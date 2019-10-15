@@ -12,6 +12,6 @@ jobs:
     - name: Setup toolchain
       run: rustup override set nightly
     - name: Build
-      run: cargo build --verbose
+      run: cargo build
     - name: Run tests
       run: cargo test --verbose
