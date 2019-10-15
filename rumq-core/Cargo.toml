@@ -1,0 +1,13 @@
+[package]
+name = "rumq-core"
+version = "0.1.0"
+authors = ["tekjar"]
+edition = "2018"
+
+[dependencies]
+derive_more = "0.15"
+tokio-byteorder = "0.1"
+async-trait = "0.1"
+tokio = {version = "0.2.0-alpha.6", features = ["macros"]}
+futures-preview = { version = "0.3.0-alpha.19"}
+
