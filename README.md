@@ -1,5 +1,4 @@
 # rumq [![img](https://github.com/tekjar/rumq/workflows/ci/badge.svg)](https://github.com/tekjar/rumq/actions)
-----------------
 
 MQTT ecosystem in rust
 
