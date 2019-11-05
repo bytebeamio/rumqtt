@@ -10,13 +10,13 @@ pub mod connect {
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct Connect {
-        pub(crate) protocol: Protocol,
-        pub(crate) keep_alive: u16,
-        pub(crate) client_id: String,
-        pub(crate) clean_session: bool,
-        pub(crate) last_will: Option<LastWill>,
-        pub(crate) username: Option<String>,
-        pub(crate) password: Option<String>,
+        pub protocol: Protocol,
+        pub keep_alive: u16,
+        pub client_id: String,
+        pub clean_session: bool,
+        pub last_will: Option<LastWill>,
+        pub username: Option<String>,
+        pub password: Option<String>,
     }
 
     pub fn new<S>(id: S) -> Connect
@@ -98,8 +98,8 @@ pub mod connack {
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct Connack {
-        pub(crate) session_present: bool,
-        pub(crate) code: ConnectReturnCode,
+        pub session_present: bool,
+        pub code: ConnectReturnCode,
     }
 }
 
@@ -108,10 +108,10 @@ pub mod lastwill {
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct LastWill {
-        pub(crate) topic: String,
-        pub(crate) message: String,
-        pub(crate) qos: QoS,
-        pub(crate) retain: bool,
+        pub topic: String,
+        pub message: String,
+        pub qos: QoS,
+        pub retain: bool,
     }
 }
 
@@ -122,12 +122,12 @@ pub mod publish {
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct Publish {
-        pub(crate) dup: bool,
-        pub(crate) qos: QoS,
-        pub(crate) retain: bool,
-        pub(crate) topic_name: String,
-        pub(crate) pkid: Option<PacketIdentifier>,
-        pub(crate) payload: Arc<Vec<u8>>,
+        pub dup: bool,
+        pub qos: QoS,
+        pub retain: bool,
+        pub topic_name: String,
+        pub pkid: Option<PacketIdentifier>,
+        pub payload: Arc<Vec<u8>>,
     }
 }
 
@@ -137,14 +137,14 @@ pub mod subscribe {
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct Subscribe {
-        pub(crate) pkid: PacketIdentifier,
-        pub(crate) topics: Vec<SubscribeTopic>,
+        pub pkid: PacketIdentifier,
+        pub topics: Vec<SubscribeTopic>,
     }
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct SubscribeTopic {
-        pub(crate) topic_path: String,
-        pub(crate) qos: QoS,
+        pub topic_path: String,
+        pub qos: QoS,
     }
 }
 
@@ -160,8 +160,8 @@ pub mod suback {
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct Suback {
-        pub(crate) pkid: PacketIdentifier,
-        pub(crate) return_codes: Vec<SubscribeReturnCodes>,
+        pub pkid: PacketIdentifier,
+        pub return_codes: Vec<SubscribeReturnCodes>,
     }
 }
 
@@ -170,7 +170,7 @@ pub mod unsubscribe {
 
     #[derive(Debug, Clone, PartialEq)]
     pub struct Unsubscribe {
-        pub(crate) pkid: PacketIdentifier,
-        pub(crate) topics: Vec<String>,
+        pub pkid: PacketIdentifier,
+        pub topics: Vec<String>,
     }
 }
