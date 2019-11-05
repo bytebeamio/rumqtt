@@ -4,8 +4,8 @@ extern crate log;
 use std::time::Duration;
 use rumq_core::*;
 
-mod state;
-mod eventloop;
+pub(crate) mod state;
+pub(crate) mod eventloop;
 // pub use eventloop::MqttEventLoop;
 // pub use eventloop::connect;
 
