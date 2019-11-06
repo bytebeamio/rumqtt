@@ -17,3 +17,6 @@ futures-util-preview = { version = "=0.3.0-alpha.19", features = ["sink", "selec
 rumq-core = {path = "../rumq-core", version = "0.1"}
 log = "0.4"
 async-stream = "0.1"
+
+[dev-dependencies]
+tokio-executor = {version = "0.2.0-alpha.6", features = ["current-thread"]}

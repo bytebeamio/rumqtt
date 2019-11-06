@@ -1,5 +1,17 @@
 
-#### takes any stream type as input
+TODO
+------
+
+- [ ] Connection
+- [ ] Publish and ack
+- [ ] Keep alive
+- [ ] Reconnection
+- [ ] Throttling
+- [ ] Tls
+- [ ] First alpha release
+
+
+Takes any stream type as input
 -------
 
 Allows eventloop to be channel implementation agnostic. This opens up interesting usage patterns. Instead of providing
@@ -33,7 +45,7 @@ rumqtt_eventloop.start(user_channel_rx_stream);
 ```
 
 
-#### don't spawn any thread from the library
+Don't spawn any thread from the library
 -------
 
 Provide all the eventloop handling necessary for a robust mqtt connection but don't spawn any inner threads. This choice is
@@ -60,7 +72,7 @@ eventloop.run(rx);
 ```
 
 
-#### support both synchronous and asynchronous use cases
+Support both synchronous and asynchronous use cases
 -------
 
 Leverage on the above pattern to support both synchronous and asynchronus publishes with timeouts
@@ -72,7 +84,7 @@ eventloop.run_timeout(publishes, 10 * Duration::SECS);
 
 Eventloop will wait for all the acks within timeout (where ever necessary) and exits
 
-#### automatic reconnections
+Automatic reconnections
 -------
 
 Open question: When should event loop start taking control of reconnections? After initial success or should
@@ -85,7 +97,7 @@ Reconnect::Never
 ```
 
 
-#### command channels to configure eventloop dynamically
+Command channels to configure eventloop dynamically
 -------
 
 reconnections, disconnection, throttle speed, pause/resume (without disconnections)
@@ -113,7 +125,7 @@ eventloop.run() //return -> Result<MqttSt>
 ```
 
 
-#### keep additional functionality like gcloud jwt auth and http connect proxy out of rumqtt
+Keep additional functionality like gcloud jwt auth and http connect proxy out of rumqtt
 -------
 
 Prevents (some) conflicts w.r.t different versions of ring. conflicts because of rustls are still possible but atleast

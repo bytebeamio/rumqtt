@@ -8,8 +8,9 @@ use rumq_core::*;
 
 pub(crate) mod state;
 pub(crate) mod eventloop;
-// pub use eventloop::MqttEventLoop;
-// pub use eventloop::connect;
+
+pub use eventloop::MqttEventLoop;
+pub use eventloop::connect;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]
