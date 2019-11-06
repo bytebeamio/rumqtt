@@ -1,3 +1,5 @@
+#![recursion_limit="256"]
+
 #[macro_use]
 extern crate log;
 
@@ -15,11 +17,11 @@ pub enum Notification {
     Reconnection,
     Disconnection,
     Publish(Publish),
-    PubAck(PacketIdentifier),
-    PubRec(PacketIdentifier),
-    PubRel(PacketIdentifier),
-    PubComp(PacketIdentifier),
-    SubAck(PacketIdentifier),
+    Puback(PacketIdentifier),
+    Pubrec(PacketIdentifier),
+    Pubrel(PacketIdentifier),
+    Pubcomp(PacketIdentifier),
+    Suback(PacketIdentifier),
     None
 }
 

@@ -1,119 +1,64 @@
 use crate::Notification;
-use crate::state::Reply;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
 use crate::Request;
 
 use derive_more::From;
 
-use rumq_core::{Connect, Packet, Protocol};
+use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
 use futures_core::Stream;
-use futures_util::{select, FusedStream, StreamExt, SinkExt};
+use futures_util::{select, FusedStream, StreamExt, SinkExt, FutureExt, pin_mut};
 use futures_util::stream::{SplitStream, SplitSink, Fuse};
 
 use std::io;
 use std::time::Duration;
 
-use tokio::net::TcpStream;
+use tokio::net::{self, TcpStream};
 use tokio::timer;
 use async_stream::stream;
+use tokio_io::split::ReadHalf;
+use tokio::prelude::AsyncRead;
+use tokio::io::AsyncReadExt;
 
 
-pub struct MqttEventLoop<I: Stream<Item = Request> + FusedStream + Unpin> {
+pub struct MqttEventLoop<I> {
     state: MqttState,
     mqttoptions: MqttOptions,
     requests: I,
-    network_tx: SplitSink<Framed<TcpStream, MqttCodec>, Packet>,
-    network_rx: Fuse<SplitStream<Framed<TcpStream, MqttCodec>>>
+    network: TcpStream,
 }
 
 #[derive(From, Debug)]
 pub enum EventLoopError {
     Io(io::Error),
+    NoRequest,
     MqttState(StateError),
     StreamClosed,
     Timeout(timer::timeout::Elapsed),
+    Rumq(rumq_core::Error)
 }
 
-pub async fn connect<I: Stream<Item = Request> + FusedStream + Unpin>(mqttoptions: MqttOptions, requests: I) -> Result<MqttEventLoop<I>, EventLoopError> { 
-        let stream = connect_timeout().await?;
-        let (network_tx, network_rx) = stream.split();
+pub async fn connect<I: Stream<Item = Request>>(mqttoptions: MqttOptions, requests: I) -> Result<MqttEventLoop<I>, EventLoopError> {
+    let stream = connect_timeout().await?;
+ 
+    let eventloop = MqttEventLoop {
+        state: MqttState::new(mqttoptions.clone()),
+        mqttoptions,
+        requests,
+        network: stream
+    };
 
-        let network_rx = network_rx.fuse();
-        let eventloop = MqttEventLoop {
-            state: MqttState::new(mqttoptions.clone()),
-            mqttoptions,
-            requests,
-            network_tx,
-            network_rx
-        };
-
-        Ok(eventloop)
-    }
-
-impl<I: Stream<Item = Request> + FusedStream + Unpin> MqttEventLoop<I> {
-    async fn select(&mut self) -> Result<Option<Notification>, EventLoopError> {
-        select! {
-            packet = self.network_rx.next() =>  {
-                let packet = if let Some(p) = packet {
-                    p?
-                } else {
-                    return Ok(None)
-                };
-
-                let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet)?;
-                
-                if let Some(reply) = reply {
-                    self.network_tx.send(reply.into()).await?;
-                }
-
-                Ok(notification)
-            },
-            request = self.requests.next() => {
-                let request = request.unwrap();
-                let request = self.state.handle_outgoing_mqtt_packet(request.into());
-                self.network_tx.send(request.into()).await?;
-                Ok(None)
-            }
-        }
-    }
-
-    pub async fn eventloop(&mut self) -> Result<impl Stream<Item = Result<Notification, EventLoopError>> + '_, EventLoopError> {
-        let connect = Packet::Connect(connect_packet(&self.mqttoptions));
-
-        // TODO: timeout doesn't work on python3 -m http.server
-        timer::Timeout::new(async {
-                self.network_tx.send(connect).await?;
-                Ok::<_, io::Error>(())
-            }, Duration::from_secs(10),
-        ).await??;
-
-        let o = stream!{
-            loop {
-                let o = if let Some(notification) = self.select().await? {
-                    notification
-                } else {
-                    continue
-                };
-
-                yield Ok(o)
-            }
-        };
-
-        // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
-        let o = Box::pin(o);
-        Ok(o)
-    }
+    Ok(eventloop)
 }
 
-async fn connect_timeout() -> Result<Framed<TcpStream, MqttCodec>, io::Error> {
+async fn connect_timeout() -> Result<TcpStream, io::Error> {
     let connection = timer::Timeout::new( async {
-        TcpStream::connect("localhost:1883").await
+        let s = TcpStream::connect("localhost:1883").await;
+        s
     }, Duration::from_secs(10)).await??;
 
-    let framed = Framed::new(connection, MqttCodec);
 
-    Ok(framed)
+    Ok(connection)
 }
 
 fn connect_packet(mqttoptions: &MqttOptions) -> Connect {
@@ -122,6 +67,7 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Connect {
     } else {
         (None, None)
     };
+
     let connect = Connect {
         protocol: Protocol::MQTT(4),
         keep_alive: mqttoptions.keep_alive().as_secs() as u16,
@@ -131,7 +77,31 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Connect {
         username,
         password,
     };
+
     connect
+}
+
+impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
+    async fn start(&mut self) -> Result<(), EventLoopError> {
+
+        return Ok::<_, EventLoopError>(())
+    }
+
+    async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+        select! {
+            packet = self.network.mqtt_read().fuse() =>  {
+                let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
+                Ok((notification, reply))
+            },
+            request = self.requests.next().fuse() => {
+                let request = request.ok_or(EventLoopError::NoRequest)?;
+                let request = self.state.handle_outgoing_mqtt_packet(request.into());
+                let request = Some(request);
+                let notification = None;
+                Ok((notification, request))
+            }
+        }
+    }
 }
 
 impl From<Request> for Packet {
@@ -146,11 +116,3 @@ impl From<Request> for Packet {
     }
 }
 
-impl From<Reply> for Packet {
-    fn from(item: Reply) -> Self {
-        match item {
-            Reply::PubAck(p) => Packet::Puback(p),
-            _ => unimplemented!(),
-        }
-    }
-}
