@@ -1,4 +1,3 @@
-use crate::Request;
 use crate::Notification;
 use crate::MqttOptions;
 
@@ -76,6 +75,7 @@ impl MqttState {
     pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Packet {
         let out = match packet {
             Packet::Publish(publish) => self.handle_outgoing_publish(publish),
+            Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe),
             _ => unimplemented!(),
         };
 
@@ -88,7 +88,6 @@ impl MqttState {
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
     pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
-
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
@@ -108,13 +107,6 @@ impl MqttState {
         out
     }
 
-    fn handle_outgoing_disconnect(&mut self) -> Request {
-        self.connection_status = MqttConnectionStatus::Disconnecting;
-        Request::Disconnect
-    }
-
-
-
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
@@ -125,14 +117,6 @@ impl MqttState {
 
         debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
         Packet::Publish(publish)
-    }
-
-
-    pub fn is_disconnecting(&self) -> bool {
-        match self.connection_status {
-            MqttConnectionStatus::Disconnecting => true,
-            _ => false
-        }
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
@@ -268,12 +252,12 @@ impl MqttState {
         Ok((None, None))
     }
 
-    fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Subscribe {
+    fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Packet {
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
 
         debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
-        subscription
+        Packet::Subscribe(subscription)
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
@@ -497,8 +481,8 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_pubrec(PacketIdentifier(1)).unwrap();
 
         match notification {
-            None => assert!(true),
-            _ => panic!("Invalid notification: {:?}", notification),
+            Some(Notification::Pubrec(PacketIdentifier(id))) => assert_eq!(id, 1),
+            _ => panic!("Invalid notification")
         }
 
         match request {

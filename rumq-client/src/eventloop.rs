@@ -7,31 +7,28 @@ use derive_more::From;
 
 use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
 use futures_core::Stream;
-use futures_util::{select, FusedStream, StreamExt, SinkExt, FutureExt, pin_mut};
-use futures_util::stream::{SplitStream, SplitSink, Fuse};
+use futures_util::{select, StreamExt, FutureExt};
 
 use std::io;
 use std::time::Duration;
 
-use tokio::net::{self, TcpStream};
+use tokio::net::TcpStream;
 use tokio::timer;
 use async_stream::stream;
-use tokio_io::split::ReadHalf;
-use tokio::prelude::AsyncRead;
-use tokio::io::AsyncReadExt;
 
 
 pub struct MqttEventLoop<I> {
     state: MqttState,
-    mqttoptions: MqttOptions,
+    options: MqttOptions,
     requests: Option<I>,
-    network: TcpStream,
+    network: Option<TcpStream>,
 }
 
 #[derive(From, Debug)]
 pub enum EventLoopError {
     Io(io::Error),
     NoRequestStream,
+    NoTcpStream,
     NoRequest,
     MqttState(StateError),
     StreamClosed,
@@ -39,25 +36,25 @@ pub enum EventLoopError {
     Rumq(rumq_core::Error)
 }
 
-pub async fn connect<I>(mqttoptions: MqttOptions) -> Result<MqttEventLoop<I>, EventLoopError> {
+pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<I>, EventLoopError> {
     // new tcp connection with a timeout
     let mut stream = timer::Timeout::new( async {
         let s = TcpStream::connect("localhost:1883").await;
         s
-    }, Duration::from_secs(10)).await??;
+    }, timeout).await??;
 
     // new mqtt connection with timeout
-    let connect = Packet::Connect(connect_packet(&mqttoptions));
     timer::Timeout::new(async {
+        let connect = connect_packet(&options);
         stream.mqtt_write(&connect).await?;
         Ok::<_, EventLoopError>(())
-    }, Duration::from_secs(10)).await??;
+    }, timeout).await??;
 
     let eventloop = MqttEventLoop {
-        state: MqttState::new(mqttoptions.clone()),
-        mqttoptions,
+        state: MqttState::new(options.clone()),
+        options,
         requests: None,
-        network: stream
+        network: Some(stream)
     };
 
     Ok(eventloop)
@@ -76,6 +73,7 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
     /// and outgoing data
     pub async fn build(&mut self, stream: I) -> Result<impl MqttStream + '_, EventLoopError> {
         self.requests = Some(stream);
+        let mut network = self.network.take().ok_or(EventLoopError::NoTcpStream)?;
 
         // a stream which polls user request stream, network stream and creates
         // a stream of notifications to the user
@@ -85,7 +83,7 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
 
                 // write the reply back to the network
                 if let Some(p) = reply {
-                    self.network.mqtt_write(&p).await?;
+                    network.mqtt_write(&p).await?;
                 }
 
                 // yield the notification to the user
@@ -101,8 +99,8 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
     }
 
     async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let mut network = &mut self.network;
-        let mut requests = self.requests.as_mut().ok_or(EventLoopError::NoRequestStream)?;
+        let network = self.network.as_mut().ok_or(EventLoopError::NoTcpStream)?;
+        let requests = self.requests.as_mut().ok_or(EventLoopError::NoRequestStream)?;
 
         select! {
             packet = network.mqtt_read().fuse() =>  {
@@ -120,7 +118,7 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
     }
 }
 
-fn connect_packet(mqttoptions: &MqttOptions) -> Connect {
+fn connect_packet(mqttoptions: &MqttOptions) -> Packet {
     let (username, password) = if let Some((u, p)) = mqttoptions.credentials() {
         (Some(u), Some(p))
     } else {
@@ -137,7 +135,7 @@ fn connect_packet(mqttoptions: &MqttOptions) -> Connect {
         password,
     };
 
-    connect
+    Packet::Connect(connect)
 }
 
 impl From<Request> for Packet {
@@ -155,3 +153,22 @@ impl From<Request> for Packet {
 // impl trait alias hack: https://stackoverflow.com/questions/57937436/how-to-alias-an-impl-trait
 pub trait MqttStream: Stream<Item = Result<Notification, EventLoopError>> {}
 impl<T: Stream<Item = Result<Notification, EventLoopError>>> MqttStream for T {}
+
+
+
+#[cfg(test)]
+mod test {
+    use super::MqttEventLoop;
+    use crate::state::MqttState;
+
+    fn eventloop() -> MqttEventLoop<I> {
+        let eventloop = MqttEventLoop {
+            state: MqttState::new(mqttoptions.clone()),
+            options,
+            requests: None,
+            network: stream
+        };
+
+        eventloop
+    }
+}
