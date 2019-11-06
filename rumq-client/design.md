@@ -10,6 +10,46 @@ TODO
 - [ ] Tls
 - [ ] First alpha release
 
+Connection and Automatic reconnections
+-------
+
+Open question: When should event loop start taking control of reconnections? After initial success or should
+we expose options similar to current implementation? what should be the default behavior
+
+```
+Reconnect::AfterFirstSuccess
+Reconnect::Always
+Reconnect::Never
+```
+
+Let's do this for starters
+
+```$xslt
+    // create an eventloop after the initial mqtt connection is successful
+    // user will decide if this should be retried or not
+    let eventloop = connect(mqttoptions) -> Result<EventLoop, Error>
+
+    // during intermittent reconnetions due to bad network, eventloop will
+    // behave as per configured reconnection options to the eventloop
+    let stream = eventloop.assemble(reconnection_options, inputs);
+```
+
+Possible reconnection options
+
+```$xslt
+Reconnect::Never
+Reconnect::Automatic
+```
+
+I feel this a good middle ground between manual user control and rumq being very opinionated about
+reconnection behaviour. 
+
+But why not leave the intermittent reconnection behaviour as well to the user you ask? 
+
+Because maintaining
+state is a much more complicated business than just retrying the connection. We don't want the user to think
+about mqttstate by default. If the user intends for a much more custom behaviour, he/she can use
+`Reconnect::Never` and pass the returned `MqttState` to the next connection.
 
 Takes any stream type as input
 -------
@@ -83,18 +123,6 @@ eventloop.run_timeout(publishes, 10 * Duration::SECS);
 ```
 
 Eventloop will wait for all the acks within timeout (where ever necessary) and exits
-
-Automatic reconnections
--------
-
-Open question: When should event loop start taking control of reconnections? After initial success or should
-we expose options similar to current implementation? what should be the default behavior
-
-```
-Reconnect::AfterFirstSuccess
-Reconnect::Always
-Reconnect::Never
-```
 
 
 Command channels to configure eventloop dynamically

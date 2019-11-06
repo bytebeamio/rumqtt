@@ -9,11 +9,13 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
+    pretty_env_logger::init();
+
     let (mut requests_tx, requests_rx) = mpsc::channel(1);
     let mqttoptions = MqttOptions::new("test-1", "localhost", 5555);
 
-    let mut eventloop = connect(mqttoptions, requests_rx.fuse()).await.unwrap();
-    let mut stream = eventloop.eventloop().await.unwrap();
+    let mut eventloop = connect(mqttoptions).await.unwrap();
+    let mut stream = eventloop.build(requests_rx).await.unwrap();
 
     thread::spawn(move || {
         for i in 0..255 {
@@ -26,6 +28,8 @@ async fn main() {
     while let Some(item) = stream.next().await {
         println!("{:?}", item);
     }
+
+    thread::sleep_ms(10000);
 }
 
 fn publish(i: u8) -> Request {

@@ -23,7 +23,6 @@ pub enum Notification {
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
     Suback(PacketIdentifier),
-    None
 }
 
 #[doc(hidden)]
