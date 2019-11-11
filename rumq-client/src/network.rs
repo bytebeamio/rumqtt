@@ -35,7 +35,7 @@ pub enum Error {
     NoValidCertInChain
 }
 
-pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<NetworkStream, Error> {
+pub async fn connect(options: &MqttOptions, timeout: Duration) -> Result<NetworkStream, Error> {
     let addr = format!("{}:{}", options.broker_addr, options.port);
     let tcp = Timeout::new( async {
         TcpStream::connect(addr).await
@@ -48,7 +48,7 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<NetworkS
     // is lost while converting from pem to der. This method iterates through all the
     // certs in the chain, converts each to der and adds them to root store
     // TODO: Check if there is a better way to do this
-    match options.ca {
+    match options.ca.as_ref() {
         Some(ca) => {
             let mut ca = BufReader::new(Cursor::new(ca));
             if config.root_store.add_pem_file(&mut ca)?.0 == 0 {
@@ -62,14 +62,14 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<NetworkS
     }
 
     // Add der encoded client cert and key
-    if let Some(client) = options.client_auth {
-        let cert_chain = vec![Certificate(client.0)];
-        let key = PrivateKey(client.1);
+    if let Some(client) = options.client_auth.as_ref() {
+        let cert_chain = vec![Certificate(client.0.clone())];
+        let key = PrivateKey(client.1.clone());
         config.set_single_client_cert(cert_chain, key);
     }
 
     // Set ALPN
-    if let Some(alpn) = options.alpn {
+    if let Some(alpn) = options.alpn.as_ref() {
         config.set_protocols(&alpn);
     }
 

@@ -37,10 +37,9 @@ pub enum EventLoopError {
 }
 
 pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<I>, EventLoopError> {
-    // new tcp connection with a timeout
-    let mut network = network::connect(options.clone(), timeout).await?;
-    let mut state = MqttState::new(options.clone());
     let connect = connect_packet(&options);
+    let mut network = network::connect(&options, timeout).await?;
+    let mut state = MqttState::new(options.clone());
 
     // mqtt connection with timeout
     timer::Timeout::new(async {
@@ -104,8 +103,7 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
 
     async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let network = &mut self.network;
-        // TODO: Find a way to lazy initialize this struct member to get away with unwrap
-        //       during every poll
+        // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
         let requests = self.requests.as_mut().unwrap();
 
         select! {
