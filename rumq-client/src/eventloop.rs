@@ -8,13 +8,11 @@ use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
 use futures_core::Stream;
 use futures_util::{select, StreamExt, FutureExt};
 
-use std::{io, mem};
+use std::io;
 use std::time::Duration;
 
-use tokio::net::TcpStream;
 use tokio::timer;
 use async_stream::stream;
-use std::marker::PhantomData;
 use crate::network::NetworkStream;
 
 
@@ -40,20 +38,29 @@ pub enum EventLoopError {
 
 pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<I>, EventLoopError> {
     // new tcp connection with a timeout
-    let mut stream = network::connect(options.clone(), timeout).await?;
+    let mut network = network::connect(options.clone(), timeout).await?;
+    let mut state = MqttState::new(options.clone());
+    let connect = connect_packet(&options);
 
-    // new mqtt connection with timeout
+    // mqtt connection with timeout
     timer::Timeout::new(async {
-        let connect = connect_packet(&options);
-        stream.mqtt_write(&connect).await?;
+        network.mqtt_write(&connect).await?;
+        state.handle_outgoing_connect()?;
+        Ok::<_, EventLoopError>(())
+    }, timeout).await??;
+
+    // wait for 'timeout' time to validate connack
+    timer::Timeout::new( async {
+        let packet = network.mqtt_read().await?;
+        state.handle_incoming_connack(packet)?;
         Ok::<_, EventLoopError>(())
     }, timeout).await??;
 
     let eventloop = MqttEventLoop {
-        state: MqttState::new(options.clone()),
+        state,
         options,
+        network,
         requests: None,
-        network: stream
     };
 
     Ok(eventloop)

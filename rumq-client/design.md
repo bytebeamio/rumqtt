@@ -3,11 +3,11 @@ TODO
 ------
 
 - [X] Connection
-- [ ] Publish and ack
+- [X] Publish and ack
 - [ ] Keep alive
 - [ ] Reconnection
 - [ ] Throttling
-- [ ] Tls
+- [X] Tls
 - [ ] First alpha release
 
 

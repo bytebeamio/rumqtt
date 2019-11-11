@@ -1,14 +1,13 @@
 use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, TlsConnector};
-use tokio_rustls::rustls::{ClientConfig, ClientSession, Certificate, PrivateKey};
+use tokio_rustls::rustls::{ClientConfig, Certificate, PrivateKey};
 use tokio::timer::{timeout, Timeout};
-use tokio::stream::StreamExt;
 
 use derive_more::From;
 
 use crate::MqttOptions;
 use std::time::Duration;
-use std::net::{SocketAddr, AddrParseError};
+use std::net::AddrParseError;
 use std::io;
 use std::sync::Arc;
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
@@ -22,6 +21,7 @@ use std::io::{Cursor, BufReader};
 pub enum NetworkStream {
     Tcp(TcpStream),
     Tls(TlsStream<TcpStream>),
+    #[cfg(test)]
     Vec(Vec<u8>)
 }
 
@@ -42,15 +42,16 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<NetworkS
     }, timeout).await??;
 
     let mut config = ClientConfig::new();
+
+    // Add ca to root store if the connection is TLS
+    // NOTE: Adding DER file isn't feasible as some of the chain information
+    // is lost while converting from pem to der. This method iterates through all the
+    // certs in the chain, converts each to der and adds them to root store
+    // TODO: Check if there is a better way to do this
     match options.ca {
         Some(ca) => {
             let mut ca = BufReader::new(Cursor::new(ca));
-            // NOTE: Adding DER file isn't feasible as some of the chain information
-            // is lost while converting from pem to der. This method iterates through all the
-            // certs in the chain, converts each to der and adds them to root store
-            // TODO: Check if there is a better way to do this
-            let count = config.root_store.add_pem_file(&mut ca)?;
-            if count.0 == 0 {
+            if config.root_store.add_pem_file(&mut ca)?.0 == 0 {
                 return Err(Error::NoValidCertInChain)
             }
         }
@@ -89,6 +90,7 @@ impl AsyncRead for NetworkStream {
         match self.get_mut() {
             NetworkStream::Tcp(stream) => Pin::new(stream).poll_read(cx, buf),
             NetworkStream::Tls(stream) => Pin::new(stream).poll_read(cx, buf),
+            #[cfg(test)]
             NetworkStream::Vec(stream) => {
                 let mut stream: &[u8] = &stream;
                 Pin::new(&mut stream).poll_read(cx, buf)
@@ -102,6 +104,7 @@ impl AsyncWrite for NetworkStream {
         match self.get_mut() {
             NetworkStream::Tcp(stream) => Pin::new(stream).poll_write(cx, buf),
             NetworkStream::Tls(stream) => Pin::new(stream).poll_write(cx, buf),
+            #[cfg(test)]
             NetworkStream::Vec(stream) => Pin::new(stream).poll_write(cx, buf)
         }
     }
@@ -110,6 +113,7 @@ impl AsyncWrite for NetworkStream {
         match self.get_mut() {
             NetworkStream::Tcp(stream) => Pin::new(stream).poll_flush(cx),
             NetworkStream::Tls(stream) => Pin::new(stream).poll_flush(cx),
+            #[cfg(test)]
             NetworkStream::Vec(stream) => Pin::new(stream).poll_flush(cx),
         }
     }
@@ -118,6 +122,7 @@ impl AsyncWrite for NetworkStream {
         match self.get_mut() {
             NetworkStream::Tcp(stream) => Pin::new(stream).poll_shutdown(cx),
             NetworkStream::Tls(stream) => Pin::new(stream).poll_shutdown(cx),
+            #[cfg(test)]
             NetworkStream::Vec(stream) => Pin::new(stream).poll_shutdown(cx),
         }
     }

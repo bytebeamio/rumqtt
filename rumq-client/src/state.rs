@@ -20,8 +20,16 @@ pub enum MqttConnectionStatus {
 
 #[derive(Debug)]
 pub enum StateError {
+    /// Broker's error reply to client's connect packet
+    Connect(ConnectReturnCode),
+    /// Invalid state for a given operation
+    InvalidState,
+    /// Received a packet (ack) which isn't asked for
     Unsolicited,
-    AwaitPingResp
+    /// Last pingreq isn't acked
+    AwaitPingResp,
+    /// Received a wrong packet while waiting for another packet
+    WrongPacket
 }
 
 /// `MqttState` saves the state of the mqtt connection. Methods will
@@ -258,6 +266,39 @@ impl MqttState {
 
         debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
         Packet::Subscribe(subscription)
+    }
+
+    pub fn handle_outgoing_connect(&mut self) -> Result<(), StateError> {
+        self.connection_status = MqttConnectionStatus::Handshake;
+        Ok(())
+    }
+
+    pub fn handle_incoming_connack(&mut self, packet: Packet) -> Result<(), StateError> {
+        let connack = match packet {
+            Packet::Connack(connack) => connack,
+            packet => {
+                error!("Invalid packet. Expecting connack. Received = {:?}", packet);
+                self.connection_status = MqttConnectionStatus::Disconnected;
+                return Err(StateError::WrongPacket)
+            }
+        };
+
+        match connack.code {
+            ConnectReturnCode::Accepted if self.connection_status == MqttConnectionStatus::Handshake => {
+                self.connection_status = MqttConnectionStatus::Connected;
+                Ok(())
+            }
+            ConnectReturnCode::Accepted if self.connection_status != MqttConnectionStatus::Handshake => {
+                error!("Invalid state. Expected = {:?}, Current = {:?}", MqttConnectionStatus::Handshake, self.connection_status);
+                self.connection_status = MqttConnectionStatus::Disconnected;
+                Err(StateError::InvalidState)
+            }
+            code => {
+                error!("Connection failed. Connection error = {:?}", code);
+                self.connection_status = MqttConnectionStatus::Disconnected;
+                Err(StateError::Connect(code))
+            }
+        }
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
