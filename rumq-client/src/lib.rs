@@ -6,6 +6,7 @@ extern crate log;
 use std::time::Duration;
 use rumq_core::*;
 
+pub(crate) mod network;
 pub(crate) mod state;
 pub(crate) mod eventloop;
 

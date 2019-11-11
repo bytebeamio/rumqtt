@@ -2,13 +2,20 @@
 TODO
 ------
 
-- [ ] Connection
+- [X] Connection
 - [ ] Publish and ack
 - [ ] Keep alive
 - [ ] Reconnection
 - [ ] Throttling
 - [ ] Tls
 - [ ] First alpha release
+
+
+Changelog
+--------
+* Consistent use of DER encoded data for certs and keys everywhere. PEM file error return isn't clear to me in rustls
+* Don't panic when domain name does not match to sub_alt_name in the server certificate (https://github.com/ctz/rustls/issues/127)
+* Return proper error instead of panicking when the user provides ip instead of a domain name for a tls connection
 
 Connection and Automatic reconnections
 -------

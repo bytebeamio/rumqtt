@@ -1,7 +1,6 @@
-use crate::Notification;
+use crate::{Notification, Request, network};
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
-use crate::Request;
 
 use derive_more::From;
 
@@ -9,19 +8,21 @@ use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
 use futures_core::Stream;
 use futures_util::{select, StreamExt, FutureExt};
 
-use std::io;
+use std::{io, mem};
 use std::time::Duration;
 
 use tokio::net::TcpStream;
 use tokio::timer;
 use async_stream::stream;
+use std::marker::PhantomData;
+use crate::network::NetworkStream;
 
 
 pub struct MqttEventLoop<I> {
     state: MqttState,
     options: MqttOptions,
     requests: Option<I>,
-    network: Option<TcpStream>,
+    network: NetworkStream
 }
 
 #[derive(From, Debug)]
@@ -33,15 +34,13 @@ pub enum EventLoopError {
     MqttState(StateError),
     StreamClosed,
     Timeout(timer::timeout::Elapsed),
-    Rumq(rumq_core::Error)
+    Rumq(rumq_core::Error),
+    Network(network::Error)
 }
 
 pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<I>, EventLoopError> {
     // new tcp connection with a timeout
-    let mut stream = timer::Timeout::new( async {
-        let s = TcpStream::connect("localhost:1883").await;
-        s
-    }, timeout).await??;
+    let mut stream = network::connect(options.clone(), timeout).await?;
 
     // new mqtt connection with timeout
     timer::Timeout::new(async {
@@ -54,7 +53,7 @@ pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttE
         state: MqttState::new(options.clone()),
         options,
         requests: None,
-        network: Some(stream)
+        network: stream
     };
 
     Ok(eventloop)
@@ -68,12 +67,10 @@ pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttE
 /// producing 'n' elements) is not very clear yet. Probably the stream should end when
 /// all the state buffers are acked with a timeout
 impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
-
     /// Build a stream object when polled by the user will start progress on incoming
     /// and outgoing data
     pub async fn build(&mut self, stream: I) -> Result<impl MqttStream + '_, EventLoopError> {
         self.requests = Some(stream);
-        let mut network = self.network.take().ok_or(EventLoopError::NoTcpStream)?;
 
         // a stream which polls user request stream, network stream and creates
         // a stream of notifications to the user
@@ -83,7 +80,7 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
 
                 // write the reply back to the network
                 if let Some(p) = reply {
-                    network.mqtt_write(&p).await?;
+                    self.network.mqtt_write(&p).await?;
                 }
 
                 // yield the notification to the user
@@ -99,8 +96,10 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
     }
 
     async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let network = self.network.as_mut().ok_or(EventLoopError::NoTcpStream)?;
-        let requests = self.requests.as_mut().ok_or(EventLoopError::NoRequestStream)?;
+        let network = &mut self.network;
+        // TODO: Find a way to lazy initialize this struct member to get away with unwrap
+        //       during every poll
+        let requests = self.requests.as_mut().unwrap();
 
         select! {
             packet = network.mqtt_read().fuse() =>  {
