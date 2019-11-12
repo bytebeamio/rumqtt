@@ -22,11 +22,21 @@ async fn main() {
     let mut stream  = eventloop.build(requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        for i in 0..255 {
+        for i in 0..10 {
             let publish = publish(i);
             tokio_executor::current_thread::block_on_all(requests_tx.send(publish)).unwrap();
             thread::sleep(Duration::from_secs(1));
         }
+
+        thread::sleep(Duration::from_secs(100));
+
+        for i in 0..10 {
+            let publish = publish(i);
+            tokio_executor::current_thread::block_on_all(requests_tx.send(publish)).unwrap();
+            thread::sleep(Duration::from_secs(1));
+        }
+
+        thread::sleep(Duration::from_secs(300));
     });
 
     while let Some(item) = stream.next().await {
@@ -36,6 +46,7 @@ async fn main() {
 
 async fn eventloop<I>() -> MqttEventLoop<I> {
     let mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
+    let mqttoptions = mqttoptions.set_keep_alive(15);
     let password = gen_iotcore_password();
     let mqttoptions = mqttoptions
                                     .set_ca(include_bytes!("../certs/bike-1/roots.pem").to_vec())
