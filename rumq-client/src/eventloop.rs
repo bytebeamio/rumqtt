@@ -12,6 +12,7 @@ use std::io;
 use std::time::Duration;
 
 use tokio::timer;
+use tokio::future::FutureExt as OtherFutureExt;
 use async_stream::stream;
 use crate::network::NetworkStream;
 
@@ -104,14 +105,33 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
     async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let network = &mut self.network;
         // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
+
         let requests = self.requests.as_mut().unwrap();
+        let keep_alive = self.options.keep_alive;
 
         select! {
-            packet = network.mqtt_read().fuse() =>  {
+            packet = network.mqtt_read().timeout(keep_alive).fuse() =>  {
+                let packet = match packet {
+                    Ok(packet) => packet,
+                    Err(_) => {
+                        self.state.handle_outgoing_ping()?;
+                        return Ok((None, Some(Packet::Pingreq)))
+                    }
+                };
                 let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
                 Ok((notification, reply))
             },
-            request = requests.next().fuse() => {
+            request = requests.next().timeout(keep_alive).fuse() => {
+                let request = match request {
+                    Ok(request) => request,
+                    Err(_) => {
+                        self.state.handle_outgoing_ping()?;
+                        return Ok((None, Some(Packet::Pingreq)))
+                    }
+                };
+
+                // outgoing packet handle is only user for requests, not replys. this ensures
+                // ping debug print show last request time, not reply time
                 let request = request.ok_or(EventLoopError::NoRequest)?;
                 let request = self.state.handle_outgoing_mqtt_packet(request.into());
                 let request = Some(request);

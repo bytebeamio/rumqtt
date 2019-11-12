@@ -227,7 +227,7 @@ impl MqttState {
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<bool, StateError> {
+    pub fn handle_outgoing_ping(&mut self) -> Result<(), StateError> {
         let keep_alive = self.opts.keep_alive();
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
@@ -238,21 +238,13 @@ impl MqttState {
             return Err(StateError::AwaitPingResp);
         }
 
-
-        let ping = if elapsed_in > keep_alive || elapsed_out > keep_alive {
-            self.await_pingresp = true;
-            true
-        } else {
-            false
-        };
-
         debug!(
-            "Ping = {:?}. keep alive = {},
+            "Pingreq. keep alive = {},
             last incoming packet before {} millisecs,
-            last outgoing packet before {} millisecs",
-            ping, keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
+            last outgoing request before {} millisecs",
+            keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
 
-        Ok(ping)
+        Ok(())
     }
 
     fn handle_incoming_pingresp(&mut self) -> Result<(Option<Notification>, Option<Packet>), StateError> {

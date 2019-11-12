@@ -15,16 +15,19 @@ async fn main() {
 
     let (mut requests_tx, requests_rx) = mpsc::channel(1);
     let mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mqttoptions = mqttoptions.set_keep_alive(10);
+
     let timeout = Duration::from_secs(10);
     let mut eventloop = connect(mqttoptions, timeout).await.unwrap();
     let mut stream = eventloop.build(requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        for i in 0..255 {
+        for i in 0..10 {
             let publish = publish(i);
             tokio_executor::current_thread::block_on_all(requests_tx.send(publish)).unwrap();
             thread::sleep(Duration::from_secs(1));
         }
+        thread::sleep(Duration::from_secs(300));
     });
 
     while let Some(item) = stream.next().await {

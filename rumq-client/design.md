@@ -167,3 +167,60 @@ Prevents (some) conflicts w.r.t different versions of ring. conflicts because of
 prevents ones w.r.t jsonwebtoken.
 
 Keeps the codebase small which eases some maintainence burden
+
+Keep alive
+-------
+
+Keepalives can be a little tricky
+
+client should keep track of keepalive timeouts for 2 different reasons
+
+* when there is no incoming n/w activity
+
+to detect any halfopen connections to the broker, client should send a pingrequest packet
+and validate next pingreq with previous pingresp.
+if previous ack isn't received, client should consider this as a halfopen connection and
+disconnect. takes 2 keepalive times to detect halfopen connection and disconnect
+
+* to prevent broker from disconnecting the client due to no client activity
+
+broker should receive some packet activity from a client or else it'll assume the
+connection as halfopen and disconnect.
+for this reason, even though the client is receiving some incoming packets(qos0 publishes)
+client should timeout when there is no outgoing packet activity and send a ping request
+
+
+We would require timeouts on network incoming packets as well as network outgoing packets. concurrently
+
+so we need to create 2 streams with timeouts, one on n/w incoming packets and another on n/w outgoing packets and select
+
+```rust
+let incoming_stream = stream!(tcp.read_mqtt().timeout(NetworkTimeout))
+
+This captures incoming stream timeout
+
+Caputuring timeout on outgoing packects (replys due to incoming packets + user requests) is tricky because replys
+are a sideeffect of processing incoming packets which generate notifications for the user as well. 
+To have a timeout on a combination of reply and requests, we need to filter out notifications (or put it into other stream) 
+which beats our design of returning one eventloop stream to the user to handle full mqtt io
+
+
+let mqtt_stream = stream! {
+    loop {
+        select! {
+            (notification, reply) = incoming_stream.next().handle_incoming_packet(),
+            (request) = requests.next()
+        } 
+        yield reply
+    }
+}
+```
+
+So there is no way to separate notifications from reply without creating a duplicate stream
+
+Option 2 is to timeout on user requests alone. This will lead to sending unnecessary pingreqests after keep alive time
+even when there is outgoing network activity due to network replys. But this will let us have one simple 
+stream to poll. Returning 2 streams might not be intuitive to the users. main eventloop progress can stop when the user
+doensn't poll the notification stream (tx.send will block which eventually blocks all incoming packets). Having a second stream also results in more allocations in the hotpath (which might not be a big deal but not ideal) 
+Option2 is also considerable less codebase and hence easy maintainence.
+
