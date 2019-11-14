@@ -13,10 +13,10 @@ use std::sync::Arc;
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_io::{AsyncRead, AsyncWrite};
 use futures_util::task::Context;
-use async_stream::reexport::Pin;
-use futures_core::Poll;
+use std::pin::Pin;
 use rumq_core::{MqttRead, MqttWrite};
 use std::io::{Cursor, BufReader};
+use std::task::Poll;
 
 pub enum NetworkStream {
     Tcp(TcpStream),

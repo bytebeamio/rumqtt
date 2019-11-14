@@ -238,6 +238,8 @@ impl MqttState {
             return Err(StateError::AwaitPingResp);
         }
 
+        self.await_pingresp = true;
+
         debug!(
             "Pingreq. keep alive = {},
             last incoming packet before {} millisecs,
@@ -563,19 +565,12 @@ mod test {
         let opts = MqttOptions::new("test", "localhost", 1883).set_keep_alive(10);
         mqtt.opts = opts;
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::from_secs(10));
-
-        // should ping
-         match  mqtt.handle_outgoing_ping().unwrap() {
-            true => (),
-            _ => assert!(false, "expecting ping")
-        }
+        mqtt.handle_outgoing_ping().unwrap();
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish));
         mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
-        thread::sleep(Duration::from_secs(10));
 
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {
@@ -593,20 +588,12 @@ mod test {
         mqtt.opts = opts;
 
         mqtt.connection_status = MqttConnectionStatus::Connected;
-        thread::sleep(Duration::from_secs(10));
 
         // should ping
-        match  mqtt.handle_outgoing_ping().unwrap() {
-            true => (),
-            _ => assert!(false, "expecting ping")
-        }
+        mqtt.handle_outgoing_ping().unwrap();
         mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
 
-        thread::sleep(Duration::from_secs(10));
         // should ping
-         match  mqtt.handle_outgoing_ping().unwrap() {
-            true => (),
-            _ => assert!(false, "expecting ping")
-        }
+        mqtt.handle_outgoing_ping().unwrap();
     }
 }

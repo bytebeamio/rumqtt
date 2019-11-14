@@ -13,5 +13,15 @@ jobs:
       run: rustup override set nightly
     - name: Build
       run: cargo build
-    - name: Run tests
-      run: cargo test --verbose
+    - name: Run tokio tests
+      run: cargo test --features tokio-traits
+      env:
+        PROJECT: ""
+        REGISTRY: ""
+    - name: Run async tests
+      run: cargo test --features async-traits
+      env:
+        PROJECT: ""
+        REGISTRY: ""
+
+

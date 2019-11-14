@@ -2,13 +2,14 @@ use futures_util::stream::StreamExt;
 use std::thread;
 use rumq_core::*;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use futures_channel::mpsc;
 
 use rumq_client::{self, MqttOptions, Request, connect, MqttEventLoop};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header, Key};
 use std::ops::Add;
+// use futures_util::SinkExt;
 
 // RUST_LOG=rumq_client=debug PROJECT=cloudlinc REGISTRY=iotcore cargo run --color=always --package rumq-client --example gcloud
 
@@ -24,7 +25,7 @@ async fn main() {
     thread::spawn(move || {
         for i in 0..10 {
             let publish = publish(i);
-            tokio_executor::current_thread::block_on_all(requests_tx.send(publish)).unwrap();
+            // futures_executor::block_on(requests_tx.send(publish)).unwrap();
             thread::sleep(Duration::from_secs(1));
         }
 
@@ -32,7 +33,7 @@ async fn main() {
 
         for i in 0..10 {
             let publish = publish(i);
-            tokio_executor::current_thread::block_on_all(requests_tx.send(publish)).unwrap();
+            // futures_executor::block_on(requests_tx.send(publish)).unwrap();
             thread::sleep(Duration::from_secs(1));
         }
 

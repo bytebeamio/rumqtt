@@ -182,17 +182,21 @@ impl<T: Stream<Item = Result<Notification, EventLoopError>>> MqttStream for T {}
 
 #[cfg(test)]
 mod test {
-    use super::MqttEventLoop;
-    use crate::state::MqttState;
-
-    fn eventloop() -> MqttEventLoop<I> {
-        let eventloop = MqttEventLoop {
-            state: MqttState::new(mqttoptions.clone()),
-            options,
-            requests: None,
-            network: stream
-        };
-
-        eventloop
-    }
+//    use super::MqttEventLoop;
+//    use crate::state::MqttState;
+//    use crate::{MqttOptions, network};
+//
+//    fn eventloop<I>() -> MqttEventLoop<I> {
+//        let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
+//        let network = network::vconnect(options.clone());
+//
+//        let eventloop = MqttEventLoop {
+//            state: MqttState::new(options.clone()),
+//            options,
+//            requests: None,
+//            network
+//        };
+//
+//        eventloop
+//    }
 }

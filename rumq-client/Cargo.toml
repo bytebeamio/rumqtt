@@ -11,11 +11,11 @@ derive_more = "0.15"
 tokio = {version = "0.2.0-alpha.6", features = ["macros", "io"]}
 tokio-rustls = "0.12.0-alpha.8"
 tokio-io = "0.2.0-alpha.6"
-futures-core-preview = "=0.3.0-alpha.19"
-futures-sink-preview = "=0.3.0-alpha.19"
-futures-util-preview = { version = "=0.3.0-alpha.19", features = ["sink", "select-macro", "async-await"] }
+futures-core = "0.3"
+futures-sink = "0.3"
+futures-util = { version = "=0.3", features = ["sink", "async-await"] }
 
-rumq-core = {path = "../rumq-core", version = "0.1"}
+rumq-core = {path = "../rumq-core", version = "0.1", features = ["tokio-traits"]}
 log = "0.4"
 async-stream = {git = "https://github.com/tokio-rs/async-stream"}
 
@@ -26,3 +26,5 @@ color-backtrace = "0.2.3"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
 jsonwebtoken = {git = "https://github.com/Keats/jsonwebtoken", branch = "next"}
+futures-channel = "0.3"
+futures-executor = "0.3"

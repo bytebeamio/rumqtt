@@ -8,18 +8,18 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 #[cfg(feature = "async-traits")]
-mod foo {
+mod read {
     pub use async_byteorder::{BigEndian, AsyncReadBytesExt};
     pub use async_std::io::prelude::ReadExt as AsyncReadExt;
 }
 
 #[cfg(feature = "tokio-traits")]
-mod foo {
+mod read {
     pub use tokio_byteorder::{BigEndian, AsyncReadBytesExt};
     pub use tokio::io::AsyncReadExt;
 }
 
-use foo::{BigEndian, AsyncReadBytesExt, AsyncReadExt};
+use read::{BigEndian, AsyncReadBytesExt, AsyncReadExt};
 
 use crate::{
     Connack, Connect, LastWill, Packet, PacketType, Protocol, Publish, QoS, Suback,

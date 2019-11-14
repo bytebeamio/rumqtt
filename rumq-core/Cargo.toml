@@ -18,6 +18,7 @@ cfg-if = "0.1"
 [features]
 async-traits = ["futures-io", "async-byteorder", "async-std"]
 tokio-traits = ["tokio-byteorder", "tokio"]
+default = ["tokio-traits"]
 
 [dev-dependencies]
 tokio = {version = "0.2.0-alpha.6", features = ["macros"]}
