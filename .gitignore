@@ -10,3 +10,5 @@ Cargo.lock
 **/*.rs.bk
 .idea
 .vscode
+*.pem
+*.der

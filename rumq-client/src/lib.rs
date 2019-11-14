@@ -1,13 +1,17 @@
+#![recursion_limit="256"]
+
 #[macro_use]
 extern crate log;
 
 use std::time::Duration;
 use rumq_core::*;
 
-mod state;
-mod eventloop;
-// pub use eventloop::MqttEventLoop;
-// pub use eventloop::connect;
+pub(crate) mod network;
+pub(crate) mod state;
+pub(crate) mod eventloop;
+
+pub use eventloop::MqttEventLoop;
+pub use eventloop::connect;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]
@@ -15,12 +19,11 @@ pub enum Notification {
     Reconnection,
     Disconnection,
     Publish(Publish),
-    PubAck(PacketIdentifier),
-    PubRec(PacketIdentifier),
-    PubRel(PacketIdentifier),
-    PubComp(PacketIdentifier),
-    SubAck(PacketIdentifier),
-    None
+    Puback(PacketIdentifier),
+    Pubrec(PacketIdentifier),
+    Pubrel(PacketIdentifier),
+    Pubcomp(PacketIdentifier),
+    Suback(PacketIdentifier),
 }
 
 #[doc(hidden)]

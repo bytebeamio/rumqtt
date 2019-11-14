@@ -1,5 +1,64 @@
 
-#### takes any stream type as input
+TODO
+------
+
+- [X] Connection
+- [X] Publish and ack
+- [ ] Keep alive
+- [ ] Reconnection
+- [ ] Throttling
+- [X] Tls
+- [ ] First alpha release
+
+
+Changelog
+--------
+* Consistent use of DER encoded data for certs and keys everywhere. PEM file error return isn't clear to me in rustls
+* Don't panic when domain name does not match to sub_alt_name in the server certificate (https://github.com/ctz/rustls/issues/127)
+* Return proper error instead of panicking when the user provides ip instead of a domain name for a tls connection
+
+Connection and Automatic reconnections
+-------
+
+Open question: When should event loop start taking control of reconnections? After initial success or should
+we expose options similar to current implementation? what should be the default behavior
+
+```
+Reconnect::AfterFirstSuccess
+Reconnect::Always
+Reconnect::Never
+```
+
+Let's do this for starters
+
+```$xslt
+    // create an eventloop after the initial mqtt connection is successful
+    // user will decide if this should be retried or not
+    let eventloop = connect(mqttoptions) -> Result<EventLoop, Error>
+
+    // during intermittent reconnetions due to bad network, eventloop will
+    // behave as per configured reconnection options to the eventloop
+    let stream = eventloop.assemble(reconnection_options, inputs);
+```
+
+Possible reconnection options
+
+```$xslt
+Reconnect::Never
+Reconnect::Automatic
+```
+
+I feel this a good middle ground between manual user control and rumq being very opinionated about
+reconnection behaviour. 
+
+But why not leave the intermittent reconnection behaviour as well to the user you ask? 
+
+Because maintaining
+state is a much more complicated business than just retrying the connection. We don't want the user to think
+about mqttstate by default. If the user intends for a much more custom behaviour, he/she can use
+`Reconnect::Never` and pass the returned `MqttState` to the next connection.
+
+Takes any stream type as input
 -------
 
 Allows eventloop to be channel implementation agnostic. This opens up interesting usage patterns. Instead of providing
@@ -33,7 +92,7 @@ rumqtt_eventloop.start(user_channel_rx_stream);
 ```
 
 
-#### don't spawn any thread from the library
+Don't spawn any thread from the library
 -------
 
 Provide all the eventloop handling necessary for a robust mqtt connection but don't spawn any inner threads. This choice is
@@ -60,7 +119,7 @@ eventloop.run(rx);
 ```
 
 
-#### support both synchronous and asynchronous use cases
+Support both synchronous and asynchronous use cases
 -------
 
 Leverage on the above pattern to support both synchronous and asynchronus publishes with timeouts
@@ -72,20 +131,8 @@ eventloop.run_timeout(publishes, 10 * Duration::SECS);
 
 Eventloop will wait for all the acks within timeout (where ever necessary) and exits
 
-#### automatic reconnections
--------
 
-Open question: When should event loop start taking control of reconnections? After initial success or should
-we expose options similar to current implementation? what should be the default behavior
-
-```
-Reconnect::AfterFirstSuccess
-Reconnect::Always
-Reconnect::Never
-```
-
-
-#### command channels to configure eventloop dynamically
+Command channels to configure eventloop dynamically
 -------
 
 reconnections, disconnection, throttle speed, pause/resume (without disconnections)
@@ -113,10 +160,67 @@ eventloop.run() //return -> Result<MqttSt>
 ```
 
 
-#### keep additional functionality like gcloud jwt auth and http connect proxy out of rumqtt
+Keep additional functionality like gcloud jwt auth and http connect proxy out of rumqtt
 -------
 
 Prevents (some) conflicts w.r.t different versions of ring. conflicts because of rustls are still possible but atleast
 prevents ones w.r.t jsonwebtoken.
 
 Keeps the codebase small which eases some maintainence burden
+
+Keep alive
+-------
+
+Keepalives can be a little tricky
+
+client should keep track of keepalive timeouts for 2 different reasons
+
+* when there is no incoming n/w activity
+
+to detect any halfopen connections to the broker, client should send a pingrequest packet
+and validate next pingreq with previous pingresp.
+if previous ack isn't received, client should consider this as a halfopen connection and
+disconnect. takes 2 keepalive times to detect halfopen connection and disconnect
+
+* to prevent broker from disconnecting the client due to no client activity
+
+broker should receive some packet activity from a client or else it'll assume the
+connection as halfopen and disconnect.
+for this reason, even though the client is receiving some incoming packets(qos0 publishes)
+client should timeout when there is no outgoing packet activity and send a ping request
+
+
+We would require timeouts on network incoming packets as well as network outgoing packets. concurrently
+
+so we need to create 2 streams with timeouts, one on n/w incoming packets and another on n/w outgoing packets and select
+
+```rust
+let incoming_stream = stream!(tcp.read_mqtt().timeout(NetworkTimeout))
+
+This captures incoming stream timeout
+
+Caputuring timeout on outgoing packects (replys due to incoming packets + user requests) is tricky because replys
+are a sideeffect of processing incoming packets which generate notifications for the user as well. 
+To have a timeout on a combination of reply and requests, we need to filter out notifications (or put it into other stream) 
+which beats our design of returning one eventloop stream to the user to handle full mqtt io
+
+
+let mqtt_stream = stream! {
+    loop {
+        select! {
+            (notification, reply) = incoming_stream.next().handle_incoming_packet(),
+            (request) = requests.next()
+        } 
+        yield reply
+    }
+}
+```
+
+So there is no way to separate notifications from reply without creating a duplicate stream
+
+Option 2 is to timeout on user requests alone. This will lead to sending unnecessary pingreqests after keep alive time
+even when there is outgoing network activity due to network replys. But this will let us have one simple 
+stream to poll. Returning 2 streams might not be intuitive to the users. main eventloop progress can stop when the user
+doensn't poll the notification stream (tx.send will block which eventually blocks all incoming packets). Having a second stream also results in more allocations in the hotpath (which might not be a big deal but not ideal) 
+Option2 is also considerable less codebase and hence easy maintainence.
+
