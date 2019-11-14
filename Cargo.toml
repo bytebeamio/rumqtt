@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+  "async-byteorder",
   "rumq-core",
   "rumq-client",
   "rumq-broker",

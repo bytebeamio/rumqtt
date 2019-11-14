@@ -4,10 +4,22 @@ use crate::qos;
 use crate::Error;
 use crate::PacketIdentifier;
 use crate::SubscribeTopic;
-use tokio_byteorder::{BigEndian, AsyncReadBytesExt};
-use tokio::io::AsyncReadExt;
 use async_trait::async_trait;
 use std::sync::Arc;
+
+#[cfg(feature = "async-traits")]
+mod foo {
+    pub use async_byteorder::{BigEndian, AsyncReadBytesExt};
+    pub use async_std::io::prelude::ReadExt as AsyncReadExt;
+}
+
+#[cfg(feature = "tokio-traits")]
+mod foo {
+    pub use tokio_byteorder::{BigEndian, AsyncReadBytesExt};
+    pub use tokio::io::AsyncReadExt;
+}
+
+use foo::{BigEndian, AsyncReadBytesExt, AsyncReadExt};
 
 use crate::{
     Connack, Connect, LastWill, Packet, PacketType, Protocol, Publish, QoS, Suback,
@@ -280,7 +292,11 @@ mod test {
         SubscribeTopic,
     };
     use std::sync::Arc;
+
+    #[cfg(feature = "tokio-traits")]
     use std::io::Cursor;
+    #[cfg(feature = "async-traits")]
+    use async_std::io::Cursor;
 
     impl MqttRead for Cursor<Vec<u8>> {}
 

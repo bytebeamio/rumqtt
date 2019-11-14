@@ -139,6 +139,3 @@ pub enum Error {
     UnexpectedEof,
     Io(io::Error),
 }
-
-impl MqttRead for tokio::net::TcpStream{}
-impl MqttWrite for tokio::net::TcpStream{}
