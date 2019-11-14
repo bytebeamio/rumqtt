@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Setup toolchain
-      run: rustup override set nightly
+      run: rustup override set stable
     - name: Build
       run: cargo build
     - name: Run tokio tests
