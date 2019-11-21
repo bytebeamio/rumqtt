@@ -6,6 +6,7 @@ use futures_channel::mpsc;
 
 use rumq_client::{self, MqttOptions, Request, connect};
 use std::time::Duration;
+use futures_util::sink::Sink;
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +24,7 @@ async fn main() {
     thread::spawn(move || {
         for i in 0..10 {
             let publish = publish(i);
-            // tokio_executor::current_thread::block_on_all(requests_tx.send(publish)).unwrap();
+            futures_executor::block_on(requests_tx.send(publish)).unwrap();
             thread::sleep(Duration::from_secs(1));
         }
         thread::sleep(Duration::from_secs(300));

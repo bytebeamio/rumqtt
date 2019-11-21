@@ -14,6 +14,7 @@ tokio-io = "0.2.0-alpha.6"
 futures-core = "0.3"
 futures-sink = "0.3"
 futures-util = { version = "=0.3", features = ["sink", "async-await"] }
+pin-utils = "0.1.0-alpha.4"
 
 rumq-core = {path = "../rumq-core", version = "0.1", features = ["tokio-traits"]}
 log = "0.4"
