@@ -1,19 +1,9 @@
 use crate::{Error, Packet, QoS, SubscribeReturnCodes, SubscribeTopic};
 use async_trait::async_trait;
 
-#[cfg(feature = "async-traits")]
-mod write {
-    pub use async_byteorder::{BigEndian, AsyncWriteBytesExt};
-    pub use async_std::io::prelude::WriteExt as AsyncWriteExt;
-}
+pub use tokio_byteorder::futures::{BigEndian, AsyncWriteBytesExt};
+pub use async_std::io::prelude::WriteExt as AsyncWriteExt;
 
-#[cfg(feature = "tokio-traits")]
-mod write {
-    pub use tokio_byteorder::{BigEndian, AsyncWriteBytesExt};
-    pub use tokio::io::AsyncWriteExt;
-}
-
-use write::{BigEndian, AsyncWriteBytesExt, AsyncWriteExt};
 
 #[async_trait]
 pub trait MqttWrite: AsyncWriteBytesExt + Unpin {

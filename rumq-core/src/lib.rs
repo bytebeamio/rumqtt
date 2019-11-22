@@ -76,7 +76,7 @@ pub enum Packet {
 /// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
 
 
-fn qos(num: u8) -> Result<QoS, Error> {
+pub fn qos(num: u8) -> Result<QoS, Error> {
     match num {
         0 => Ok(QoS::AtMostOnce),
         1 => Ok(QoS::AtLeastOnce),
@@ -86,7 +86,7 @@ fn qos(num: u8) -> Result<QoS, Error> {
 }
 
 
-fn packet_type(num: u8) -> Result<PacketType, Error> {
+pub fn packet_type(num: u8) -> Result<PacketType, Error> {
     match num {
         1 => Ok(PacketType::Connect),
         2 => Ok(PacketType::Connack),

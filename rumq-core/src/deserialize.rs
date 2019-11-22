@@ -7,19 +7,8 @@ use crate::SubscribeTopic;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-#[cfg(feature = "async-traits")]
-mod read {
-    pub use async_byteorder::{BigEndian, AsyncReadBytesExt};
-    pub use async_std::io::prelude::ReadExt as AsyncReadExt;
-}
-
-#[cfg(feature = "tokio-traits")]
-mod read {
-    pub use tokio_byteorder::{BigEndian, AsyncReadBytesExt};
-    pub use tokio::io::AsyncReadExt;
-}
-
-use read::{BigEndian, AsyncReadBytesExt, AsyncReadExt};
+pub use tokio_byteorder::futures::{BigEndian, AsyncReadBytesExt};
+pub use async_std::io::prelude::ReadExt as AsyncReadExt;
 
 use crate::{
     Connack, Connect, LastWill, Packet, PacketType, Protocol, Publish, QoS, Suback,
