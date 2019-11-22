@@ -5,23 +5,23 @@ use crate::MqttOptions;
 use derive_more::From;
 
 use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
-use futures_core::Stream;
 use futures_util::{select, StreamExt, FutureExt};
-
+use futures_util::stream::Stream;
+use futures_util::future::Either;
+use futures_io::{AsyncRead, AsyncWrite};
+use async_std::net::TcpStream;
+use async_std::future::TimeoutError;
+use async_tls::client::TlsStream;
 use std::io;
 use std::time::Duration;
 
-use tokio::timer;
-use tokio::future::FutureExt as OtherFutureExt;
 use async_stream::stream;
-use crate::network::NetworkStream;
 
-
-pub struct MqttEventLoop<I> {
+pub struct MqttEventLoop<A, B> {
     state: MqttState,
     options: MqttOptions,
-    requests: Option<I>,
-    network: NetworkStream
+    requests: Option<A>,
+    network: B
 }
 
 #[derive(From, Debug)]
@@ -32,29 +32,35 @@ pub enum EventLoopError {
     NoRequest,
     MqttState(StateError),
     StreamClosed,
-    Timeout(timer::timeout::Elapsed),
+    Timeout(TimeoutError),
     Rumq(rumq_core::Error),
     Network(network::Error)
 }
 
-pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<I>, EventLoopError> {
+pub async fn connect<A, B>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<A, Either<TcpStream, TlsStream<TcpStream>>>, EventLoopError> {
     let connect = connect_packet(&options);
     let mut network = network::connect(&options, timeout).await?;
     let mut state = MqttState::new(options.clone());
 
-    // mqtt connection with timeout
-    timer::Timeout::new(async {
+    async_std::future::timeout(timeout, async {
         network.mqtt_write(&connect).await?;
         state.handle_outgoing_connect()?;
         Ok::<_, EventLoopError>(())
-    }, timeout).await??;
+    }).await??;
+
+    // mqtt connection with timeout
+    async_std::future::timeout(timeout, async {
+        network.mqtt_write(&connect).await?;
+        state.handle_outgoing_connect()?;
+        Ok::<_, EventLoopError>(())
+    }).await??;
 
     // wait for 'timeout' time to validate connack
-    timer::Timeout::new( async {
+    async_std::future::timeout(timeout, async {
         let packet = network.mqtt_read().await?;
         state.handle_incoming_connack(packet)?;
         Ok::<_, EventLoopError>(())
-    }, timeout).await??;
+    }).await??;
 
     let eventloop = MqttEventLoop {
         state,
@@ -73,10 +79,10 @@ pub async fn connect<I>(options: MqttOptions, timeout: Duration) -> Result<MqttE
 /// TODO: The implementation of of user requests which are bounded streams (ends after
 /// producing 'n' elements) is not very clear yet. Probably the stream should end when
 /// all the state buffers are acked with a timeout
-impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
+impl<A: Stream<Item = Request> + Unpin, B: AsyncRead + AsyncWrite + Unpin + Send> MqttEventLoop<A, B> {
     /// Build a stream object when polled by the user will start progress on incoming
     /// and outgoing data
-    pub async fn build(&mut self, stream: I) -> Result<impl MqttStream + '_, EventLoopError> {
+    pub async fn build(&mut self, stream: A) -> Result<impl MqttStream + '_, EventLoopError> {
         self.requests = Some(stream);
 
         // a stream which polls user request stream, network stream and creates
@@ -84,16 +90,10 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
         let o = stream! {
             loop {
                 let (notification, reply) = self.poll().await?;
-
                 // write the reply back to the network
-                if let Some(p) = reply {
-                    self.network.mqtt_write(&p).await?;
-                }
-
+                if let Some(p) = reply { self.network.mqtt_write(&p).await?; }
                 // yield the notification to the user
-                if let Some(n) = notification {
-                    yield Ok(n)
-                }
+                if let Some(n) = notification { yield Ok(n) }
             }
         };
 
@@ -109,19 +109,29 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
         let requests = self.requests.as_mut().unwrap();
         let keep_alive = self.options.keep_alive;
 
+        let network = async_std::future::timeout(keep_alive, async {
+            let packet = network.mqtt_read().await?;
+            Ok::<_, rumq_core::Error>(packet)
+        });
+
+        let request = async_std::future::timeout(keep_alive, async {
+            let request = requests.next().await;
+            request
+        });
+
         select! {
-            o = network.mqtt_read().timeout(keep_alive).fuse() =>  {
+            o = network.fuse() =>  {
                 let (notification, request) = self.handle_packet(o).await?;
                 Ok((notification, request))
             },
-            o = requests.next().timeout(keep_alive).fuse() => {
+            o = request.fuse() => {
                 let (notification, request) = self.handle_request(o).await?;
                 Ok((notification, request))
             }
         }
     }
 
-    async fn handle_packet(&mut self, packet: Result<Result<Packet, rumq_core::Error>, timer::timeout::Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    async fn handle_packet(&mut self, packet: Result<Result<Packet, rumq_core::Error>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let packet = match packet {
             Ok(packet) => packet,
             Err(_) => {
@@ -134,7 +144,7 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
         Ok((notification, reply))
     }
 
-    async fn handle_request(&mut self, request: Result<Option<Request>, timer::timeout::Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    async fn handle_request(&mut self, request: Result<Option<Request>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let request = match request {
             Ok(request) => request,
             Err(_) => {

@@ -1,8 +1,7 @@
-use tokio::net::TcpStream;
-use tokio_rustls::{client::TlsStream, TlsConnector};
-use tokio_rustls::rustls::{ClientConfig, Certificate, PrivateKey};
-use tokio::timer::{timeout, Timeout};
-
+use async_std::net::TcpStream;
+use async_tls::{client::TlsStream, TlsConnector};
+use rustls::{ClientConfig, Certificate, PrivateKey};
+use futures_util::future::Either;
 use derive_more::From;
 
 use crate::MqttOptions;
@@ -10,36 +9,21 @@ use std::time::Duration;
 use std::net::AddrParseError;
 use std::io;
 use std::sync::Arc;
-use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
-use tokio_io::{AsyncRead, AsyncWrite};
-use futures_util::task::Context;
-use std::pin::Pin;
-use rumq_core::{MqttRead, MqttWrite};
 use std::io::{Cursor, BufReader};
-use std::task::Poll;
-
-pub enum NetworkStream {
-    Tcp(TcpStream),
-    Tls(TlsStream<TcpStream>),
-    #[cfg(test)]
-    Vec(Vec<u8>)
-}
 
 #[derive(From, Debug)]
 pub enum Error {
     Addr(AddrParseError),
     Io(io::Error),
-    Timeout(timeout::Elapsed),
-    DNSName(InvalidDNSNameError),
     WebPki(webpki::Error),
     NoValidCertInChain
 }
 
-pub async fn connect(options: &MqttOptions, timeout: Duration) -> Result<NetworkStream, Error> {
+pub async fn connect(options: &MqttOptions, timeout: Duration) -> Result<Either<TcpStream, TlsStream<TcpStream>>, Error> {
     let addr = format!("{}:{}", options.broker_addr, options.port);
-    let tcp = Timeout::new( async {
+    let tcp = async_std::io::timeout(timeout, async {
         TcpStream::connect(addr).await
-    }, timeout).await??;
+    }).await?;
 
     let mut config = ClientConfig::new();
 
@@ -56,7 +40,7 @@ pub async fn connect(options: &MqttOptions, timeout: Duration) -> Result<Network
             }
         }
         None => {
-            let stream = NetworkStream::Tcp(tcp);
+            let stream = Either::Left(tcp);
             return Ok(stream);
         }
     }
@@ -74,60 +58,7 @@ pub async fn connect(options: &MqttOptions, timeout: Duration) -> Result<Network
     }
 
     let connector = TlsConnector::from(Arc::new(config));
-    let domain = DNSNameRef::try_from_ascii_str(&options.broker_addr)?;
-    let tls = connector.connect(domain, tcp).await?;
-    Ok(NetworkStream::Tls(tls))
+    let tls = connector.connect(&options.broker_addr, tcp)?.await?;
+    Ok(Either::Right(tls))
 }
-
-#[cfg(test)]
-pub async fn vconnect(options: MqttOptions) -> Result<NetworkStream, Error> {
-    Ok(NetworkStream::Vec(Vec::new()))
-}
-
-
-impl AsyncRead for NetworkStream {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<usize, io::Error>> {
-        match self.get_mut() {
-            NetworkStream::Tcp(stream) => Pin::new(stream).poll_read(cx, buf),
-            NetworkStream::Tls(stream) => Pin::new(stream).poll_read(cx, buf),
-            #[cfg(test)]
-            NetworkStream::Vec(stream) => {
-                let mut stream: &[u8] = &stream;
-                Pin::new(&mut stream).poll_read(cx, buf)
-            }
-        }
-    }
-}
-
-impl AsyncWrite for NetworkStream {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
-        match self.get_mut() {
-            NetworkStream::Tcp(stream) => Pin::new(stream).poll_write(cx, buf),
-            NetworkStream::Tls(stream) => Pin::new(stream).poll_write(cx, buf),
-            #[cfg(test)]
-            NetworkStream::Vec(stream) => Pin::new(stream).poll_write(cx, buf)
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        match self.get_mut() {
-            NetworkStream::Tcp(stream) => Pin::new(stream).poll_flush(cx),
-            NetworkStream::Tls(stream) => Pin::new(stream).poll_flush(cx),
-            #[cfg(test)]
-            NetworkStream::Vec(stream) => Pin::new(stream).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        match self.get_mut() {
-            NetworkStream::Tcp(stream) => Pin::new(stream).poll_shutdown(cx),
-            NetworkStream::Tls(stream) => Pin::new(stream).poll_shutdown(cx),
-            #[cfg(test)]
-            NetworkStream::Vec(stream) => Pin::new(stream).poll_shutdown(cx),
-        }
-    }
-}
-
-impl MqttRead for NetworkStream {}
-impl MqttWrite for NetworkStream {}
 
