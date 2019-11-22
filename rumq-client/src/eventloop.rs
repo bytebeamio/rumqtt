@@ -102,43 +102,54 @@ impl<I: Stream<Item = Request> + Unpin> MqttEventLoop<I> {
         Ok(o)
     }
 
-    async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let network = &mut self.network;
-        // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
 
+    async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+        // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
+        let network = &mut self.network;
         let requests = self.requests.as_mut().unwrap();
         let keep_alive = self.options.keep_alive;
 
         select! {
-            packet = network.mqtt_read().timeout(keep_alive).fuse() =>  {
-                let packet = match packet {
-                    Ok(packet) => packet,
-                    Err(_) => {
-                        self.state.handle_outgoing_ping()?;
-                        return Ok((None, Some(Packet::Pingreq)))
-                    }
-                };
-                let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
-                Ok((notification, reply))
+            o = network.mqtt_read().timeout(keep_alive).fuse() =>  {
+                let (notification, request) = self.handle_packet(o).await?;
+                Ok((notification, request))
             },
-            request = requests.next().timeout(keep_alive).fuse() => {
-                let request = match request {
-                    Ok(request) => request,
-                    Err(_) => {
-                        self.state.handle_outgoing_ping()?;
-                        return Ok((None, Some(Packet::Pingreq)))
-                    }
-                };
-
-                // outgoing packet handle is only user for requests, not replys. this ensures
-                // ping debug print show last request time, not reply time
-                let request = request.ok_or(EventLoopError::NoRequest)?;
-                let request = self.state.handle_outgoing_mqtt_packet(request.into());
-                let request = Some(request);
-                let notification = None;
+            o = requests.next().timeout(keep_alive).fuse() => {
+                let (notification, request) = self.handle_request(o).await?;
                 Ok((notification, request))
             }
         }
+    }
+
+    async fn handle_packet(&mut self, packet: Result<Result<Packet, rumq_core::Error>, timer::timeout::Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+        let packet = match packet {
+            Ok(packet) => packet,
+            Err(_) => {
+                self.state.handle_outgoing_ping()?;
+                return Ok((None, Some(Packet::Pingreq)))
+            }
+        };
+
+        let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
+        Ok((notification, reply))
+    }
+
+    async fn handle_request(&mut self, request: Result<Option<Request>, timer::timeout::Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+        let request = match request {
+            Ok(request) => request,
+            Err(_) => {
+                self.state.handle_outgoing_ping()?;
+                return Ok((None, Some(Packet::Pingreq)))
+            }
+        };
+
+        // outgoing packet handle is only user for requests, not replys. this ensures
+        // ping debug print show last request time, not reply time
+        let request = request.ok_or(EventLoopError::NoRequest)?;
+        let request = self.state.handle_outgoing_mqtt_packet(request.into());
+        let request = Some(request);
+        let notification = None;
+        Ok((notification, request))
     }
 }
 
