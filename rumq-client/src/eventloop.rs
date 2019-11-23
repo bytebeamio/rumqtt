@@ -37,16 +37,11 @@ pub enum EventLoopError {
     Network(network::Error)
 }
 
-pub async fn connect<A, B>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<A, Either<TcpStream, TlsStream<TcpStream>>>, EventLoopError> {
+// TODO: Explicitly typing the `MqttEventLoop` type for e.g in funciton returns might be challenging
+pub async fn connect<A>(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<A, Either<TcpStream, TlsStream<TcpStream>>>, EventLoopError> {
     let connect = connect_packet(&options);
     let mut network = network::connect(&options, timeout).await?;
     let mut state = MqttState::new(options.clone());
-
-    async_std::future::timeout(timeout, async {
-        network.mqtt_write(&connect).await?;
-        state.handle_outgoing_connect()?;
-        Ok::<_, EventLoopError>(())
-    }).await??;
 
     // mqtt connection with timeout
     async_std::future::timeout(timeout, async {

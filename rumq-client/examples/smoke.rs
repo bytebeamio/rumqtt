@@ -2,32 +2,34 @@ use futures_util::stream::StreamExt;
 use std::thread;
 use rumq_core::*;
 use std::sync::Arc;
-use futures_channel::mpsc;
+use async_std::sync::channel;
+use async_std::task;
 
 use rumq_client::{self, MqttOptions, Request, connect};
 use std::time::Duration;
-use futures_util::sink::Sink;
 
-#[tokio::main]
+#[async_std::main]
 async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let (mut requests_tx, requests_rx) = mpsc::channel(1);
+    let (requests_tx, requests_rx) = channel(10);
     let mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     let mqttoptions = mqttoptions.set_keep_alive(10);
 
-    let timeout = Duration::from_secs(10);
+    let timeout = Duration::from_secs(5);
     let mut eventloop = connect(mqttoptions, timeout).await.unwrap();
     let mut stream = eventloop.build(requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        for i in 0..10 {
-            let publish = publish(i);
-            futures_executor::block_on(requests_tx.send(publish)).unwrap();
-            thread::sleep(Duration::from_secs(1));
-        }
-        thread::sleep(Duration::from_secs(300));
+        task::block_on( async {
+            for i in 0..10 {
+                requests_tx.send(publish(i)).await;
+                task::sleep(Duration::from_secs(1)).await;
+            }
+        });
+
+        thread::sleep(Duration::from_secs(100));
     });
 
     while let Some(item) = stream.next().await {

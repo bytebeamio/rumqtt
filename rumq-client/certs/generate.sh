@@ -18,6 +18,6 @@ for i in $(seq 1 $1); do
   gcloud iot devices create $bike_id --region=asia-east1 --registry=iotcore --public-key path=rsa_cert.pem,type=rs256
 
   mkdir -p $bike_id
-  mv roots.pem rsa_private.der $bike_id
+  mv roots.pem rsa_private.pem rsa_private.der $bike_id
   rm -rf *.pem *.der
 done
