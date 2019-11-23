@@ -1,21 +1,21 @@
 use crate::{Notification, Request, network};
-use crate::state::{StateError, MqttState};
-use crate::MqttOptions;
-
 use derive_more::From;
-
 use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
-use futures_util::{select, StreamExt, FutureExt};
+use futures_util::{select, FutureExt};
 use futures_util::stream::Stream;
 use futures_util::future::Either;
 use futures_io::{AsyncRead, AsyncWrite};
 use async_std::net::TcpStream;
 use async_std::future::TimeoutError;
 use async_tls::client::TlsStream;
+use async_std::stream::StreamExt;
+use async_stream::stream;
+
+use crate::state::{StateError, MqttState};
+use crate::MqttOptions;
+
 use std::io;
 use std::time::Duration;
-
-use async_stream::stream;
 
 pub struct MqttEventLoop<A, B> {
     state: MqttState,
@@ -78,6 +78,7 @@ impl<A: Stream<Item = Request> + Unpin, B: AsyncRead + AsyncWrite + Unpin + Send
     /// Build a stream object when polled by the user will start progress on incoming
     /// and outgoing data
     pub async fn build(&mut self, stream: A) -> Result<impl MqttStream + '_, EventLoopError> {
+        // let stream = stream.throttle(self.options.throttle);
         self.requests = Some(stream);
 
         // a stream which polls user request stream, network stream and creates
