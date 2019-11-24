@@ -19,9 +19,13 @@ rumq-core = { path = "../rumq-core", version = "0.1"}
 auto_enums = { version = "0.7", features = ["futures"]}
 log = "0.4"
 
+
 [dev-dependencies]
 pretty_env_logger = "0.3.1"
 color-backtrace = "0.2.3"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
 jsonwebtoken = {git = "https://github.com/Keats/jsonwebtoken", branch = "next"}
+
+[profile.release]
+debug = true

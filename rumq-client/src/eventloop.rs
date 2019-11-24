@@ -3,11 +3,8 @@ use derive_more::From;
 use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
 use futures_util::{select, FutureExt};
 use futures_util::stream::Stream;
-use futures_util::future::Either;
 use futures_io::{AsyncRead, AsyncWrite};
-use async_std::net::TcpStream;
 use async_std::future::TimeoutError;
-use async_tls::client::TlsStream;
 use async_std::stream::StreamExt;
 use async_stream::stream;
 
@@ -17,11 +14,11 @@ use crate::MqttOptions;
 use std::io;
 use std::time::Duration;
 
-pub struct MqttEventLoop<B> {
+pub struct MqttEventLoop {
     state: MqttState,
     options: MqttOptions,
     requests: Option<Box<dyn Stream<Item = Request> + Unpin>>,
-    network: B,
+    network: Box<dyn  Network>,
 }
 
 #[derive(From, Debug)]
@@ -38,7 +35,7 @@ pub enum EventLoopError {
 }
 
 // TODO: Explicitly typing the `MqttEventLoop` type for e.g in funciton returns might be challenging
-pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop<Either<TcpStream, TlsStream<TcpStream>>>, EventLoopError> {
+pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop, EventLoopError> {
     let connect = connect_packet(&options);
     let mut network = network::connect(&options, timeout).await?;
     let mut state = MqttState::new(options.clone());
@@ -57,6 +54,7 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEven
         Ok::<_, EventLoopError>(())
     }).await??;
 
+    let network = Box::new(network);
     let eventloop = MqttEventLoop {
         state,
         options,
@@ -74,7 +72,7 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEven
 /// TODO: The implementation of of user requests which are bounded streams (ends after
 /// producing 'n' elements) is not very clear yet. Probably the stream should end when
 /// all the state buffers are acked with a timeout
-impl<B: AsyncRead + AsyncWrite + Unpin + Send> MqttEventLoop<B> {
+impl MqttEventLoop {
     /// Build a stream object when polled by the user will start progress on incoming
     /// and outgoing data
     pub async fn build(&mut self, stream: impl Stream<Item = Request> + Unpin + 'static) -> Result<impl MqttStream + '_, EventLoopError> {
@@ -195,6 +193,8 @@ impl From<Request> for Packet {
 pub trait MqttStream: Stream<Item = Result<Notification, EventLoopError>> {}
 impl<T: Stream<Item = Result<Notification, EventLoopError>>> MqttStream for T {}
 
+trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
+impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
 
 
 #[cfg(test)]

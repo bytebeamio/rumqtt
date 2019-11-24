@@ -15,7 +15,7 @@ async fn main() {
 
     let (requests_tx, requests_rx) = channel(10);
     let mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    let mqttoptions = mqttoptions.set_keep_alive(10);
+    let mqttoptions = mqttoptions.set_keep_alive(10).set_throttle(Duration::from_secs(1));
 
     let timeout = Duration::from_secs(5);
     let mut eventloop = connect(mqttoptions, timeout).await.unwrap();
@@ -23,9 +23,8 @@ async fn main() {
 
     thread::spawn(move || {
         task::block_on( async {
-            for i in 0..10 {
+            for i in 0..1 {
                 requests_tx.send(publish(i)).await;
-                task::sleep(Duration::from_secs(1)).await;
             }
         });
 
