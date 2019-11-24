@@ -18,6 +18,7 @@ async-tls = "0.6"
 rumq-core = { path = "../rumq-core", version = "0.1"}
 auto_enums = { version = "0.7", features = ["futures"]}
 log = "0.4"
+pin-utils = "0.1.0-alpha.4"
 
 
 [dev-dependencies]
