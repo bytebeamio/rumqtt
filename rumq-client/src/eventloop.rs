@@ -7,7 +7,7 @@ use futures_io::{AsyncRead, AsyncWrite};
 use async_std::future::TimeoutError;
 use async_std::stream::StreamExt;
 use async_stream::stream;
-
+use async_std::sync::{channel, Sender, Receiver};
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
 
@@ -17,6 +17,8 @@ use std::time::Duration;
 pub struct MqttEventLoop {
     state: MqttState,
     options: MqttOptions,
+    queue_limit_tx: Sender<bool>,
+    queue_limit_rx: Receiver<bool>,
     requests: Option<Box<dyn Stream<Item = Request> + Unpin>>,
     network: Box<dyn  Network>,
 }
@@ -34,12 +36,12 @@ pub enum EventLoopError {
     Network(network::Error)
 }
 
-// TODO: Explicitly typing the `MqttEventLoop` type for e.g in funciton returns might be challenging
 pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop, EventLoopError> {
     let connect = connect_packet(&options);
     let mut network = network::connect(&options, timeout).await?;
     let mut state = MqttState::new(options.clone());
-
+    let (queue_limit_tx, queue_limit_rx) = channel(1);
+    
     // mqtt connection with timeout
     async_std::future::timeout(timeout, async {
         network.mqtt_write(&connect).await?;
@@ -58,6 +60,8 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEven
     let eventloop = MqttEventLoop {
         state,
         options,
+        queue_limit_rx,
+        queue_limit_tx,
         network,
         requests: None,
     };
@@ -76,7 +80,7 @@ impl MqttEventLoop {
     /// Build a stream object when polled by the user will start progress on incoming
     /// and outgoing data
     pub async fn build(&mut self, stream: impl Stream<Item = Request> + Unpin + 'static) -> Result<impl MqttStream + '_, EventLoopError> {
-        let stream = stream.throttle(self.options.throttle);
+        // let stream = stream.throttle(self.options.throttle);
         self.requests = Some(Box::new(stream));
 
         // a stream which polls user request stream, network stream and creates
@@ -101,16 +105,16 @@ impl MqttEventLoop {
         // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
         let network = &mut self.network;
         let requests = self.requests.as_mut().unwrap();
-        let keep_alive = self.options.keep_alive;
 
-        let network = async_std::future::timeout(keep_alive, async {
+        let network = async_std::future::timeout(self.options.keep_alive, async {
             let packet = network.mqtt_read().await?;
-            Ok::<_, rumq_core::Error>(packet)
+            Ok::<_, EventLoopError>(packet)
         });
 
-        let request = async_std::future::timeout(keep_alive, async {
+        let request = async_std::future::timeout(self.options.keep_alive, async {            
             let request = requests.next().await;
-            request
+            let request = request.ok_or(EventLoopError::NoRequest)?;
+            Ok::<_, EventLoopError>(request)
         });
 
         select! {
@@ -125,7 +129,7 @@ impl MqttEventLoop {
         }
     }
 
-    async fn handle_packet(&mut self, packet: Result<Result<Packet, rumq_core::Error>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let packet = match packet {
             Ok(packet) => packet,
             Err(_) => {
@@ -135,10 +139,14 @@ impl MqttEventLoop {
         };
 
         let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
+        if self.state.outgoing_pub.len() > self.options.inflight {
+            self.queue_limit_tx.send(true).await;
+        }
+
         Ok((notification, reply))
     }
 
-    async fn handle_request(&mut self, request: Result<Option<Request>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    async fn handle_request(&mut self, request: Result<Result<Request, EventLoopError>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
         let request = match request {
             Ok(request) => request,
             Err(_) => {
@@ -147,10 +155,13 @@ impl MqttEventLoop {
             }
         };
 
+        if self.state.outgoing_pub.len() > self.options.inflight {
+            self.queue_limit_rx.recv().await;
+        }
+
         // outgoing packet handle is only user for requests, not replys. this ensures
         // ping debug print show last request time, not reply time
-        let request = request.ok_or(EventLoopError::NoRequest)?;
-        let request = self.state.handle_outgoing_mqtt_packet(request.into());
+        let request = self.state.handle_outgoing_mqtt_packet(request?.into());
         let request = Some(request);
         let notification = None;
         Ok((notification, request))
@@ -216,4 +227,29 @@ mod test {
 //
 //        eventloop
 //    }
+
+    #[test]
+    fn connection_should_timeout_on_time() {
+
+    }
+
+    #[test]
+    fn connection_waits_for_connack_and_errors_after_timeout() {
+
+    }
+
+    #[test]
+    fn throttled_requests_works_with_correct_delays_between_requests() {
+
+    }
+
+    #[test]
+    fn requests_are_blocked_after_max_inflight_queue_size() {
+
+    }
+
+    #[test]
+    fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
+
+    }
 }
