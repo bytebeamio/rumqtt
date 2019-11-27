@@ -7,7 +7,7 @@ TODO
 - [X] Keep alive
 - [ ] Reconnection
 - [X] Throttling
-- [ ] Size limited queues
+- [X] Size limited queues
 - [X] Tls
 - [ ] First alpha release
 

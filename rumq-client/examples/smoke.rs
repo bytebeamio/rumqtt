@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_std::sync::channel;
 use async_std::task;
 
-use rumq_client::{self, MqttOptions, Request, connect};
+use rumq_client::{self, MqttOptions, Request, eventloop};
 use std::time::Duration;
 
 #[async_std::main]
@@ -16,14 +16,11 @@ async fn main() {
     let (requests_tx, requests_rx) = channel(10);
     let mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     let mqttoptions = mqttoptions.set_keep_alive(10).set_throttle(Duration::from_secs(1));
-
-    let timeout = Duration::from_secs(5);
-    let mut eventloop = connect(mqttoptions, timeout).await.unwrap();
-    let mut stream = eventloop.build(requests_rx).await.unwrap();
+    let mut eventloop = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
         task::block_on( async {
-            for i in 0..1 {
+            for i in 0..10 {
                 requests_tx.send(publish(i)).await;
             }
         });
@@ -31,7 +28,7 @@ async fn main() {
         thread::sleep(Duration::from_secs(100));
     });
 
-    while let Some(item) = stream.next().await {
+    while let Some(item) = eventloop.next().await {
         println!("{:?}", item);
     }
 }

@@ -11,7 +11,7 @@ pub(crate) mod state;
 pub(crate) mod eventloop;
 
 pub use eventloop::MqttEventLoop;
-pub use eventloop::connect;
+pub use eventloop::eventloop;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]

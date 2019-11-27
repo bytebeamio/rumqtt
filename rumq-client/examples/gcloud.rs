@@ -2,7 +2,7 @@ use std::thread;
 use std::sync::Arc;
 
 use rumq_core::*;
-use rumq_client::{self, MqttOptions, Request, connect};
+use rumq_client::{self, MqttOptions, Request, eventloop};
 use async_std::sync::channel;
 use async_std::task;
 use futures_util::stream::StreamExt;
@@ -20,10 +20,7 @@ async fn main() {
 
     let (requests_tx, requests_rx) = channel(1);
     let mqttoptions = gcloud();
-    
-    let timeout = Duration::from_secs(10);
-    let mut eventloop = connect(mqttoptions, timeout).await.unwrap();
-    let mut stream  = eventloop.build(requests_rx).await.unwrap();
+    let mut stream = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
         task::block_on( async {

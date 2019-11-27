@@ -19,7 +19,7 @@ pub struct MqttEventLoop {
     options: MqttOptions,
     queue_limit_tx: Sender<bool>,
     queue_limit_rx: Receiver<bool>,
-    requests: Option<Box<dyn Stream<Item = Request> + Unpin>>,
+    requests: Box<dyn Requests>,
     network: Box<dyn  Network>,
 }
 
@@ -36,9 +36,17 @@ pub enum EventLoopError {
     Network(network::Error)
 }
 
-pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEventLoop, EventLoopError> {
+/// Eventloop implementation. The life of the event loop is dependent on request
+/// stream provided by the user and tcp stream. The event loop will be disconnected
+/// either during a disconnection at the broker or when the request stream ends.
+/// TODO: The implementation of of user requests which are bounded streams (ends after
+/// producing 'n' elements) is not very clear yet. Probably the stream should end when
+/// all the state buffers are acked with a timeout
+pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<impl MqttStream, EventLoopError> {
     let connect = connect_packet(&options);
+    let timeout = Duration::from_secs(5);
     let mut network = network::connect(&options, timeout).await?;
+    
     let mut state = MqttState::new(options.clone());
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     
@@ -57,54 +65,42 @@ pub async fn connect(options: MqttOptions, timeout: Duration) -> Result<MqttEven
     }).await??;
 
     let network = Box::new(network);
-    let eventloop = MqttEventLoop {
+    let requests = Box::new(requests);
+    // let requests = requests.throttle(self.options.throttle);
+
+    let mut eventloop = MqttEventLoop {
         state,
         options,
         queue_limit_rx,
         queue_limit_tx,
         network,
-        requests: None,
+        requests,
     };
 
-    Ok(eventloop)
+    // a stream which polls user request stream, network stream and creates
+    // a stream of notifications to the user
+    let o = stream! {
+        loop {
+            let (notification, reply) = eventloop.poll().await?;
+            // write the reply back to the network
+            if let Some(p) = reply { eventloop.network.mqtt_write(&p).await?; }
+            // yield the notification to the user
+            if let Some(n) = notification { yield Ok::<_, EventLoopError>(n) }
+        }
+    };
+
+    // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
+    let o = Box::pin(o);
+    Ok(o)
 }
 
 
-/// Eventloop implementation. The life of the event loop is dependent on request
-/// stream provided by the user and tcp stream. The event loop will be disconnected
-/// either during a disconnection at the broker or when the request stream ends.
-/// TODO: The implementation of of user requests which are bounded streams (ends after
-/// producing 'n' elements) is not very clear yet. Probably the stream should end when
-/// all the state buffers are acked with a timeout
+
 impl MqttEventLoop {
-    /// Build a stream object when polled by the user will start progress on incoming
-    /// and outgoing data
-    pub async fn build(&mut self, stream: impl Stream<Item = Request> + Unpin + 'static) -> Result<impl MqttStream + '_, EventLoopError> {
-        // let stream = stream.throttle(self.options.throttle);
-        self.requests = Some(Box::new(stream));
-
-        // a stream which polls user request stream, network stream and creates
-        // a stream of notifications to the user
-        let o = stream! {
-            loop {
-                let (notification, reply) = self.poll().await?;
-                // write the reply back to the network
-                if let Some(p) = reply { self.network.mqtt_write(&p).await?; }
-                // yield the notification to the user
-                if let Some(n) = notification { yield Ok(n) }
-            }
-        };
-
-        // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
-        let o = Box::pin(o);
-        Ok(o)
-    }
-
-
     async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
         let network = &mut self.network;
-        let requests = self.requests.as_mut().unwrap();
+        let requests = &mut self.requests;
 
         let network = async_std::future::timeout(self.options.keep_alive, async {
             let packet = network.mqtt_read().await?;
@@ -207,6 +203,9 @@ impl<T: Stream<Item = Result<Notification, EventLoopError>>> MqttStream for T {}
 trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
 impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
 
+pub trait Requests: Stream<Item = Request> + Unpin {}
+impl<T> Requests for T where T: Stream<Item = Request> + Unpin {}
+
 
 #[cfg(test)]
 mod test {
@@ -239,7 +238,22 @@ mod test {
     }
 
     #[test]
+    fn disconnection_errors_honor_reconnection_options() {
+
+    }
+
+    #[test]
     fn throttled_requests_works_with_correct_delays_between_requests() {
+
+    }
+
+    #[test]
+    fn request_future_triggers_pings_on_time() {
+
+    }
+
+    #[test]
+    fn network_future_triggers_pings_on_time() {
 
     }
 
