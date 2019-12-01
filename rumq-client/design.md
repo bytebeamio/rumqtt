@@ -4,12 +4,12 @@ TODO
 
 - [X] Connection
 - [X] Publish and ack
-- [ ] Keep alive
+- [X] Keep alive
 - [ ] Reconnection
-- [ ] Throttling
+- [X] Throttling
+- [X] Size limited queues
 - [X] Tls
 - [ ] First alpha release
-
 
 Changelog
 --------

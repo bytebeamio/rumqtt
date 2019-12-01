@@ -11,7 +11,7 @@ pub(crate) mod state;
 pub(crate) mod eventloop;
 
 pub use eventloop::MqttEventLoop;
-pub use eventloop::connect;
+pub use eventloop::eventloop;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]
@@ -74,6 +74,9 @@ pub enum SecurityOptions {
     UsernamePassword(String, String),
 }
 
+// TODO: Should all the options be exposed as public? Drawback
+// would be loosing the ability to panic when the user options
+// are wrong (e.g empty client id) or aggressive (keep alive time)
 /// Mqtt options
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
@@ -103,8 +106,8 @@ pub struct MqttOptions {
     request_channel_capacity: usize,
     /// notification channel capacity
     notification_channel_capacity: usize,
-    /// maximum number of outgoing messages per second
-    throttle: Option<u64>,
+    /// Minimum delay time between consecutive outgoing packets
+    throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: usize,
 }
@@ -131,7 +134,7 @@ impl MqttOptions {
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            throttle: None,
+            throttle: Duration::from_millis(1),
             inflight: 100,
         }
     }
@@ -262,17 +265,13 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_throttle(mut self, rate: u64) -> Self {
-        if rate == 0 {
-            panic!("zero rate is not allowed");
-        }
-
-        self.throttle = Some(rate);
+    pub fn set_throttle(mut self, duration: Duration) -> Self {
+        self.throttle = duration;
         self
     }
 
     /// Outgoing message rate
-    pub fn throttle(&self) -> Option<u64> {
+    pub fn throttle(&self) -> Duration {
         self.throttle
     }
 

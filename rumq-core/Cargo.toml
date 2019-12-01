@@ -6,19 +6,11 @@ edition = "2018"
 
 [dependencies]
 derive_more = "0.15"
-tokio-byteorder = {package = "tokio-byteorder", version = "0.1", optional = true}
-async-byteorder = {path = "../async-byteorder", version = "0.1", optional = true}
+tokio-byteorder = {path = "../../tokio-byteorder", version = "0.1", features = ["futures-traits"]}
 async-trait = "0.1"
-tokio = {version = "0.2.0-alpha.6", features = ["macros"], optional = true}
-async-std = {version = "1", features = ["attributes"], optional = true}
-futures-io = {version = "0.3", optional = true}
-futures-preview = { version = "0.3.0-alpha.19"}
-cfg-if = "0.1"
-
-[features]
-async-traits = ["futures-io", "async-byteorder", "async-std"]
-tokio-traits = ["tokio-byteorder", "tokio"]
-default = ["tokio-traits"]
+futures-io = {version = "0.3" }
+futures-util = {version = "0.3", features = ["io"]}
 
 [dev-dependencies]
-tokio = {version = "0.2.0-alpha.6", features = ["macros"]}
+async-std = {version = "1", features = ["attributes"]}
+

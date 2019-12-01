@@ -7,19 +7,8 @@ use crate::SubscribeTopic;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-#[cfg(feature = "async-traits")]
-mod read {
-    pub use async_byteorder::{BigEndian, AsyncReadBytesExt};
-    pub use async_std::io::prelude::ReadExt as AsyncReadExt;
-}
-
-#[cfg(feature = "tokio-traits")]
-mod read {
-    pub use tokio_byteorder::{BigEndian, AsyncReadBytesExt};
-    pub use tokio::io::AsyncReadExt;
-}
-
-use read::{BigEndian, AsyncReadBytesExt, AsyncReadExt};
+pub use tokio_byteorder::futures::{BigEndian, AsyncReadBytesExt};
+pub use futures_util::io::AsyncReadExt;
 
 use crate::{
     Connack, Connect, LastWill, Packet, PacketType, Protocol, Publish, QoS, Suback,
@@ -283,6 +272,9 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
     }
 }
 
+/// Implement MattRead for every AsyncReadBytesExt type (and hence AsyncRead type)
+impl<R: AsyncReadBytesExt + ?Sized + Unpin> MqttRead for R {}
+
 #[cfg(test)]
 mod test {
     use super::MqttRead;
@@ -292,15 +284,9 @@ mod test {
         SubscribeTopic,
     };
     use std::sync::Arc;
-
-    #[cfg(feature = "tokio-traits")]
-    use std::io::Cursor;
-    #[cfg(feature = "async-traits")]
     use async_std::io::Cursor;
 
-    impl MqttRead for Cursor<Vec<u8>> {}
-
-    #[tokio::test]
+    #[async_std::test]
     async fn read_packet_connect_mqtt_protocol() {
         let mut stream = Cursor::new(vec![
             0x10, 39,                                                       // packet type, flags and remaining len
@@ -337,7 +323,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn read_packet_connack_works() {
         let mut stream = Cursor::new(vec![
             0b00100000, 0x02,               // packet type, flags and remaining len
@@ -355,7 +341,7 @@ mod test {
         );
     }
 
-     #[tokio::test]
+    #[async_std::test]
     async fn read_packet_publish_qos1_works() {
         let mut stream = Cursor::new(vec![
             0b00110010, 11,                              // packet type, flags and remaining len
@@ -380,7 +366,7 @@ mod test {
         );
     }
 
-     #[tokio::test]
+    #[async_std::test]
     async fn read_packet_publish_qos0_works() {
         let mut stream = Cursor::new(vec![
             0b00110000, 7,                                  // packet type, flags and remaining len 
@@ -404,7 +390,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn read_packet_puback_works() {
         let mut stream = Cursor::new(vec![
             0b01000000, 0x02,                            // packet type, flags and remaining len 
@@ -416,7 +402,7 @@ mod test {
         assert_eq!(packet, Packet::Puback(PacketIdentifier(10)));
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn read_packet_subscribe_works() {
         let mut stream = Cursor::new(vec![
             0b10000010, 20,                                                     // packet type, flags and remaining len
@@ -454,7 +440,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn read_packet_unsubscribe_works() {
         let mut stream = Cursor::new(vec![
             0b10100010, 17,                                                     // packet type, flags and remaining len 
@@ -476,7 +462,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn read_packet_suback_works() {
         let mut stream = Cursor::new(vec![
             0x90, 4,                    // packet type, flags and remaining len 

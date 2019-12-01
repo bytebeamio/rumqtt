@@ -1,43 +1,43 @@
-use futures_util::stream::StreamExt;
 use std::thread;
-use rumq_core::*;
 use std::sync::Arc;
-use futures_channel::mpsc;
 
-use rumq_client::{self, MqttOptions, Request, connect, MqttEventLoop};
+use rumq_core::*;
+use rumq_client::{self, MqttOptions, Request, eventloop};
+use async_std::sync::channel;
+use async_std::task;
+use futures_util::stream::StreamExt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
-use jsonwebtoken::{encode, Algorithm, Header, Key};
+use jsonwebtoken::{encode, Algorithm, Header};
 use std::ops::Add;
-// use futures_util::SinkExt;
 
 // RUST_LOG=rumq_client=debug PROJECT=cloudlinc REGISTRY=iotcore cargo run --color=always --package rumq-client --example gcloud
 
-#[tokio::main]
+#[async_std::main]
 async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let (mut requests_tx, requests_rx) = mpsc::channel(1);
-    let mut eventloop = eventloop().await;
-    let mut stream  = eventloop.build(requests_rx).await.unwrap();
+    let (requests_tx, requests_rx) = channel(1);
+    let mqttoptions = gcloud();
+    let mut stream = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        for i in 0..10 {
-            let publish = publish(i);
-            // futures_executor::block_on(requests_tx.send(publish)).unwrap();
-            thread::sleep(Duration::from_secs(1));
-        }
+        task::block_on( async {
+            for i in 0..10 {
+                requests_tx.send(publish(i)).await;
+                task::sleep(Duration::from_secs(1)).await;
+            }
+
+            task::sleep(Duration::from_secs(10)).await;
+
+            for i in 0..10 {
+                requests_tx.send(publish(i)).await;
+                task::sleep(Duration::from_secs(1)).await;
+            }
+        });
 
         thread::sleep(Duration::from_secs(100));
-
-        for i in 0..10 {
-            let publish = publish(i);
-            // futures_executor::block_on(requests_tx.send(publish)).unwrap();
-            thread::sleep(Duration::from_secs(1));
-        }
-
-        thread::sleep(Duration::from_secs(300));
     });
 
     while let Some(item) = stream.next().await {
@@ -45,17 +45,14 @@ async fn main() {
     }
 }
 
-async fn eventloop<I>() -> MqttEventLoop<I> {
+fn gcloud() -> MqttOptions {
     let mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
     let mqttoptions = mqttoptions.set_keep_alive(15);
     let password = gen_iotcore_password();
-    let mqttoptions = mqttoptions
-                                    .set_ca(include_bytes!("../certs/bike-1/roots.pem").to_vec())
-                                    .set_credentials("unused", &password);
-
-
-    let timeout = Duration::from_secs(10);
-    connect(mqttoptions, timeout).await.unwrap()
+    
+    mqttoptions
+        .set_ca(include_bytes!("../certs/bike-1/roots.pem").to_vec())
+        .set_credentials("unused", &password)
 }
 
 fn publish(i: u8) -> Request {
@@ -81,7 +78,7 @@ fn id() -> String {
 }
 
 fn gen_iotcore_password() -> String {
-    let key = include_bytes!("../certs/bike-1/rsa_private.der");
+    let key = include_bytes!("../certs/bike-1/rsa_private.pem");
     let project = env!("PROJECT").to_owned();
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -96,6 +93,5 @@ fn gen_iotcore_password() -> String {
     let exp = SystemTime::now().add(Duration::from_secs(300)).duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     let claims = Claims { iat, exp, aud: project };
-    let key = Key::Der(key);
     encode(&jwt_header, &claims, key).unwrap()
 }

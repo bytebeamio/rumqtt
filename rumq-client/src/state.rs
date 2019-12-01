@@ -43,21 +43,21 @@ pub struct MqttState {
     /// Mqtt options of the current connection
     pub opts: MqttOptions,
     /// Connection status
-    connection_status: MqttConnectionStatus,
+    pub connection_status: MqttConnectionStatus,
     /// Status of last ping
-    await_pingresp: bool,
+    pub await_pingresp: bool,
     /// Last incoming packet time
-    last_incoming: Instant,
+    pub last_incoming: Instant,
     /// Last outgoing packet time
-    last_outgoing: Instant,
+    pub last_outgoing: Instant,
     /// Packet id of the last outgoing packet
-    last_pkid: PacketIdentifier,
+    pub last_pkid: PacketIdentifier,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    outgoing_pub: VecDeque<Publish>,
+    pub outgoing_pub: VecDeque<Publish>,
     /// Packet ids of released QoS 2 publishes
-    outgoing_rel: VecDeque<PacketIdentifier>,
+    pub outgoing_rel: VecDeque<PacketIdentifier>,
     /// Packet ids on incoming QoS 2 publishes
-    incoming_pub: VecDeque<PacketIdentifier>,
+    pub incoming_pub: VecDeque<PacketIdentifier>,
 }
 
 impl MqttState {

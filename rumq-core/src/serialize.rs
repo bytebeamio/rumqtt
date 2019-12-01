@@ -1,19 +1,8 @@
 use crate::{Error, Packet, QoS, SubscribeReturnCodes, SubscribeTopic};
 use async_trait::async_trait;
 
-#[cfg(feature = "async-traits")]
-mod write {
-    pub use async_byteorder::{BigEndian, AsyncWriteBytesExt};
-    pub use async_std::io::prelude::WriteExt as AsyncWriteExt;
-}
-
-#[cfg(feature = "tokio-traits")]
-mod write {
-    pub use tokio_byteorder::{BigEndian, AsyncWriteBytesExt};
-    pub use tokio::io::AsyncWriteExt;
-}
-
-use write::{BigEndian, AsyncWriteBytesExt, AsyncWriteExt};
+pub use tokio_byteorder::futures::{BigEndian, AsyncWriteBytesExt};
+pub use futures_util::io::AsyncWriteExt;
 
 #[async_trait]
 pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
@@ -187,6 +176,9 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
     }
 }
 
+/// Implement MqttWrite for every AsyncWriteBytesExt type (and hence AsyncWrite type)
+impl<W: AsyncWriteBytesExt + ?Sized + Unpin> MqttWrite for W {}
+
 #[cfg(test)]
 mod test {
     use super::MqttWrite;
@@ -194,9 +186,7 @@ mod test {
     use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
     use std::sync::Arc;
 
-    impl MqttWrite for Vec<u8> {}
-
-    #[tokio::test]
+    #[async_std::test]
     async fn write_packet_connect_mqtt_protocol_works() {
         let connect = Packet::Connect(Connect {
             protocol: Protocol::MQTT(4),
@@ -231,7 +221,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn write_packet_connack_works() {
         let connack = Packet::Connack(Connack {
             session_present: true,
@@ -244,7 +234,7 @@ mod test {
         assert_eq!(stream, vec![0b00100000, 0x02, 0x01, 0x00]);
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn write_packet_publish_at_least_once_works() {
         let publish = Packet::Publish(Publish {
             dup: false,
@@ -264,7 +254,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn write_packet_publish_at_most_once_works() {
         let publish = Packet::Publish(Publish {
             dup: false,
@@ -284,7 +274,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[async_std::test]
     async fn write_packet_subscribe_works() {
         let subscribe = Packet::Subscribe(Subscribe {
             pkid: PacketIdentifier(260),
