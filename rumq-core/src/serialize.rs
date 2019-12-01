@@ -1,8 +1,8 @@
 use crate::{Error, Packet, QoS, SubscribeReturnCodes, SubscribeTopic};
 use async_trait::async_trait;
 
-pub use tokio_byteorder::futures::{BigEndian, AsyncWriteBytesExt};
-pub use futures_util::io::AsyncWriteExt;
+use tokio_byteorder::{BigEndian, AsyncWriteBytesExt};
+use tokio::io::AsyncWriteExt;
 
 #[async_trait]
 pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
@@ -186,7 +186,7 @@ mod test {
     use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
     use std::sync::Arc;
 
-    #[async_std::test]
+    #[tokio::test]
     async fn write_packet_connect_mqtt_protocol_works() {
         let connect = Packet::Connect(Connect {
             protocol: Protocol::MQTT(4),
@@ -221,7 +221,7 @@ mod test {
         );
     }
 
-    #[async_std::test]
+    #[tokio::test]
     async fn write_packet_connack_works() {
         let connack = Packet::Connack(Connack {
             session_present: true,
@@ -234,7 +234,7 @@ mod test {
         assert_eq!(stream, vec![0b00100000, 0x02, 0x01, 0x00]);
     }
 
-    #[async_std::test]
+    #[tokio::test]
     async fn write_packet_publish_at_least_once_works() {
         let publish = Packet::Publish(Publish {
             dup: false,
@@ -254,7 +254,7 @@ mod test {
         );
     }
 
-    #[async_std::test]
+    #[tokio::test]
     async fn write_packet_publish_at_most_once_works() {
         let publish = Packet::Publish(Publish {
             dup: false,
@@ -274,7 +274,7 @@ mod test {
         );
     }
 
-    #[async_std::test]
+    #[tokio::test]
     async fn write_packet_subscribe_works() {
         let subscribe = Packet::Subscribe(Subscribe {
             pkid: PacketIdentifier(260),

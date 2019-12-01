@@ -8,15 +8,12 @@ edition = "2018"
 
 [dependencies]
 derive_more = "0.15"
+tokio = { version = "0.2", features = ["stream, macros", "sync", "time"]
 async-stream = "0.2"
-async-std = { version = "1.1", features = ["attributes", "unstable"] }
 futures-util = "0.3"
-futures-io = {version = "0.3"}
 webpki = "0.21"
-rustls = "0.16"
-async-tls = "0.6"
+tokio-rustls = "0.12"
 rumq-core = { path = "../rumq-core", version = "0.1"}
-auto_enums = { version = "0.7", features = ["futures"]}
 log = "0.4"
 pin-utils = "0.1.0-alpha.4"
 
