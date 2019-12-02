@@ -1,27 +1,20 @@
-name: ci
-
 on: [push]
 
+name: CI
+
 jobs:
-  build:
-
+  ubuntu:
+    name: Rust project
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v1
-    - name: Setup toolchain
-      run: rustup override set stable
-    - name: Build
-      run: cargo build
-    - name: Run tokio tests
-      run: cargo test --features tokio-traits
-      env:
-        PROJECT: ""
-        REGISTRY: ""
-    - name: Run async tests
-      run: cargo test --features async-traits
-      env:
-        PROJECT: ""
-        REGISTRY: ""
+      - uses: actions/checkout@master
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --all-features
 
 
