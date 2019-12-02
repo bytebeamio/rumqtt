@@ -2,12 +2,11 @@ use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
 use futures_util::{select, FutureExt};
-use futures_util::stream::Stream;
-use futures_io::{AsyncRead, AsyncWrite};
-use async_std::future::TimeoutError;
-use async_std::stream::StreamExt;
+use futures_util::stream::{Stream, StreamExt};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::{self, Elapsed};
 use async_stream::stream;
-use async_std::sync::{channel, Sender, Receiver};
+use tokio::sync::mpsc::{channel, Sender, Receiver};
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
 
@@ -17,8 +16,8 @@ use std::time::Duration;
 pub struct MqttEventLoop {
     state: MqttState,
     options: MqttOptions,
-    queue_limit_tx: Sender<bool>,
-    queue_limit_rx: Receiver<bool>,
+    queue_limit_tx: Sender<()>,
+    queue_limit_rx: Receiver<()>,
     requests: Box<dyn Requests>,
     network: Box<dyn  Network>,
 }
@@ -31,7 +30,7 @@ pub enum EventLoopError {
     NoRequest,
     MqttState(StateError),
     StreamClosed,
-    Timeout(TimeoutError),
+    Timeout(Elapsed),
     Rumq(rumq_core::Error),
     Network(network::Error)
 }
@@ -45,20 +44,31 @@ pub enum EventLoopError {
 pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<impl MqttStream, EventLoopError> {
     let connect = connect_packet(&options);
     let timeout = Duration::from_secs(5);
-    let mut network = network::connect(&options, timeout).await?;
+
+    let mut network = time::timeout(timeout, async {
+        let o: Box<dyn Network> =  if options.ca.is_some() {
+            let o = network::tls_connect(&options).await?;
+            Box::new(o)
+        } else {
+            let o = network::tcp_connect(&options).await?;
+            Box::new(o)
+        };
+       
+        Ok::<_, EventLoopError>(o)
+    }).await??;
     
     let mut state = MqttState::new(options.clone());
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     
     // mqtt connection with timeout
-    async_std::future::timeout(timeout, async {
+   time::timeout(timeout, async {
         network.mqtt_write(&connect).await?;
         state.handle_outgoing_connect()?;
         Ok::<_, EventLoopError>(())
     }).await??;
 
     // wait for 'timeout' time to validate connack
-    async_std::future::timeout(timeout, async {
+    time::timeout(timeout, async {
         let packet = network.mqtt_read().await?;
         state.handle_incoming_connack(packet)?;
         Ok::<_, EventLoopError>(())
@@ -102,12 +112,12 @@ impl MqttEventLoop {
         let network = &mut self.network;
         let requests = &mut self.requests;
 
-        let network = async_std::future::timeout(self.options.keep_alive, async {
+        let network = time::timeout(self.options.keep_alive, async {
             let packet = network.mqtt_read().await?;
             Ok::<_, EventLoopError>(packet)
         });
 
-        let request = async_std::future::timeout(self.options.keep_alive, async {            
+        let request = time::timeout(self.options.keep_alive, async {            
             let request = requests.next().await;
             let request = request.ok_or(EventLoopError::NoRequest)?;
             Ok::<_, EventLoopError>(request)
@@ -125,7 +135,7 @@ impl MqttEventLoop {
         }
     }
 
-    async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let packet = match packet {
             Ok(packet) => packet,
             Err(_) => {
@@ -136,13 +146,13 @@ impl MqttEventLoop {
 
         let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
         if self.state.outgoing_pub.len() > self.options.inflight {
-            self.queue_limit_tx.send(true).await;
+            self.queue_limit_tx.send(()).await;
         }
 
         Ok((notification, reply))
     }
 
-    async fn handle_request(&mut self, request: Result<Result<Request, EventLoopError>, TimeoutError>) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
+    async fn handle_request(&mut self, request: Result<Result<Request, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
         let request = match request {
             Ok(request) => request,
             Err(_) => {
