@@ -1,11 +1,7 @@
-use crate::Notification;
 use crate::MqttOptions;
+use crate::Notification;
 
-use std::{
-    collections::VecDeque,
-    result::Result,
-    time::Instant,
-};
+use std::{collections::VecDeque, result::Result, time::Instant};
 
 use rumq_core::*;
 
@@ -16,7 +12,6 @@ pub enum MqttConnectionStatus {
     Disconnecting,
     Disconnected,
 }
-
 
 #[derive(Debug)]
 pub enum StateError {
@@ -29,7 +24,7 @@ pub enum StateError {
     /// Last pingreq isn't acked
     AwaitPingResp,
     /// Received a wrong packet while waiting for another packet
-    WrongPacket
+    WrongPacket,
 }
 
 /// `MqttState` saves the state of the mqtt connection. Methods will
@@ -123,7 +118,12 @@ impl MqttState {
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name, publish.pkid, publish.payload.len());
+        debug!(
+            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic_name,
+            publish.pkid,
+            publish.payload.len()
+        );
         Packet::Publish(publish)
     }
 
@@ -244,7 +244,10 @@ impl MqttState {
             "Pingreq. keep alive = {},
             last incoming packet before {} millisecs,
             last outgoing request before {} millisecs",
-            keep_alive.as_millis(), elapsed_in.as_millis(), elapsed_out.as_millis());
+            keep_alive.as_millis(),
+            elapsed_in.as_millis(),
+            elapsed_out.as_millis()
+        );
 
         Ok(())
     }
@@ -273,7 +276,7 @@ impl MqttState {
             packet => {
                 error!("Invalid packet. Expecting connack. Received = {:?}", packet);
                 self.connection_status = MqttConnectionStatus::Disconnected;
-                return Err(StateError::WrongPacket)
+                return Err(StateError::WrongPacket);
             }
         };
 
@@ -283,7 +286,11 @@ impl MqttState {
                 Ok(())
             }
             ConnectReturnCode::Accepted if self.connection_status != MqttConnectionStatus::Handshake => {
-                error!("Invalid state. Expected = {:?}, Current = {:?}", MqttConnectionStatus::Handshake, self.connection_status);
+                error!(
+                    "Invalid state. Expected = {:?}, Current = {:?}",
+                    MqttConnectionStatus::Handshake,
+                    self.connection_status
+                );
                 self.connection_status = MqttConnectionStatus::Disconnected;
                 Err(StateError::InvalidState)
             }
@@ -326,9 +333,9 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use std::{sync::Arc, thread, time::Duration};
+    use std::sync::Arc;
 
-    use super::{MqttConnectionStatus, MqttState, StateError, Packet};
+    use super::{MqttConnectionStatus, MqttState, Packet, StateError};
     use crate::{MqttOptions, Notification};
     use rumq_core::*;
 
@@ -517,7 +524,7 @@ mod test {
 
         match notification {
             Some(Notification::Pubrec(PacketIdentifier(id))) => assert_eq!(id, 1),
-            _ => panic!("Invalid notification")
+            _ => panic!("Invalid notification"),
         }
 
         match request {

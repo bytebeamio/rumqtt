@@ -1,19 +1,21 @@
 use std::thread;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::ops::Add;
+use std::env;
 
 use rumq_core::*;
 use rumq_client::{self, MqttOptions, Request, eventloop};
-use async_std::sync::channel;
-use async_std::task;
-use futures_util::stream::StreamExt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header};
-use std::ops::Add;
+use futures_util::stream::StreamExt;
+use tokio::sync::mpsc::{channel, Sender};
+use tokio::task;
+use tokio::time;
 
 // RUST_LOG=rumq_client=debug PROJECT=cloudlinc REGISTRY=iotcore cargo run --color=always --package rumq-client --example gcloud
 
-#[async_std::main]
+#[tokio::main]
 async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
@@ -23,20 +25,21 @@ async fn main() {
     let mut stream = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        task::block_on( async {
-            for i in 0..10 {
-                requests_tx.send(publish(i)).await;
-                task::sleep(Duration::from_secs(1)).await;
-            }
+        #[tokio::main(basic_scheduler)]
+        async fn requests(mut requests_tx: Sender<Request>) {
+            task::spawn(async move {
+                for i in 0..10 {
+                    requests_tx.send(publish(i)).await.unwrap();
+                    time::delay_for(Duration::from_secs(1)).await; 
+                }
+                
+                time::delay_for(Duration::from_secs(100)).await; 
+            }).await.unwrap();
+                    
+        }
 
-            task::sleep(Duration::from_secs(10)).await;
-
-            for i in 0..10 {
-                requests_tx.send(publish(i)).await;
-                task::sleep(Duration::from_secs(1)).await;
-            }
-        });
-
+        requests(requests_tx);
+        
         thread::sleep(Duration::from_secs(100));
     });
 
@@ -71,16 +74,15 @@ fn publish(i: u8) -> Request {
 }
 
 fn id() -> String {
-    let project = env!("PROJECT").to_owned();
-    let registry= env!("REGISTRY").to_owned();
+    let project = env::var("PROJECT").unwrap();
+    let registry = env::var("REGISTRY").unwrap();
 
     "projects/".to_owned() + &project + "/locations/asia-east1/registries/" + &registry + "/devices/" + "bike-1"
 }
 
 fn gen_iotcore_password() -> String {
     let key = include_bytes!("../certs/bike-1/rsa_private.pem");
-    let project = env!("PROJECT").to_owned();
-
+    let project = env::var("PROJECT").unwrap();
     #[derive(Debug, Serialize, Deserialize)]
     struct Claims {
         iat: u64,

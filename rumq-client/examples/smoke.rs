@@ -2,13 +2,14 @@ use futures_util::stream::StreamExt;
 use std::thread;
 use rumq_core::*;
 use std::sync::Arc;
-use async_std::sync::channel;
-use async_std::task;
+use tokio::sync::mpsc::{channel, Sender};
+use tokio::task;
+use tokio::time;
 
 use rumq_client::{self, MqttOptions, Request, eventloop};
 use std::time::Duration;
 
-#[async_std::main]
+#[tokio::main(basic_scheduler)]
 async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
@@ -19,12 +20,17 @@ async fn main() {
     let mut eventloop = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        task::block_on( async {
-            for i in 0..10 {
-                requests_tx.send(publish(i)).await;
-            }
-        });
+        #[tokio::main(basic_scheduler)]
+        async fn requests(mut requests_tx: Sender<Request>) {
+            task::spawn(async move {
+                for i in 0..100 {
+                    requests_tx.send(publish(i)).await.unwrap();
+                    time::delay_for(Duration::from_secs(1)).await; 
+                }
+            }).await.unwrap();
+        }
 
+        requests(requests_tx);
         thread::sleep(Duration::from_secs(100));
     });
 

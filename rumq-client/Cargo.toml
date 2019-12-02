@@ -8,15 +8,12 @@ edition = "2018"
 
 [dependencies]
 derive_more = "0.15"
+tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "sync", "time"] }
 async-stream = "0.2"
-async-std = { version = "1.1", features = ["attributes", "unstable"] }
 futures-util = "0.3"
-futures-io = {version = "0.3"}
 webpki = "0.21"
-rustls = "0.16"
-async-tls = "0.6"
+tokio-rustls = "0.12"
 rumq-core = { path = "../rumq-core", version = "0.1"}
-auto_enums = { version = "0.7", features = ["futures"]}
 log = "0.4"
 pin-utils = "0.1.0-alpha.4"
 
@@ -26,7 +23,8 @@ pretty_env_logger = "0.3.1"
 color-backtrace = "0.2.3"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
-jsonwebtoken = {git = "https://github.com/Keats/jsonwebtoken", branch = "next"}
+jsonwebtoken = "7.0.0-alpha.2"
+tokio = { version = "0.2", features = ["full", "macros"] }
 
 [profile.release]
 debug = true
