@@ -25,6 +25,8 @@ pub enum Error {
     WrongPacket,
     /// Unsupported packet
     Unsupported,
+    /// Invalid client ID
+    InvalidClientId,
 }
 
 /// `MqttState` saves the state of the mqtt connection. Methods will
@@ -111,8 +113,8 @@ impl MqttState {
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(), Error> {
-        match packet {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Option<Packet>, Option<Packet>), Error> {
+        let connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
                 error!("Invalid packet. Expecting connect. Received = {:?}", packet);
@@ -121,7 +123,21 @@ impl MqttState {
             }
         };
 
-        Ok(())
+        if connect.client_id.starts_with(' ') || connect.client_id.is_empty() {
+            error!("Client id shouldn't start with space (or) shouldn't be empty in persistent sessions");
+            return Err(Error::InvalidClientId);
+        }
+
+        // TODO: Handle connect packet
+        // TODO: Handle session present
+        let reply = Some(Packet::Connack(Connack {
+            session_present: false,
+            code: ConnectReturnCode::Accepted,
+        }));
+
+        let notification = None;
+
+        Ok((notification, reply))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
