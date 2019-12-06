@@ -74,11 +74,25 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
     // a stream of notifications to the user
     let o = stream! {
         loop {
-            let (notification, reply) = eventloop.poll().await?;
+            let event = match eventloop.poll().await {
+                Ok(o) => Ok(o),
+                Err(error) => {
+                    let state = eventloop.state.clone();
+                    Err(MqttError { state, error: error.into() })
+                }
+            };
+
+            let (notification, reply) = event?;
+
             // write the reply back to the network
-            if let Some(p) = reply { eventloop.network.mqtt_write(&p).await?; }
+            if let Some(p) = reply { 
+                if let Err(error) = eventloop.network.mqtt_write(&p).await {
+                    let state = eventloop.state.clone();
+                    Err(MqttError { state, error: error.into() })?;
+                }
+            }
             // yield the notification to the user
-            if let Some(n) = notification { yield Ok::<_, EventLoopError>(n) }
+             if let Some(n) = notification { yield Ok::<_, MqttError>(n) }
         }
     };
 
@@ -225,8 +239,8 @@ impl From<Request> for Packet {
 }
 
 // impl trait alias hack: https://stackoverflow.com/questions/57937436/how-to-alias-an-impl-trait
-pub trait MqttStream: Stream<Item = Result<Notification, EventLoopError>> {}
-impl<T: Stream<Item = Result<Notification, EventLoopError>>> MqttStream for T {}
+pub trait MqttStream: Stream<Item = Result<Notification, MqttError>> {}
+impl<T: Stream<Item = Result<Notification, MqttError>>> MqttStream for T {}
 
 trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
 impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
