@@ -35,6 +35,13 @@ pub enum EventLoopError {
     Network(network::Error)
 }
 
+
+#[derive(Debug)]
+pub struct MqttError {
+    state: MqttState,
+    error: EventLoopError
+}
+
 /// Eventloop implementation. The life of the event loop is dependent on request
 /// stream provided by the user and tcp stream. The event loop will be disconnected
 /// either during a disconnection at the broker or when the request stream ends.
@@ -42,38 +49,14 @@ pub enum EventLoopError {
 /// producing 'n' elements) is not very clear yet. Probably the stream should end when
 /// all the state buffers are acked with a timeout
 pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<impl MqttStream, EventLoopError> {
-    let connect = connect_packet(&options);
-    let timeout = Duration::from_secs(5);
-
-    let mut network = time::timeout(timeout, async {
-        let o: Box<dyn Network> =  if options.ca.is_some() {
-            let o = network::tls_connect(&options).await?;
-            Box::new(o)
-        } else {
-            let o = network::tcp_connect(&options).await?;
-            Box::new(o)
-        };
-       
-        Ok::<_, EventLoopError>(o)
-    }).await??;
-    
-    let mut state = MqttState::new(options.clone());
     let (queue_limit_tx, queue_limit_rx) = channel(1);
+    let mut state = MqttState::new(options.clone());
     
-    // mqtt connection with timeout
-   time::timeout(timeout, async {
-        network.mqtt_write(&connect).await?;
-        state.handle_outgoing_connect()?;
-        Ok::<_, EventLoopError>(())
-    }).await??;
-
-    // wait for 'timeout' time to validate connack
-    time::timeout(timeout, async {
-        let packet = network.mqtt_read().await?;
-        state.handle_incoming_connack(packet)?;
-        Ok::<_, EventLoopError>(())
-    }).await??;
-
+    // make tcp and mqtt connections
+    let mut network = network_connect(&options).await?;
+    mqtt_connect(&options, &mut network, &mut state).await?;
+    
+    // make network and user requests generic for better unit testing capabilities
     let network = Box::new(network);
     let requests = Box::new(requests);
     // let requests = requests.throttle(self.options.throttle);
@@ -104,11 +87,46 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
     Ok(o)
 }
 
+async fn network_connect(options: &MqttOptions) -> Result<Box<dyn Network>, EventLoopError> {
+    let network= time::timeout(Duration::from_secs(5), async {
+        if options.ca.is_some() {
+            let o = network::tls_connect(&options).await?;
+            let o = Box::new(o);
+            Ok::<Box<dyn Network>, EventLoopError>(o)
+        } else {
+            let o = network::tcp_connect(&options).await?;
+            let o = Box::new(o);
+            Ok::<Box<dyn Network>, EventLoopError>(o)
+        }
+    }).await??;
+
+    Ok(network)
+}
+
+
+async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &mut MqttState) -> Result<(), EventLoopError> {
+    let connect = connect_packet(options);
+    
+    // mqtt connection with timeout
+    time::timeout(Duration::from_secs(5), async {
+        network.mqtt_write(&connect).await?;
+        state.handle_outgoing_connect()?;
+        Ok::<_, EventLoopError>(())
+    }).await??;
+
+    // wait for 'timeout' time to validate connack
+    time::timeout(Duration::from_secs(5), async {
+        let packet = network.mqtt_read().await?;
+        state.handle_incoming_connack(packet)?;
+        Ok::<_, EventLoopError>(())
+    }).await??;
+
+    Ok(())
+}
 
 
 impl MqttEventLoop {
     async fn poll(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        // TODO: Find a way to lazy initialize this struct member to get away with unwrap every poll
         let network = &mut self.network;
         let requests = &mut self.requests;
 
@@ -219,23 +237,23 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin {}
 
 #[cfg(test)]
 mod test {
-//    use super::MqttEventLoop;
-//    use crate::state::MqttState;
-//    use crate::{MqttOptions, network};
-//
-//    fn eventloop<I>() -> MqttEventLoop<I> {
-//        let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
-//        let network = network::vconnect(options.clone());
-//
-//        let eventloop = MqttEventLoop {
-//            state: MqttState::new(options.clone()),
-//            options,
-//            requests: None,
-//            network
-//        };
-//
-//        eventloop
-//    }
+    use super::MqttEventLoop;
+    use crate::state::MqttState;
+    use crate::{MqttOptions, network};
+
+    fn eventloop<I>() -> MqttEventLoop<I> {
+        let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
+        let network = network::vconnect(options.clone());
+
+        let eventloop = MqttEventLoop {
+            state: MqttState::new(options.clone()),
+            options,
+            requests: None,
+            network
+        };
+
+        eventloop
+    }
 
     #[test]
     fn connection_should_timeout_on_time() {
