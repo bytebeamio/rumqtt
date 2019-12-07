@@ -23,7 +23,7 @@ async fn main() {
         #[tokio::main(basic_scheduler)]
         async fn requests(mut requests_tx: Sender<Request>) {
             task::spawn(async move {
-                for i in 0..100 {
+                for i in 0..10 {
                     requests_tx.send(publish(i)).await.unwrap();
                     time::delay_for(Duration::from_secs(1)).await; 
                 }
@@ -31,12 +31,14 @@ async fn main() {
         }
 
         requests(requests_tx);
-        thread::sleep(Duration::from_secs(100));
+        thread::sleep(Duration::from_secs(3));
     });
 
     while let Some(item) = eventloop.next().await {
         println!("{:?}", item);
     }
+
+    println!("State = {:?}", eventloop.state);
 }
 
 fn publish(i: u8) -> Request {

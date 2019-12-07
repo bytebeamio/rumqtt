@@ -15,7 +15,7 @@ webpki = "0.21"
 tokio-rustls = "0.12"
 rumq-core = { path = "../rumq-core", version = "0.1"}
 log = "0.4"
-pin-utils = "0.1.0-alpha.4"
+pin-project = "0.4"
 
 
 [dev-dependencies]

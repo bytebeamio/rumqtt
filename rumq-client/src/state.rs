@@ -33,7 +33,7 @@ pub enum StateError {
 /// operate directly. This abstracts the functionality better
 /// so that it's easy to switch between synchronous code, tokio (or)
 /// async/await
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MqttState {
     /// Mqtt options of the current connection
     pub opts: MqttOptions,
