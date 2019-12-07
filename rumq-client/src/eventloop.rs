@@ -40,13 +40,6 @@ pub enum EventLoopError {
     Network(network::Error)
 }
 
-
-#[derive(Debug)]
-pub struct MqttError {
-    state: MqttState,
-    error: EventLoopError
-}
-
 /// Eventloop which drives the client. Connects to the server and returs a stream to 
 /// be polled to handle incoming network packets and outgoing user requests. The
 /// implementation right now does tcp and mqtt connects before returning the eventloop.
@@ -247,10 +240,6 @@ impl From<Request> for Packet {
         }
     }
 }
-
-// impl trait alias hack: https://stackoverflow.com/questions/57937436/how-to-alias-an-impl-trait
-pub trait MqttStream: Stream<Item = Result<Notification, MqttError>> {}
-impl<T: Stream<Item = Result<Notification, MqttError>>> MqttStream for T {}
 
 trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
 impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
