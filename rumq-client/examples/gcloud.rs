@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::ops::Add;
 use std::env;
+use std::fs;
 
 use rumq_core::*;
 use rumq_client::{self, MqttOptions, Request, eventloop};
@@ -52,9 +53,10 @@ fn gcloud() -> MqttOptions {
     let mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
     let mqttoptions = mqttoptions.set_keep_alive(15);
     let password = gen_iotcore_password();
+    let ca = fs::read("certs/bike-1/roots.pem").unwrap();
     
     mqttoptions
-        .set_ca(include_bytes!("../certs/bike-1/roots.pem").to_vec())
+        .set_ca(ca)
         .set_credentials("unused", &password)
 }
 
@@ -81,7 +83,7 @@ fn id() -> String {
 }
 
 fn gen_iotcore_password() -> String {
-    let key = include_bytes!("../certs/bike-1/rsa_private.pem");
+    let key = fs::read("certs/bike-1/rsa_private.pem").unwrap();
     let project = env::var("PROJECT").unwrap();
     #[derive(Debug, Serialize, Deserialize)]
     struct Claims {
@@ -95,5 +97,5 @@ fn gen_iotcore_password() -> String {
     let exp = SystemTime::now().add(Duration::from_secs(300)).duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     let claims = Claims { iat, exp, aud: project };
-    encode(&jwt_header, &claims, key).unwrap()
+    encode(&jwt_header, &claims, &key).unwrap()
 }
