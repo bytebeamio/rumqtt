@@ -239,7 +239,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(Duration::from_secs(1))
+        MqttState::new()
     }
 
     #[test]
