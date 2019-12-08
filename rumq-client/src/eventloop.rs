@@ -26,6 +26,7 @@ pub struct MqttEventLoop {
     requests: Box<dyn Requests>,
     network: Box<dyn  Network>,
     throttle_flag: bool,
+    throttle: Instant
 }
 
 #[derive(From, Debug)]
@@ -69,7 +70,8 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
         queue_limit_tx,
         network,
         requests,
-        throttle_flag: false
+        throttle_flag: false,
+        throttle: Instant::now()
     };
 
     Ok(eventloop)
@@ -139,7 +141,8 @@ impl MqttEventLoop {
     async fn mqtt(&mut self) -> Result<Option<Notification>, EventLoopError> {
         let network = &mut self.network;
         let requests = &mut self.requests;
-        let throttle = self.options.throttle;
+        let throttle = &mut self.throttle;
+        let delay = self.options.throttle;
         let throttle_flag = &mut self.throttle_flag;
 
         let network = time::timeout(self.options.keep_alive, async {
@@ -157,11 +160,13 @@ impl MqttEventLoop {
             // happens just before delay ends, next poll's delay shouldn't
             // wait for `throttle` time. instead it should wait remaining time
             if *throttle_flag {
-                time::delay_until(Instant::now() + throttle).await;
+                time::delay_until(*throttle).await;
                 *throttle_flag = false;
             }
+            
             let request = requests.next().await;
             *throttle_flag = true;
+            *throttle = Instant::now() + delay;
             let request = request.ok_or(EventLoopError::NoRequest)?;
             Ok::<_, EventLoopError>(request)
         });

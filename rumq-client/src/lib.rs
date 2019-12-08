@@ -1,9 +1,6 @@
-#![recursion_limit = "256"]
-
 #[macro_use]
 extern crate log;
 
-use rumq_core::*;
 use std::time::Duration;
 
 pub(crate) mod eventloop;
