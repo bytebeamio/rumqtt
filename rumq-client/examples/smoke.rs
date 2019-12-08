@@ -1,7 +1,5 @@
 use futures_util::stream::StreamExt;
 use std::thread;
-use rumq_core::*;
-use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
@@ -24,7 +22,7 @@ async fn main() {
         async fn requests(mut requests_tx: Sender<Request>) {
             task::spawn(async move {
                 for i in 0..10 {
-                    requests_tx.send(publish(i)).await.unwrap();
+                    requests_tx.send(publish_request(i)).await.unwrap();
                     time::delay_for(Duration::from_secs(1)).await; 
                 }
             }).await.unwrap();
@@ -41,15 +39,10 @@ async fn main() {
     println!("State = {:?}", eventloop.state);
 }
 
-fn publish(i: u8) -> Request {
-    let publish = Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic_name: "hello/world".to_owned(),
-        pkid: None,
-        payload: Arc::new(vec![1, 2, 3, i])
-    };
+fn publish_request(i: u8) -> Request {
+    let topic = "hello/world".to_owned();
+    let payload = vec![1, 2, 3, i];
 
+    let publish = rumq_client::publish(topic, payload);
     Request::Publish(publish)
 }

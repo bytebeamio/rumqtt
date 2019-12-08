@@ -1,6 +1,6 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
+use rumq_core::{self, Packet, MqttRead, MqttWrite};
 use futures_util::{select, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::pin_mut;
@@ -157,7 +157,7 @@ impl MqttEventLoop {
             // happens just before delay ends, next poll's delay shouldn't
             // wait for `throttle` time. instead it should wait remaining time
             if *throttle_flag {
-                time::delay_until(Instant::now() + throttle);
+                time::delay_until(Instant::now() + throttle).await;
                 *throttle_flag = false;
             }
             let request = requests.next().await;
@@ -190,7 +190,7 @@ impl MqttEventLoop {
 
         let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
         if self.state.outgoing_pub.len() > self.options.inflight {
-            self.queue_limit_tx.send(()).await;
+            let _ = self.queue_limit_tx.send(()).await;
         }
 
         Ok((notification, reply))
@@ -219,21 +219,15 @@ impl MqttEventLoop {
 }
 
 fn connect_packet(mqttoptions: &MqttOptions) -> Packet {
-    let (username, password) = if let Some((u, p)) = mqttoptions.credentials() {
-        (Some(u), Some(p))
-    } else {
-        (None, None)
-    };
+    let mut connect = rumq_core::connect(mqttoptions.client_id());
 
-    let connect = Connect {
-        protocol: Protocol::MQTT(4),
-        keep_alive: mqttoptions.keep_alive().as_secs() as u16,
-        client_id: mqttoptions.client_id(),
-        clean_session: mqttoptions.clean_session(),
-        last_will: None,
-        username,
-        password,
-    };
+    connect
+        .set_keep_alive(mqttoptions.keep_alive().as_secs() as u16)
+        .set_clean_session(mqttoptions.clean_session());
+
+    if let Some((username, password)) = mqttoptions.credentials() {
+        connect.set_username(username).set_password(password);
+    }
 
     Packet::Connect(connect)
 }
@@ -298,16 +292,11 @@ mod test {
     }
 
     
-    fn publish(i: u8) -> Request {
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            topic_name: "hello/world".to_owned(),
-            pkid: None,
-            payload: Arc::new(vec![1, 2, 3, i])
-        };
-        
+    fn publish_request(i: u8) -> Request {
+        let topic = "hello/world".to_owned();
+        let payload = vec![1, 2, 3];
+
+        let mut publish = publish(topic, payload);
         Request::Publish(publish)
     }
 
@@ -315,7 +304,7 @@ mod test {
     async fn requests(mut requests_tx: Sender<Request>) {
         task::spawn(async move {
             for i in 0..10 {
-                requests_tx.send(publish(i)).await.unwrap();
+                requests_tx.send(publish_request(i)).await.unwrap();
             }
         }).await.unwrap();
     }
@@ -348,7 +337,7 @@ mod test {
         let (mut eventloop, tx, rx) = eventloop(requests_rx);
 
         thread::spawn(move || {
-            requests()
+            // requests()
         });
     }
 

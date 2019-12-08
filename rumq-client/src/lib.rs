@@ -1,17 +1,18 @@
-#![recursion_limit="256"]
+#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate log;
 
-use std::time::Duration;
 use rumq_core::*;
+use std::time::Duration;
 
+pub(crate) mod eventloop;
 pub(crate) mod network;
 pub(crate) mod state;
-pub(crate) mod eventloop;
 
-pub use eventloop::MqttEventLoop;
 pub use eventloop::eventloop;
+pub use eventloop::MqttEventLoop;
+pub use rumq_core::*;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]

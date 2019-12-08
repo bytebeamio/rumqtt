@@ -1,11 +1,9 @@
 use std::thread;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::ops::Add;
 use std::env;
 use std::fs;
 
-use rumq_core::*;
 use rumq_client::{self, MqttOptions, Request, eventloop};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header};
@@ -30,7 +28,7 @@ async fn main() {
         async fn requests(mut requests_tx: Sender<Request>) {
             task::spawn(async move {
                 for i in 0..10 {
-                    requests_tx.send(publish(i)).await.unwrap();
+                    requests_tx.send(publish_request(i)).await.unwrap();
                     time::delay_for(Duration::from_secs(1)).await; 
                 }
                 
@@ -60,18 +58,11 @@ fn gcloud() -> MqttOptions {
         .set_credentials("unused", &password)
 }
 
-fn publish(i: u8) -> Request {
+fn publish_request(i: u8) -> Request {
     let topic = "/devices/".to_owned() +  "bike-1/events/imu";
+    let payload = vec![1, 2, 3, i];
 
-    let publish = Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic_name: topic,
-        pkid: None,
-        payload: Arc::new(vec![1, 2, 3, i]),
-    };
-
+    let publish = rumq_client::publish(topic, payload);
     Request::Publish(publish)
 }
 
