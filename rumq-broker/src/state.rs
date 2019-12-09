@@ -128,12 +128,10 @@ impl MqttState {
             return Err(Error::InvalidClientId);
         }
 
+        let connack = connack(ConnectReturnCode::Accepted, false);
         // TODO: Handle connect packet
         // TODO: Handle session present
-        let reply = Some(Packet::Connack(Connack {
-            session_present: false,
-            code: ConnectReturnCode::Accepted,
-        }));
+        let reply = Some(Packet::Connack(connack));
 
         let notification = None;
 
@@ -145,7 +143,7 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Packet>, Option<Packet>), Error> {
-        match self.outgoing_pub.iter().position(|x| x.pkid() == Some(pkid)) {
+        match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
@@ -187,7 +185,7 @@ impl MqttState {
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
         let publish = if *publish.pkid() == None {
             let pkid = self.next_pkid();
-            publish.set_pkid(Some(pkid));
+            publish.set_pkid(pkid);
             publish
         } else {
             publish
