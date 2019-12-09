@@ -33,7 +33,7 @@ async fn main() {
 }
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.mqtt().await;
+    let mut stream = eventloop.mqtt();
 
     while let Some(item) = stream.next().await {
         println!("{:?}", item);

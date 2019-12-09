@@ -3,7 +3,6 @@ use derive_more::From;
 use rumq_core::{self, Packet, MqttRead, MqttWrite};
 use futures_util::{select, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
-use futures_util::pin_mut;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{self, Instant, Elapsed};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
@@ -14,9 +13,6 @@ use crate::MqttOptions;
 
 use std::io;
 use std::time::Duration;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 #[pin_project]
 pub struct MqttEventLoop {
@@ -117,7 +113,7 @@ async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &
 
 
 impl MqttEventLoop {
-    pub async fn mqtt(&mut self) -> impl Stream<Item = Notification> + '_ {
+    pub fn mqtt(&mut self) -> impl Stream<Item = Notification> + '_ {
         let o = stream! {
             loop {
                 let (notification, reply) = match self.read_network_and_requests().await {
@@ -198,12 +194,6 @@ impl MqttEventLoop {
 
 
         Ok((notification, outpacket))
-    }
-
-
-    async fn write_network(&mut self, packet: Packet) -> Result<(), EventLoopError> {
-        self.network.mqtt_write(&packet).await?;
-        Ok(())
     }
 
     async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
@@ -360,17 +350,19 @@ mod test {
 
     }
 
-    #[tokio::test]
     async fn throttled_requests_works_with_correct_delays_between_requests() {
         let (requests_tx, requests_rx) = channel(5);
         let (mut eventloop, tx, mut rx) = eventloop(requests_rx);
+        let mut eventloop = eventloop.mqtt();
 
         thread::spawn(move || {
             requests(requests_tx);
         });
 
         for _ in 0..10 {
+            dbg!();
             let _notification = eventloop.next().await;
+            dbg!();
             let packet = rx.next().await.unwrap();
             println!("Packet = {:?}", packet);
         }
