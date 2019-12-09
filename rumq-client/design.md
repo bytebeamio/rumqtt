@@ -5,7 +5,7 @@ TODO
 - [X] Connection
 - [X] Publish and ack
 - [X] Keep alive
-- [ ] Reconnection
+- [X] Reconnection
 - [X] Throttling
 - [X] Size limited queues
 - [X] Tls

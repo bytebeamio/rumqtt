@@ -121,6 +121,8 @@ impl MqttEventLoop {
     /// either retried infinitely or number of times asked by the user.
     /// Any hard errors are yielded as last `Notification::Error` element of the stream before closing the
     /// stream. These can be converted to finer versions when necessary
+    /// There are no methods to poll the stream for the user. This is done to prevent extra copies
+    /// of user notifcations (if a channel is used)
     /// TODO: Differentiate TLS auth errors and server being down
     /// TODO: User requests which are bounded streams (ends after producing 'n' elements) or channels
     /// which are closed before acks aren't received, the current implementation ends the mqtt stream 
