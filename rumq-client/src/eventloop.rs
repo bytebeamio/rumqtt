@@ -54,11 +54,11 @@ pub enum EventLoopError {
 pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<MqttEventLoop, EventLoopError> {
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     let mut state = MqttState::new(options.clone());
-    
+
     // make tcp and mqtt connections
     let mut network = network_connect(&options).await?;
     mqtt_connect(&options, &mut network, &mut state).await?;
-    
+
     // make network and user requests generic for better unit testing capabilities
     let network = Box::new(network);
     let requests = Box::new(requests);
@@ -82,26 +82,36 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
 impl Stream for MqttEventLoop {
     type Item = Notification;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Notification>> {
-        let mqtt = self.get_mut().handle_network_and_requests();
-        pin_mut!(mqtt);
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Notification>> {
+        let (notification, outpacket) = { 
+            let mut eventloop = self.as_mut();
+            let mqtt = eventloop.read_network_and_requests();
+            pin_mut!(mqtt);
 
-        let (notification, outpacket) = match mqtt.poll(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(v) => match v {
-               Ok(o) => o, 
-               Err(e) => {
-                   error!("Mqtt eventloop error = {:?}", e);
-                   return Poll::Ready(None)
-               }
+            match mqtt.poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(v) => match v {
+                    Ok(o) => o, 
+                    Err(e) => {
+                        error!("Mqtt eventloop error = {:?}", e);
+                        return Poll::Ready(None)
+                    }
+                }
             }
         };
 
-        let network = &mut self.get_mut().network;
         if let Some(packet) = outpacket {
-            let f = network.mqtt_write(&packet);
+            let mut eventloop = self.as_mut();
+            let f = eventloop.write_network(packet);
             pin_mut!(f);
-            f.poll(cx);
+            match f.poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(_)) => (),
+                Poll::Ready(Err(e)) => {
+                    error!("Network write error = {:?}", e);
+                    return Poll::Ready(None)
+                }
+            }
         }
 
         if let Some(notification) = notification {
@@ -131,27 +141,29 @@ async fn network_connect(options: &MqttOptions) -> Result<Box<dyn Network>, Even
 
 async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &mut MqttState) -> Result<(), EventLoopError> {
     let connect = connect_packet(options);
-    
+
     // mqtt connection with timeout
     time::timeout(Duration::from_secs(5), async {
         network.mqtt_write(&connect).await?;
         state.handle_outgoing_connect()?;
         Ok::<_, EventLoopError>(())
     }).await??;
-    
+
     // wait for 'timeout' time to validate connack
     time::timeout(Duration::from_secs(5), async {
         let packet = network.mqtt_read().await?;
         state.handle_incoming_connack(packet)?;
         Ok::<_, EventLoopError>(())
     }).await??;
-    
+
     Ok(())
 }
 
 
 impl MqttEventLoop {
-    async fn handle_network_and_requests(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    /// Reads user requests stream and network stream concurrently and returns notification
+    /// which should be sent to the user and packet which should be written to network
+    async fn read_network_and_requests(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let network = &mut self.network;
         let requests = &mut self.requests;
         let throttle = &mut self.throttle;
@@ -176,7 +188,7 @@ impl MqttEventLoop {
                 time::delay_until(*throttle).await;
                 *throttle_flag = false;
             }
-            
+
             let request = requests.next().await;
             *throttle_flag = true;
 
@@ -197,6 +209,12 @@ impl MqttEventLoop {
 
 
         Ok((notification, outpacket))
+    }
+
+
+    async fn write_network(&mut self, packet: Packet) -> Result<(), EventLoopError> {
+        self.network.mqtt_write(&packet).await?;
+        Ok(())
     }
 
     async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
@@ -313,7 +331,7 @@ mod test {
         (eventloop, server_tx, server_rx)
     }
 
-    
+
     fn publish_request(i: u8) -> Request {
         let topic = "hello/world".to_owned();
         let payload = vec![1, 2, 3];
@@ -404,7 +422,7 @@ mod test {
             (io, server_tx, server_rx)
         }
     }
-    
+
 
     impl AsyncRead for IO {
         fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
@@ -427,7 +445,7 @@ mod test {
         fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
             let f = self.get_mut().tx.send(buf.to_vec());
             pin_mut!(f);
-            
+
             match f.poll(cx) {
                 Poll::Ready(_) => Poll::Ready(Ok(buf.len())),
                 Poll::Pending => Poll::Pending
