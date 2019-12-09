@@ -119,10 +119,15 @@ impl MqttEventLoop {
     /// be classified as hard error and retry shouldn't be performed. Same with TLS auth failures
     /// Other soft error like server/intermediate node going down intemediately or should be 
     /// either retried infinitely or number of times asked by the user.
-    /// Any hard errors are yielded as last `Notification::Error` element of the stream before closing the
-    /// stream. These can be converted to finer versions when necessary
+    /// Any hard errors are yielded as last `Notification::Error` element of the stream before
+    /// closing the stream. These can be converted to finer versions when necessary
     /// There are no methods to poll the stream for the user. This is done to prevent extra copies
     /// of user notifcations (if a channel is used)
+    /// NOTE: For cases where the steam should be inturrepted, user's should wrap the stream into
+    /// an interruptible stream. check `stream-cancel` for example. Usecases like shutdown can
+    /// depend on this to force stop the stream and use `MqttState` in `MqttEventLoop` to persist
+    /// it to disk
+    /// NOTE: Similary stream can be paused in the stream loop by user to pause the stream
     /// TODO: Differentiate TLS auth errors and server being down
     /// TODO: User requests which are bounded streams (ends after producing 'n' elements) or channels
     /// which are closed before acks aren't received, the current implementation ends the mqtt stream 
