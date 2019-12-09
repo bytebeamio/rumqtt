@@ -77,24 +77,37 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
     Ok(eventloop)
 }
 
-
+/// Stream implementation for the eventloop so that it can be plugged into rust's async
+/// ecosystem
 impl Stream for MqttEventLoop {
     type Item = Notification;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Notification>> {
-        let mqtt = self.get_mut().mqtt();
+        let mqtt = self.get_mut().handle_network_and_requests();
         pin_mut!(mqtt);
 
-        match mqtt.poll(cx) {
-            Poll::Pending => Poll::Pending,
+        let (notification, outpacket) = match mqtt.poll(cx) {
+            Poll::Pending => return Poll::Pending,
             Poll::Ready(v) => match v {
-               Ok(Some(v)) => Poll::Ready(Some(v)),
-               Ok(None) => Poll::Pending,
+               Ok(o) => o, 
                Err(e) => {
                    error!("Mqtt eventloop error = {:?}", e);
-                   Poll::Ready(None)
+                   return Poll::Ready(None)
                }
             }
+        };
+
+        let network = &mut self.get_mut().network;
+        if let Some(packet) = outpacket {
+            let f = network.mqtt_write(&packet);
+            pin_mut!(f);
+            f.poll(cx);
+        }
+
+        if let Some(notification) = notification {
+            Poll::Ready(Some(notification))
+        } else {
+            Poll::Pending
         }
     }
 }
@@ -138,7 +151,7 @@ async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &
 
 
 impl MqttEventLoop {
-    async fn mqtt(&mut self) -> Result<Option<Notification>, EventLoopError> {
+    async fn handle_network_and_requests(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let network = &mut self.network;
         let requests = &mut self.requests;
         let throttle = &mut self.throttle;
@@ -176,17 +189,14 @@ impl MqttEventLoop {
             Ok::<_, EventLoopError>(request)
         });
 
-        let (notification, out) = select! {
+        let (notification, outpacket) = select! {
             o = network.fuse() => self.handle_packet(o).await?,
             o = request.fuse() => self.handle_request(o).await?
         };
 
-        if let Some(packet) = out {
-            self.network.mqtt_write(&packet).await?;
-        }
 
 
-        Ok(notification)
+        Ok((notification, outpacket))
     }
 
     async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
@@ -269,6 +279,7 @@ mod test {
     use tokio::time;
     use tokio::task;
     use futures_util::pin_mut;
+    use futures_util::stream::StreamExt;
     use std::time::{Instant, Duration};
     use std::pin::Pin;
     use std::task::{Poll, Context};
@@ -342,14 +353,20 @@ mod test {
 
     }
 
-    #[test]
-    fn throttled_requests_works_with_correct_delays_between_requests() {
+    #[tokio::test]
+    async fn throttled_requests_works_with_correct_delays_between_requests() {
         let (requests_tx, requests_rx) = channel(5);
-        let (mut eventloop, tx, rx) = eventloop(requests_rx);
+        let (mut eventloop, tx, mut rx) = eventloop(requests_rx);
 
         thread::spawn(move || {
-            // requests()
+            requests(requests_tx);
         });
+
+        for _ in 0..10 {
+            let _notification = eventloop.next().await;
+            let packet = rx.next().await.unwrap();
+            println!("Packet = {:?}", packet);
+        }
     }
 
     #[test]
