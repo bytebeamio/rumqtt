@@ -105,7 +105,7 @@ pub struct MqttOptions {
     /// notification channel capacity
     notification_channel_capacity: usize,
     /// Minimum delay time between consecutive outgoing packets
-    throttle: Duration,
+    throttle: Option<Duration>,
     /// maximum number of outgoing inflight messages
     inflight: usize,
 }
@@ -132,7 +132,7 @@ impl MqttOptions {
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            throttle: Duration::from_millis(1),
+            throttle: None,
             inflight: 100,
         }
     }
@@ -264,12 +264,12 @@ impl MqttOptions {
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
     pub fn set_throttle(&mut self, duration: Duration) -> &mut Self {
-        self.throttle = duration;
+        self.throttle = Some(duration);
         self
     }
 
     /// Outgoing message rate
-    pub fn throttle(&self) -> Duration {
+    pub fn throttle(&self) -> Option<Duration> {
         self.throttle
     }
 

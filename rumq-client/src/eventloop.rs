@@ -159,14 +159,19 @@ impl MqttEventLoop {
             // delay_until is used instead of delay_for incase timeout
             // happens just before delay ends, next poll's delay shouldn't
             // wait for `throttle` time. instead it should wait remaining time
-            if *throttle_flag {
+            if *throttle_flag && delay.is_some() {
                 time::delay_until(*throttle).await;
                 *throttle_flag = false;
             }
             
             let request = requests.next().await;
             *throttle_flag = true;
-            *throttle = Instant::now() + delay;
+
+            // Add delay for the next request
+            if let Some(delay) = delay {
+                *throttle = Instant::now() + delay;
+            }
+
             let request = request.ok_or(EventLoopError::NoRequest)?;
             Ok::<_, EventLoopError>(request)
         });
