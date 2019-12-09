@@ -7,6 +7,7 @@ use futures_util::pin_mut;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{self, Instant, Elapsed};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
+use async_stream::stream;
 use pin_project::pin_project;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
@@ -77,51 +78,6 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
     Ok(eventloop)
 }
 
-/// Stream implementation for the eventloop so that it can be plugged into rust's async
-/// ecosystem
-impl Stream for MqttEventLoop {
-    type Item = Notification;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Notification>> {
-        let (notification, outpacket) = { 
-            let mut eventloop = self.as_mut();
-            let mqtt = eventloop.read_network_and_requests();
-            pin_mut!(mqtt);
-
-            match mqtt.poll(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(v) => match v {
-                    Ok(o) => o, 
-                    Err(e) => {
-                        error!("Mqtt eventloop error = {:?}", e);
-                        return Poll::Ready(None)
-                    }
-                }
-            }
-        };
-
-        if let Some(packet) = outpacket {
-            let mut eventloop = self.as_mut();
-            let f = eventloop.write_network(packet);
-            pin_mut!(f);
-            match f.poll(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Ok(_)) => (),
-                Poll::Ready(Err(e)) => {
-                    error!("Network write error = {:?}", e);
-                    return Poll::Ready(None)
-                }
-            }
-        }
-
-        if let Some(notification) = notification {
-            Poll::Ready(Some(notification))
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
 async fn network_connect(options: &MqttOptions) -> Result<Box<dyn Network>, EventLoopError> {
     let network= time::timeout(Duration::from_secs(5), async {
         if options.ca.is_some() {
@@ -161,6 +117,39 @@ async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &
 
 
 impl MqttEventLoop {
+    pub async fn mqtt(&mut self) -> impl Stream<Item = Notification> + '_ {
+        let o = stream! {
+            loop {
+                let (notification, reply) = match self.read_network_and_requests().await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        error!("Eventloop error = {:?}", e);
+                        break
+                    }
+                };
+
+                // write the reply back to the network
+                if let Some(p) = reply {
+                    match self.network.mqtt_write(&p).await {
+                        Ok(_) => (),
+                        Err(e) => {
+                            error!("Network write error = {:?}", e);
+                            break
+                        }
+                    }
+                }
+
+                // yield the notification to the user
+                if let Some(n) = notification { 
+                    yield n 
+                }
+            }
+        };
+        
+        // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
+        Box::pin(o)
+    }
+
     /// Reads user requests stream and network stream concurrently and returns notification
     /// which should be sent to the user and packet which should be written to network
     async fn read_network_and_requests(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {

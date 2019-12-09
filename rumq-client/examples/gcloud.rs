@@ -4,7 +4,7 @@ use std::ops::Add;
 use std::env;
 use std::fs;
 
-use rumq_client::{self, MqttOptions, Request, eventloop};
+use rumq_client::{self, MqttOptions, Request, MqttEventLoop, eventloop};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header};
 use futures_util::stream::StreamExt;
@@ -21,30 +21,35 @@ async fn main() {
 
     let (requests_tx, requests_rx) = channel(1);
     let mqttoptions = gcloud();
-    let mut stream = eventloop(mqttoptions, requests_rx).await.unwrap();
+    let mut eventloop = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        #[tokio::main(basic_scheduler)]
-        async fn requests(mut requests_tx: Sender<Request>) {
-            task::spawn(async move {
-                for i in 0..10 {
-                    requests_tx.send(publish_request(i)).await.unwrap();
-                    time::delay_for(Duration::from_secs(1)).await; 
-                }
-                
-                time::delay_for(Duration::from_secs(100)).await; 
-            }).await.unwrap();
-                    
-        }
-
         requests(requests_tx);
-        
         thread::sleep(Duration::from_secs(100));
     });
+
+    stream_it(&mut eventloop).await;
+    println!("State = {:?}", eventloop.state);
+}
+
+async fn stream_it(eventloop: &mut MqttEventLoop) {
+    let mut stream = eventloop.mqtt().await;
 
     while let Some(item) = stream.next().await {
         println!("{:?}", item);
     }
+}
+
+#[tokio::main(basic_scheduler)]
+async fn requests(mut requests_tx: Sender<Request>) {
+    task::spawn(async move {
+        for i in 0..10 {
+            requests_tx.send(publish_request(i)).await.unwrap();
+            time::delay_for(Duration::from_secs(1)).await; 
+        }
+
+        time::delay_for(Duration::from_secs(100)).await; 
+    }).await.unwrap();
 }
 
 fn gcloud() -> MqttOptions {
