@@ -1,12 +1,10 @@
 use std::thread;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::ops::Add;
 use std::env;
 use std::fs;
 
-use rumq_core::*;
-use rumq_client::{self, MqttOptions, Request, eventloop};
+use rumq_client::{self, MqttOptions, Request, MqttEventLoop, eventloop};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header};
 use futures_util::stream::StreamExt;
@@ -23,55 +21,55 @@ async fn main() {
 
     let (requests_tx, requests_rx) = channel(1);
     let mqttoptions = gcloud();
-    let mut stream = eventloop(mqttoptions, requests_rx).await.unwrap();
+    let mut eventloop = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {
-        #[tokio::main(basic_scheduler)]
-        async fn requests(mut requests_tx: Sender<Request>) {
-            task::spawn(async move {
-                for i in 0..10 {
-                    requests_tx.send(publish(i)).await.unwrap();
-                    time::delay_for(Duration::from_secs(1)).await; 
-                }
-                
-                time::delay_for(Duration::from_secs(100)).await; 
-            }).await.unwrap();
-                    
-        }
-
         requests(requests_tx);
-        
         thread::sleep(Duration::from_secs(100));
     });
+
+    stream_it(&mut eventloop).await;
+    println!("State = {:?}", eventloop.state);
+}
+
+async fn stream_it(eventloop: &mut MqttEventLoop) {
+    let mut stream = eventloop.mqtt();
 
     while let Some(item) = stream.next().await {
         println!("{:?}", item);
     }
 }
 
+#[tokio::main(basic_scheduler)]
+async fn requests(mut requests_tx: Sender<Request>) {
+    task::spawn(async move {
+        for i in 0..10 {
+            requests_tx.send(publish_request(i)).await.unwrap();
+            time::delay_for(Duration::from_secs(1)).await; 
+        }
+
+        time::delay_for(Duration::from_secs(100)).await; 
+    }).await.unwrap();
+}
+
 fn gcloud() -> MqttOptions {
-    let mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
-    let mqttoptions = mqttoptions.set_keep_alive(15);
+    let mut mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
+    mqttoptions.set_keep_alive(15);
     let password = gen_iotcore_password();
     let ca = fs::read("certs/bike-1/roots.pem").unwrap();
     
     mqttoptions
         .set_ca(ca)
-        .set_credentials("unused", &password)
+        .set_credentials("unused", &password);
+
+    mqttoptions 
 }
 
-fn publish(i: u8) -> Request {
+fn publish_request(i: u8) -> Request {
     let topic = "/devices/".to_owned() +  "bike-1/events/imu";
+    let payload = vec![1, 2, 3, i];
 
-    let publish = Publish {
-        dup: false,
-        qos: QoS::AtLeastOnce,
-        retain: false,
-        topic_name: topic,
-        pkid: None,
-        payload: Arc::new(vec![1, 2, 3, i]),
-    };
-
+    let publish = rumq_client::publish(topic, payload);
     Request::Publish(publish)
 }
 

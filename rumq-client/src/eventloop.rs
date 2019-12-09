@@ -1,21 +1,18 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::{self, Connect, Packet, Protocol, MqttRead, MqttWrite};
+use rumq_core::{self, Packet, MqttRead, MqttWrite};
 use futures_util::{select, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
-use futures_util::pin_mut;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::time::{self, Elapsed};
+use tokio::time::{self, Instant, Elapsed};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
+use async_stream::stream;
 use pin_project::pin_project;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
 
 use std::io;
 use std::time::Duration;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 #[pin_project]
 pub struct MqttEventLoop {
@@ -25,6 +22,8 @@ pub struct MqttEventLoop {
     queue_limit_rx: Receiver<()>,
     requests: Box<dyn Requests>,
     network: Box<dyn  Network>,
+    throttle_flag: bool,
+    throttle: Instant
 }
 
 #[derive(From, Debug)]
@@ -52,15 +51,14 @@ pub enum EventLoopError {
 pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<MqttEventLoop, EventLoopError> {
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     let mut state = MqttState::new(options.clone());
-    
+
     // make tcp and mqtt connections
     let mut network = network_connect(&options).await?;
     mqtt_connect(&options, &mut network, &mut state).await?;
-    
+
     // make network and user requests generic for better unit testing capabilities
     let network = Box::new(network);
     let requests = Box::new(requests);
-    // let requests = requests.throttle(self.options.throttle);
 
     let eventloop = MqttEventLoop {
         state,
@@ -69,32 +67,11 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
         queue_limit_tx,
         network,
         requests,
+        throttle_flag: false,
+        throttle: Instant::now()
     };
 
     Ok(eventloop)
-}
-
-
-impl Stream for MqttEventLoop {
-    type Item = Notification;
-
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Notification>> {
-        let mqtt = self.get_mut().mqtt();
-        pin_mut!(mqtt);
-
-        match mqtt.poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(v) => match v {
-               Ok(Some(v)) => Poll::Ready(Some(v)),
-               Ok(None) => Poll::Pending,
-               Err(e) => {
-                   error!("Mqtt eventloop error = {:?}", e);
-                   Poll::Ready(None)
-               }
-            }
-        }
-    }
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Box<dyn Network>, EventLoopError> {
@@ -116,7 +93,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Box<dyn Network>, Even
 
 async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &mut MqttState) -> Result<(), EventLoopError> {
     let connect = connect_packet(options);
-    
+
     // mqtt connection with timeout
     time::timeout(Duration::from_secs(5), async {
         network.mqtt_write(&connect).await?;
@@ -136,9 +113,47 @@ async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &
 
 
 impl MqttEventLoop {
-    async fn mqtt(&mut self) -> Result<Option<Notification>, EventLoopError> {
+    pub fn mqtt(&mut self) -> impl Stream<Item = Notification> + '_ {
+        let o = stream! {
+            loop {
+                let (notification, reply) = match self.read_network_and_requests().await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        error!("Eventloop error = {:?}", e);
+                        break
+                    }
+                };
+
+                // write the reply back to the network
+                if let Some(p) = reply {
+                    match self.network.mqtt_write(&p).await {
+                        Ok(_) => (),
+                        Err(e) => {
+                            error!("Network write error = {:?}", e);
+                            break
+                        }
+                    }
+                }
+
+                // yield the notification to the user
+                if let Some(n) = notification { 
+                    yield n 
+                }
+            }
+        };
+        
+        // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
+        Box::pin(o)
+    }
+
+    /// Reads user requests stream and network stream concurrently and returns notification
+    /// which should be sent to the user and packet which should be written to network
+    async fn read_network_and_requests(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let network = &mut self.network;
         let requests = &mut self.requests;
+        let throttle = &mut self.throttle;
+        let delay = self.options.throttle;
+        let throttle_flag = &mut self.throttle_flag;
 
         let network = time::timeout(self.options.keep_alive, async {
             let packet = network.mqtt_read().await?;
@@ -146,28 +161,39 @@ impl MqttEventLoop {
         });
 
         let request = time::timeout(self.options.keep_alive, async {            
+            // apply throttling to requests. throttling is only applied
+            // after the last element is received to cater early returns
+            // due to timeoutss. after the delay, if timeout has happened 
+            // just before a request, next poll shouldn't cause same delay
+            //
+            // delay_until is used instead of delay_for incase timeout
+            // happens just before delay ends, next poll's delay shouldn't
+            // wait for `throttle` time. instead it should wait remaining time
+            if *throttle_flag && delay.is_some() {
+                time::delay_until(*throttle).await;
+                *throttle_flag = false;
+            }
+
             let request = requests.next().await;
+            *throttle_flag = true;
+
+            // Add delay for the next request
+            if let Some(delay) = delay {
+                *throttle = Instant::now() + delay;
+            }
+
             let request = request.ok_or(EventLoopError::NoRequest)?;
             Ok::<_, EventLoopError>(request)
         });
 
-        let (notification, reply) = select! {
-            o = network.fuse() =>  {
-                let (notification, request) = self.handle_packet(o).await?;
-                (notification, request)
-            },
-            o = request.fuse() => {
-                let (notification, request) = self.handle_request(o).await?;
-                (notification, request)
-            }
+        let (notification, outpacket) = select! {
+            o = network.fuse() => self.handle_packet(o).await?,
+            o = request.fuse() => self.handle_request(o).await?
         };
 
-        if let Some(packet) = reply {
-            self.network.mqtt_write(&packet).await?;
-        }
 
 
-        Ok(notification)
+        Ok((notification, outpacket))
     }
 
     async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
@@ -181,7 +207,7 @@ impl MqttEventLoop {
 
         let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
         if self.state.outgoing_pub.len() > self.options.inflight {
-            self.queue_limit_tx.send(()).await;
+            let _ = self.queue_limit_tx.send(()).await;
         }
 
         Ok((notification, reply))
@@ -210,21 +236,15 @@ impl MqttEventLoop {
 }
 
 fn connect_packet(mqttoptions: &MqttOptions) -> Packet {
-    let (username, password) = if let Some((u, p)) = mqttoptions.credentials() {
-        (Some(u), Some(p))
-    } else {
-        (None, None)
-    };
+    let mut connect = rumq_core::connect(mqttoptions.client_id());
 
-    let connect = Connect {
-        protocol: Protocol::MQTT(4),
-        keep_alive: mqttoptions.keep_alive().as_secs() as u16,
-        client_id: mqttoptions.client_id(),
-        clean_session: mqttoptions.clean_session(),
-        last_will: None,
-        username,
-        password,
-    };
+    connect
+        .set_keep_alive(mqttoptions.keep_alive().as_secs() as u16)
+        .set_clean_session(mqttoptions.clean_session());
+
+    if let Some((username, password)) = mqttoptions.credentials() {
+        connect.set_username(username).set_password(password);
+    }
 
     Packet::Connect(connect)
 }
@@ -250,44 +270,79 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin {}
 
 #[cfg(test)]
 mod test {
+    use rumq_core::*;
+    use tokio::sync::mpsc::{channel, Sender, Receiver};
+    use tokio::io::{self, AsyncRead, AsyncWrite};
+    use tokio::time;
+    use tokio::task;
+    use futures_util::pin_mut;
+    use futures_util::stream::StreamExt;
+    use std::time::{Instant, Duration};
+    use std::pin::Pin;
+    use std::task::{Poll, Context};
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::thread;
     use super::MqttEventLoop;
     use crate::state::MqttState;
-    use crate::{MqttOptions, network};
+    use crate::{Request, MqttOptions};
 
-    // fn eventloop<I>() -> MqttEventLoop<I> {
-    //     let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
-    //     let mut state = MqttState::new(options.clone());
-    //     let (queue_limit_tx, queue_limit_rx) = channel(1);
-    //     
-    //     // make tcp and mqtt connections
-    //     let mut network = network_connect(&options).await?;
-    //     let mut network = 
-    //     
-    //     // make network and user requests generic for better unit testing capabilities
-    //     let network = Box::new(network);
-    //     let requests = Box::new(requests);
-    //     // let requests = requests.throttle(self.options.throttle);
+    fn eventloop(requests: Receiver<Request>) -> (MqttEventLoop, Sender<Vec<u8>>, Receiver<Vec<u8>>) {
+        let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
+        let state = MqttState::new(options.clone());
+        let (network, server_tx, server_rx) = IO::new();
+        let network = Box::new(network);
+        let requests = Box::new(requests);
+        let (queue_limit_tx, queue_limit_rx) = channel(1);
 
-    //     let eventloop = MqttEventLoop {
-    //         state,
-    //         options,
-    //         queue_limit_rx,
-    //         queue_limit_tx,
-    //         network,
-    //         requests,
-    //     };
 
-    //     Ok(eventloop)
-    // }
+        let eventloop = MqttEventLoop {
+            state,
+            options,
+            queue_limit_rx,
+            queue_limit_tx,
+            network,
+            requests,
+            throttle_flag: false,
+            throttle: time::Instant::now()
+        };
 
-    #[test]
-    fn connection_should_timeout_on_time() {
-
+        (eventloop, server_tx, server_rx)
     }
 
-    #[test]
-    fn connection_waits_for_connack_and_errors_after_timeout() {
 
+    fn publish_request(i: u8) -> Request {
+        let topic = "hello/world".to_owned();
+        let payload = vec![1, 2, 3];
+
+        let mut publish = publish(topic, payload);
+        Request::Publish(publish)
+    }
+
+    #[tokio::main(basic_scheduler)]
+    async fn requests(mut requests_tx: Sender<Request>) {
+        task::spawn(async move {
+            for i in 0..10 {
+                requests_tx.send(publish_request(i)).await.unwrap();
+            }
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_should_timeout_on_time() {
+        let (requests_tx, requests_rx) = channel(5);
+        let (mut eventloop, tx, rx) = eventloop(requests_rx);
+        let start = Instant::now(); 
+        let o = super::mqtt_connect(&eventloop.options, &mut eventloop.network, &mut eventloop.state).await;
+        let elapsed = start.elapsed();
+
+        match o {
+            Ok(_) => assert!(false),
+            Err(super::EventLoopError::Timeout(_)) => assert!(true), 
+            Err(_) => assert!(false)
+        }
+
+        assert!(elapsed.as_secs() == 5);
     }
 
     #[test]
@@ -295,9 +350,22 @@ mod test {
 
     }
 
-    #[test]
-    fn throttled_requests_works_with_correct_delays_between_requests() {
+    async fn throttled_requests_works_with_correct_delays_between_requests() {
+        let (requests_tx, requests_rx) = channel(5);
+        let (mut eventloop, tx, mut rx) = eventloop(requests_rx);
+        let mut eventloop = eventloop.mqtt();
 
+        thread::spawn(move || {
+            requests(requests_tx);
+        });
+
+        for _ in 0..10 {
+            dbg!();
+            let _notification = eventloop.next().await;
+            dbg!();
+            let packet = rx.next().await.unwrap();
+            println!("Packet = {:?}", packet);
+        }
     }
 
     #[test]
@@ -318,5 +386,59 @@ mod test {
     #[test]
     fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
 
+    }
+
+
+    struct IO {
+        tx: Sender<Vec<u8>>,
+        rx: Receiver<Vec<u8>>
+    }
+
+
+    impl IO {
+        pub fn new() -> (IO, Sender<Vec<u8>>, Receiver<Vec<u8>>) {
+            let (client_tx, server_rx) = channel(10);
+            let (server_tx, client_rx) = channel(10);
+            let io = IO {tx: client_tx, rx: client_rx};
+            (io, server_tx, server_rx)
+        }
+    }
+
+
+    impl AsyncRead for IO {
+        fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+            match self.get_mut().rx.poll_recv(cx) {
+                Poll::Ready(Some(d)) => {
+                    dbg!(d.len(), buf.len());
+                    buf.clone_from_slice(&d);
+                    Poll::Ready(Ok(buf.len()))
+                }
+                Poll::Ready(None) => {
+                    dbg!();
+                    Poll::Ready(Ok(0))
+                }
+                Poll::Pending => Poll::Pending,
+            }
+        } 
+    }
+
+    impl AsyncWrite for IO {
+        fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
+            let f = self.get_mut().tx.send(buf.to_vec());
+            pin_mut!(f);
+
+            match f.poll(cx) {
+                Poll::Ready(_) => Poll::Ready(Ok(buf.len())),
+                Poll::Pending => Poll::Pending
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), io::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), io::Error>> {
+            Poll::Ready(Ok(()))
+        }
     }
 }

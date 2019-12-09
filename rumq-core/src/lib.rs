@@ -1,25 +1,17 @@
+#[macro_use]
+extern crate getset;
+
 use derive_more::From;
 use std::io;
 use std::string::FromUtf8Error;
 
-mod serialize;
 mod deserialize;
+mod packets;
+mod serialize;
 
-pub mod packets;
-pub use packets::{
-    connect::{Connect, Protocol},
-    connack::{Connack, ConnectReturnCode},
-    publish::Publish,
-    subscribe::{Subscribe, SubscribeTopic},
-    suback::{Suback, SubscribeReturnCodes},
-    unsubscribe::Unsubscribe,
-    lastwill::LastWill,
-    PacketIdentifier
-};
-
-pub use serialize::MqttWrite;
 pub use deserialize::MqttRead;
-
+pub use packets::*;
+pub use serialize::MqttWrite;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,16 +67,14 @@ pub enum Packet {
 ///
 /// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
 
-
 pub fn qos(num: u8) -> Result<QoS, Error> {
     match num {
         0 => Ok(QoS::AtMostOnce),
         1 => Ok(QoS::AtLeastOnce),
         2 => Ok(QoS::ExactlyOnce),
-        _ => Err(Error::UnsupportedQoS)
+        _ => Err(Error::UnsupportedQoS),
     }
 }
-
 
 pub fn packet_type(num: u8) -> Result<PacketType, Error> {
     match num {
@@ -114,7 +104,7 @@ pub fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
         3 => Ok(ConnectReturnCode::RefusedIdentifierRejected),
         4 => Ok(ConnectReturnCode::RefusedProtocolVersion),
         5 => Ok(ConnectReturnCode::ServerUnavailable),
-        _ => Err(Error::InvalidConnectReturnCode(num))
+        _ => Err(Error::InvalidConnectReturnCode(num)),
     }
 }
 

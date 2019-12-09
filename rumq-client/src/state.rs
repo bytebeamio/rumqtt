@@ -113,16 +113,16 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
-        let publish = match publish.qos {
+        let publish = match publish.qos() {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
         debug!(
             "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
-            publish.topic_name,
-            publish.pkid,
-            publish.payload.len()
+            publish.topic_name(),
+            publish.pkid(),
+            publish.payload().len()
         );
         Packet::Publish(publish)
     }
@@ -132,7 +132,7 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
+        match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
@@ -152,7 +152,7 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     pub fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
+        match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _ = self.outgoing_pub.remove(index);
                 self.outgoing_rel.push_back(pkid);
@@ -171,7 +171,7 @@ impl MqttState {
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
     pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Notification>, Option<Packet>), StateError> {
-        let qos = publish.qos;
+        let qos = publish.qos();
 
         match qos {
             QoS::AtMostOnce => {
@@ -179,13 +179,13 @@ impl MqttState {
                 Ok((Some(notification), None))
             }
             QoS::AtLeastOnce => {
-                let pkid = publish.pkid.unwrap();
+                let pkid = publish.pkid().unwrap();
                 let request = Packet::Puback(pkid);
                 let notification = Notification::Publish(publish);
                 Ok((Some(notification), Some(request)))
             }
             QoS::ExactlyOnce => {
-                let pkid = publish.pkid.unwrap();
+                let pkid = publish.pkid().unwrap();
                 let reply = Packet::Pubrec(pkid);
                 let notification = Notification::Publish(publish);
 
@@ -259,9 +259,9 @@ impl MqttState {
 
     fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Packet {
         let pkid = self.next_pkid();
-        subscription.pkid = pkid;
+        subscription.set_pkid(pkid);
 
-        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
+        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
         Packet::Subscribe(subscription)
     }
 
@@ -280,7 +280,7 @@ impl MqttState {
             }
         };
 
-        match connack.code {
+        match *connack.code() {
             ConnectReturnCode::Accepted if self.connection_status == MqttConnectionStatus::Handshake => {
                 self.connection_status = MqttConnectionStatus::Connected;
                 Ok(())
@@ -307,9 +307,9 @@ impl MqttState {
     /// frequency/size data publishes but should ideally be `Arc`d while returning to
     /// prevent deep copy of large messages as this is anyway immutable after adding pkid
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
-        let publish = if publish.pkid == None {
+        let publish = if *publish.pkid() == None {
             let pkid = self.next_pkid();
-            publish.pkid = Some(pkid);
+            publish.set_pkid(pkid);
             publish
         } else {
             publish
@@ -340,25 +340,21 @@ mod test {
     use rumq_core::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
-        Publish {
-            dup: false,
-            qos,
-            retain: false,
-            pkid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        }
+        let topic = "hello/world".to_owned();
+        let payload = vec![1, 2, 3];
+
+        let mut publish = publish(topic, payload);
+        publish.set_qos(qos);
+        publish
     }
 
     fn build_incoming_publish(qos: QoS, pkid: u16) -> Publish {
-        Publish {
-            dup: false,
-            qos,
-            retain: false,
-            pkid: Some(PacketIdentifier(pkid)),
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        }
+        let topic = "hello/world".to_owned();
+        let payload = vec![1, 2, 3];
+
+        let mut publish = publish(topic, payload);
+        publish.set_pkid(pkid).set_qos(qos);
+        publish
     }
 
     fn build_mqttstate() -> MqttState {
@@ -389,7 +385,7 @@ mod test {
             Packet::Publish(p) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
-        assert_eq!(publish_out.pkid, None);
+        assert_eq!(*publish_out.pkid(), None);
         assert_eq!(mqtt.outgoing_pub.len(), 0);
 
         // QoS1 Publish
@@ -400,7 +396,7 @@ mod test {
             Packet::Publish(p) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
-        assert_eq!(publish_out.pkid, Some(PacketIdentifier(1)));
+        assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(1)));
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
         // Packet id should be incremented and publish should be saved in queue
@@ -408,7 +404,7 @@ mod test {
             Packet::Publish(p) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
-        assert_eq!(publish_out.pkid, Some(PacketIdentifier(2)));
+        assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(2)));
         assert_eq!(mqtt.outgoing_pub.len(), 2);
 
         // QoS1 Publish
@@ -419,7 +415,7 @@ mod test {
             Packet::Publish(p) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
-        assert_eq!(publish_out.pkid, Some(PacketIdentifier(3)));
+        assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(3)));
         assert_eq!(mqtt.outgoing_pub.len(), 3);
 
         // Packet id should be incremented and publish should be saved in queue
@@ -427,7 +423,7 @@ mod test {
             Packet::Publish(p) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
-        assert_eq!(publish_out.pkid, Some(PacketIdentifier(4)));
+        assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(4)));
         assert_eq!(mqtt.outgoing_pub.len(), 4);
     }
 
@@ -459,7 +455,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_publish(publish).unwrap();
 
         match notification {
-            Some(Notification::Publish(publish)) => assert_eq!(publish.pkid.unwrap(), PacketIdentifier(1)),
+            Some(Notification::Publish(publish)) => assert_eq!(publish.pkid().unwrap(), PacketIdentifier(1)),
             _ => panic!("Invalid notification: {:?}", notification),
         }
 
@@ -483,7 +479,7 @@ mod test {
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
         let backup = mqtt.outgoing_pub.get(0).clone();
-        assert_eq!(backup.unwrap().pkid, Some(PacketIdentifier(2)));
+        assert_eq!(*backup.unwrap().pkid(), Some(PacketIdentifier(2)));
 
         mqtt.handle_incoming_puback(PacketIdentifier(2)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 0);
@@ -504,7 +500,7 @@ mod test {
 
         // check if the remaining element's pkid is 1
         let backup = mqtt.outgoing_pub.get(0).clone();
-        assert_eq!(backup.unwrap().pkid, Some(PacketIdentifier(1)));
+        assert_eq!(*backup.unwrap().pkid(), Some(PacketIdentifier(1)));
 
         assert_eq!(mqtt.outgoing_rel.len(), 1);
 
@@ -569,7 +565,8 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-        let opts = MqttOptions::new("test", "localhost", 1883).set_keep_alive(10);
+        let mut opts = MqttOptions::new("test", "localhost", 1883);
+        opts.set_keep_alive(10);
         mqtt.opts = opts;
         mqtt.connection_status = MqttConnectionStatus::Connected;
         mqtt.handle_outgoing_ping().unwrap();
@@ -591,7 +588,8 @@ mod test {
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
 
-        let opts = MqttOptions::new("test", "localhost", 1883).set_keep_alive(10);
+        let mut opts = MqttOptions::new("test", "localhost", 1883);
+        opts.set_keep_alive(10);
         mqtt.opts = opts;
 
         mqtt.connection_status = MqttConnectionStatus::Connected;

@@ -99,16 +99,16 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
-        let publish = match publish.qos {
+        let publish = match publish.qos() {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
         debug!(
             "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
-            publish.topic_name,
-            publish.pkid,
-            publish.payload.len()
+            publish.topic_name(),
+            publish.pkid(),
+            publish.payload().len()
         );
         Packet::Publish(publish)
     }
@@ -123,7 +123,7 @@ impl MqttState {
             }
         };
 
-        if connect.client_id.starts_with(' ') || connect.client_id.is_empty() {
+        if connect.client_id().starts_with(' ') || connect.client_id().is_empty() {
             error!("Client id shouldn't start with space (or) shouldn't be empty in persistent sessions");
             return Err(Error::InvalidClientId);
         }
@@ -145,7 +145,7 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Packet>, Option<Packet>), Error> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
+        match self.outgoing_pub.iter().position(|x| x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
@@ -163,7 +163,7 @@ impl MqttState {
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
     pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Packet>, Option<Packet>), Error> {
-        let qos = publish.qos;
+        let qos = publish.qos();
 
         match qos {
             QoS::AtMostOnce => {
@@ -171,7 +171,7 @@ impl MqttState {
                 Ok((Some(notification), None))
             }
             QoS::AtLeastOnce => {
-                let pkid = publish.pkid.unwrap();
+                let pkid = publish.pkid().unwrap();
                 let request = Packet::Puback(pkid);
                 let notification = Packet::Publish(publish);
                 Ok((Some(notification), Some(request)))
@@ -185,9 +185,9 @@ impl MqttState {
     /// frequency/size data publishes but should ideally be `Arc`d while returning to
     /// prevent deep copy of large messages as this is anyway immutable after adding pkid
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
-        let publish = if publish.pkid == None {
+        let publish = if *publish.pkid() == None {
             let pkid = self.next_pkid();
-            publish.pkid = Some(pkid);
+            publish.set_pkid(Some(pkid));
             publish
         } else {
             publish
