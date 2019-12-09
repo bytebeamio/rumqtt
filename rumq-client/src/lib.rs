@@ -142,7 +142,7 @@ impl MqttOptions {
         (self.broker_addr.clone(), self.port)
     }
 
-    pub fn set_ca(mut self, ca: Vec<u8>) -> Self {
+    pub fn set_ca(&mut self, ca: Vec<u8>) -> &mut Self {
         self.ca = Some(ca);
         self
     }
@@ -151,7 +151,7 @@ impl MqttOptions {
         self.ca.clone()
     }
 
-    pub fn set_client_auth(mut self, cert: Vec<u8>, key: Vec<u8>) -> Self {
+    pub fn set_client_auth(&mut self, cert: Vec<u8>, key: Vec<u8>) -> &mut Self {
         self.client_auth = Some((cert, key));
         self
     }
@@ -160,7 +160,7 @@ impl MqttOptions {
         self.client_auth.clone()
     }
 
-    pub fn set_alpn(mut self, alpn: Vec<Vec<u8>>) -> Self {
+    pub fn set_alpn(&mut self, alpn: Vec<Vec<u8>>) -> &mut Self {
         self.alpn = Some(alpn);
         self
     }
@@ -171,7 +171,7 @@ impl MqttOptions {
 
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(mut self, secs: u16) -> Self {
+    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
         if secs < 5 {
             panic!("Keep alives should be >= 5  secs");
         }
@@ -191,7 +191,7 @@ impl MqttOptions {
     }
 
     /// Set packet size limit (in Kilo Bytes)
-    pub fn set_max_packet_size(mut self, sz: usize) -> Self {
+    pub fn set_max_packet_size(&mut self, sz: usize) -> &mut Self {
         self.max_packet_size = sz * 1024;
         self
     }
@@ -207,7 +207,7 @@ impl MqttOptions {
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
-    pub fn set_clean_session(mut self, clean_session: bool) -> Self {
+    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         self.clean_session = clean_session;
         self
     }
@@ -219,7 +219,7 @@ impl MqttOptions {
 
     /// Time interval after which client should retry for new
     /// connection if there are any disconnections. By default, no retry will happen
-    pub fn set_reconnect_options(mut self, opts: ReconnectOptions) -> Self {
+    pub fn set_reconnect_options(&mut self, opts: ReconnectOptions) -> &mut Self {
         self.reconnect_options = opts;
         self
     }
@@ -230,7 +230,7 @@ impl MqttOptions {
     }
 
     /// Username and password
-    pub fn set_credentials<S: Into<String>>(mut self, username: S, password: S) -> Self {
+    pub fn set_credentials<S: Into<String>>(&mut self, username: S, password: S) -> &mut Self {
         self.credentials = Some((username.into(), password.into()));
         self
     }
@@ -241,7 +241,7 @@ impl MqttOptions {
     }
 
     /// Set notification channel capacity
-    pub fn set_notification_channel_capacity(mut self, capacity: usize) -> Self {
+    pub fn set_notification_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.notification_channel_capacity = capacity;
         self
     }
@@ -252,7 +252,7 @@ impl MqttOptions {
     }
 
     /// Set request channel capacity
-    pub fn set_request_channel_capacity(mut self, capacity: usize) -> Self {
+    pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.request_channel_capacity = capacity;
         self
     }
@@ -263,7 +263,7 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_throttle(mut self, duration: Duration) -> Self {
+    pub fn set_throttle(&mut self, duration: Duration) -> &mut Self {
         self.throttle = duration;
         self
     }
@@ -274,7 +274,7 @@ impl MqttOptions {
     }
 
     /// Set number of concurrent in flight messages
-    pub fn set_inflight(mut self, inflight: usize) -> Self {
+    pub fn set_inflight(&mut self, inflight: usize) -> &mut Self {
         if inflight == 0 {
             panic!("zero in flight is not allowed")
         }

@@ -13,8 +13,8 @@ async fn main() {
     color_backtrace::install();
 
     let (requests_tx, requests_rx) = channel(10);
-    let mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    let mqttoptions = mqttoptions.set_keep_alive(10).set_throttle(Duration::from_secs(1));
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    mqttoptions.set_keep_alive(10).set_throttle(Duration::from_secs(1));
     let mut eventloop = eventloop(mqttoptions, requests_rx).await.unwrap();
 
     thread::spawn(move || {

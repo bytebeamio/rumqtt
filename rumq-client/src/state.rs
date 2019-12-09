@@ -565,7 +565,8 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-        let opts = MqttOptions::new("test", "localhost", 1883).set_keep_alive(10);
+        let mut opts = MqttOptions::new("test", "localhost", 1883);
+        opts.set_keep_alive(10);
         mqtt.opts = opts;
         mqtt.connection_status = MqttConnectionStatus::Connected;
         mqtt.handle_outgoing_ping().unwrap();
@@ -587,7 +588,8 @@ mod test {
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
 
-        let opts = MqttOptions::new("test", "localhost", 1883).set_keep_alive(10);
+        let mut opts = MqttOptions::new("test", "localhost", 1883);
+        opts.set_keep_alive(10);
         mqtt.opts = opts;
 
         mqtt.connection_status = MqttConnectionStatus::Connected;

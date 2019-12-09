@@ -48,14 +48,16 @@ async fn main() {
 }
 
 fn gcloud() -> MqttOptions {
-    let mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
-    let mqttoptions = mqttoptions.set_keep_alive(15);
+    let mut mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
+    mqttoptions.set_keep_alive(15);
     let password = gen_iotcore_password();
     let ca = fs::read("certs/bike-1/roots.pem").unwrap();
     
     mqttoptions
         .set_ca(ca)
-        .set_credentials("unused", &password)
+        .set_credentials("unused", &password);
+
+    mqttoptions 
 }
 
 fn publish_request(i: u8) -> Request {

@@ -290,7 +290,8 @@ mod test {
             queue_limit_tx,
             network,
             requests,
-            throttle_flag: false
+            throttle_flag: false,
+            throttle: time::Instant::now()
         };
 
         (eventloop, server_tx, server_rx)
