@@ -1,3 +1,5 @@
+#![recursion_limit = "300"]
+
 #[macro_use]
 extern crate log;
 
@@ -22,6 +24,7 @@ pub enum Notification {
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
     Suback(PacketIdentifier),
+    Error(String),
 }
 
 #[doc(hidden)]
@@ -53,14 +56,12 @@ pub enum Command {
 pub enum ReconnectOptions {
     /// Don't automatically reconnect
     Never,
-    /// Reconnect automatically if the initial connection was successful.
-    ///
-    /// Before a reconnection attempt, sleep for the specified amount of time (in seconds).
-    AfterFirstSuccess(u64),
     /// Always reconnect automatically.
-    ///
-    /// Before a reconnection attempt, sleep for the specified amount of time (in seconds).
-    Always(u64),
+    /// Before a reconnection attempt, sleep for the specified amount of time
+    Always(Duration),
+    /// Always reconnect automatically.
+    /// Before a reconnection attempt, sleep for the specified amount of time
+    Count(u16, Duration),
 }
 
 /// Client authentication option for mqtt connect packet
@@ -94,8 +95,6 @@ pub struct MqttOptions {
     client_auth: Option<(Vec<u8>, Vec<u8>)>,
     /// alpn settings
     alpn: Option<Vec<Vec<u8>>>,
-    /// reconnection options
-    reconnect_options: ReconnectOptions,
     /// username and password
     credentials: Option<(String, String)>,
     /// maximum packet size
@@ -127,7 +126,6 @@ impl MqttOptions {
             ca: None,
             client_auth: None,
             alpn: None,
-            reconnect_options: ReconnectOptions::AfterFirstSuccess(10),
             credentials: None,
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
@@ -217,18 +215,6 @@ impl MqttOptions {
         self.clean_session
     }
 
-    /// Time interval after which client should retry for new
-    /// connection if there are any disconnections. By default, no retry will happen
-    pub fn set_reconnect_options(&mut self, opts: ReconnectOptions) -> &mut Self {
-        self.reconnect_options = opts;
-        self
-    }
-
-    /// Reconnection options
-    pub fn reconnect_options(&self) -> ReconnectOptions {
-        self.reconnect_options
-    }
-
     /// Username and password
     pub fn set_credentials<S: Into<String>>(&mut self, username: S, password: S) -> &mut Self {
         self.credentials = Some((username.into(), password.into()));
@@ -296,16 +282,12 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883)
-            .set_reconnect_options(ReconnectOptions::Always(10))
-            .set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883)
-            .set_reconnect_options(ReconnectOptions::Always(10))
-            .set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
 }
