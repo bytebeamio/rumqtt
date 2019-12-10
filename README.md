@@ -1,10 +1,17 @@
-# rumq [![img](https://github.com/tekjar/rumq/workflows/ci/badge.svg)](https://github.com/tekjar/rumq/actions)
+# rumq [![img](https://github.com/tekjar/rumq/workflows/CI/badge.svg)](https://github.com/tekjar/rumq/actions)
 
-MQTT ecosystem in rust
+MQTT ecosystem in rust which strives to be simple, robust and performant
+
+* Fully asynchronous. Built on top of tokio 0.2 and futures 0.3
+* Mqtt eventloop is just a stream. Easily plug it into async ecosystem
+* Takes a `Stream` for user requests. Solves both bounded and unbounded
+  usecases
+* Automatic reconnections
+* Request throttling
+* Inflight queue size based throttling
+* Tls using RustTLS. Cross compilation and multi platform support is painless
+
 
 #### REFERENCES
 ----------------
-* https://arxiv.org/pdf/1810.07730.pdf
-* https://news.ycombinator.com/item?id=19476439
 * http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html
-* http://stanford-clark.com/MQTT/#fixed-header
