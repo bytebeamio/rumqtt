@@ -1,6 +1,6 @@
 [package]
 name = "rumq-client"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 authors = ["tekjar <kraviteza@gmail.com>"]
 edition = "2018"
 
@@ -13,7 +13,7 @@ async-stream = "0.2"
 futures-util = "0.3"
 webpki = "0.21"
 tokio-rustls = "0.12"
-rumq-core = { path = "../rumq-core", version = "0.1"}
+rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.1"}
 log = "0.4"
 pin-project = "0.4"
 
@@ -25,6 +25,3 @@ serde = {version = "1", features = ["derive"]}
 envy = "0.4"
 jsonwebtoken = "7.0.0-alpha.2"
 tokio = { version = "0.2", features = ["full", "macros"] }
-
-[profile.release]
-debug = true
