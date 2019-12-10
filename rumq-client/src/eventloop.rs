@@ -9,7 +9,7 @@ use tokio::sync::mpsc::{channel, Sender, Receiver};
 use async_stream::stream;
 use pin_project::pin_project;
 use crate::state::{StateError, MqttState};
-use crate::MqttOptions;
+use crate::{MqttOptions, ReconnectOptions};
 
 use std::io;
 use std::time::Duration;
@@ -39,15 +39,16 @@ pub enum EventLoopError {
     Network(network::Error)
 }
 
-/// Eventloop which drives the client. Connects to the server and returs a stream to 
-/// be polled to handle incoming network packets and outgoing user requests. The
-/// implementation right now does tcp and mqtt connects before returning the eventloop.
-/// This might interfere with commands that needs to be catered on priority even during
-/// connections (e.g shutdown can't wait for a timeout of 5 seconds while connecting)
-/// TODO: Handle shutdown during connection
-/// TODO: The implementation of of user requests which are bounded streams (ends after
-/// producing 'n' elements) is not very clear yet. Probably the stream should end when
-/// all the state buffers are acked with a timeout
+/// Connects to the server and returs an object which encompasses state of the connection.
+/// Use this to create an `stream` and poll it with tokio 
+/// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
+/// internal state after the work with the stream is done. This is useful in scenarios like
+/// shutdown where the current state should be persisted and passed back to the `stream` as
+/// a `Stream`
+/// First connection is done here instead of the stream to initialize network directly without
+/// Option and to have good error code for failured. If using an encapsulated struct with
+/// connection parameters (with state inside `MqttEventLoop`) and handling indermediate critical
+/// errors (like intermediate authorization failure after initial success)
 pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<MqttEventLoop, EventLoopError> {
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     let mut state = MqttState::new(options.clone());
@@ -113,35 +114,96 @@ async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &
 
 
 impl MqttEventLoop {
-    pub fn mqtt(&mut self) -> impl Stream<Item = Notification> + '_ {
+    /// This stream handle mqtt state and reconnections. It's critical to define when to retry
+    /// and when to return error to the user. For example, intermediate mqtt auth failure should
+    /// be classified as hard error and retry shouldn't be performed. Same with TLS auth failures
+    /// Other soft error like server/intermediate node going down intemediately or should be 
+    /// either retried infinitely or number of times asked by the user.
+    /// Any hard errors are yielded as last `Notification::Error` element of the stream before
+    /// closing the stream. These can be converted to finer versions when necessary
+    /// There are no methods to poll the stream for the user. This is done to prevent extra copies
+    /// of user notifcations (if a channel is used)
+    /// NOTE: For cases where the steam should be inturrepted, user's should wrap the stream into
+    /// an interruptible stream. check `stream-cancel` for example. Usecases like shutdown can
+    /// depend on this to force stop the stream and use `MqttState` in `MqttEventLoop` to persist
+    /// it to disk
+    /// NOTE: Similary stream can be paused in the stream loop by user to pause the stream
+    /// TODO: Differentiate TLS auth errors and server being down
+    /// TODO: User requests which are bounded streams (ends after producing 'n' elements) or channels
+    /// which are closed before acks aren't received, the current implementation ends the mqtt stream 
+    /// immediately. Probably the stream should end when all the state buffers are acked with a timeout
+    pub fn stream(&mut self, reconnect: ReconnectOptions) -> impl Stream<Item = Notification> + '_ {
         let o = stream! {
-            loop {
-                let (notification, reply) = match self.read_network_and_requests().await {
-                    Ok(o) => o,
-                    Err(e) => {
-                        error!("Eventloop error = {:?}", e);
-                        break
-                    }
-                };
-
-                // write the reply back to the network
-                if let Some(p) = reply {
-                    match self.network.mqtt_write(&p).await {
-                        Ok(_) => (),
-                        Err(e) => {
-                            error!("Network write error = {:?}", e);
-                            break
+            'main: loop {
+                // loop which polls mqtt requests and network after a connection is established
+                'stream: loop {
+                    let (notification, reply) = match self.read_network_and_requests().await {
+                        Ok(o) => o,
+                        Err(EventLoopError::NoRequest) => {
+                            let error = format!("RequestStreamClosed");
+                            yield Notification::Error(error);
+                            break 'main
                         }
+                        Err(e) => {
+                            let error = format!("{:?}", e);
+                            yield Notification::Error(error);
+                            break 'stream
+                        }
+                    };
+
+                    // write the reply back to the network
+                    if let Some(p) = reply {
+                        match self.network.mqtt_write(&p).await {
+                            Ok(_) => (),
+                            Err(e) => {
+                                let error = format!("{:?}", e);
+                                yield Notification::Error(error);
+                                break 'stream
+                            }
+                        }
+                    }
+
+                    // yield the notification to the user
+                    if let Some(n) = notification { 
+                        yield n 
                     }
                 }
 
-                // yield the notification to the user
-                if let Some(n) = notification { 
-                    yield n 
+                // connection retry
+                'reconnection: loop {
+                    let mut network = match network_connect(&self.options).await {
+                        Ok(network) => network,
+                        Err(e) => {
+                            error!("Network connection error = {:?}", e);
+                            match reconnect {
+                                ReconnectOptions::Never => {
+                                    let err = format!("Network connection error = {:?}", e);
+                                    yield Notification::Error(err);
+                                    break 'main
+                                }
+                                ReconnectOptions::Always(sleep) => {
+                                    time::delay_for(sleep).await;
+                                    continue 'reconnection 
+                                }
+                                _ => unimplemented!()
+                            }
+                        }
+                    };
+                    
+                    if let Err(e) = mqtt_connect(&self.options, &mut network, &mut self.state).await {
+                        let error = format!("{:?}", e);
+                        yield Notification::Error(error);
+                        break 'main
+                    }
+
+                    // make network and user requests generic for better unit testing capabilities
+                    let network = Box::new(network);
+                    self.network = network;
+                    continue 'main
                 }
             }
         };
-        
+
         // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
         Box::pin(o)
     }
@@ -285,7 +347,7 @@ mod test {
     use std::thread;
     use super::MqttEventLoop;
     use crate::state::MqttState;
-    use crate::{Request, MqttOptions};
+    use crate::{Request, MqttOptions, ReconnectOptions};
 
     fn eventloop(requests: Receiver<Request>) -> (MqttEventLoop, Sender<Vec<u8>>, Receiver<Vec<u8>>) {
         let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
@@ -353,7 +415,7 @@ mod test {
     async fn throttled_requests_works_with_correct_delays_between_requests() {
         let (requests_tx, requests_rx) = channel(5);
         let (mut eventloop, tx, mut rx) = eventloop(requests_rx);
-        let mut eventloop = eventloop.mqtt();
+        let mut eventloop = eventloop.stream(ReconnectOptions::Never);
 
         thread::spawn(move || {
             requests(requests_tx);
