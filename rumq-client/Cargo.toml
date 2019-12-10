@@ -1,7 +1,10 @@
 [package]
 name = "rumq-client"
 version = "0.1.0-alpha.1"
-authors = ["tekjar <kraviteza@gmail.com>"]
+description = "An efficeint and robust mqtt client for your connected devices"
+license = "MIT"
+repository = "https://github.com/tekjar/rumq"
+authors = ["tekjar"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,7 +16,7 @@ async-stream = "0.2"
 futures-util = "0.3"
 webpki = "0.21"
 tokio-rustls = "0.12"
-rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.1"}
+rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.1" }
 log = "0.4"
 pin-project = "0.4"
 
