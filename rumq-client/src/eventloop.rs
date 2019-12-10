@@ -17,10 +17,10 @@ use std::time::Duration;
 #[pin_project]
 pub struct MqttEventLoop {
     pub state: MqttState,
-    options: MqttOptions,
+    pub options: MqttOptions,
+    pub requests: Box<dyn Requests>,
     queue_limit_tx: Sender<()>,
     queue_limit_rx: Receiver<()>,
-    requests: Box<dyn Requests>,
     network: Box<dyn  Network>,
     throttle_flag: bool,
     throttle: Instant
@@ -42,13 +42,23 @@ pub enum EventLoopError {
 /// Connects to the server and returs an object which encompasses state of the connection.
 /// Use this to create an `stream` and poll it with tokio 
 /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
-/// internal state after the work with the stream is done. This is useful in scenarios like
-/// shutdown where the current state should be persisted and passed back to the `stream` as
-/// a `Stream`
-/// First connection is done here instead of the stream to initialize network directly without
-/// Option and to have good error code for failured. If using an encapsulated struct with
-/// connection parameters (with state inside `MqttEventLoop`) and handling indermediate critical
-/// errors (like intermediate authorization failure after initial success)
+/// internal state and mqtt options after the work with the stream is done. This is useful in 
+/// scenarios like shutdown where the current state should be persisted and passed back to the
+/// `stream` as a `Stream`
+/// For a similar reason, requests are also initialized as part of this method to reuse same 
+/// request stream while retrying after the previous `Stream` from `stream()` method
+/// ```
+/// let mut eventloop = eventloop(options, requests);
+/// loop {
+///     let mut stream = eventloop.stream(reconnection_options);
+///     while let Some(notification) = stream.next().await() {}
+/// }
+/// ```
+/// When mqtt `stream` ends due to critical errors (like auth failure), user has a choice to 
+/// access and update `options`, `state` and `requests`.
+/// For example, state and requests can be used to save state to disk before shutdown.
+/// Options can be used to update gcp iotcore password
+/// TODO: Remove `mqttoptions` from `state` to make sure that there is not chance of dirty
 pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Result<MqttEventLoop, EventLoopError> {
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     let mut state = MqttState::new(options.clone());
@@ -132,7 +142,12 @@ impl MqttEventLoop {
     /// TODO: User requests which are bounded streams (ends after producing 'n' elements) or channels
     /// which are closed before acks aren't received, the current implementation ends the mqtt stream 
     /// immediately. Probably the stream should end when all the state buffers are acked with a timeout
+    /* 
     pub fn stream(&mut self, reconnect: ReconnectOptions) -> impl Stream<Item = Notification> + '_ {
+       unimplemented!() 
+    }
+    */
+    pub fn drive(&mut self, reconnect: ReconnectOptions) -> impl Stream<Item = Notification> + '_ {
         let o = stream! {
             'main: loop {
                 // loop which polls mqtt requests and network after a connection is established
