@@ -51,19 +51,6 @@ pub enum Command {
     Resume,
 }
 
-/// Control how the connection is re-established if it is lost.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ReconnectOptions {
-    /// Don't automatically reconnect
-    Never,
-    /// Always reconnect automatically.
-    /// Before a reconnection attempt, sleep for the specified amount of time
-    Always(Duration),
-    /// Always reconnect automatically.
-    /// Before a reconnection attempt, sleep for the specified amount of time
-    Count(u16, Duration),
-}
-
 /// Client authentication option for mqtt connect packet
 #[derive(Clone, Debug)]
 pub enum SecurityOptions {
@@ -277,7 +264,7 @@ impl MqttOptions {
 
 #[cfg(test)]
 mod test {
-    use super::{MqttOptions, ReconnectOptions};
+    use super::MqttOptions;
 
     #[test]
     #[should_panic]
