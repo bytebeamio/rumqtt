@@ -141,10 +141,30 @@ impl Publish {
 
 #[derive(Debug, Clone, PartialEq, Getters, Setters)]
 #[get = "pub"]
-#[set = "pub"]
 pub struct Subscribe {
+    #[set = "pub"]
     pub(crate) pkid: PacketIdentifier,
     pub(crate) topics: Vec<SubscribeTopic>,
+}
+
+pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
+    let topic = SubscribeTopic {
+        topic_path: topic.into(),
+        qos,
+    };
+
+    Subscribe {
+        pkid: PacketIdentifier(0),
+        topics: vec![topic],
+    }
+}
+
+impl Subscribe {
+    pub fn add(&mut self, topic: String, qos: QoS) -> &mut Self {
+        let topic = SubscribeTopic { topic_path: topic, qos };
+        self.topics.push(topic);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Getters)]
