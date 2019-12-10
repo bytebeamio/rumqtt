@@ -21,7 +21,6 @@ pub struct MqttEventLoop {
     pub requests: Box<dyn Requests>,
     queue_limit_tx: Sender<()>,
     queue_limit_rx: Receiver<()>,
-    network: Box<dyn  Network>,
     throttle_flag: bool,
     throttle: Instant
 }
@@ -63,20 +62,12 @@ pub async fn eventloop(options: MqttOptions, requests: impl Requests + 'static) 
     let (queue_limit_tx, queue_limit_rx) = channel(1);
     let mut state = MqttState::new(options.clone());
 
-    // make tcp and mqtt connections
-    let mut network = network_connect(&options).await?;
-    mqtt_connect(&options, &mut network, &mut state).await?;
-
-    // make network and user requests generic for better unit testing capabilities
-    let network = Box::new(network);
     let requests = Box::new(requests);
-
     let eventloop = MqttEventLoop {
         state,
         options,
         queue_limit_rx,
         queue_limit_tx,
-        network,
         requests,
         throttle_flag: false,
         throttle: Instant::now()
@@ -147,12 +138,17 @@ impl MqttEventLoop {
        unimplemented!() 
     }
     */
-    pub fn drive(&mut self, reconnect: ReconnectOptions) -> impl Stream<Item = Notification> + '_ {
+    pub fn stream(&mut self,  reconnect: ReconnectOptions) -> impl Stream<Item = Notification> + '_ {
         let o = stream! {
+            // make tcp and mqtt connections
+            let mut network = network_connect(&self.options).await.unwrap();
+            mqtt_connect(&self.options, &mut network, &mut self.state).await.unwrap();
+            let mut network = Box::new(network);
+            
             'main: loop {
                 // loop which polls mqtt requests and network after a connection is established
                 'stream: loop {
-                    let (notification, reply) = match self.read_network_and_requests().await {
+                    let (notification, reply) = match self.read_network_and_requests(&mut network).await {
                         Ok(o) => o,
                         Err(EventLoopError::NoRequest) => {
                             let error = format!("RequestStreamClosed");
@@ -168,7 +164,7 @@ impl MqttEventLoop {
 
                     // write the reply back to the network
                     if let Some(p) = reply {
-                        match self.network.mqtt_write(&p).await {
+                        match network.mqtt_write(&p).await {
                             Ok(_) => (),
                             Err(e) => {
                                 let error = format!("{:?}", e);
@@ -212,8 +208,7 @@ impl MqttEventLoop {
                     }
 
                     // make network and user requests generic for better unit testing capabilities
-                    let network = Box::new(network);
-                    self.network = network;
+                    network = Box::new(network);
                     continue 'main
                 }
             }
@@ -225,8 +220,7 @@ impl MqttEventLoop {
 
     /// Reads user requests stream and network stream concurrently and returns notification
     /// which should be sent to the user and packet which should be written to network
-    async fn read_network_and_requests(&mut self) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let network = &mut self.network;
+    async fn read_network_and_requests(&mut self, mut network: impl Network) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let requests = &mut self.requests;
         let throttle = &mut self.throttle;
         let delay = self.options.throttle;
