@@ -1,4 +1,4 @@
-#![recursion_limit = "300"]
+#![recursion_limit = "512"]
 
 #[macro_use]
 extern crate log;
@@ -49,19 +49,6 @@ pub enum Request {
 pub enum Command {
     Pause,
     Resume,
-}
-
-/// Control how the connection is re-established if it is lost.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ReconnectOptions {
-    /// Don't automatically reconnect
-    Never,
-    /// Always reconnect automatically.
-    /// Before a reconnection attempt, sleep for the specified amount of time
-    Always(Duration),
-    /// Always reconnect automatically.
-    /// Before a reconnection attempt, sleep for the specified amount of time
-    Count(u16, Duration),
 }
 
 /// Client authentication option for mqtt connect packet
@@ -277,7 +264,7 @@ impl MqttOptions {
 
 #[cfg(test)]
 mod test {
-    use super::{MqttOptions, ReconnectOptions};
+    use super::MqttOptions;
 
     #[test]
     #[should_panic]

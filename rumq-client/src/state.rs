@@ -333,8 +333,6 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use super::{MqttConnectionStatus, MqttState, Packet, StateError};
     use crate::{MqttOptions, Notification};
     use rumq_core::*;

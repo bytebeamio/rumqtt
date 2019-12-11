@@ -1,4 +1,6 @@
-# rumq [![img](https://github.com/tekjar/rumq/workflows/CI/badge.svg)](https://github.com/tekjar/rumq/actions)
+# rumq 
+[![img](https://github.com/tekjar/rumq/workflows/CI/badge.svg)](https://github.com/tekjar/rumq/actions)
+[![img](https://img.shields.io/discord/633193308033646605?style=flat-square)](https://discord.gg/mpkSqDg)
 
 MQTT ecosystem in rust which strives to be simple, robust and performant
 
