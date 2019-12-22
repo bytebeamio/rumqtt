@@ -24,7 +24,7 @@ pub struct MqttEventLoop {
 #[derive(From, Debug)]
 pub enum EventLoopError {
     Io(io::Error),
-    NoRequest,
+    RequestStreamDone,
     MqttState(StateError),
     Timeout(Elapsed),
     Rumq(rumq_core::Error),
@@ -64,56 +64,80 @@ pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Mqt
     eventloop
 }
 
-async fn network_connect(options: &MqttOptions) -> Result<Box<dyn Network>, EventLoopError> {
-    let network= time::timeout(Duration::from_secs(5), async {
-        if options.ca.is_some() {
-            let o = network::tls_connect(&options).await?;
-            let o = Box::new(o);
-            Ok::<Box<dyn Network>, EventLoopError>(o)
-        } else {
-            let o = network::tcp_connect(&options).await?;
-            let o = Box::new(o);
-            Ok::<Box<dyn Network>, EventLoopError>(o)
-        }
-    }).await??;
-
-    Ok(network)
-}
-
-
-async fn mqtt_connect(options: &MqttOptions, mut network: impl Network, state: &mut MqttState) -> Result<(), EventLoopError> {
-    let connect = connect_packet(options);
-
-    // mqtt connection with timeout
-    time::timeout(Duration::from_secs(5), async {
-        network.mqtt_write(&connect).await?;
-        state.handle_outgoing_connect()?;
-        Ok::<_, EventLoopError>(())
-    }).await??;
-
-    // wait for 'timeout' time to validate connack
-    time::timeout(Duration::from_secs(5), async {
-        let packet = network.mqtt_read().await?;
-        state.handle_incoming_connack(packet)?;
-        Ok::<_, EventLoopError>(())
-    }).await??;
-
-    Ok(())
-}
 
 
 impl MqttEventLoop {
-    /// This stream handle mqtt state and reconnections. 
+    async fn connect(&mut self) -> Result<Box<dyn Network>, EventLoopError> {
+        let mut network = self.network_connect().await?;
+        self.mqtt_connect(&mut network).await?;
+
+        Ok(network)
+    }
+
+    async fn network_connect(&self) -> Result<Box<dyn Network>, EventLoopError> {
+        let network= time::timeout(Duration::from_secs(5), async {
+            if self.options.ca.is_some() {
+                let o = network::tls_connect(&self.options).await?;
+                let o = Box::new(o);
+                Ok::<Box<dyn Network>, EventLoopError>(o)
+            } else {
+                let o = network::tcp_connect(&self.options).await?;
+                let o = Box::new(o);
+                Ok::<Box<dyn Network>, EventLoopError>(o)
+            }
+        }).await??;
+
+        Ok(network)
+    }
+
+
+    async fn mqtt_connect(&mut self, mut network: impl Network) -> Result<(), EventLoopError> {
+        let id = self.options.client_id();
+        let keep_alive = self.options.keep_alive().as_secs() as u16;
+        let clean_session = self.options.clean_session();
+
+        let mut connect = rumq_core::connect(id);
+        connect.set_keep_alive(keep_alive).set_clean_session(clean_session);
+
+        if let Some((username, password)) = self.options.credentials() {
+            connect.set_username(username).set_password(password);
+        }
+
+        // mqtt connection with timeout
+        time::timeout(Duration::from_secs(5), async {
+            network.mqtt_write(&Packet::Connect(connect)).await?;
+            self.state.handle_outgoing_connect()?;
+            Ok::<_, EventLoopError>(())
+        }).await??;
+
+        // wait for 'timeout' time to validate connack
+        time::timeout(Duration::from_secs(5), async {
+            let packet = network.mqtt_read().await?;
+            self.state.handle_incoming_connack(packet)?;
+            Ok::<_, EventLoopError>(())
+        }).await??;
+
+        Ok(())
+    }
+
+    /// The stream which powers mqtt. Polls user requests and network activity and yields
+    /// incoming packets.
+    /// 
+    /// NOTE: There are no methods to poll the stream internally for the user. This is done to prevent 
+    /// extra copies of user notifcations (if a channel is used)
+    /// 
     /// Instead of baking reconnections inside this stream and handling compllicated and
     /// opinionated uses cases like distingushing between critical and non critical errors,
     /// a different approach of separating state and connection is taken. This stream just
     /// borrows state from `MqttEventLoop` and when the stream ends due to errors, users can
     /// choose to use same `MqttEventLoop` to spawn a new stream and hence continuing from the
     /// previous state
+    ///
     /// All the stream errors are represented using Notification::Error() as the last element
     /// of the stream. Users can depend on this result to do error handling. For example, if
     /// gcp iot core disconnects because of jwt expiry, users can update `MqttOptions` in 
     /// `MqttEventLoop` and create a new stream.
+    ///
     /// With these techniques, the codebase becomes much simpler and robustness is just a matter
     /// of creating a loop like below
     /// ```ignore
@@ -123,36 +147,22 @@ impl MqttEventLoop {
     ///     while let Some(notification) = stream.next().await() {}
     /// }
     /// ```
-    /// NOTE: There are no methods to poll the stream internally for the user. This is done to prevent 
-    /// extra copies of user notifcations (if a channel is used)
-    /// NOTE: For cases where the steam should be inturrepted, user's should wrap the stream into
-    /// an interruptible stream. check `stream-cancel` for example. Usecases like shutdown can
-    /// depend on this to force stop the stream and use `MqttState` in `MqttEventLoop` to save
-    /// intermediate state to disk
-    /// NOTE: Similary stream can be paused in the stream loop by user to pause the stream
-    /// TODO: User requests which are bounded streams (ends after producing 'n' elements) or channels
-    /// which are closed before acks aren't received, the current implementation ends the mqtt stream 
-    /// immediately. Probably the stream should end when all the state buffers are acked with a timeout
     pub fn stream(&mut self) -> impl Stream<Item = Notification> + '_ {
         let o = stream! {
-            // make tcp and mqtt connections
-            let mut network = network_connect(&self.options).await.unwrap();
-            mqtt_connect(&self.options, &mut network, &mut self.state).await.unwrap();
-            let mut network = Box::new(network);
-
-            let mut runtime = Runtime::new(self.options.clone(), &mut self.state);
+            let mut network = match self.connect().await {
+                Ok(network) => network,
+                Err(e) => {
+                    yield Notification::Error(format!("{:?}", e));
+                    return
+                }
+            };
             
+            let mut runtime = Runtime::new(self.options.clone(), &mut self.state);
             loop {
                 let (notification, reply) = match runtime.read_network_and_requests(&mut self.requests, &mut network).await {
                     Ok(o) => o,
-                    Err(EventLoopError::NoRequest) => {
-                        let error = format!("RequestStreamClosed");
-                        yield Notification::Error(error);
-                        break
-                    }
                     Err(e) => {
-                        let error = format!("{:?}", e);
-                        yield Notification::Error(error);
+                        yield Notification::Error(format!("{:?}", e));
                         break
                     }
                 };
@@ -160,8 +170,7 @@ impl MqttEventLoop {
                 // write the reply back to the network
                 if let Some(p) = reply {
                     if let Err(e) = network.mqtt_write(&p).await {
-                        let error = format!("{:?}", e);
-                        yield Notification::Error(error);
+                        yield Notification::Error(format!("{:?}", e));
                         break
                     }
                 }
@@ -210,7 +219,7 @@ impl<'eventloop> Runtime<'eventloop> {
 
         let request = time::timeout(self.options.keep_alive, async {            
             let request = requests.next().await;
-            let request = request.ok_or(EventLoopError::NoRequest)?;
+            let request = request.ok_or(EventLoopError::RequestStreamDone)?;
             Ok::<_, EventLoopError>(request)
         });
 
@@ -260,20 +269,6 @@ impl<'eventloop> Runtime<'eventloop> {
         let notification = None;
         Ok((notification, request))
     }
-}
-
-fn connect_packet(mqttoptions: &MqttOptions) -> Packet {
-    let mut connect = rumq_core::connect(mqttoptions.client_id());
-
-    connect
-        .set_keep_alive(mqttoptions.keep_alive().as_secs() as u16)
-        .set_clean_session(mqttoptions.clean_session());
-
-    if let Some((username, password)) = mqttoptions.credentials() {
-        connect.set_username(username).set_password(password);
-    }
-
-    Packet::Connect(connect)
 }
 
 impl From<Request> for Packet {
