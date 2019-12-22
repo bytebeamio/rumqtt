@@ -4,7 +4,7 @@ use rumq_core::{self, Packet, MqttRead, MqttWrite};
 use futures_util::{select, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::time::{self, Instant, Elapsed};
+use tokio::time::{self, Elapsed};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use async_stream::stream;
 use pin_project::pin_project;
@@ -19,10 +19,6 @@ pub struct MqttEventLoop {
     pub state: MqttState,
     pub options: MqttOptions,
     pub requests: Box<dyn Requests>,
-    queue_limit_tx: Sender<()>,
-    queue_limit_rx: Receiver<()>,
-    throttle_flag: bool,
-    throttle: Instant
 }
 
 #[derive(From, Debug)]
@@ -56,18 +52,13 @@ pub enum EventLoopError {
 /// Options can be used to update gcp iotcore password
 /// TODO: Remove `mqttoptions` from `state` to make sure that there is not chance of dirty
 pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
-    let (queue_limit_tx, queue_limit_rx) = channel(1);
     let state = MqttState::new(options.clone());
     let requests = Box::new(requests);
-    
+
     let eventloop = MqttEventLoop {
         state,
         options,
-        queue_limit_rx,
-        queue_limit_tx,
         requests,
-        throttle_flag: false,
-        throttle: Instant::now()
     };
 
     eventloop
@@ -149,8 +140,10 @@ impl MqttEventLoop {
             mqtt_connect(&self.options, &mut network, &mut self.state).await.unwrap();
             let mut network = Box::new(network);
 
+            let mut runtime = Runtime::new(self.options.clone(), &mut self.state);
+            
             loop {
-                let (notification, reply) = match self.read_network_and_requests(&mut network).await {
+                let (notification, reply) = match runtime.read_network_and_requests(&mut self.requests, &mut network).await {
                     Ok(o) => o,
                     Err(EventLoopError::NoRequest) => {
                         let error = format!("RequestStreamClosed");
@@ -167,9 +160,9 @@ impl MqttEventLoop {
                 // write the reply back to the network
                 if let Some(p) = reply {
                     if let Err(e) = network.mqtt_write(&p).await {
-                            let error = format!("{:?}", e);
-                            yield Notification::Error(error);
-                            break
+                        let error = format!("{:?}", e);
+                        yield Notification::Error(error);
+                        break
                     }
                 }
 
@@ -181,42 +174,42 @@ impl MqttEventLoop {
         // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
         Box::pin(o)
     }
+}
+
+
+pub struct Runtime<'eventloop> {
+    options: MqttOptions,
+    state: &'eventloop mut MqttState,
+    queue_limit_tx: Sender<()>,
+    queue_limit_rx: Receiver<()>,
+}
+
+
+impl<'eventloop> Runtime<'eventloop> {
+    pub fn new(options: MqttOptions, state: &'eventloop mut MqttState) -> Runtime<'eventloop> {
+        let (queue_limit_tx, queue_limit_rx) = channel(1);
+
+        let runtime = Runtime {
+            options,
+            state,
+            queue_limit_tx,
+            queue_limit_rx
+        };
+
+        runtime
+    }
+
 
     /// Reads user requests stream and network stream concurrently and returns notification
     /// which should be sent to the user and packet which should be written to network
-    async fn read_network_and_requests(&mut self, mut network: impl Network) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let requests = &mut self.requests;
-        let throttle = &mut self.throttle;
-        let delay = self.options.throttle;
-        let throttle_flag = &mut self.throttle_flag;
-
+    async fn read_network_and_requests(&mut self, mut requests: impl Requests, mut network: impl Network) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let network = time::timeout(self.options.keep_alive, async {
             let packet = network.mqtt_read().await?;
             Ok::<_, EventLoopError>(packet)
         });
 
         let request = time::timeout(self.options.keep_alive, async {            
-            // apply throttling to requests. throttling is only applied
-            // after the last element is received to cater early returns
-            // due to timeoutss. after the delay, if timeout has happened 
-            // just before a request, next poll shouldn't cause same delay
-            //
-            // delay_until is used instead of delay_for incase timeout
-            // happens just before delay ends, next poll's delay shouldn't
-            // wait for `throttle` time. instead it should wait remaining time
-            if *throttle_flag && delay.is_some() {
-                time::delay_until(*throttle).await;
-                *throttle_flag = false;
-            }
-
             let request = requests.next().await;
-            *throttle_flag = true;
-
-            // Add delay for the next request
-            if let Some(delay) = delay {
-                *throttle = Instant::now() + delay;
-            }
-
             let request = request.ok_or(EventLoopError::NoRequest)?;
             Ok::<_, EventLoopError>(request)
         });
@@ -226,10 +219,9 @@ impl MqttEventLoop {
             o = request.fuse() => self.handle_request(o).await?
         };
 
-
-
         Ok((notification, outpacket))
     }
+
 
     async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
         let packet = match packet {
@@ -325,17 +317,12 @@ mod test {
         let options = MqttOptions::new("dummy", "test.mosquitto.org", 1883);
         let state = MqttState::new(options.clone());
         let requests = Box::new(requests);
-        let (queue_limit_tx, queue_limit_rx) = channel(1);
 
 
         let eventloop = MqttEventLoop {
             state,
             options,
-            queue_limit_rx,
-            queue_limit_tx,
             requests,
-            throttle_flag: false,
-            throttle: time::Instant::now()
         };
 
         eventloop
@@ -393,14 +380,14 @@ mod test {
         });
 
         /*
-        for _ in 0..10 {
-            dbg!();
-            let _notification = eventloop.next().await;
-            dbg!();
-            let packet = rx.next().await.unwrap();
-            println!("Packet = {:?}", packet);
-        }
-        */
+           for _ in 0..10 {
+           dbg!();
+           let _notification = eventloop.next().await;
+           dbg!();
+           let packet = rx.next().await.unwrap();
+           println!("Packet = {:?}", packet);
+           }
+           */
     }
 
     #[test]

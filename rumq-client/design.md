@@ -1,27 +1,54 @@
 
-TODO
+This doc is a journal. Make a blog out of this
+
+Primarily designed to efficiently perform streaming (unbounded) mqtt publishes and
+subscriptions in flaky networks. 
+
+But the design choices to take a `Stream` for user requests (publishes, subscriptions etc) and the
+eventloop it self being a `Stream` yielding incoming packets to the user makes other use cases easy to implement.
+
+
+With out boring myself and you with only details, let's try to dive in
+with some real world use cases
+
+
+##### Robustness (reconnections and retransmissions)
 ------
 
-- [X] Connection
-- [X] Publish and ack
-- [X] Keep alive
-- [X] Reconnection
-- [X] Throttling
-- [X] Size limited queues
-- [X] Tls
-- [ ] First alpha release
 
-Changelog
---------
-* Consistent use of DER encoded data for certs and keys everywhere. PEM file error return isn't clear to me in rustls
-* Don't panic when domain name does not match to sub_alt_name in the server certificate (https://github.com/ctz/rustls/issues/127)
-* Return proper error instead of panicking when the user provides ip instead of a domain name for a tls connection
 
+##### Pausing the network activity to cooperate with other processes which needs bandwidth
+------
+
+
+
+##### Shutting down the eventloop by saving current state to the disk
+------
+
+
+
+##### Disk aware request stream
+------
+
+
+
+
+##### Bounded requests
+------
+
+
+
+
+
+
+* Automatic reconnections
+* No commands for misc operations like network pause/
 Connection and Automatic reconnections
 -------
 
 Open question: When should event loop start taking control of reconnections? After initial success or should
 we expose options similar to current implementation? what should be the default behavior
+
 
 ```
 Reconnect::AfterFirstSuccess
@@ -53,7 +80,7 @@ reconnection behaviour.
 
 But why not leave the intermittent reconnection behaviour as well to the user you ask? 
 
-Because maintaining
+Because maintaini
 state is a much more complicated business than just retrying the connection. We don't want the user to think
 about mqttstate by default. If the user intends for a much more custom behaviour, he/she can use
 `Reconnect::Never` and pass the returned `MqttState` to the next connection.
