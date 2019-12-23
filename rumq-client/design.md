@@ -1,3 +1,4 @@
+-[ ] Make mqtt stream usable in `task::spawn`
 
 This doc is a journal. Make a blog out of this
 
