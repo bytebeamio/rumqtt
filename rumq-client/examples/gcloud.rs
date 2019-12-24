@@ -1,4 +1,3 @@
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::ops::Add;
 use std::env;
@@ -23,9 +22,9 @@ async fn main() {
     let mqttoptions = gcloud();
     let mut eventloop = eventloop(mqttoptions, requests_rx);
 
-    thread::spawn(move || {
-        requests(requests_tx);
-        thread::sleep(Duration::from_secs(100));
+    task::spawn(async move {
+        requests(requests_tx).await;
+        time::delay_for(Duration::from_secs(100)).await;
     });
 
     stream_it(&mut eventloop).await;
@@ -40,16 +39,13 @@ async fn stream_it(eventloop: &mut MqttEventLoop) {
     }
 }
 
-#[tokio::main(basic_scheduler)]
 async fn requests(mut requests_tx: Sender<Request>) {
-    task::spawn(async move {
-        for i in 0..10 {
-            requests_tx.send(publish_request(i)).await.unwrap();
-            time::delay_for(Duration::from_secs(1)).await; 
-        }
+    for i in 0..10 {
+        requests_tx.send(publish_request(i)).await.unwrap();
+        time::delay_for(Duration::from_secs(1)).await; 
+    }
 
-        time::delay_for(Duration::from_secs(100)).await; 
-    }).await.unwrap();
+    time::delay_for(Duration::from_secs(100)).await; 
 }
 
 fn gcloud() -> MqttOptions {
@@ -57,7 +53,7 @@ fn gcloud() -> MqttOptions {
     mqttoptions.set_keep_alive(15);
     let password = gen_iotcore_password();
     let ca = fs::read("certs/bike-1/roots.pem").unwrap();
-    
+
     mqttoptions
         .set_ca(ca)
         .set_credentials("unused", &password);

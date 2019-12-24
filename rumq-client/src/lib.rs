@@ -10,7 +10,7 @@ pub(crate) mod network;
 pub(crate) mod state;
 
 pub use eventloop::eventloop;
-pub use eventloop::MqttEventLoop;
+pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use rumq_core::*;
 
 /// Incoming notifications from the broker
@@ -24,7 +24,7 @@ pub enum Notification {
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
     Suback(PacketIdentifier),
-    Error(String),
+    Error(EventLoopError),
 }
 
 #[doc(hidden)]

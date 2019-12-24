@@ -152,7 +152,7 @@ impl MqttEventLoop {
             let mut network = match self.connect().await {
                 Ok(network) => network,
                 Err(e) => {
-                    yield Notification::Error(format!("{:?}", e));
+                    yield Notification::Error(e);
                     return
                 }
             };
@@ -167,7 +167,7 @@ impl MqttEventLoop {
                 let (notification, reply) = match runtime.read_network_and_requests(&mut requests, &mut network).await {
                     Ok(o) => o,
                     Err(e) => {
-                        yield Notification::Error(format!("{:?}", e));
+                        yield Notification::Error(e);
                         break
                     }
                 };
@@ -175,7 +175,7 @@ impl MqttEventLoop {
                 // write the reply back to the network
                 if let Some(p) = reply {
                     if let Err(e) = network.mqtt_write(&p).await {
-                        yield Notification::Error(format!("{:?}", e));
+                        yield Notification::Error(e.into());
                         break
                     }
                 }
@@ -291,8 +291,8 @@ impl From<Request> for Packet {
 trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
 impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
 
-pub trait Requests: Stream<Item = Request> + Unpin {}
-impl<T> Requests for T where T: Stream<Item = Request> + Unpin {}
+pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
+impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
 
 
 #[cfg(test)]
@@ -303,7 +303,6 @@ mod test {
     use tokio::{time, task};
     use futures_util::stream::StreamExt;
     use std::time::{Instant, Duration};
-    use std::thread;
     use crate::{Request, MqttOptions};
 
     async fn start_requests(mut requests_tx: Sender<Request>) {
@@ -358,17 +357,12 @@ mod test {
         });
 
         // start the eventloop
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(1));
-            #[tokio::main(basic_scheduler)]
-            async fn eventloop(options: MqttOptions, requests_rx: Receiver<Request>) {
-                let mut eventloop = super::eventloop(options, requests_rx); 
-                let mut stream = eventloop.stream();
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut stream = eventloop.stream();
 
-                while let Some(_) = stream.next().await {}
-            }
-
-            eventloop(options, requests_rx)
+            while let Some(_) = stream.next().await {}
         });
 
 
