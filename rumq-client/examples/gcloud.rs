@@ -40,7 +40,7 @@ async fn stream_it(eventloop: &mut MqttEventLoop) {
 }
 
 async fn requests(mut requests_tx: Sender<Request>) {
-    for i in 0..10 {
+    for i in 0..15 {
         requests_tx.send(publish_request(i)).await.unwrap();
         time::delay_for(Duration::from_secs(1)).await; 
     }
@@ -50,7 +50,7 @@ async fn requests(mut requests_tx: Sender<Request>) {
 
 fn gcloud() -> MqttOptions {
     let mut mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
-    mqttoptions.set_keep_alive(15);
+    mqttoptions.set_keep_alive(5);
     let password = gen_iotcore_password();
     let ca = fs::read("certs/bike-1/roots.pem").unwrap();
 
@@ -65,7 +65,8 @@ fn publish_request(i: u8) -> Request {
     let topic = "/devices/".to_owned() +  "bike-1/events/imu";
     let payload = vec![1, 2, 3, i];
 
-    let publish = rumq_client::publish(topic, payload);
+    let mut publish = rumq_client::publish(topic, payload);
+    publish.set_qos(rumq_core::QoS::AtMostOnce);
     Request::Publish(publish)
 }
 

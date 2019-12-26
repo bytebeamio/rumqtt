@@ -1,4 +1,5 @@
 -[ ] Make mqtt stream usable in `task::spawn`
+-[ ] Make core publish take qos with publish
 
 This doc is a journal. Make a blog out of this
 

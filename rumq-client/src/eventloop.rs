@@ -157,14 +157,13 @@ impl MqttEventLoop {
                 }
             };
 
-            // throttle is part of this method and not the `eventloop` because users might want
-            // to consume request stream in the eventloop with full speed after mqtt stream
-            // stops in between
-            let mut requests = time::throttle(self.options.throttle, &mut self.requests);
-            let mut runtime = Runtime::new(self.options.clone(), &mut self.state);
+            let mut network_stream = network_stream(self.options.keep_alive, network);
+            let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut self.requests);
+            
 
+            let mut runtime = Runtime::new(self.options.clone(), &mut self.state);
             loop {
-                let (notification, reply) = match runtime.read_network_and_requests(&mut requests, &mut network).await {
+                let (notification, reply) = match runtime.read_network_and_requests(&mut self.requests, &mut network).await {
                     Ok(o) => o,
                     Err(e) => {
                         yield Notification::Error(e);
@@ -190,6 +189,49 @@ impl MqttEventLoop {
     }
 }
 
+fn request_stream(keep_alive: Duration, throttle: Duration, mut requests: impl Requests + 'static) -> impl Stream<Item = Packet> + 'static {
+    stream! {
+        let mut requests = time::throttle(throttle, &mut requests);
+        
+        loop {
+            let timeout_request = time::timeout(keep_alive, async {
+                let request = requests.next().await;
+                request
+            }).await;
+
+
+            match timeout_request {
+                Ok(Some(request)) => yield request.into(),
+                Ok(None) => break,
+                Err(_) => yield Packet::Pingreq
+            }
+        }
+    }
+}
+
+fn network_stream(keep_alive: Duration, mut network: impl Network + 'static) -> impl Stream<Item = Packet> + 'static {
+    stream! {
+        loop {
+            let timeout_packet = time::timeout(keep_alive, async {
+                let packet = network.mqtt_read().await;
+                packet
+            }).await;
+
+            let packet = match timeout_packet {
+                Ok(p) => p,
+                Err(_) => {
+                    yield Packet::Pingreq;
+                    continue
+                }
+            };
+
+            match packet {
+                Ok(packet) => yield packet,
+                Err(_) => break 
+            }
+        }
+    }
+}
 
 pub struct Runtime<'eventloop> {
     options: MqttOptions,
