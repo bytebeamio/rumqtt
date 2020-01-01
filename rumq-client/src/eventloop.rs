@@ -1,7 +1,7 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::{self, Packet, MqttRead, MqttWrite};
-use futures_util::{select, FutureExt};
+use futures_util::{select, pin_mut, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{self, Elapsed};
@@ -14,8 +14,11 @@ use crate::MqttOptions;
 use std::io;
 use std::time::Duration;
 
-#[pin_project]
 pub struct MqttEventLoop {
+    runtime: Option<Runtime>
+}
+
+pub struct Runtime {
     pub state: MqttState,
     pub options: MqttOptions,
     pub requests: Box<dyn Requests>,
@@ -55,18 +58,99 @@ pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Mqt
     let state = MqttState::new(options.clone());
     let requests = Box::new(requests);
 
-    let eventloop = MqttEventLoop {
+    let  runtime = Runtime {
         state,
         options,
         requests,
     };
 
+    let eventloop = MqttEventLoop { runtime: Some(runtime) };
     eventloop
 }
 
+fn stream(mut runtime: Runtime) -> impl Stream<Item = Notification> {
+    stream! {
+        let mut network = match runtime.connect().await {
+            Ok(network) => network,
+            Err(e) => {
+                yield Notification::Error(e);
+                return
+            }
+        };
+
+        // let mut network_stream = network_stream(runtime.options.keep_alive, &mut network);
+        // let mut request_stream = request_stream(runtime.options.keep_alive, runtime.options.throttle, &mut runtime.requests);
+
+        pin_mut!(network);
+        
+        loop {
+            let (notification, outpacket) = select! {
+                o = network.mqtt_read().fuse() => runtime.handle_packet(o.unwrap()).await.unwrap(),
+                o = runtime.requests.next().fuse() => runtime.handle_request(o.unwrap()).await.unwrap(),
+            };
+            
+            // write the reply back to the network
+            if let Some(p) = outpacket {
+                if let Err(e) = network.mqtt_write(&p).await {
+                    yield Notification::Error(e.into());
+                    break
+                }
+            }
+
+            // yield the notification to the user
+            if let Some(n) = notification { yield n }
+        }
+    }
+}
+
+fn request_stream<R: Requests>(keep_alive: Duration, throttle: Duration, requests: R) -> impl Stream<Item = Packet> {
+    stream! {
+        let mut requests = time::throttle(throttle, requests);
+
+        loop {
+            let timeout_request = time::timeout(keep_alive, async {
+                let request = requests.next().await;
+                request
+            }).await;
 
 
-impl MqttEventLoop {
+            match timeout_request {
+                Ok(Some(request)) => yield request.into(),
+                Ok(None) => break,
+                Err(_) => {
+                    let packet = Packet::Pingreq;
+                    yield packet
+                }
+            }
+        }
+    }
+}
+
+fn network_stream<S: Network>(keep_alive: Duration, mut network: S) -> impl Stream<Item = Packet> {
+    stream! {
+        loop {
+            let timeout_packet = time::timeout(keep_alive, async {
+                let packet = network.mqtt_read().await;
+                packet
+            }).await;
+
+            let packet = match timeout_packet {
+                Ok(p) => p,
+                Err(_) => {
+                    yield Packet::Pingreq;
+                    continue
+                }
+            };
+
+            match packet {
+                Ok(packet) => yield packet,
+                Err(_) => break 
+            }
+        }
+    }
+}
+
+impl Runtime {
     async fn connect(&mut self) -> Result<Box<dyn Network>, EventLoopError> {
         let mut network = self.network_connect().await?;
         self.mqtt_connect(&mut network).await?;
@@ -120,198 +204,15 @@ impl MqttEventLoop {
         Ok(())
     }
 
-    /// The stream which powers mqtt. Polls user requests and network activity and yields
-    /// incoming packets.
-    /// 
-    /// NOTE: There are no methods to poll the stream internally for the user. This is done to prevent 
-    /// extra copies of user notifcations (if a channel is used)
-    /// 
-    /// Instead of baking reconnections inside this stream and handling complicated and
-    /// opinionated uses cases like distingushing between critical and non critical errors,
-    /// a different approach of separating state and connection is taken. This stream just
-    /// borrows state from `MqttEventLoop` and when the stream ends due to errors, users can
-    /// choose to use same `MqttEventLoop` to spawn a new stream and hence continuing from the
-    /// previous state
-    ///
-    /// All the stream errors are represented using Notification::Error() as the last element
-    /// of the stream. Users can depend on this result to do error handling. For example, if
-    /// gcp iot core disconnects because of jwt expiry, users can update `MqttOptions` in 
-    /// `MqttEventLoop` and create a new stream.
-    ///
-    /// With these techniques, the codebase becomes much simpler and robustness is just a matter
-    /// of creating a loop like below
-    /// ```ignore
-    /// let mut eventloop = eventloop(options, requests);
-    /// loop {
-    ///     let mut stream = eventloop.stream();
-    ///     while let Some(notification) = stream.next().await() {}
-    /// }
-    /// ```
-    pub fn stream(&mut self) -> impl Stream<Item = Notification> + '_ {
-        let o = stream! {
-            let mut network = match self.connect().await {
-                Ok(network) => network,
-                Err(e) => {
-                    yield Notification::Error(e);
-                    return
-                }
-            };
-
-            let mut network_stream = network_stream(self.options.keep_alive, network);
-            let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut self.requests);
-            
-
-            let mut runtime = Runtime::new(self.options.clone(), &mut self.state);
-            loop {
-                let (notification, reply) = match runtime.read_network_and_requests(&mut self.requests, &mut network).await {
-                    Ok(o) => o,
-                    Err(e) => {
-                        yield Notification::Error(e);
-                        break
-                    }
-                };
-
-                // write the reply back to the network
-                if let Some(p) = reply {
-                    if let Err(e) = network.mqtt_write(&p).await {
-                        yield Notification::Error(e.into());
-                        break
-                    }
-                }
-
-                // yield the notification to the user
-                if let Some(n) = notification { yield n }
-            }
-        };
-
-        // https://rust-lang.github.io/async-book/04_pinning/01_chapter.html
-        Box::pin(o)
-    }
-}
-
-fn request_stream(keep_alive: Duration, throttle: Duration, mut requests: impl Requests + 'static) -> impl Stream<Item = Packet> + 'static {
-    stream! {
-        let mut requests = time::throttle(throttle, &mut requests);
-        
-        loop {
-            let timeout_request = time::timeout(keep_alive, async {
-                let request = requests.next().await;
-                request
-            }).await;
-
-
-            match timeout_request {
-                Ok(Some(request)) => yield request.into(),
-                Ok(None) => break,
-                Err(_) => yield Packet::Pingreq
-            }
-        }
-    }
-}
-
-fn network_stream(keep_alive: Duration, mut network: impl Network + 'static) -> impl Stream<Item = Packet> + 'static {
-    stream! {
-        loop {
-            let timeout_packet = time::timeout(keep_alive, async {
-                let packet = network.mqtt_read().await;
-                packet
-            }).await;
-
-            let packet = match timeout_packet {
-                Ok(p) => p,
-                Err(_) => {
-                    yield Packet::Pingreq;
-                    continue
-                }
-            };
-
-            match packet {
-                Ok(packet) => yield packet,
-                Err(_) => break 
-            }
-        }
-    }
-}
-
-pub struct Runtime<'eventloop> {
-    options: MqttOptions,
-    state: &'eventloop mut MqttState,
-    queue_limit_tx: Sender<()>,
-    queue_limit_rx: Receiver<()>,
-}
-
-
-impl<'eventloop> Runtime<'eventloop> {
-    pub fn new(options: MqttOptions, state: &'eventloop mut MqttState) -> Runtime<'eventloop> {
-        let (queue_limit_tx, queue_limit_rx) = channel(1);
-
-        let runtime = Runtime {
-            options,
-            state,
-            queue_limit_tx,
-            queue_limit_rx
-        };
-
-        runtime
-    }
-
-
-    /// Reads user requests stream and network stream concurrently and returns notification
-    /// which should be sent to the user and packet which should be written to network
-    async fn read_network_and_requests(&mut self, mut requests: impl Requests, mut network: impl Network) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let network = time::timeout(self.options.keep_alive, async {
-            let packet = network.mqtt_read().await?;
-            Ok::<_, EventLoopError>(packet)
-        });
-
-        let request = time::timeout(self.options.keep_alive, async {            
-            let request = requests.next().await;
-            let request = request.ok_or(EventLoopError::RequestStreamDone)?;
-            Ok::<_, EventLoopError>(request)
-        });
-
-        let (notification, outpacket) = select! {
-            o = network.fuse() => self.handle_packet(o).await?,
-            o = request.fuse() => self.handle_request(o).await?
-        };
-
-        Ok((notification, outpacket))
-    }
-
-
-    async fn handle_packet(&mut self, packet: Result<Result<Packet, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let packet = match packet {
-            Ok(packet) => packet,
-            Err(_) => {
-                self.state.handle_outgoing_ping()?;
-                return Ok((None, Some(Packet::Pingreq)))
-            }
-        };
-
-        let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet?)?;
-        if self.state.outgoing_pub.len() > self.options.inflight {
-            let _ = self.queue_limit_tx.send(()).await;
-        }
-
+    async fn handle_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+        let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet)?;
         Ok((notification, reply))
     }
 
-    async fn handle_request(&mut self, request: Result<Result<Request, EventLoopError>, Elapsed>) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
-        let request = match request {
-            Ok(request) => request,
-            Err(_) => {
-                self.state.handle_outgoing_ping()?;
-                return Ok((None, Some(Packet::Pingreq)))
-            }
-        };
-
-        if self.state.outgoing_pub.len() > self.options.inflight {
-            self.queue_limit_rx.recv().await;
-        }
-
+    async fn handle_request(&mut self, request: Request) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
         // outgoing packet handle is only user for requests, not replys. this ensures
         // ping debug print show last request time, not reply time
-        let request = self.state.handle_outgoing_mqtt_packet(request?.into());
+        let request = self.state.handle_outgoing_mqtt_packet(request.into());
         let request = Some(request);
         let notification = None;
         Ok((notification, request))
