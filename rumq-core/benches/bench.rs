@@ -24,10 +24,10 @@ fn publish_deserialize_perf(bench: &mut Bencher) {
     let mut stream = stream(100);
     
     bench.iter(|| {
-        black_box(runtime.block_on(async {
-            let packet = stream.mqtt_read().await.unwrap();
+        runtime.block_on(async {
+            let _packet = stream.mqtt_read().await.unwrap();
             stream.set_position(0);
-        }))
+        })
     });
 }
 

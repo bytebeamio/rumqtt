@@ -1,13 +1,12 @@
 use crate::*;
 
-use tokio_byteorder::{BigEndian, AsyncReadBytesExt};
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
 use std::sync::Arc;
 
 #[async_trait]
-pub trait MqttRead: AsyncReadBytesExt + Unpin {
+pub trait MqttRead: AsyncReadExt + Unpin {
     async fn mqtt_read(&mut self) -> Result<Packet, Error> {
         let p = self.read_u8().await?;
         let remaining_len = self.read_remaining_length().await?;
@@ -34,22 +33,22 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
             PacketType::Publish => Ok(Packet::Publish(self.read_publish(byte1, remaining_len).await?)),
             PacketType::Puback if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Puback => {
-                let pkid = self.read_u16::<BigEndian>().await?;
+                let pkid = self.read_u16().await?;
                 Ok(Packet::Puback(PacketIdentifier(pkid)))
             }
             PacketType::Pubrec if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Pubrec => {
-                let pkid = self.read_u16::<BigEndian>().await?;
+                let pkid = self.read_u16().await?;
                 Ok(Packet::Pubrec(PacketIdentifier(pkid)))
             }
             PacketType::Pubrel if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Pubrel => {
-                let pkid = self.read_u16::<BigEndian>().await?;
+                let pkid = self.read_u16().await?;
                 Ok(Packet::Pubrel(PacketIdentifier(pkid)))
             }
             PacketType::Pubcomp if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Pubcomp => {
-                let pkid = self.read_u16::<BigEndian>().await?;
+                let pkid = self.read_u16().await?;
                 Ok(Packet::Pubcomp(PacketIdentifier(pkid)))
             }
             PacketType::Subscribe => Ok(Packet::Subscribe(
@@ -61,7 +60,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
             )),
             PacketType::Unsuback if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Unsuback => {
-                let pkid = self.read_u16::<BigEndian>().await?;
+                let pkid = self.read_u16().await?;
                 Ok(Packet::Unsuback(PacketIdentifier(pkid)))
             }
             PacketType::Pingreq => Err(Error::IncorrectPacketFormat),
@@ -79,7 +78,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
         };
 
         let connect_flags = self.read_u8().await?;
-        let keep_alive = self.read_u16::<BigEndian>().await?;
+        let keep_alive = self.read_u16().await?;
         let client_id = self.read_mqtt_string().await?;
 
         let last_will = match connect_flags & 0b100 {
@@ -146,7 +145,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
         // Packet identifier exists where QoS > 0
         let pkid = match qos {
             QoS::AtMostOnce => None,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => Some(PacketIdentifier(self.read_u16::<BigEndian>().await?))
+            QoS::AtLeastOnce | QoS::ExactlyOnce => Some(PacketIdentifier(self.read_u16().await?))
         };
 
         // variable header len = len of topic (2 bytes) + topic.len() + [optional packet id (2 bytes)]
@@ -172,7 +171,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
     }
 
     async fn read_subscribe(&mut self, remaining_len: usize) -> Result<Subscribe, Error> {
-        let pkid = self.read_u16::<BigEndian>().await?;
+        let pkid = self.read_u16().await?;
 
         // variable header size = 2
         // variable header + payload - variable header
@@ -196,7 +195,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
     }
 
     async fn read_suback(&mut self, remaining_len: usize) -> Result<Suback, Error> {
-        let pkid = self.read_u16::<BigEndian>().await?;
+        let pkid = self.read_u16().await?;
         let mut payload_bytes = remaining_len - 2;
         let mut return_codes = Vec::with_capacity(payload_bytes);
 
@@ -217,7 +216,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
     }
 
     async fn read_unsubscribe(&mut self, remaining_len: usize) -> Result<Unsubscribe, Error> {
-        let pkid = self.read_u16::<BigEndian>().await?;
+        let pkid = self.read_u16().await?;
         let mut payload_bytes = remaining_len - 2;
         let mut topics = Vec::with_capacity(1);
 
@@ -234,7 +233,7 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
     }
 
     async fn read_mqtt_string(&mut self) -> Result<String, Error> {
-        let len = self.read_u16::<BigEndian>().await? as usize;
+        let len = self.read_u16().await? as usize;
         let mut data = Vec::with_capacity(len);
         
         let mut s = self.take(len as u64);
@@ -263,8 +262,8 @@ pub trait MqttRead: AsyncReadBytesExt + Unpin {
     }
 }
 
-/// Implement MattRead for every AsyncReadBytesExt type (and hence AsyncRead type)
-impl<R: AsyncReadBytesExt + ?Sized + Unpin> MqttRead for R {}
+/// Implement MattRead for every AsyncReadExt type (and hence AsyncRead type)
+impl<R: AsyncReadExt + ?Sized + Unpin> MqttRead for R {}
 
 #[cfg(test)]
 mod test {

@@ -1,0 +1,25 @@
+
+running 13 tests
+test deserialize::test::read_packet_connack_works ... ignored
+test deserialize::test::read_packet_connect_mqtt_protocol ... ignored
+test deserialize::test::read_packet_puback_works ... ignored
+test deserialize::test::read_packet_publish_qos0_works ... ignored
+test deserialize::test::read_packet_publish_qos1_works ... ignored
+test deserialize::test::read_packet_suback_works ... ignored
+test deserialize::test::read_packet_subscribe_works ... ignored
+test deserialize::test::read_packet_unsubscribe_works ... ignored
+test serialize::test::write_packet_connack_works ... ignored
+test serialize::test::write_packet_connect_mqtt_protocol_works ... ignored
+test serialize::test::write_packet_publish_at_least_once_works ... ignored
+test serialize::test::write_packet_publish_at_most_once_works ... ignored
+test serialize::test::write_packet_subscribe_works ... ignored
+
+test result: ok. 0 passed; 0 failed; 13 ignored; 0 measured; 0 filtered out
+
+
+running 2 tests
+test publish_deserialize_perf ... bench:         669 ns/iter (+/- 5)
+test publish_serialize_perf   ... bench:         317 ns/iter (+/- 1)
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 2 measured
+
