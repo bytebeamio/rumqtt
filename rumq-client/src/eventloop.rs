@@ -1,22 +1,36 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::{self, Packet, MqttRead, MqttWrite};
-use futures_util::{select, pin_mut, FutureExt};
+use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::time::{self, Elapsed};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use async_stream::stream;
-use pin_project::pin_project;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
 
 use std::io;
 use std::time::Duration;
+use std::task::{Poll, Context};
+use std::pin::Pin;
 
 pub struct MqttEventLoop {
     runtime: Option<Runtime>,
     stream: Box<dyn Stream<Item = Notification>>
+}
+
+
+impl Stream for MqttEventLoop {
+    type Item = Notification;
+    
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let mut stream = self.stream;
+        pin_mut!(stream);
+        
+        let o = ready!(stream.poll_next(cx));
+        unimplemented!();
+    }
 }
 
 pub struct Runtime {
