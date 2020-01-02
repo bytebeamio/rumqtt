@@ -3,7 +3,7 @@ use derive_more::From;
 use rumq_core::{self, Packet, MqttRead, MqttWrite};
 use futures_util::{select, pin_mut, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::time::{self, Elapsed};
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use async_stream::stream;
@@ -15,13 +15,13 @@ use std::io;
 use std::time::Duration;
 
 pub struct MqttEventLoop {
-    runtime: Option<Runtime>
+    runtime: Option<Runtime>,
+    stream: Box<dyn Stream<Item = Notification>>
 }
 
 pub struct Runtime {
     pub state: MqttState,
     pub options: MqttOptions,
-    pub requests: Box<dyn Requests>,
 }
 
 #[derive(From, Debug)]
@@ -61,14 +61,14 @@ pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Mqt
     let  runtime = Runtime {
         state,
         options,
-        requests,
     };
 
-    let eventloop = MqttEventLoop { runtime: Some(runtime) };
+    let stream = stream(runtime, requests);
+    let eventloop = MqttEventLoop { runtime: None, stream: Box::new(stream) };
     eventloop
 }
 
-fn stream(mut runtime: Runtime) -> impl Stream<Item = Notification> {
+fn stream<R: Requests>(mut runtime: Runtime, mut requests: R) -> impl Stream<Item = Notification> {
     stream! {
         let mut network = match runtime.connect().await {
             Ok(network) => network,
@@ -78,20 +78,22 @@ fn stream(mut runtime: Runtime) -> impl Stream<Item = Notification> {
             }
         };
 
-        // let mut network_stream = network_stream(runtime.options.keep_alive, &mut network);
-        // let mut request_stream = request_stream(runtime.options.keep_alive, runtime.options.throttle, &mut runtime.requests);
+        let (network_rx, mut network_tx) = split(network);
+        let mut network_stream = network_stream(runtime.options.keep_alive, network_rx);
+        let mut request_stream = request_stream(runtime.options.keep_alive, runtime.options.throttle, &mut requests);
 
-        pin_mut!(network);
+        pin_mut!(network_stream);
+        pin_mut!(request_stream);
         
         loop {
             let (notification, outpacket) = select! {
-                o = network.mqtt_read().fuse() => runtime.handle_packet(o.unwrap()).await.unwrap(),
-                o = runtime.requests.next().fuse() => runtime.handle_request(o.unwrap()).await.unwrap(),
+                o = network_stream.next().fuse() => runtime.handle_packet(o.unwrap()).await.unwrap(),
+                o = request_stream.next().fuse() => runtime.handle_request(o.unwrap()).await.unwrap(),
             };
             
             // write the reply back to the network
             if let Some(p) = outpacket {
-                if let Err(e) = network.mqtt_write(&p).await {
+                if let Err(e) = network_tx.mqtt_write(&p).await {
                     yield Notification::Error(e.into());
                     break
                 }
@@ -126,7 +128,7 @@ fn request_stream<R: Requests>(keep_alive: Duration, throttle: Duration, request
     }
 }
 
-fn network_stream<S: Network>(keep_alive: Duration, mut network: S) -> impl Stream<Item = Packet> {
+fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl Stream<Item = Packet> {
     stream! {
         loop {
             let timeout_packet = time::timeout(keep_alive, async {
@@ -209,10 +211,10 @@ impl Runtime {
         Ok((notification, reply))
     }
 
-    async fn handle_request(&mut self, request: Request) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
+    async fn handle_request(&mut self, request: Packet) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
         // outgoing packet handle is only user for requests, not replys. this ensures
         // ping debug print show last request time, not reply time
-        let request = self.state.handle_outgoing_mqtt_packet(request.into());
+        let request = self.state.handle_outgoing_mqtt_packet(request);
         let request = Some(request);
         let notification = None;
         Ok((notification, request))
@@ -233,6 +235,9 @@ impl From<Request> for Packet {
 
 trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
 impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
+
+trait NetworkRead: AsyncRead + Unpin + Send {}
+impl<T> NetworkRead for T where T: AsyncRead + Unpin + Send {}
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
