@@ -24,14 +24,11 @@ async fn main() {
 
 
     stream_it(&mut eventloop).await;
-    println!("State = {:?}", eventloop.state);
 }
 
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.stream();
-
-    while let Some(item) = stream.next().await {
+    while let Some(item) = eventloop.next().await {
         println!("{:?}", item);
     }
 }

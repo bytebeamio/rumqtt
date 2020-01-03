@@ -382,7 +382,7 @@ mod test {
 
         // Packet id shouldn't be set and publish shouldn't be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish) {
-            Packet::Publish(p) => p,
+            Ok(Packet::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(*publish_out.pkid(), None);
@@ -393,7 +393,7 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Packet::Publish(p) => p,
+            Ok(Packet::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(1)));
@@ -401,7 +401,7 @@ mod test {
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Packet::Publish(p) => p,
+            Ok(Packet::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(2)));
@@ -412,7 +412,7 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Packet::Publish(p) => p,
+            Ok(Packet::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(3)));
@@ -420,7 +420,7 @@ mod test {
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Packet::Publish(p) => p,
+            Ok(Packet::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(*publish_out.pkid(), Some(PacketIdentifier(4)));
@@ -472,8 +472,8 @@ mod test {
         let publish1 = build_outgoing_publish(QoS::AtLeastOnce);
         let publish2 = build_outgoing_publish(QoS::ExactlyOnce);
 
-        mqtt.handle_outgoing_publish(publish1);
-        mqtt.handle_outgoing_publish(publish2);
+        mqtt.handle_outgoing_publish(publish1).unwrap();
+        mqtt.handle_outgoing_publish(publish2).unwrap();
 
         mqtt.handle_incoming_puback(PacketIdentifier(1)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 1);
@@ -514,7 +514,7 @@ mod test {
         let mut mqtt = build_mqttstate();
 
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
-        mqtt.handle_outgoing_publish(publish);
+        mqtt.handle_outgoing_publish(publish).unwrap();
 
         let (notification, request) = mqtt.handle_incoming_pubrec(PacketIdentifier(1)).unwrap();
 
@@ -554,7 +554,7 @@ mod test {
         let mut mqtt = build_mqttstate();
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
 
-        mqtt.handle_outgoing_publish(publish);
+        mqtt.handle_outgoing_publish(publish).unwrap();
         mqtt.handle_incoming_pubrec(PacketIdentifier(1)).unwrap();
         println!("{:?}", mqtt);
 
@@ -573,7 +573,7 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish));
+        mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish)).unwrap();
         mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
 
         // should throw error because we didn't get pingresp for previous ping

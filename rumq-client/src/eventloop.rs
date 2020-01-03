@@ -38,11 +38,12 @@ pub struct Runtime {
 #[derive(From, Debug)]
 pub enum EventLoopError {
     Io(io::Error),
-    RequestStreamDone,
     MqttState(StateError),
     Timeout(Elapsed),
     Rumq(rumq_core::Error),
-    Network(network::Error)
+    Network(network::Error),
+    RequestStreamClosed,
+    NetworkStreamClosed
 }
 
 /// Returns an object which encompasses state of the connection.
@@ -84,7 +85,7 @@ fn stream<R: Requests>(mut runtime: Runtime, mut requests: R) -> impl Stream<Ite
         let mut network = match runtime.connect().await {
             Ok(network) => network,
             Err(e) => {
-                yield Notification::Error(e);
+                yield Notification::StreamEnd(e, runtime.options, runtime.state);
                 return
             }
         };
@@ -97,20 +98,28 @@ fn stream<R: Requests>(mut runtime: Runtime, mut requests: R) -> impl Stream<Ite
         pin_mut!(request_stream);
         
         loop {
-            let (notification, outpacket) = select! {
-                o = network_stream.next().fuse() => runtime.handle_packet(o.unwrap()).await.unwrap(),
-                o = request_stream.next().fuse() => runtime.handle_request(o.unwrap()).await.unwrap(),
+            let o = select! {
+                o = network_stream.next().fuse() => runtime.handle_packet(o).await, 
+                o = request_stream.next().fuse() => runtime.handle_request(o).await,
+            };
+            
+            let (notification, outpacket) = match o {
+                Ok((n, p)) => (n, p),
+                Err(e) => {
+                    yield Notification::StreamEnd(e.into(), runtime.options, runtime.state);
+                    break
+                }
             };
             
             // write the reply back to the network
             if let Some(p) = outpacket {
                 if let Err(e) = network_tx.mqtt_write(&p).await {
-                    yield Notification::Error(e.into());
+                    yield Notification::StreamEnd(e.into(), runtime.options, runtime.state);
                     break
                 }
             }
 
-            // yield the notification to the user
+            // yield the notification to the user 
             if let Some(n) = notification { yield n }
         }
     }
@@ -240,7 +249,12 @@ impl Runtime {
         Ok(())
     }
 
-    async fn handle_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    async fn handle_packet(&mut self, packet: Option<Packet>) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+        let packet = match packet {
+            Some(packet) => packet,
+            None => return Err(EventLoopError::NetworkStreamClosed)
+        };
+
         match packet {
             Packet::Pingreq => {
                 let packet = self.state.handle_outgoing_mqtt_packet(packet)?;
@@ -253,7 +267,12 @@ impl Runtime {
         }
     }
 
-    async fn handle_request(&mut self, request: Packet) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
+    async fn handle_request(&mut self, request: Option<Packet>) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
+        let request = match request {
+            Some(request) => request,
+            None => return Err(EventLoopError::RequestStreamClosed)
+        };
+        
         // outgoing packet handle is only user for requests, not replys. this ensures
         // ping debug print show last request time, not reply time
         let request = self.state.handle_outgoing_mqtt_packet(request)?;
@@ -295,6 +314,7 @@ mod test {
     use std::time::{Instant, Duration};
     use crate::{Request, MqttOptions};
 
+    /*
     async fn start_requests(mut requests_tx: Sender<Request>) {
         for i in 0..10 {
             let topic = "hello/world".to_owned();
@@ -400,6 +420,7 @@ mod test {
 
     }
 
+*/
     async fn broker(port: u16) -> TcpStream {
         let addr = format!("127.0.0.1:{}", port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();

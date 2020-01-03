@@ -12,6 +12,7 @@ pub(crate) mod state;
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use rumq_core::*;
+pub use state::MqttState;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]
@@ -24,7 +25,7 @@ pub enum Notification {
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
     Suback(PacketIdentifier),
-    Error(EventLoopError),
+    StreamEnd(EventLoopError, MqttOptions, MqttState),
 }
 
 #[doc(hidden)]
