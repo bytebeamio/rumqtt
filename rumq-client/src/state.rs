@@ -75,15 +75,16 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Packet {
+    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, StateError> {
         let out = match packet {
-            Packet::Publish(publish) => self.handle_outgoing_publish(publish),
-            Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe),
+            Packet::Publish(publish) => self.handle_outgoing_publish(publish)?,
+            Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
+            Packet::Pingreq => self.handle_outgoing_ping()?,
             _ => unimplemented!(),
         };
 
         self.last_outgoing = Instant::now();
-        out
+        Ok(out)
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Notification` which for the
@@ -112,7 +113,7 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
+    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Packet, StateError> {
         let publish = match publish.qos() {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
@@ -124,7 +125,8 @@ impl MqttState {
             publish.pkid(),
             publish.payload().len()
         );
-        Packet::Publish(publish)
+
+        Ok(Packet::Publish(publish))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
@@ -227,7 +229,7 @@ impl MqttState {
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<(), StateError> {
+    pub fn handle_outgoing_ping(&mut self) -> Result<Packet, StateError> {
         let keep_alive = self.opts.keep_alive();
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
@@ -249,7 +251,7 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        Ok(())
+        Ok(Packet::Pingreq)
     }
 
     fn handle_incoming_pingresp(&mut self) -> Result<(Option<Notification>, Option<Packet>), StateError> {
@@ -257,12 +259,12 @@ impl MqttState {
         Ok((None, None))
     }
 
-    fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Packet {
+    fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Packet, StateError> {
         let pkid = self.next_pkid();
         subscription.set_pkid(pkid);
 
         debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
-        Packet::Subscribe(subscription)
+        Ok(Packet::Subscribe(subscription))
     }
 
     pub fn handle_outgoing_connect(&mut self) -> Result<(), StateError> {

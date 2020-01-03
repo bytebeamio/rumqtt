@@ -17,19 +17,16 @@ use std::pin::Pin;
 
 pub struct MqttEventLoop {
     runtime: Option<Runtime>,
-    stream: Box<dyn Stream<Item = Notification>>
+    stream: Pin<Box<dyn Stream<Item = Notification>>>
 }
 
 
 impl Stream for MqttEventLoop {
     type Item = Notification;
     
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut stream = self.stream;
-        pin_mut!(stream);
-        
-        let o = ready!(stream.poll_next(cx));
-        unimplemented!();
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let o = ready!(self.stream.as_mut().poll_next(cx));
+        Poll::Ready(o)
     }
 }
 
@@ -78,7 +75,7 @@ pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Mqt
     };
 
     let stream = stream(runtime, requests);
-    let eventloop = MqttEventLoop { runtime: None, stream: Box::new(stream) };
+    let eventloop = MqttEventLoop { runtime: None, stream: Box::pin(stream) };
     eventloop
 }
 
@@ -119,6 +116,13 @@ fn stream<R: Requests>(mut runtime: Runtime, mut requests: R) -> impl Stream<Ite
     }
 }
 
+/// Request stream. Converts requests from user into outgoing network packet. If there is no
+/// request for keep alive time, generates Pingreq to prevent broker from disconnecting the client.
+/// The caveat with generating pingreq on requsts rather than considering outgoing packets
+/// including replys due to incoming packets is that we generate unnecessary pingreqs when there
+/// are no user requests but there is outgoing network activity due to incoming packets like qos1
+/// publish. 
+/// See desgin notes for understanding this design choice
 fn request_stream<R: Requests>(keep_alive: Duration, throttle: Duration, requests: R) -> impl Stream<Item = Packet> {
     stream! {
         let mut requests = time::throttle(throttle, requests);
@@ -142,7 +146,23 @@ fn request_stream<R: Requests>(keep_alive: Duration, throttle: Duration, request
     }
 }
 
+/// Network stream. Generates pingreq when there is no incoming packet for keepalive + 1 time to
+/// find halfopen connections to the broker. keep alive + 1 is necessary so that when the
+/// connection is idle on both incoming and outgoing packets, we trigger pingreq on both requests
+/// and incoming which trigger await_pingresp error. 
+/// 
+/// Maintaing a gap between both allows network stream to receive pingresp and hence not timeout 
+/// due to incoming activity because of request ping. pingreq should be received with in one second
+/// or else pingreq due to network timeout will cause await_pingresp erorr. This is ok as
+/// pingpacket round trip size = 4 bytes. If network bandwidth is worse than 4 bytes per second,
+/// it's anyway a very bad network. We can also increase this delay from 1 to 3 secs as our minimum
+/// required keep alive time is 5 seconds
+///
+/// When there is outgoing activity but no incoming activity, e.g qos0 publishes, this generates
+/// pingreq at keep_alive + 1 making halfopen connection detection at 2*keepalive + 2 secs.
 fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl Stream<Item = Packet> {
+    let keep_alive = keep_alive + Duration::from_secs(1);
+    
     stream! {
         loop {
             let timeout_packet = time::timeout(keep_alive, async {
@@ -221,14 +241,22 @@ impl Runtime {
     }
 
     async fn handle_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
-        let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet)?;
-        Ok((notification, reply))
+        match packet {
+            Packet::Pingreq => {
+                let packet = self.state.handle_outgoing_mqtt_packet(packet)?;
+                Ok((None, Some(packet)))
+            }
+            _ => {
+                let (notification, reply) = self.state.handle_incoming_mqtt_packet(packet)?;
+                Ok((notification, reply))
+            }
+        }
     }
 
     async fn handle_request(&mut self, request: Packet) -> Result<(Option<Notification>, Option<Packet>),  EventLoopError> {
         // outgoing packet handle is only user for requests, not replys. this ensures
         // ping debug print show last request time, not reply time
-        let request = self.state.handle_outgoing_mqtt_packet(request);
+        let request = self.state.handle_outgoing_mqtt_packet(request)?;
         let request = Some(request);
         let notification = None;
         Ok((notification, request))

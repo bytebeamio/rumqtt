@@ -23,14 +23,12 @@ async fn main() {
 
 
     stream_it(&mut eventloop).await;
-    println!("State = {:?}", eventloop.state);
+    // println!("State = {:?}", eventloop.state);
 }
 
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.stream();
-
-    while let Some(item) = stream.next().await {
+    while let Some(item) = eventloop.next().await {
         println!("{:?}", item);
     }
 }
@@ -45,7 +43,7 @@ async fn requests(mut requests_tx: Sender<Request>) {
         time::delay_for(Duration::from_secs(1)).await; 
     }
 
-    time::delay_for(Duration::from_secs(30)).await; 
+    time::delay_for(Duration::from_secs(60)).await; 
 }
 
 fn publish_request(i: u8) -> Request {
