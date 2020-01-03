@@ -286,117 +286,227 @@ mod test {
     use std::time::{Instant, Duration};
     use crate::{Request, MqttOptions};
 
-    /*
-       async fn start_requests(mut requests_tx: Sender<Request>) {
-       for i in 0..10 {
-       let topic = "hello/world".to_owned();
-       let payload = vec![1, 2, 3, i];
+    #[tokio::test]
+    async fn connection_should_timeout_on_time() {
+        let (_requests_tx, requests_rx) = channel(5);
 
-       let publish = publish(topic, payload);
-       let request = Request::Publish(publish);
-       let _ = requests_tx.send(request).await;
-       }
-       }
+        task::spawn(async move {
+            let _broker = broker(1880).await;
+            time::delay_for(Duration::from_secs(10)).await;
+        });
 
+        time::delay_for(Duration::from_secs(1)).await;
+        let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
+        let mut eventloop = super::eventloop(options, requests_rx); 
 
-       #[tokio::test]
-       async fn connection_should_timeout_on_time() {
-       let (_requests_tx, requests_rx) = channel(5);
+        let start = Instant::now(); 
+        let o = eventloop.connect().await;
+        let elapsed = start.elapsed();
 
-       task::spawn(async move {
-       let _broker = broker(1880).await;
-       time::delay_for(Duration::from_secs(10)).await;
-       });
+        match o {
+            Ok(_) => assert!(false),
+            Err(super::EventLoopError::Timeout(_)) => assert!(true), 
+            Err(_) => assert!(false)
+        }
 
-       time::delay_for(Duration::from_secs(1)).await;
-       let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-       let mut eventloop = super::eventloop(options, requests_rx); 
-
-       let start = Instant::now(); 
-       let o = eventloop.connect().await;
-       let elapsed = start.elapsed();
-
-       match o {
-       Ok(_) => assert!(false),
-       Err(super::EventLoopError::Timeout(_)) => assert!(true), 
-       Err(_) => assert!(false)
-       }
-
-       assert_eq!(elapsed.as_secs(), 5);
-       }
-
-
-       #[tokio::test]
-       async fn throttled_requests_works_with_correct_delays_between_requests() {
-       let mut options = MqttOptions::new("dummy", "127.0.0.1", 1881);
-       options.set_throttle(Duration::from_secs(1));
-       let options2 = options.clone();
-
-    // start sending requests
-    let (requests_tx, requests_rx) = channel(5);
-    task::spawn(async move {
-    start_requests(requests_tx).await;
-    });
-
-    // start the eventloop
-    task::spawn(async move {
-    time::delay_for(Duration::from_secs(1)).await;
-    let mut eventloop = super::eventloop(options, requests_rx); 
-    let mut stream = eventloop.stream();
-
-    while let Some(_) = stream.next().await {}
-    });
-
-
-    let mut broker = broker(1881).await;
-    // check incoming rate at th broker
-    for i in 0..10 {
-    let start = Instant::now();
-    let packet = broker.mqtt_read().await.unwrap(); 
-    match packet {
-    Packet::Connect(_) => broker.mqtt_write(&Packet::Connack(connack(ConnectReturnCode::Accepted, false))).await.unwrap(),
-    Packet::Publish(_) => {
-    let elapsed = start.elapsed();
-    if i > 1 { 
-        assert_eq!(elapsed.as_secs(), options2.throttle.as_secs())
+        assert_eq!(elapsed.as_secs(), 5);
     }
-}
-packet => panic!("Invalid packet = {:?}", packet)
-};
-}
-}
 
-#[test]
-fn request_future_triggers_pings_on_time() {
+    #[tokio::test]
+    async fn throttled_requests_works_with_correct_delays_between_requests() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1881);
+        options.set_throttle(Duration::from_secs(1));
+        let options2 = options.clone();
 
-}
+        // start sending requests
+        let (requests_tx, requests_rx) = channel(5);
+        task::spawn(async move {
+            start_requests(requests_tx).await;
+        });
 
-#[test]
-fn network_future_triggers_pings_on_time() {
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut stream = eventloop.stream();
 
-}
-
-#[test]
-fn requests_are_blocked_after_max_inflight_queue_size() {
-
-}
-
-#[test]
-fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
-
-}
-
-#[test]
-fn reconnection_resumes_from_the_previous_state() {
+            while let Some(_) = stream.next().await {}
+        });
 
 
-}
+        let broker = broker(1881).await;
+        let mut stream = broker.stream();
 
-*/
-async fn broker(port: u16) -> TcpStream {
-    let addr = format!("127.0.0.1:{}", port);
-    let mut listener = TcpListener::bind(&addr).await.unwrap();
-    let (socket, _) = listener.accept().await.unwrap();
-    socket
-}
+        // check incoming rate at th broker
+        for i in 0..10 {
+            let start = Instant::now();
+            let _ = stream.next().await.unwrap(); 
+            let elapsed = start.elapsed();
+
+            if i > 0 { 
+                assert_eq!(elapsed.as_secs(), options2.throttle.as_secs())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn no_outgoing_requests_to_broker_should_raise_ping_on_time() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+        options.set_keep_alive(5);
+        let keep_alive = options.keep_alive();
+
+
+        // start sending requests
+        let (_requests_tx, requests_rx) = channel(5);
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut stream = eventloop.stream();
+
+            while let Some(_) = stream.next().await {}
+        });
+
+
+        let broker = broker(1885).await;
+        let mut stream = broker.stream();
+
+        // check incoming rate at th broker
+        let start = Instant::now();
+        let packet = stream.next().await.unwrap(); 
+        let elapsed = start.elapsed();
+
+        assert_eq!(packet, Packet::Pingreq);
+        assert_eq!(elapsed.as_secs(), keep_alive.as_secs())
+    }
+
+    #[tokio::test]
+    async fn  network_future_triggers_pings_on_timenetwork_future_triggers_pings_on_time() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
+        options.set_keep_alive(5);
+        let keep_alive = options.keep_alive();
+
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (mut requests_tx, requests_rx) = channel(5);
+        task::spawn(async move {
+            for i in 0..10 {
+                let publish = publish("hello/world", vec![i]);
+                let request = Request::Publish(publish);
+                let _ = requests_tx.send(request).await;
+                time::delay_for(Duration::from_secs(1)).await;
+            }
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut stream = eventloop.stream();
+
+            while let Some(_) = stream.next().await {}
+        });
+
+
+        let broker = broker(1886).await;
+        let mut stream = broker.stream();
+
+        let start = Instant::now();
+        let mut ping_received = false;
+        
+        for _i in 0..10 {
+            let packet = stream.next().await.unwrap(); 
+            let elapsed = start.elapsed();
+            if packet == Packet::Pingreq { 
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs() + 1); // add 1 due to keep alive network implementation
+                break
+            }
+        }
+
+        assert!(ping_received);
+    }
+
+    #[test]
+    fn requests_are_blocked_after_max_inflight_queue_size() {
+
+    }
+
+    #[test]
+    fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
+
+    }
+
+    #[test]
+    fn reconnection_resumes_from_the_previous_state() {
+
+
+    }
+
+
+    use async_stream::stream;
+    use futures_util::stream::Stream;
+
+    async fn start_requests(mut requests_tx: Sender<Request>) {
+        for i in 0..10 {
+            let topic = "hello/world".to_owned();
+            let payload = vec![1, 2, 3, i];
+
+            let publish = publish(topic, payload);
+            let request = Request::Publish(publish);
+            let _ = requests_tx.send(request).await;
+        }
+    }
+
+    struct Broker {
+        outgoing_qos0: bool,
+        stream: TcpStream
+    }
+
+    async fn broker(port: u16) -> Broker {
+        let addr = format!("127.0.0.1:{}", port);
+        let mut listener = TcpListener::bind(&addr).await.unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+
+        Broker {
+            outgoing_qos0: true,
+            stream
+        }
+    }
+
+    fn publishes(delay: Duration) -> impl Stream<Item = Packet> {
+        stream! {
+            loop {
+                let mut publish = rumq_core::publish("hello/world", vec![1, 2, 3]);
+                publish.set_qos(rumq_core::QoS::AtMostOnce);
+                time::delay_for(delay).await;
+                yield Packet::Publish(publish)
+            }
+        }
+    }
+
+    impl Broker {
+        // writes qos0 publish every second
+        fn set_outgoing_qos0(&mut self) {
+            self.outgoing_qos0 = true;
+        }
+
+        fn stream(mut self) -> impl Stream<Item = Packet> {
+            let stream = stream! {
+                loop {
+                    let packet = self.stream.mqtt_read().await.unwrap();
+
+                    match packet {
+                        Packet::Connect(_) => {
+                            let connack = rumq_core::connack(ConnectReturnCode::Accepted, false);
+                            self.stream.mqtt_write(&Packet::Connack(connack)).await.unwrap();
+                        }
+                        p => yield p
+                    }
+                }
+            };
+
+            Box::pin(stream)
+        }
+    }
 }
