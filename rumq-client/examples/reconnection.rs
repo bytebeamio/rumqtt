@@ -3,7 +3,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
 
-use rumq_client::{self, MqttState, MqttOptions, Request, Notification, MqttEventLoop, eventloop};
+use rumq_client::{self, MqttOptions, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -20,36 +20,30 @@ async fn main() {
     // start sending requests
     task::spawn(async move {
         requests(requests_tx).await;
-        time::delay_for(Duration::from_secs(3)).await;
+        time::delay_for(Duration::from_secs(30)).await;
     });
 
 
     loop {
-        let (state, options) = stream_it(&mut eventloop).await;
-        println!("state = {:?}\noptions={:?}", state, options);
+        stream_it(&mut eventloop).await;
         time::delay_for(Duration::from_secs(5)).await;
     }
 }
 
-async fn stream_it(eventloop: &mut MqttEventLoop) -> (MqttState, MqttOptions) {
-    while let Some(item) = eventloop.next().await {
-        if let Notification::StreamEnd(err, options, state) = item {
-            println!("Error = {:?}", err);
-            return (state, options)
-        }
+async fn stream_it(eventloop: &mut MqttEventLoop) {
+    let mut stream = eventloop.stream();
 
+    while let Some(item) = stream.next().await {
         println!("Received = {:?}", item);
     }
 
-    let options = MqttOptions::new("test", "localhost", 1883);
-    let state = MqttState::new();
-    (state, options)
+    println!("Stream done");
 }
 
 async fn requests(mut requests_tx: Sender<Request>) {
     let topic = "hello/world".to_owned();
 
-    for i in 0..100 {
+    for i in 0..10 {
         let payload = vec![1, 2, 3, i];
         let publish = rumq_client::publish(&topic, payload);
         let publish = Request::Publish(publish);

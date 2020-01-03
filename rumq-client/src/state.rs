@@ -1,4 +1,3 @@
-use crate::MqttOptions;
 use crate::Notification;
 
 use std::{collections::VecDeque, result::Result, time::Instant};
@@ -68,6 +67,35 @@ impl MqttState {
             outgoing_rel: VecDeque::new(),
             incoming_pub: VecDeque::new(),
         }
+    }
+
+    pub fn handle_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+        match packet {
+            Packet::Pingreq => {
+                let packet = self.handle_outgoing_mqtt_packet(packet)?;
+                Ok((None, Some(packet)))
+            }
+            _ => {
+                let (notification, reply) = self.handle_incoming_mqtt_packet(packet)?;
+                Ok((notification, reply))
+            }
+        }
+    }
+
+    pub fn handle_request(&mut self, request: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+        /*
+        let request = match request {
+            Some(request) => request,
+            None => return Err(EventLoopError::RequestStreamClosed)
+        };
+
+        */
+        // outgoing packet handle is only user for requests, not replys. this ensures
+        // ping debug print show last request time, not reply time
+        let request = self.handle_outgoing_mqtt_packet(request)?;
+        let request = Some(request);
+        let notification = None;
+        Ok((notification, request))
     }
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should

@@ -25,7 +25,7 @@ pub enum Notification {
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
     Suback(PacketIdentifier),
-    StreamEnd(EventLoopError, MqttOptions, MqttState),
+    StreamEnd(EventLoopError),
 }
 
 #[doc(hidden)]
