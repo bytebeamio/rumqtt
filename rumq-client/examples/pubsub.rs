@@ -3,7 +3,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
 
-use rumq_client::{self, MqttOptions, Request, MqttEventLoop, QoS, eventloop};
+use rumq_client::{self, MqttOptions, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -28,9 +28,13 @@ async fn main() {
 
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    while let Some(item) = eventloop.next().await {
-        println!("{:?}", item);
+    let mut stream = eventloop.stream();
+
+    while let Some(item) = stream.next().await {
+        println!("Received = {:?}", item);
     }
+
+    println!("Stream done");
 }
 
 

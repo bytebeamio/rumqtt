@@ -31,9 +31,13 @@ async fn main() {
 }
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    while let Some(item) = eventloop.next().await {
-        println!("{:?}", item);
+    let mut stream = eventloop.stream();
+
+    while let Some(item) = stream.next().await {
+        println!("Received = {:?}", item);
     }
+
+    println!("Stream done");
 }
 
 async fn requests(mut requests_tx: Sender<Request>) {
