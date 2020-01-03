@@ -35,8 +35,6 @@ pub enum StateError {
 /// async/await
 #[derive(Debug, Clone)]
 pub struct MqttState {
-    /// Mqtt options of the current connection
-    pub opts: MqttOptions,
     /// Connection status
     pub connection_status: MqttConnectionStatus,
     /// Status of last ping
@@ -59,9 +57,8 @@ impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(opts: MqttOptions) -> Self {
+    pub fn new() -> Self {
         MqttState {
-            opts,
             connection_status: MqttConnectionStatus::Disconnected,
             await_pingresp: false,
             last_incoming: Instant::now(),
@@ -230,7 +227,6 @@ impl MqttState {
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
     pub fn handle_outgoing_ping(&mut self) -> Result<Packet, StateError> {
-        let keep_alive = self.opts.keep_alive();
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
@@ -243,10 +239,9 @@ impl MqttState {
         self.await_pingresp = true;
 
         debug!(
-            "Pingreq. keep alive = {},
+            "Pingreq,
             last incoming packet before {} millisecs,
             last outgoing request before {} millisecs",
-            keep_alive.as_millis(),
             elapsed_in.as_millis(),
             elapsed_out.as_millis()
         );
@@ -358,8 +353,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        let opts = MqttOptions::new("test-id", "127.0.0.1", 1883);
-        MqttState::new(opts)
+        MqttState::new()
     }
 
     #[test]
@@ -567,7 +561,6 @@ mod test {
         let mut mqtt = build_mqttstate();
         let mut opts = MqttOptions::new("test", "localhost", 1883);
         opts.set_keep_alive(10);
-        mqtt.opts = opts;
         mqtt.connection_status = MqttConnectionStatus::Connected;
         mqtt.handle_outgoing_ping().unwrap();
 
@@ -590,7 +583,6 @@ mod test {
 
         let mut opts = MqttOptions::new("test", "localhost", 1883);
         opts.set_keep_alive(10);
-        mqtt.opts = opts;
 
         mqtt.connection_status = MqttConnectionStatus::Connected;
 

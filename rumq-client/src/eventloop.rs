@@ -67,7 +67,7 @@ pub enum EventLoopError {
 /// Options can be used to update gcp iotcore password
 /// TODO: Remove `mqttoptions` from `state` to make sure that there is not chance of dirty opts
 pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
-    let state = MqttState::new(options.clone());
+    let state = MqttState::new();
     let requests = Box::new(requests);
 
     let  runtime = Runtime {

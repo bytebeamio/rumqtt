@@ -42,14 +42,14 @@ async fn stream_it(eventloop: &mut MqttEventLoop) -> (MqttState, MqttOptions) {
     }
 
     let options = MqttOptions::new("test", "localhost", 1883);
-    let state = MqttState::new(options.clone());
+    let state = MqttState::new();
     (state, options)
 }
 
 async fn requests(mut requests_tx: Sender<Request>) {
     let topic = "hello/world".to_owned();
 
-    for i in 0..5 {
+    for i in 0..100 {
         let payload = vec![1, 2, 3, i];
         let publish = rumq_client::publish(&topic, payload);
         let publish = Request::Publish(publish);
