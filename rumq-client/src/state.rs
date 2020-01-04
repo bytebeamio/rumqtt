@@ -1,3 +1,4 @@
+use crate::MqttOptions;
 use crate::Notification;
 
 use std::{collections::VecDeque, result::Result, time::Instant};

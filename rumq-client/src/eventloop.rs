@@ -5,7 +5,8 @@ use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::time::{self, Elapsed};
-use tokio::sync::mpsc::{channel, Sender, Receiver};
+use tokio::sync::Semaphore;
+use tokio::sync::mpsc::channel;
 use async_stream::stream;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
@@ -89,16 +90,39 @@ impl MqttEventLoop {
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut self.requests);
 
+            let (mut fence_tx, mut fence_rx) = channel::<bool>(1);
+
             pin_mut!(network_stream);
             pin_mut!(request_stream);
 
             loop {
+                let state = &mut self.state;
+                let inflight = self.options.inflight();
+                let packet = async {
+                    let o = network_stream.next().await;
+                    // release the fence when incoming messages are acks
+                    if state.outgoing_pub.len() >= inflight {
+                        let _ = fence_tx.try_send(true);
+                    }
+                    o
+                };
+
+                let request = async {
+                    let o = request_stream.next().await;
+                    // save the packet first and block till we have an ack.
+                    // if inflight = 5, 6th packet will be saved in the state but not sent
+                    if state.outgoing_pub.len() >= inflight {
+                        let _ = fence_rx.recv().await;
+                    }
+                    o
+                };
+
                 let o = select! {
-                    o = network_stream.next().fuse() => match o {
+                    o = packet.fuse() => match o {
                         Some(o) => self.state.handle_packet(o),
                         None => break 
                     },
-                    o = request_stream.next().fuse() => match o {
+                    o = request.fuse() => match o {
                         Some(o) => self.state.handle_request(o),
                         None => break 
                     }
@@ -413,7 +437,7 @@ mod test {
 
         let start = Instant::now();
         let mut ping_received = false;
-        
+
         for _i in 0..10 {
             let packet = stream.next().await.unwrap(); 
             let elapsed = start.elapsed();
@@ -427,14 +451,99 @@ mod test {
         assert!(ping_received);
     }
 
-    #[test]
-    fn requests_are_blocked_after_max_inflight_queue_size() {
+    #[tokio::test]
+    async fn requests_are_blocked_after_max_inflight_queue_size() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1887);
+        options.set_inflight(5);
+        let inflight = options.inflight();
 
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (mut requests_tx, requests_rx) = channel(5);
+        task::spawn(async move {
+            for i in 0..10 {
+                let publish = publish("hello/world", vec![i]);
+                let request = Request::Publish(publish);
+                let _ = requests_tx.send(request).await;
+                time::delay_for(Duration::from_secs(1)).await;
+            }
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut stream = eventloop.stream();
+
+            while let Some(_) = stream.next().await {}
+        });
+
+
+        let mut broker = broker(1887).await;
+        for i in 1..=10 {
+            let packet = broker.mqtt_read().await; 
+
+            if i > inflight { 
+                assert!(packet.is_none());
+            }
+        }
     }
 
-    #[test]
-    fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
+    #[tokio::test]
+    async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
+        pretty_env_logger::init();
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        options.set_inflight(3);
+        let inflight = options.inflight();
 
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (mut requests_tx, requests_rx) = channel(5);
+        task::spawn(async move {
+            for i in 0..5 {
+                let publish = publish("hello/world", vec![i]);
+                let request = Request::Publish(publish);
+                let _ = requests_tx.send(request).await;
+                time::delay_for(Duration::from_secs(1)).await;
+            }
+
+            time::delay_for(Duration::from_secs(60)).await;
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut stream = eventloop.stream();
+            while let Some(p) = stream.next().await {}
+        });
+
+        let mut broker = broker(1888).await;
+
+        // packet 1
+        let packet = broker.mqtt_read().await; 
+        assert!(packet.is_some());
+        // packet 2
+        let packet = broker.mqtt_read().await; 
+        assert!(packet.is_some());
+        // packet 3
+        let packet = broker.mqtt_read().await; 
+        assert!(packet.is_some());
+        // packet 4 
+        let packet = broker.mqtt_read().await; 
+        assert!(packet.is_none());
+        // ack packet 1 and we should receiver packet 4
+        broker.ack(PacketIdentifier(1)).await;
+        let packet = broker.mqtt_read().await; 
+        dbg!(&packet);
+        assert!(packet.is_some());
+        // packet 5 
+        let packet = broker.mqtt_read().await; 
+        assert!(packet.is_none());
+        // ack packet 2 and we should receiver packet 5
+        broker.ack(PacketIdentifier(2)).await;
+        let packet = broker.mqtt_read().await; 
+        assert!(packet.is_some());
     }
 
     #[test]
@@ -459,17 +568,21 @@ mod test {
     }
 
     struct Broker {
-        outgoing_qos0: bool,
         stream: TcpStream
     }
 
     async fn broker(port: u16) -> Broker {
         let addr = format!("127.0.0.1:{}", port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
-        let (stream, _) = listener.accept().await.unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+
+        let packet = stream.mqtt_read().await.unwrap();
+        if let Packet::Connect(_) = packet {
+            let connack = rumq_core::connack(ConnectReturnCode::Accepted, false);
+            stream.mqtt_write(&Packet::Connack(connack)).await.unwrap();
+        }
 
         Broker {
-            outgoing_qos0: true,
             stream
         }
     }
@@ -485,10 +598,25 @@ mod test {
         }
     }
 
+    use tokio::io::AsyncWriteExt;
     impl Broker {
-        // writes qos0 publish every second
-        fn set_outgoing_qos0(&mut self) {
-            self.outgoing_qos0 = true;
+        // reads a packet from the stream with 2 second timeout
+        async fn mqtt_read(&mut self) -> Option<PacketIdentifier> {
+            let mqtt_read = time::timeout(Duration::from_secs(2), async {
+                self.stream.mqtt_read().await.unwrap()
+            });
+
+            if let Ok(Packet::Publish(publish)) = mqtt_read.await {
+                Some(publish.pkid().unwrap())
+            } else {
+                None
+            }
+        }
+
+        async fn ack(&mut self, pkid: PacketIdentifier) {
+            let packet = Packet::Puback(pkid); 
+            self.stream.mqtt_write(&packet).await.unwrap();
+            self.stream.flush().await.unwrap();
         }
 
         fn stream(mut self) -> impl Stream<Item = Packet> {

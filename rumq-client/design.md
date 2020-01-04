@@ -253,3 +253,10 @@ stream to poll. Returning 2 streams might not be intuitive to the users. main ev
 doensn't poll the notification stream (tx.send will block which eventually blocks all incoming packets). Having a second stream also results in more allocations in the hotpath (which might not be a big deal but not ideal) 
 Option2 is also considerable less codebase and hence easy maintainence.
 
+
+Timeout for packets which are not acked
+------------------
+
+Implement timeout for unacked packets and drop/republish them. Useful if the
+broker is buggy. But might not be too important as unacked messages are
+anyway retried during reconnection
