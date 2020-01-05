@@ -5,8 +5,6 @@ use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::time::{self, Elapsed};
-use tokio::sync::Semaphore;
-use tokio::sync::mpsc::channel;
 use async_stream::stream;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
@@ -90,41 +88,25 @@ impl MqttEventLoop {
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut self.requests);
 
-            let (mut fence_tx, mut fence_rx) = channel::<bool>(1);
-
             pin_mut!(network_stream);
             pin_mut!(request_stream);
 
             loop {
-                let state = &mut self.state;
-                let inflight = self.options.inflight();
-                let packet = async {
-                    let o = network_stream.next().await;
-                    // release the fence when incoming messages are acks
-                    if state.outgoing_pub.len() >= inflight {
-                        let _ = fence_tx.try_send(true);
-                    }
-                    o
-                };
-
-                let request = async {
-                    let o = request_stream.next().await;
-                    // save the packet first and block till we have an ack.
-                    // if inflight = 5, 6th packet will be saved in the state but not sent
-                    if state.outgoing_pub.len() >= inflight {
-                        let _ = fence_rx.recv().await;
-                    }
-                    o
-                };
-
-                let o = select! {
-                    o = packet.fuse() => match o {
+                let o = if self.state.outgoing_pub.len() >= self.options.inflight {
+                    match network_stream.next().await {
                         Some(o) => self.state.handle_packet(o),
-                        None => break 
-                    },
-                    o = request.fuse() => match o {
-                        Some(o) => self.state.handle_request(o),
-                        None => break 
+                        None => break
+                    }
+                } else {
+                    select! {
+                        o = network_stream.next().fuse() => match o {
+                            Some(o) => self.state.handle_packet(o),
+                            None => break 
+                        },
+                        o = request_stream.next().fuse() => match o {
+                            Some(o) => self.state.handle_request(o),
+                            None => break 
+                        }
                     }
                 };
 
@@ -303,7 +285,7 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
 #[cfg(test)]
 mod test {
     use rumq_core::*;
-    use tokio::sync::mpsc::{channel, Sender, Receiver};
+    use tokio::sync::mpsc::{channel, Sender};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::{time, task};
     use futures_util::stream::StreamExt;
@@ -315,7 +297,7 @@ mod test {
         let (_requests_tx, requests_rx) = channel(5);
 
         task::spawn(async move {
-            let _broker = broker(1880).await;
+            let _broker = broker(1880, false).await;
             time::delay_for(Duration::from_secs(10)).await;
         });
 
@@ -358,7 +340,7 @@ mod test {
         });
 
 
-        let broker = broker(1881).await;
+        let broker = broker(1881, true).await;
         let mut stream = broker.stream();
 
         // check incoming rate at th broker
@@ -392,7 +374,7 @@ mod test {
         });
 
 
-        let broker = broker(1885).await;
+        let broker = broker(1885, true).await;
         let mut stream = broker.stream();
 
         // check incoming rate at th broker
@@ -432,7 +414,7 @@ mod test {
         });
 
 
-        let broker = broker(1886).await;
+        let broker = broker(1886, true).await;
         let mut stream = broker.stream();
 
         let start = Instant::now();
@@ -479,7 +461,7 @@ mod test {
         });
 
 
-        let mut broker = broker(1887).await;
+        let mut broker = broker(1887, true).await;
         for i in 1..=10 {
             let packet = broker.mqtt_read().await; 
 
@@ -494,7 +476,6 @@ mod test {
         pretty_env_logger::init();
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
         options.set_inflight(3);
-        let inflight = options.inflight();
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incomin activity
@@ -515,10 +496,10 @@ mod test {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::eventloop(options, requests_rx); 
             let mut stream = eventloop.stream();
-            while let Some(p) = stream.next().await {}
+            while let Some(_p) = stream.next().await {}
         });
 
-        let mut broker = broker(1888).await;
+        let mut broker = broker(1888, true).await;
 
         // packet 1
         let packet = broker.mqtt_read().await; 
@@ -535,7 +516,6 @@ mod test {
         // ack packet 1 and we should receiver packet 4
         broker.ack(PacketIdentifier(1)).await;
         let packet = broker.mqtt_read().await; 
-        dbg!(&packet);
         assert!(packet.is_some());
         // packet 5 
         let packet = broker.mqtt_read().await; 
@@ -571,15 +551,17 @@ mod test {
         stream: TcpStream
     }
 
-    async fn broker(port: u16) -> Broker {
+    async fn broker(port: u16, connack: bool) -> Broker {
         let addr = format!("127.0.0.1:{}", port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
         let (mut stream, _) = listener.accept().await.unwrap();
 
         let packet = stream.mqtt_read().await.unwrap();
         if let Packet::Connect(_) = packet {
-            let connack = rumq_core::connack(ConnectReturnCode::Accepted, false);
-            stream.mqtt_write(&Packet::Connack(connack)).await.unwrap();
+            if connack {
+                let connack = rumq_core::connack(ConnectReturnCode::Accepted, false);
+                stream.mqtt_write(&Packet::Connack(connack)).await.unwrap();
+            }
         }
 
         Broker {
