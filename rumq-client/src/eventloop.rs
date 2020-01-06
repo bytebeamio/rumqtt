@@ -1,17 +1,20 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::{self, Packet, MqttRead, MqttWrite};
+use rumq_core::{self, Packet, Publish, PacketIdentifier, MqttRead, MqttWrite};
 use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::time::{self, Elapsed};
+use tokio::stream::iter;
 use async_stream::stream;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
 
 use std::time::Duration;
+use std::collections::VecDeque;
 use std::task::{Poll, Context};
 use std::pin::Pin;
+use std::mem;
 
 pub struct MqttEventLoop {
     // intermediate state of the eventloop. this is set
@@ -19,6 +22,8 @@ pub struct MqttEventLoop {
     options: MqttOptions,
     state: MqttState,
     requests: Box<dyn Requests>,
+    pending_pub: VecDeque<Publish>,
+    pending_rel: VecDeque<PacketIdentifier>
 }
 
 
@@ -68,8 +73,10 @@ pub enum EventLoopError {
 pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
     let state = MqttState::new();
     let requests = Box::new(requests);
+    let pending_pub = VecDeque::new();
+    let pending_rel = VecDeque::new();
 
-    let eventloop = MqttEventLoop { options, state, requests };
+    let eventloop = MqttEventLoop { options, state, requests, pending_pub, pending_rel };
     eventloop
 }
 
@@ -84,9 +91,16 @@ impl MqttEventLoop {
                 }
             };
 
+            // move pending messages from state to eventloop and create a pending stream of
+            // requests
+            self.populate_pending();
+            let mut pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
+            let mut pending = iter(self.pending_pub.drain(..)).map(Packet::Publish).chain(pending_rel);
+
             let (network_rx, mut network_tx) = split(network);
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
-            let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut self.requests);
+
+            let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
 
             pin_mut!(network_stream);
             pin_mut!(request_stream);
@@ -133,7 +147,16 @@ impl MqttEventLoop {
 
         Box::pin(stream)
     }
+    
+    pub fn populate_pending(&mut self) {
+        let mut pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
+        self.pending_pub.append(&mut pending_pub);
+
+        let mut pending_rel = mem::replace(&mut self.state.outgoing_rel, VecDeque::new());
+        self.pending_rel.append(&mut pending_rel);
+    }
 }
+
 
 /// Request stream. Converts requests from user into outgoing network packet. If there is no
 /// request for keep alive time, generates Pingreq to prevent broker from disconnecting the client.
@@ -142,10 +165,27 @@ impl MqttEventLoop {
 /// are no user requests but there is outgoing network activity due to incoming packets like qos1
 /// publish. 
 /// See desgin notes for understanding this design choice
-fn request_stream<R: Requests>(keep_alive: Duration, throttle: Duration, requests: R) -> impl Stream<Item = Packet> {
+fn request_stream<R: Requests, P: Packets>(keep_alive: Duration, throttle: Duration, pending: P, requests: R) -> impl Stream<Item = Packet> {
     stream! {
-        let mut requests = time::throttle(throttle, requests);
+        let mut pending = time::throttle(throttle, pending);
+        loop {
+            let timeout_request = time::timeout(keep_alive, async {
+                let request = pending.next().await;
+                request
+            }).await;
 
+
+            match timeout_request {
+                Ok(Some(request)) => yield request,
+                Ok(None) => break,
+                Err(_) => {
+                    let packet = Packet::Pingreq;
+                    yield packet
+                }
+            }
+        }
+        
+        let mut requests = time::throttle(throttle, requests);
         loop {
             let timeout_request = time::timeout(keep_alive, async {
                 let request = requests.next().await;
@@ -278,8 +318,14 @@ impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
 trait NetworkRead: AsyncRead + Unpin + Send {}
 impl<T> NetworkRead for T where T: AsyncRead + Unpin + Send {}
 
+trait NetworkWrite: AsyncWrite + Unpin + Send + Sync {}
+impl<T> NetworkWrite for T where T: AsyncWrite + Unpin + Send + Sync {}
+
 pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
+
+pub trait Packets: Stream<Item = Packet> + Unpin + Send + Sync {}
+impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
 
 
 #[cfg(test)]
@@ -288,6 +334,7 @@ mod test {
     use tokio::sync::mpsc::{channel, Sender};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::{time, task};
+    use tokio::io::AsyncWriteExt;
     use futures_util::stream::StreamExt;
     use std::time::{Instant, Duration};
     use crate::{Request, MqttOptions};
@@ -473,7 +520,6 @@ mod test {
 
     #[tokio::test]
     async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
-        pretty_env_logger::init();
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
         options.set_inflight(3);
 
@@ -526,10 +572,102 @@ mod test {
         assert!(packet.is_some());
     }
 
-    #[test]
-    fn reconnection_resumes_from_the_previous_state() {
+    #[tokio::test]
+    async fn reconnection_resumes_from_the_previous_state() {
+        let options = MqttOptions::new("dummy", "127.0.0.1", 1889);
 
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (mut requests_tx, requests_rx) = channel(5);
+        task::spawn(async move {
+            for i in 0..10 {
+                let publish = publish("hello/world", vec![i]);
+                let request = Request::Publish(publish);
+                let _ = requests_tx.send(request).await;
+                time::delay_for(Duration::from_secs(1)).await;
+            }
 
+            time::delay_for(Duration::from_secs(10)).await;
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+
+            loop {
+                let mut stream = eventloop.stream();
+                while let Some(_) = stream.next().await {}
+            }
+        });
+
+        // broker connection 1
+        {
+            let mut broker = broker(1889, true).await;
+            for i in 1..=2 {
+                let packet = broker.mqtt_read().await; 
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+                broker.ack(packet.unwrap()).await;
+            }
+        }
+
+        // broker connection 2
+        {
+            let mut broker = broker(1889, true).await;
+            for i in 3..=4 {
+                let packet = broker.mqtt_read().await; 
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+                broker.ack(packet.unwrap()).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnection_resends_unacked_packets() {
+        let options = MqttOptions::new("dummy", "127.0.0.1", 1890);
+
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (mut requests_tx, requests_rx) = channel(5);
+        task::spawn(async move {
+            for i in 0..10 {
+                let publish = publish("hello/world", vec![i]);
+                let request = Request::Publish(publish);
+                let _ = requests_tx.send(request).await;
+                time::delay_for(Duration::from_secs(1)).await;
+            }
+
+            time::delay_for(Duration::from_secs(10)).await;
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let mut eventloop = super::eventloop(options, requests_rx); 
+
+            loop {
+                let mut stream = eventloop.stream();
+                while let Some(_) = stream.next().await {}
+            }
+        });
+
+        // broker connection 1
+        {
+            let mut broker = broker(1890, true).await;
+            for i in 1..=2 {
+                let packet = broker.mqtt_read().await; 
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+            }
+        }
+
+        // broker connection 2
+        {
+            let mut broker = broker(1890, true).await;
+            for i in 1..=6 {
+                let packet = broker.mqtt_read().await; 
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+            }
+        }
     }
 
 
@@ -569,18 +707,6 @@ mod test {
         }
     }
 
-    fn publishes(delay: Duration) -> impl Stream<Item = Packet> {
-        stream! {
-            loop {
-                let mut publish = rumq_core::publish("hello/world", vec![1, 2, 3]);
-                publish.set_qos(rumq_core::QoS::AtMostOnce);
-                time::delay_for(delay).await;
-                yield Packet::Publish(publish)
-            }
-        }
-    }
-
-    use tokio::io::AsyncWriteExt;
     impl Broker {
         // reads a packet from the stream with 2 second timeout
         async fn mqtt_read(&mut self) -> Option<PacketIdentifier> {
