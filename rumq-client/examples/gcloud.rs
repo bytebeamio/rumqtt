@@ -1,4 +1,3 @@
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::ops::Add;
 use std::env;
@@ -23,41 +22,39 @@ async fn main() {
     let mqttoptions = gcloud();
     let mut eventloop = eventloop(mqttoptions, requests_rx);
 
-    thread::spawn(move || {
-        requests(requests_tx);
-        thread::sleep(Duration::from_secs(100));
+    task::spawn(async move {
+        requests(requests_tx).await;
+        time::delay_for(Duration::from_secs(100)).await;
     });
 
     stream_it(&mut eventloop).await;
-    println!("State = {:?}", eventloop.state);
 }
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
     let mut stream = eventloop.stream();
 
     while let Some(item) = stream.next().await {
-        println!("{:?}", item);
+        println!("Received = {:?}", item);
     }
+
+    println!("Stream done");
 }
 
-#[tokio::main(basic_scheduler)]
 async fn requests(mut requests_tx: Sender<Request>) {
-    task::spawn(async move {
-        for i in 0..10 {
-            requests_tx.send(publish_request(i)).await.unwrap();
-            time::delay_for(Duration::from_secs(1)).await; 
-        }
+    for i in 0..15 {
+        requests_tx.send(publish_request(i)).await.unwrap();
+        time::delay_for(Duration::from_secs(1)).await; 
+    }
 
-        time::delay_for(Duration::from_secs(100)).await; 
-    }).await.unwrap();
+    time::delay_for(Duration::from_secs(100)).await; 
 }
 
 fn gcloud() -> MqttOptions {
     let mut mqttoptions = MqttOptions::new(&id(), "mqtt.googleapis.com", 8883);
-    mqttoptions.set_keep_alive(15);
+    mqttoptions.set_keep_alive(5);
     let password = gen_iotcore_password();
     let ca = fs::read("certs/bike-1/roots.pem").unwrap();
-    
+
     mqttoptions
         .set_ca(ca)
         .set_credentials("unused", &password);
@@ -69,7 +66,8 @@ fn publish_request(i: u8) -> Request {
     let topic = "/devices/".to_owned() +  "bike-1/events/imu";
     let payload = vec![1, 2, 3, i];
 
-    let publish = rumq_client::publish(topic, payload);
+    let mut publish = rumq_client::publish(topic, payload);
+    publish.set_qos(rumq_core::QoS::AtLeastOnce);
     Request::Publish(publish)
 }
 

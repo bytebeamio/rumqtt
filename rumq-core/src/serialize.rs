@@ -1,11 +1,10 @@
 use crate::*;
 
 use async_trait::async_trait;
-use tokio_byteorder::{BigEndian, AsyncWriteBytesExt};
 use tokio::io::AsyncWriteExt;
 
 #[async_trait]
-pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
+pub trait MqttWrite: AsyncWriteExt + Unpin {
     async fn mqtt_write(&mut self, packet: &Packet) -> Result<(), Error> {
         match packet {
             Packet::Connect(connect) => {
@@ -33,7 +32,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
                 }
 
                 self.write_u8(connect_flags).await?;
-                self.write_u16::<BigEndian>(connect.keep_alive).await?;
+                self.write_u16(connect.keep_alive).await?;
                 self.write_mqtt_string(connect.client_id.as_ref()).await?;
 
                 if let Some(ref last_will) = connect.last_will {
@@ -67,7 +66,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
                 self.write_mqtt_string(publish.topic_name.as_str()).await?;
                 if publish.qos != QoS::AtMostOnce {
                     if let Some(pkid) = publish.pkid {
-                        self.write_u16::<BigEndian>(pkid.0).await?;
+                        self.write_u16(pkid.0).await?;
                     }
                 }
                 self.write_all(&publish.payload.as_ref()).await?;
@@ -75,22 +74,22 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
             }
             Packet::Puback(pkid) => {
                 self.write_all(&[0x40, 0x02]).await?;
-                self.write_u16::<BigEndian>(pkid.0).await?;
+                self.write_u16(pkid.0).await?;
                 Ok(())
             }
             Packet::Pubrec(pkid) => {
                 self.write_all(&[0x50, 0x02]).await?;
-                self.write_u16::<BigEndian>(pkid.0).await?;
+                self.write_u16(pkid.0).await?;
                 Ok(())
             }
             Packet::Pubrel(pkid) => {
                 self.write_all(&[0x62, 0x02]).await?;
-                self.write_u16::<BigEndian>(pkid.0).await?;
+                self.write_u16(pkid.0).await?;
                 Ok(())
             }
             Packet::Pubcomp(pkid) => {
                 self.write_all(&[0x70, 0x02]).await?;
-                self.write_u16::<BigEndian>(pkid.0).await?;
+                self.write_u16(pkid.0).await?;
                 Ok(())
             }
             Packet::Subscribe(subscribe) => {
@@ -98,7 +97,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
                 let len = 2 + subscribe.topics.iter().fold(0, |s, ref t| s + t.topic_path.len() + 3);
                 
                 self.write_remaining_length(len).await?;
-                self.write_u16::<BigEndian>(subscribe.pkid.0).await?;
+                self.write_u16(subscribe.pkid.0).await?;
                 for topic in subscribe.topics.as_ref() as &Vec<SubscribeTopic> {
                     self.write_mqtt_string(topic.topic_path.as_str()).await?;
                     self.write_u8(topic.qos as u8).await?;
@@ -108,7 +107,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
             Packet::Suback(suback) => {
                 self.write_all(&[0x90]).await?;
                 self.write_remaining_length(suback.return_codes.len() + 2).await?;
-                self.write_u16::<BigEndian>(suback.pkid.0).await?;
+                self.write_u16(suback.pkid.0).await?;
                 
                 let payload: Vec<u8> = suback.return_codes.iter().map(|&code| match code {
                     SubscribeReturnCodes::Success(qos) => qos as u8,
@@ -122,7 +121,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
                 self.write_all(&[0xA2]).await?;
                 let len = 2 + unsubscribe.topics.iter().fold(0, |s, ref topic| s + topic.len() + 2);
                 self.write_remaining_length(len).await?;
-                self.write_u16::<BigEndian>(unsubscribe.pkid.0).await?;
+                self.write_u16(unsubscribe.pkid.0).await?;
                 
                 for topic in unsubscribe.topics.as_ref() as &Vec<String> {
                     self.write_mqtt_string(topic.as_str()).await?;
@@ -131,7 +130,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
             }
             Packet::Unsuback(pkid) => {
                 self.write_all(&[0xB0, 0x02]).await?;
-                self.write_u16::<BigEndian>(pkid.0).await?;
+                self.write_u16(pkid.0).await?;
                 Ok(())
             }
             Packet::Pingreq => {
@@ -150,7 +149,7 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
     }
 
     async fn write_mqtt_string(&mut self, string: &str) -> Result<(), Error> {
-        self.write_u16::<BigEndian>(string.len() as u16).await?;
+        self.write_u16(string.len() as u16).await?;
         self.write_all(string.as_bytes()).await?;
         Ok(())
     }
@@ -176,8 +175,8 @@ pub trait MqttWrite: AsyncWriteBytesExt + Unpin {
     }
 }
 
-/// Implement MqttWrite for every AsyncWriteBytesExt type (and hence AsyncWrite type)
-impl<W: AsyncWriteBytesExt + ?Sized + Unpin> MqttWrite for W {}
+/// Implement MqttWrite for every AsyncWriteExt type (and hence AsyncWrite type)
+impl<W: AsyncWriteExt + ?Sized + Unpin> MqttWrite for W {}
 
 #[cfg(test)]
 mod test {
