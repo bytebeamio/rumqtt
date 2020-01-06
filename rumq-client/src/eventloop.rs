@@ -397,6 +397,7 @@ mod test {
             let elapsed = start.elapsed();
 
             if i > 0 { 
+                dbg!(elapsed.as_millis());
                 assert_eq!(elapsed.as_secs(), options2.throttle.as_secs())
             }
         }
