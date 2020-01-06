@@ -1,6 +1,6 @@
 [package]
 name = "rumq-core"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 description = "Serializes and deserializes mqtt byte stream"
 license = "MIT"
 repository = "https://github.com/tekjar/rumq"
