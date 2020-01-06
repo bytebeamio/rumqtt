@@ -1,23 +1,20 @@
 #[macro_use]
 extern crate log;
 
+use derive_more::From;
+use rumq_core::Packet;
+use tokio::net::TcpListener;
+use tokio::sync::mpsc::channel;
+use tokio::task;
+use tokio::time::{self, Elapsed};
+
 use std::io;
 use std::time::Duration;
-use std::sync::Arc;
 
-use derive_more::From;
-use tokio::task;
-use tokio::time;
-use tokio::time::Elapsed;
-use tokio::net::{TcpStream, TcpListener, ToSocketAddrs};
-use tokio::io::BufReader;
-use async_std::sync::{channel, Sender, Receiver};
-use sharded_slab::Slab;
-use rumq_core::{Packet, MqttRead, MqttWrite};
-
-mod client;
-mod state;
+mod graveyard;
+mod connection;
 mod router;
+mod state;
 
 #[derive(From, Debug)]
 pub enum Error {
@@ -28,57 +25,69 @@ pub enum Error {
     Disconnected,
 }
 
-async fn connection_loop(mut stream: TcpStream, slab: Arc<Slab<Sender<Packet>>>) -> Result<(), Error> {
-    let mut mqtt = state::MqttState::new();
-    let timeout = Duration::from_millis(100);
-    
-    time::timeout(timeout, async {
-        let packet = stream.mqtt_read().await?;
-        let notification_and_reply = mqtt.handle_incoming_connect(packet)?;
-        
-        if let Some(packet) = notification_and_reply.1 {
-            stream.mqtt_write(&packet).await?;
-        }
-        
-        Ok::<_, Error>(())
-    }).await??;
-    
-    let mut reader = BufReader::new(stream); // 2
-    while let packet = reader.mqtt_read().await? { // 4
-        debug!("Packet = {:?}", packet);
-    }
-    
-    Ok(())
+
+/// Quotas and limitations mirroring google cloud
+/// TODO: Review all limitations and audit security aspects
+#[derive(Clone, Debug)]
+pub struct ConnectionConfig {
+    /// Max device id length
+    device_id_length: usize,
+    /// Maximum payload size of telemetry event
+    telemetry_payload_size: usize,
+    /// Throughput from cloud to device
+    cloud_to_device_throughput: usize,
+    /// Throughput from device to cloud
+    device_to_cloud_throughput: usize,
+    /// Minimum delay time between consecutive outgoing packets
+    incoming_messages_per_sec: usize,
+    /// maximum size of all inflight messages
+    inflight_size: usize,
 }
 
-pub struct Broker {}
+impl Default for ConnectionConfig {
+    fn default() -> Self { 
+        ConnectionConfig {
+            device_id_length: 256,
+            // 100KB per event
+            telemetry_payload_size: 100 * 1024,
+            // 100 KB/s throughput
+            cloud_to_device_throughput: 100 * 1024,
+            // 100 KB/s throughput
+            device_to_cloud_throughput: 100 * 1024,
+            // 10ms constant delay between each event
+            incoming_messages_per_sec: 100,
+            // 10MB
+            inflight_size: 10 * 1024 * 1024,
+        } 
+    }
+}
 
 pub async fn accept_loop(addr: &str) -> Result<(), Error> {
+    let connection_config = ConnectionConfig::default();
     let mut listener = TcpListener::bind(addr).await?;
-    let mut incoming = listener.incoming();
+    let (router_tx, router_rx) = channel::<Packet>(10);
 
-    let router = Arc::new(Slab::new());
-
+    // graveyard to save state of persistent connections
+    let graveyard = graveyard::Graveyard::new();
+    // router to route data between connections. creates an extra copy but
+    // might not be a big deal if we prevent clones/send fat pointers and batch
+    let router = router::Router::new(graveyard.clone(), router_rx);
+    
     info!("Waiting for connection");
+    // eventloop which accepts connections
     loop {
-        let (tx, rx) = channel::<Packet>(2);
-        let key = router.insert(tx).unwrap();
-
         let (stream, addr) = listener.accept().await?;
-        info!("Accepting from: {}", addr); 
-        
-        let _handle = task::spawn(connection_loop(stream, router.clone()));
+        info!("Accepting from: {}", addr);
+        task::spawn(connection::eventloop(connection_config.clone(), graveyard.clone(), stream, router_tx.clone()));
+        time::delay_for(Duration::from_millis(1)).await;
     }
-
-    Ok(())
 }
-
 
 #[cfg(test)]
 mod test {
-    #[test] 
+    #[test]
     fn accept_loop_rate_limits_incoming_connections() {}
-    
+
     #[test]
     fn accept_loop_should_not_allow_more_than_maximum_connections() {}
 

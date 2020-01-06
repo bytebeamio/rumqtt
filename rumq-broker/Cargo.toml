@@ -7,8 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "0.2", features = ["rt-core", "io-util", "tcp", "dns", "time", "sync", "macros"] }
-async-std = { version = "1", features = ["unstable"] }
+tokio = { version = "0.2", features = ["full"] }
+quinn = "0.5"
 futures-util = "0.3"
 rumq-core = { path = "../rumq-core" }
 derive_more = "0.99"

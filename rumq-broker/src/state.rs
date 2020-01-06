@@ -71,21 +71,24 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Packet {
+    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, Error> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_outgoing_publish(publish),
             _ => unimplemented!(),
         };
 
         self.last_outgoing = Instant::now();
-        out
+        Ok(out)
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Packet` which for the
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    pub fn handle_incoming_mqtt_packet(
+        &mut self,
+        packet: Packet,
+    ) -> Result<(Option<Packet>, Option<Packet>), Error> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
@@ -98,7 +101,7 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
+    fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
         let publish = match publish.qos() {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
@@ -113,7 +116,7 @@ impl MqttState {
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<Packet, Error> {
         let connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -124,25 +127,25 @@ impl MqttState {
         };
 
         if connect.client_id().starts_with(' ') || connect.client_id().is_empty() {
-            error!("Client id shouldn't start with space (or) shouldn't be empty in persistent sessions");
+            error!("Client id shouldn't start with space (or) shouldn't be emptys");
             return Err(Error::InvalidClientId);
         }
 
         let connack = connack(ConnectReturnCode::Accepted, false);
         // TODO: Handle connect packet
         // TODO: Handle session present
-        let reply = Some(Packet::Connack(connack));
-
-        let notification = None;
-
-        Ok((notification, reply))
+        let reply = Packet::Connack(connack);
+        Ok(reply)
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    fn handle_incoming_puback(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<Packet>, Option<Packet>), Error> {
         match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -160,7 +163,10 @@ impl MqttState {
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    fn handle_incoming_publish(
+        &mut self,
+        publish: Publish,
+    ) -> Result<(Option<Packet>, Option<Packet>), Error> {
         let qos = publish.qos();
 
         match qos {
