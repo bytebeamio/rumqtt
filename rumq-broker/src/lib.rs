@@ -2,7 +2,6 @@
 extern crate log;
 
 use derive_more::From;
-use rumq_core::Packet;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::channel;
 use tokio::task;
@@ -64,16 +63,15 @@ impl Default for ConnectionConfig {
 pub async fn accept_loop(addr: &str) -> Result<(), Error> {
     let connection_config = ConnectionConfig::default();
     let mut listener = TcpListener::bind(addr).await?;
-    let (router_tx, router_rx) = channel::<Packet>(10);
+    let (router_tx, router_rx) = channel::<router::RouterMessage>(10);
 
     // graveyard to save state of persistent connections
     let graveyard = graveyard::Graveyard::new();
 
     // router to route data between connections. creates an extra copy but
     // might not be a big deal if we prevent clones/send fat pointers and batch
-    let graveyard2 = graveyard.clone();
     task::spawn(async move {
-        let mut router = router::Router::new(graveyard2, router_rx);
+        let mut router = router::Router::new(router_rx);
         router.start().await
     });
 

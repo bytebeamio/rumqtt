@@ -3,5 +3,6 @@
 members = [
   "rumq-core",
   "rumq-client",
+  "rumq-broker",
   "rumq-cli"
 ]

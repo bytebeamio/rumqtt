@@ -15,25 +15,12 @@ pub struct Graveyard {
     // handles to a connections. map of client id and connection channel tx
     connection_handles: Arc<Mutex<HashMap<String, Sender<Packet>>>>,
     // state of disconnected persistent clients
-    connection_state:   Arc<Mutex<HashMap<String, MqttState>>>,
+    connection_state: Arc<Mutex<HashMap<String, MqttState>>>,
 }
 
 impl Graveyard {
     pub fn new() -> Graveyard {
-        Graveyard {
-            connection_handles: Arc::new(Mutex::new(HashMap::new())),
-            connection_state:   Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    pub fn add_connection_handle(&self, id: &str, handle: Sender<Packet>) {
-        let mut handles = self.connection_handles.lock().unwrap();
-        handles.insert(id.to_owned(), handle);
-    }
-
-    pub fn connection_handle(&self, id: &str) -> Sender<Packet> {
-        let mut handles = self.connection_handles.lock().unwrap();
-        handles.remove(id).unwrap()
+        Graveyard { connection_handles: Arc::new(Mutex::new(HashMap::new())), connection_state: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub fn reap(&self, id: &str, state: MqttState) {
