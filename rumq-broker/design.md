@@ -11,3 +11,9 @@ Broker constitutes of following components
   from the backend
 * Timestone which reads all the data from all the connections and writes
   to disk and tries to simulate kafka
+
+
+TODO
+---------------
+
+* Create a map connection id strings to numbers

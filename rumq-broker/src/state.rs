@@ -7,7 +7,6 @@ use std::time::Duration;
 pub enum MqttConnectionStatus {
     Handshake,
     Connected,
-    Disconnecting,
     Disconnected,
 }
 
@@ -59,7 +58,7 @@ impl MqttState {
     /// instantiated for clean sessions
     pub fn new() -> Self {
         MqttState {
-            connection_status: MqttConnectionStatus::Disconnected,
+            connection_status: MqttConnectionStatus::Handshake,
             keep_alive: None,
             await_pingresp: false,
             last_incoming: Instant::now(),
@@ -116,7 +115,7 @@ impl MqttState {
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<Packet, Error> {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Packet, String), Error> {
         let connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -126,16 +125,19 @@ impl MqttState {
             }
         };
 
+        let id = connect.client_id();
         if connect.client_id().starts_with(' ') || connect.client_id().is_empty() {
             error!("Client id shouldn't start with space (or) shouldn't be emptys");
             return Err(Error::InvalidClientId);
         }
 
+        self.connection_status = MqttConnectionStatus::Connected;
         let connack = connack(ConnectReturnCode::Accepted, false);
         // TODO: Handle connect packet
         // TODO: Handle session present
         let reply = Packet::Connack(connack);
-        Ok(reply)
+
+        Ok((reply, id.to_owned()))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
@@ -151,8 +153,8 @@ impl MqttState {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
                 let request = None;
-                let Packet = Some(Packet::Puback(pkid));
-                Ok((Packet, request))
+                let packet = Some(Packet::Puback(pkid));
+                Ok((packet, request))
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);

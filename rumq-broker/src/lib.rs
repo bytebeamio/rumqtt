@@ -69,9 +69,14 @@ pub async fn accept_loop(addr: &str) -> Result<(), Error> {
 
     // graveyard to save state of persistent connections
     let graveyard = graveyard::Graveyard::new();
+    
     // router to route data between connections. creates an extra copy but
     // might not be a big deal if we prevent clones/send fat pointers and batch
-    let router = router::Router::new(graveyard.clone(), router_rx);
+    let graveyard2 = graveyard.clone();
+    task::spawn(async move {
+        let mut router = router::Router::new(graveyard2, router_rx);
+        router.start().await
+    });
     
     info!("Waiting for connection");
     // eventloop which accepts connections

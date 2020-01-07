@@ -25,4 +25,19 @@ impl Graveyard {
             connection_state: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
+    pub fn add_connection_handle(&self, id: &str, handle: Sender<Packet>) {
+        let mut handles = self.connection_handles.lock().unwrap();
+        handles.insert(id.to_owned(), handle);
+    }
+
+    pub fn connection_handle(&self, id: &str) -> Sender<Packet> {
+        let mut handles = self.connection_handles.lock().unwrap();
+        handles.remove(id).unwrap()
+    }
+
+    pub fn reap(&self, id: &str, state: MqttState) {
+        let mut handles = self.connection_state.lock().unwrap();
+        handles.insert(id.to_owned(), state);
+    }
 }
