@@ -8,8 +8,8 @@ use tokio::time;
 
 use rumq_core::*;
 
-use crate::state::{self, MqttState};
 use crate::graveyard::Graveyard;
+use crate::state::{self, MqttState};
 use crate::ConnectionConfig;
 
 use std::time::Duration;
@@ -19,9 +19,8 @@ pub enum Error {
     State(state::Error),
     Core(rumq_core::Error),
     Timeout(time::Elapsed),
-    Mpsc(mpsc::error::SendError<Packet>)
+    Mpsc(mpsc::error::SendError<Packet>),
 }
-
 
 pub async fn eventloop(config: ConnectionConfig, graveyard: Graveyard, stream: impl Network, router_tx: Sender<Packet>) {
     // state of the given connection
@@ -32,7 +31,7 @@ pub async fn eventloop(config: ConnectionConfig, graveyard: Graveyard, stream: i
         Ok(id) => id,
         Err(e) => {
             error!("Connect packet error = {:?}", e);
-            return
+            return;
         }
     };
 
@@ -46,22 +45,21 @@ pub async fn eventloop(config: ConnectionConfig, graveyard: Graveyard, stream: i
 }
 
 struct Connection<'eventloop, S> {
-    state: &'eventloop mut MqttState,
-    stream: S,
-    this_rx: Receiver<Packet>,
+    state:     &'eventloop mut MqttState,
+    stream:    S,
+    this_rx:   Receiver<Packet>,
     router_tx: Sender<Packet>,
 }
 
 impl<'eventloop, S: Network> Connection<'eventloop, S> {
-    fn new(state: &'eventloop mut MqttState, stream: S, router_tx: Sender<Packet>) -> (Connection<'eventloop, S>, Sender<Packet>) {
+    fn new(
+        state: &'eventloop mut MqttState,
+        stream: S,
+        router_tx: Sender<Packet>,
+    ) -> (Connection<'eventloop, S>, Sender<Packet>) {
         let (this_tx, this_rx) = channel(100);
 
-        let connection = Connection {
-            state,
-            stream,
-            this_rx,
-            router_tx
-        };
+        let connection = Connection { state, stream, this_rx, router_tx };
 
         (connection, this_tx)
     }
@@ -72,11 +70,12 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
         let id = time::timeout(timeout, async {
             let packet = self.stream.mqtt_read().await?;
             let (connack, id) = self.state.handle_incoming_connect(packet)?;
-            
+
             // write connack packet
             self.stream.mqtt_write(&connack).await?;
             Ok::<_, Error>(id)
-        }).await??;
+        })
+        .await??;
 
         Ok(id)
     }
@@ -94,7 +93,7 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
                 }
             };
 
-            // TODO: Adding a bufreader and writer might improve read and write perf for 
+            // TODO: Adding a bufreader and writer might improve read and write perf for
             // small frequent messages. Not sure how to do this on TcpStream to do both
             // read and write with out using `io::split`. `io::split` introduces locks which
             // might affect perf during high load

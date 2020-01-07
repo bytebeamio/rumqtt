@@ -39,17 +39,17 @@ pub struct MqttState {
     /// Connection status
     connection_status: MqttConnectionStatus,
     /// Keep alive
-    keep_alive: Option<Duration>,
+    keep_alive:        Option<Duration>,
     /// Status of last ping
-    await_pingresp: bool,
+    await_pingresp:    bool,
     /// Last incoming packet time
-    last_incoming: Instant,
+    last_incoming:     Instant,
     /// Last outgoing packet time
-    last_outgoing: Instant,
+    last_outgoing:     Instant,
     /// Packet id of the last outgoing packet
-    last_pkid: PacketIdentifier,
+    last_pkid:         PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
-    outgoing_pub: VecDeque<Publish>,
+    outgoing_pub:      VecDeque<Publish>,
 }
 
 impl MqttState {
@@ -59,12 +59,12 @@ impl MqttState {
     pub fn new() -> Self {
         MqttState {
             connection_status: MqttConnectionStatus::Handshake,
-            keep_alive: None,
-            await_pingresp: false,
-            last_incoming: Instant::now(),
-            last_outgoing: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            outgoing_pub: VecDeque::new(),
+            keep_alive:        None,
+            await_pingresp:    false,
+            last_incoming:     Instant::now(),
+            last_outgoing:     Instant::now(),
+            last_pkid:         PacketIdentifier(0),
+            outgoing_pub:      VecDeque::new(),
         }
     }
 
@@ -84,10 +84,7 @@ impl MqttState {
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(
-        &mut self,
-        packet: Packet,
-    ) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Packet>, Option<Packet>), Error> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
@@ -144,10 +141,7 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    fn handle_incoming_puback(
-        &mut self,
-        pkid: PacketIdentifier,
-    ) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Packet>, Option<Packet>), Error> {
         match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -165,10 +159,7 @@ impl MqttState {
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(
-        &mut self,
-        publish: Publish,
-    ) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Packet>, Option<Packet>), Error> {
         let qos = publish.qos();
 
         match qos {

@@ -1,7 +1,7 @@
-use tokio::sync::mpsc::{Receiver, Sender};
 use derive_more::From;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-use rumq_core::{Packet, Connect, Publish, Subscribe};
+use rumq_core::{Connect, Packet, Publish, Subscribe};
 
 use std::collections::HashMap;
 
@@ -10,19 +10,19 @@ use crate::graveyard::Graveyard;
 #[derive(Debug, From)]
 pub enum Error {
     AllSendersDown,
-    PacketNotSupported(Packet)
+    PacketNotSupported(Packet),
 }
 
 pub struct Router {
-    graveyard: Graveyard,
+    graveyard:     Graveyard,
     // handles to all connections. used to route data
-    connections: HashMap<String, Sender<Packet>>,
+    connections:   HashMap<String, Sender<Packet>>,
     // maps subscription to interested clients. wildcards
     // aren't supported
     subscriptions: HashMap<String, Vec<String>>,
     // channel receiver to receive data from all the connections.
     // each connection will have a tx handle
-    data_rx: Receiver<Packet>,
+    data_rx:       Receiver<Packet>,
 }
 
 impl Router {
@@ -34,7 +34,7 @@ impl Router {
         loop {
             let packet = match self.data_rx.recv().await {
                 Some(packet) => packet,
-                None => return Err(Error::AllSendersDown)
+                None => return Err(Error::AllSendersDown),
             };
 
             if let Err(err) = self.handle_packet(packet) {
@@ -48,7 +48,7 @@ impl Router {
             Packet::Connect(connect) => self.handle_connect(connect)?,
             Packet::Publish(publish) => self.handle_publish(publish)?,
             Packet::Subscribe(subscribe) => self.handle_subscribe(subscribe)?,
-            packet => return Err(Error::PacketNotSupported(packet))
+            packet => return Err(Error::PacketNotSupported(packet)),
         }
 
         Ok(())

@@ -11,8 +11,8 @@ use tokio::time::{self, Elapsed};
 use std::io;
 use std::time::Duration;
 
-mod graveyard;
 mod connection;
+mod graveyard;
 mod router;
 mod state;
 
@@ -25,40 +25,39 @@ pub enum Error {
     Disconnected,
 }
 
-
 /// Quotas and limitations mirroring google cloud
 /// TODO: Review all limitations and audit security aspects
 #[derive(Clone, Debug)]
 pub struct ConnectionConfig {
     /// Max device id length
-    device_id_length: usize,
+    device_id_length:           usize,
     /// Maximum payload size of telemetry event
-    telemetry_payload_size: usize,
+    telemetry_payload_size:     usize,
     /// Throughput from cloud to device
     cloud_to_device_throughput: usize,
     /// Throughput from device to cloud
     device_to_cloud_throughput: usize,
     /// Minimum delay time between consecutive outgoing packets
-    incoming_messages_per_sec: usize,
+    incoming_messages_per_sec:  usize,
     /// maximum size of all inflight messages
-    inflight_size: usize,
+    inflight_size:              usize,
 }
 
 impl Default for ConnectionConfig {
-    fn default() -> Self { 
+    fn default() -> Self {
         ConnectionConfig {
-            device_id_length: 256,
+            device_id_length:           256,
             // 100KB per event
-            telemetry_payload_size: 100 * 1024,
+            telemetry_payload_size:     100 * 1024,
             // 100 KB/s throughput
             cloud_to_device_throughput: 100 * 1024,
             // 100 KB/s throughput
             device_to_cloud_throughput: 100 * 1024,
             // 10ms constant delay between each event
-            incoming_messages_per_sec: 100,
+            incoming_messages_per_sec:  100,
             // 10MB
-            inflight_size: 10 * 1024 * 1024,
-        } 
+            inflight_size:              10 * 1024 * 1024,
+        }
     }
 }
 
@@ -69,7 +68,7 @@ pub async fn accept_loop(addr: &str) -> Result<(), Error> {
 
     // graveyard to save state of persistent connections
     let graveyard = graveyard::Graveyard::new();
-    
+
     // router to route data between connections. creates an extra copy but
     // might not be a big deal if we prevent clones/send fat pointers and batch
     let graveyard2 = graveyard.clone();
@@ -77,7 +76,7 @@ pub async fn accept_loop(addr: &str) -> Result<(), Error> {
         let mut router = router::Router::new(graveyard2, router_rx);
         router.start().await
     });
-    
+
     info!("Waiting for connection");
     // eventloop which accepts connections
     loop {
