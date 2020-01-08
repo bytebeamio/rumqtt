@@ -26,8 +26,7 @@ pub async fn eventloop(config: ConnectionConfig, graveyard: Graveyard, stream: i
     // state of the given connection
     let mut state = MqttState::new();
 
-    let (mut connection, connection_tx) = Connection::new(&mut state, stream, router_tx);
-    let id = match connection.await_connect(connection_tx).await {
+    let mut connection = match Connection::new(&mut state, stream, router_tx).await {
         Ok(id) => id,
         Err(e) => {
             error!("Connect packet error = {:?}", e);
@@ -40,11 +39,12 @@ pub async fn eventloop(config: ConnectionConfig, graveyard: Graveyard, stream: i
     }
 
     info!("Reaping the connection in graveyard");
-    graveyard.reap(&id, state);
+    graveyard.reap(&connection.id, state);
 }
 
 struct Connection<'eventloop, S> {
     id: String,
+    keep_alive: Duration,
     state:     &'eventloop mut MqttState,
     stream:    S,
     this_rx:   Receiver<RouterMessage>,
@@ -52,40 +52,53 @@ struct Connection<'eventloop, S> {
 }
 
 impl<'eventloop, S: Network> Connection<'eventloop, S> {
-    fn new(state: &'eventloop mut MqttState, stream: S, router_tx: Sender<RouterMessage>) -> (Connection<'eventloop, S>, Sender<RouterMessage>) {
+    async fn new(state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
         let (this_tx, this_rx) = channel(100);
-        let connection = Connection { id: "uninit".to_owned(), state, stream, this_rx, router_tx };
         
-        (connection, this_tx)
-    }
-
-    async fn await_connect(&mut self, this_tx: Sender<RouterMessage>) -> Result<String, Error> {
-        // read mqtt connect packet with a timeout to prevent dos attacks
         let timeout = Duration::from_millis(100);
-        let id = time::timeout(timeout, async {
-            let packet = self.stream.mqtt_read().await?;
-            let (id, connack) = self.state.handle_incoming_connect(packet)?;
+        let (id, keep_alive, connack) = time::timeout(timeout, async {
+            let packet = stream.mqtt_read().await?;
+            let o = state.handle_incoming_connect(packet)?;
+            Ok::<_, Error>(o)
+        }).await??;
 
-            // write connack packet
-            self.stream.mqtt_write(&connack).await?;
-            Ok::<_, Error>(id)
-        })
-        .await??;
-
-        self.id = id.clone();
+        // write connack packet
+        stream.mqtt_write(&connack).await?;
+        
         // construct connect router message with cliend id and handle to this connection 
         let routermessage = RouterMessage::Connect((id.clone(), this_tx));
-        self.router_tx.send(routermessage).await?;
-        Ok(id)
+        router_tx.send(routermessage).await?;
+        let connection = Connection { id, keep_alive, state, stream, this_rx, router_tx };
+        
+        Ok(connection)
     }
 
+
     async fn run(&mut self) -> Result<(), Error> {
+        // TODO: Enable to and monitor perf. Default buffer size of 8K. Might've to periodically 
+        // flush?
+        // Q. What happens when socket receives only 4K of data and there is no new data? 
+        // Will the userspace not receive this data indefinitely. I don't see any timeouts?
+        // Carl says calls to read only issue one syscall. read_exact will "wait for that 
+        // amount to be read
+        // Verify BufReader code
+        // https://docs.rs/tokio/0.2.6/src/tokio/io/util/buf_reader.rs.html#117
+        // let mut stream = BufStream::new(stream);
+        
         let id = &self.id;
+        
         // eventloop which processes packets and router messages
         loop {
+            let stream = &mut self.stream;
+            // TODO: Use Delay::reset to not construct this timeout future everytime
+            let packet = time::timeout(self.keep_alive, async {
+                let packet = stream.mqtt_read().await?;
+                Ok::<_, Error>(packet)
+            });
+            
             let (routerpacket, outpacket) = select! {
                 // read packets from network and generate network reply and router message
-                o = self.stream.mqtt_read().fuse() => self.state.handle_incoming_mqtt_packet(id, o?)?,
+                o = packet.fuse() => self.state.handle_incoming_mqtt_packet(id, o??)?,
                 // read packets from router and generate packets to write to network
                 o = self.this_rx.next().fuse() => {
                     let packet = self.state.handle_outgoing_mqtt_packet(o.unwrap())?;
@@ -93,11 +106,6 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
                 }
             };
 
-            // TODO: Adding a bufreader and writer might improve read and write perf for
-            // small frequent messages. Not sure how to do this on TcpStream to do both
-            // read and write with out using `io::split`. `io::split` introduces locks which
-            // might affect perf during high load
-            // let mut stream = BufReader::new(stream);
 
             // send packet to router
             if let Some(packet) = routerpacket {

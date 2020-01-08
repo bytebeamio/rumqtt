@@ -44,16 +44,17 @@ impl Router {
                 None => return Err(Error::AllSendersDown),
             };
 
-            if let Err(err) = self.handle_router_message(message) {
+            if let Err(err) = self.handle_router_message(message).await {
                 error!("Handle packet error = {:?}", err);
             }
         }
     }
 
-    fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
+    async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
+        
         match message {
             RouterMessage::Connect((id, connection_handle)) => self.handle_connect(id, connection_handle)?,
-            RouterMessage::Publish(publish) => self.handle_publish(publish)?,
+            RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
         }
 
@@ -61,15 +62,32 @@ impl Router {
     }
 
     fn handle_connect(&mut self, id: String, connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
+        debug!("Connect. Id = {:?}", id);
         self.connections.insert(id, connection_handle);
         Ok(())
     }
 
-    fn handle_publish(&mut self, _publish: Publish) -> Result<(), Error> {
-        unimplemented!();
+    async fn handle_publish(&mut self, publish: Publish) -> Result<(), Error> {
+        debug!("Publish. Topic = {:?}, Qos = {:?}, Payload len = {}", publish.topic_name(), publish.qos(), publish.payload().len());
+        
+        // TODO: Will direct member access perform better than method call at higher frequency?
+        let topic = publish.topic_name();
+
+        // TODO: Directly get connection handles instead of client ids?
+        if let Some(ids) = self.subscriptions.get(topic) {
+            for id in ids.iter() {
+                let connection = self.connections.get_mut(id).unwrap();
+                let message = RouterMessage::Publish(publish.clone());
+                connection.send(message).await.unwrap();
+            }
+        }
+
+        Ok(())
     }
 
     fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
+        debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
+        
         // Each subscribe message can send multiple topics to subscribe to
         for topic in subscribe.topics() {
             let id = id.clone();

@@ -25,7 +25,9 @@ pub enum Error {
     /// Received a wrong packet while waiting for another packet
     WrongPacket,
     /// Unsupported packet
-    Unsupported,
+    UnsupportedPacket(Packet),
+    /// Unsupported qos
+    UnsupportedQoS,
     /// Invalid client ID
     InvalidClientId,
 }
@@ -91,7 +93,8 @@ impl MqttState {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(id, subscribe),
-            _ => return Err(Error::Unsupported),
+            Packet::Pingreq => self.handle_incoming_pingreq(),
+            _ => return Err(Error::UnsupportedPacket(packet)),
         };
 
         self.last_incoming = Instant::now();
@@ -110,7 +113,7 @@ impl MqttState {
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(String, Packet), Error> {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(String, Duration, Packet), Error> {
         let connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -121,6 +124,10 @@ impl MqttState {
         };
 
         let id = connect.client_id();
+        let keep_alive = *connect.keep_alive();
+        let keep_alive = Duration::from_secs(keep_alive as u64);
+        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
+
         if connect.client_id().starts_with(' ') || connect.client_id().is_empty() {
             error!("Client id shouldn't start with space (or) shouldn't be emptys");
             return Err(Error::InvalidClientId);
@@ -132,7 +139,12 @@ impl MqttState {
         // TODO: Handle session present
         let reply = Packet::Connack(connack);
 
-        Ok((id.to_owned(), reply))
+        Ok((id.to_owned(), keep_alive, reply))
+    }
+
+    fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+        let packet = Packet::Pingresp;
+        Ok((None, Some(packet)))
     }
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
@@ -151,7 +163,7 @@ impl MqttState {
                 let routermessage = RouterMessage::Publish(publish);
                 Ok((Some(routermessage), Some(packet)))
             }
-            QoS::ExactlyOnce => Err(Error::Unsupported),
+            QoS::ExactlyOnce => Err(Error::UnsupportedQoS),
         }
     }
 
