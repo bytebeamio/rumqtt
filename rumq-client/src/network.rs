@@ -1,5 +1,5 @@
 use tokio_rustls::{client::TlsStream, TlsConnector};
-use tokio_rustls::rustls::{ClientConfig, Certificate, PrivateKey};
+use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_rustls::rustls::internal::pemfile::{ certs, rsa_private_keys };
 use tokio::net::TcpStream;

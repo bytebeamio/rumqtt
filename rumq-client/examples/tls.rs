@@ -5,15 +5,16 @@ use tokio::time;
 
 use rumq_client::{self, MqttOptions, QoS, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
+use std::fs;
 
 #[tokio::main(basic_scheduler)]
 async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
     
-    let ca = include_bytes!("tlsfiles/ca-chain.cert.pem").to_vec();
-    let client_cert = include_bytes!("tlsfiles/device-1.cert.pem").to_vec();
-    let client_key = include_bytes!("tlsfiles/device-1.key.pem").to_vec();
+    let ca = fs::read("tlsfiles/ca-chain.cert.pem").unwrap();
+    let client_cert = fs::read("tlsfiles/device-1.cert.pem").unwrap();
+    let client_key = fs::read("tlsfiles/device-1.key.pem").unwrap();
     
     let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new("device-1", "localhost", 1883);
