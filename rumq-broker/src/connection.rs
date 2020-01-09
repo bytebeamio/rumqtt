@@ -2,7 +2,6 @@ use derive_more::From;
 use futures_util::future::FutureExt;
 use futures_util::select;
 use futures_util::stream::StreamExt;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{self, channel, Receiver, Sender};
 use tokio::time;
 use rumq_core::{MqttRead, MqttWrite};
@@ -10,9 +9,11 @@ use rumq_core::{MqttRead, MqttWrite};
 use crate::graveyard::Graveyard;
 use crate::state::{self, MqttState};
 use crate::router::RouterMessage;
-use crate::ConnectionConfig;
+use crate::Config;
+use crate::Network;
 
 use std::time::Duration;
+use std::sync::Arc;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -22,7 +23,7 @@ pub enum Error {
     Mpsc(mpsc::error::SendError<RouterMessage>),
 }
 
-pub async fn eventloop(config: ConnectionConfig, graveyard: Graveyard, stream: impl Network, router_tx: Sender<RouterMessage>) {
+pub async fn eventloop(config: Arc<Config>, graveyard: Graveyard, stream: impl Network, router_tx: Sender<RouterMessage>) {
     // state of the given connection
     let mut state = MqttState::new();
 
@@ -55,7 +56,7 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
     async fn new(state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
         let (this_tx, this_rx) = channel(100);
         
-        let timeout = Duration::from_millis(100);
+        let timeout = Duration::from_millis(1000);
         let (id, keep_alive, connack) = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
             let o = state.handle_incoming_connect(packet)?;
@@ -120,5 +121,3 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
     }
 }
 
-pub trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
-impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
