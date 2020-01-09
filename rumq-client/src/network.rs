@@ -1,6 +1,7 @@
 use tokio_rustls::{client::TlsStream, TlsConnector};
-use tokio_rustls::rustls::{ClientConfig, Certificate, PrivateKey};
+use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
+use tokio_rustls::rustls::internal::pemfile::{ certs, rsa_private_keys };
 use tokio::net::TcpStream;
 use derive_more::From;
 
@@ -31,16 +32,15 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     // certs in the chain, converts each to der and adds them to root store
     // TODO: Check if there is a better way to do this
     let ca = options.ca.as_ref().unwrap();
-    let mut ca = BufReader::new(Cursor::new(ca));
-    if config.root_store.add_pem_file(&mut ca)?.0 == 0 {
+    if config.root_store.add_pem_file(&mut BufReader::new(Cursor::new(ca)))?.0 == 0 {
         return Err(Error::NoValidCertInChain)
     }
 
     // Add der encoded client cert and key
     if let Some(client) = options.client_auth.as_ref() {
-        let cert_chain = vec![Certificate(client.0.clone())];
-        let key = PrivateKey(client.1.clone());
-        config.set_single_client_cert(cert_chain, key);
+        let certs = certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
+        let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone())))?;
+        config.set_single_client_cert(certs, keys.remove(0));
     }
 
     // Set ALPN

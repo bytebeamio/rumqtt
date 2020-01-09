@@ -159,6 +159,13 @@ pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
     }
 }
 
+pub fn empty_subscribe() -> Subscribe {
+    Subscribe {
+        pkid: PacketIdentifier(0),
+        topics: Vec::new(),
+    }
+}
+
 impl Subscribe {
     pub fn add(&mut self, topic: String, qos: QoS) -> &mut Self {
         let topic = SubscribeTopic { topic_path: topic, qos };
@@ -184,6 +191,10 @@ pub enum SubscribeReturnCodes {
 pub struct Suback {
     pub(crate) pkid: PacketIdentifier,
     pub(crate) return_codes: Vec<SubscribeReturnCodes>,
+}
+
+pub fn suback(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -> Suback {
+    Suback { pkid, return_codes }
 }
 
 #[derive(Debug, Clone, PartialEq)]

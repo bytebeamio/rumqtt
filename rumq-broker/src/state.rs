@@ -3,11 +3,12 @@ use std::{collections::VecDeque, result::Result, time::Instant};
 use rumq_core::*;
 use std::time::Duration;
 
+use crate::router::RouterMessage;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
     Handshake,
     Connected,
-    Disconnecting,
     Disconnected,
 }
 
@@ -24,7 +25,9 @@ pub enum Error {
     /// Received a wrong packet while waiting for another packet
     WrongPacket,
     /// Unsupported packet
-    Unsupported,
+    UnsupportedPacket(Packet),
+    /// Unsupported qos
+    UnsupportedQoS,
     /// Invalid client ID
     InvalidClientId,
 }
@@ -59,7 +62,7 @@ impl MqttState {
     /// instantiated for clean sessions
     pub fn new() -> Self {
         MqttState {
-            connection_status: MqttConnectionStatus::Disconnected,
+            connection_status: MqttConnectionStatus::Handshake,
             keep_alive: None,
             await_pingresp: false,
             last_incoming: Instant::now(),
@@ -71,25 +74,27 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Packet {
-        let out = match packet {
-            Packet::Publish(publish) => self.handle_outgoing_publish(publish),
+    pub fn handle_outgoing_mqtt_packet(&mut self, message: RouterMessage) -> Result<Packet, Error> {
+        let out = match message {
+            RouterMessage::Publish(publish) => self.handle_outgoing_publish(publish),
             _ => unimplemented!(),
         };
 
         self.last_outgoing = Instant::now();
-        out
+        Ok(out)
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Packet` which for the
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    pub fn handle_incoming_mqtt_packet(&mut self, id: &str, packet: Packet) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
-            _ => return Err(Error::Unsupported),
+            Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(id, subscribe),
+            Packet::Pingreq => self.handle_incoming_pingreq(),
+            _ => return Err(Error::UnsupportedPacket(packet)),
         };
 
         self.last_incoming = Instant::now();
@@ -98,22 +103,17 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
+    fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
         let publish = match publish.qos() {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        debug!(
-            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
-            publish.topic_name(),
-            publish.pkid(),
-            publish.payload().len()
-        );
+        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name(), publish.pkid(), publish.payload().len());
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(String, Duration, Packet), Error> {
         let connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -123,33 +123,61 @@ impl MqttState {
             }
         };
 
+        let id = connect.client_id();
+        let keep_alive = *connect.keep_alive();
+        let keep_alive = Duration::from_secs(keep_alive as u64);
+        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
+
         if connect.client_id().starts_with(' ') || connect.client_id().is_empty() {
-            error!("Client id shouldn't start with space (or) shouldn't be empty in persistent sessions");
+            error!("Client id shouldn't start with space (or) shouldn't be emptys");
             return Err(Error::InvalidClientId);
         }
 
+        self.connection_status = MqttConnectionStatus::Connected;
         let connack = connack(ConnectReturnCode::Accepted, false);
         // TODO: Handle connect packet
         // TODO: Handle session present
-        let reply = Some(Packet::Connack(connack));
+        let reply = Packet::Connack(connack);
 
-        let notification = None;
+        Ok((id.to_owned(), keep_alive, reply))
+    }
 
-        Ok((notification, reply))
+    fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+        let packet = Packet::Pingresp;
+        Ok((None, Some(packet)))
+    }
+
+    /// Results in a publish notification in all the QoS cases. Replys with an ack
+    /// in case of QoS1 and Replys rec in case of QoS while also storing the message
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+        let qos = publish.qos();
+
+        match qos {
+            QoS::AtMostOnce => {
+                let routermessage = RouterMessage::Publish(publish);
+                Ok((Some(routermessage), None))
+            }
+            QoS::AtLeastOnce => {
+                let pkid = publish.pkid().unwrap();
+                let packet = Packet::Puback(pkid);
+                let routermessage = RouterMessage::Publish(publish);
+                Ok((Some(routermessage), Some(packet)))
+            }
+            QoS::ExactlyOnce => Err(Error::UnsupportedQoS),
+        }
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
     /// matching packet identifier. Removal is now a O(n) operation. This should be
-    /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
-    /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Packet>, Option<Packet>), Error> {
+    /// usually ok in case of acks due to ack ordering in normal conditions.
+    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
-                let request = None;
-                let Packet = Some(Packet::Puback(pkid));
-                Ok((Packet, request))
+                let routermessage = None;
+                let packet = None;
+                Ok((routermessage, packet))
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
@@ -158,24 +186,36 @@ impl MqttState {
         }
     }
 
-    /// Results in a publish notification in all the QoS cases. Replys with an ack
-    /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Packet>, Option<Packet>), Error> {
-        let qos = publish.qos();
+    fn handle_incoming_subscribe(&mut self, id: &str, subscription: Subscribe) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
 
-        match qos {
-            QoS::AtMostOnce => {
-                let notification = Packet::Publish(publish);
-                Ok((Some(notification), None))
+        let pkid = subscription.pkid();
+        let id = id.to_owned();
+
+        let mut router_subscription = empty_subscribe();
+        let mut subscription_return_codes = Vec::new();
+        for topic in subscription.topics().iter() {
+            let qos = topic.qos();
+            let qos = match qos {
+                QoS::AtMostOnce | QoS::AtLeastOnce => *qos,
+                QoS::ExactlyOnce => QoS::AtLeastOnce,
+            };
+
+            let topic = topic.topic_path();
+            // we don't support wildcards yet
+            let code = if topic.chars().all(|v| v == '#' || v == '+') { SubscribeReturnCodes::Failure } else { SubscribeReturnCodes::Success(qos) };
+
+            // add only successful subscriptions to router message
+            if let SubscribeReturnCodes::Success(qos) = code {
+                router_subscription.add(topic.clone(), qos);
             }
-            QoS::AtLeastOnce => {
-                let pkid = publish.pkid().unwrap();
-                let request = Packet::Puback(pkid);
-                let notification = Packet::Publish(publish);
-                Ok((Some(notification), Some(request)))
-            }
-            QoS::ExactlyOnce => Err(Error::Unsupported),
+
+            subscription_return_codes.push(code);
         }
+
+        let packet = Packet::Suback(suback(*pkid, subscription_return_codes));
+        let routermessage = RouterMessage::Subscribe((id, subscription));
+        Ok((Some(routermessage), Some(packet)))
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
@@ -209,20 +249,14 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
+    /*
     use std::{sync::Arc, thread, time::Duration};
 
     use super::{Error, MqttConnectionStatus, MqttState, Packet};
     use rumq_core::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
-        Publish {
-            dup: false,
-            qos,
-            retain: false,
-            pkid: None,
-            topic_name: "hello/world".to_owned(),
-            payload: Arc::new(vec![1, 2, 3]),
-        }
+        Publish { dup: false, qos, retain: false, pkid: None, topic_name: "hello/world".to_owned(), payload: Arc::new(vec![1, 2, 3]) }
     }
 
     fn build_incoming_publish(qos: QoS, pkid: u16) -> Publish {
@@ -250,4 +284,5 @@ mod test {
         }
         assert_eq!(PacketIdentifier(1), pkt_id);
     }
+    */
 }
