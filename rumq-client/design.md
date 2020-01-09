@@ -1,5 +1,6 @@
--[ ] Make mqtt stream usable in `task::spawn`
 -[ ] Make core publish take qos with publish
+-[ ] Rust iterator like design
+-[ ] Should the APIs take files directly
 
 This doc is a journal. Make a blog out of this
 
