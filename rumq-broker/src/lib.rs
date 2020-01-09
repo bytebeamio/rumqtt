@@ -77,7 +77,7 @@ async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_pa
 
     let certs = certs(&mut BufReader::new(File::open(cert_path)?)).map_err(|_|Error::NoServerCertFile)?;
     let mut keys = rsa_private_keys(&mut BufReader::new(File::open(key_path)?)).map_err(|_| Error::NoServerKeyFile)?;
-
+    
     server_config.set_single_cert(certs, keys.remove(0))?;
     let acceptor = TlsAcceptor::from(Arc::new(server_config));
     Ok(acceptor)

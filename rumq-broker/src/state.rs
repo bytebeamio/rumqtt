@@ -249,6 +249,7 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
+    /*
     use std::{sync::Arc, thread, time::Duration};
 
     use super::{Error, MqttConnectionStatus, MqttState, Packet};
@@ -283,4 +284,5 @@ mod test {
         }
         assert_eq!(PacketIdentifier(1), pkt_id);
     }
+    */
 }
