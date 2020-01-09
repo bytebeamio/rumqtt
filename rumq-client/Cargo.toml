@@ -10,7 +10,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-derive_more = "0.15"
+derive_more = "0.99"
 tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "sync", "time"] }
 async-stream = "0.2"
 futures-util = "0.3"
