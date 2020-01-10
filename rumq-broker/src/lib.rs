@@ -41,7 +41,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Config {
+pub struct ServerSettings {
     pub port: u16,
     pub connection_timeout_ms: u16,
     pub max_client_id_len: usize,
@@ -83,7 +83,9 @@ async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_pa
     Ok(acceptor)
 }
 
-pub async fn accept_loop(config: Arc<Config>, addr: &str) -> Result<(), Error> {
+pub async fn accept_loop(config: Arc<ServerSettings>) -> Result<(), Error> {
+    let addr = format!("0.0.0.0:{}", config.port);
+    
     let router_config = config.clone();
     let connection_config = config.clone();
     let (router_tx, router_rx) = channel::<router::RouterMessage>(10);
@@ -103,7 +105,7 @@ pub async fn accept_loop(config: Arc<Config>, addr: &str) -> Result<(), Error> {
         None
     };
 
-    info!("Waiting for connection");
+    info!("Waiting for connection on {}", addr);
     // eventloop which accepts connections
     let mut listener = TcpListener::bind(addr).await?;
     loop {

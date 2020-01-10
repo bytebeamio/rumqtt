@@ -12,9 +12,9 @@ async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
     
-    let ca = fs::read("tlsfiles/ca-chain.cert.pem").unwrap();
-    let client_cert = fs::read("tlsfiles/device-1.cert.pem").unwrap();
-    let client_key = fs::read("tlsfiles/device-1.key.pem").unwrap();
+    let ca = fs::read("certs/tlsfiles/ca-chain.cert.pem").unwrap();
+    let client_cert = fs::read("certs/tlsfiles/device-1.cert.pem").unwrap();
+    let client_key = fs::read("certs/tlsfiles/device-1.key.pem").unwrap();
     
     let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new("device-1", "localhost", 1883);
