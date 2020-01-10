@@ -5,7 +5,7 @@ use rumq_core::{Publish, Subscribe};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::Config;
+use crate::ServerSettings;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -26,7 +26,7 @@ pub enum RouterMessage {
 }
 
 pub struct Router {
-    config: Arc<Config>,
+    config: Arc<ServerSettings>,
     // handles to all connections. used to route data
     connections:   HashMap<String, Sender<RouterMessage>>,
     // maps subscription to interested clients. wildcards
@@ -38,7 +38,7 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(config: Arc<Config>, data_rx: Receiver<RouterMessage>) -> Self {
+    pub fn new(config: Arc<ServerSettings>, data_rx: Receiver<RouterMessage>) -> Self {
         Router { config, connections: HashMap::new(), subscriptions: HashMap::new(), data_rx }
     }
 

@@ -9,7 +9,7 @@ use rumq_core::{MqttRead, MqttWrite};
 use crate::graveyard::Graveyard;
 use crate::state::{self, MqttState};
 use crate::router::RouterMessage;
-use crate::Config;
+use crate::ServerSettings;
 use crate::Network;
 
 use std::time::Duration;
@@ -23,11 +23,11 @@ pub enum Error {
     Mpsc(mpsc::error::SendError<RouterMessage>),
 }
 
-pub async fn eventloop(config: Arc<Config>, graveyard: Graveyard, stream: impl Network, router_tx: Sender<RouterMessage>) {
+pub async fn eventloop(config: Arc<ServerSettings>, graveyard: Graveyard, stream: impl Network, router_tx: Sender<RouterMessage>) {
     // state of the given connection
     let mut state = MqttState::new();
 
-    let mut connection = match Connection::new(&mut state, stream, router_tx).await {
+    let mut connection = match Connection::new(config, &mut state, stream, router_tx).await {
         Ok(id) => id,
         Err(e) => {
             error!("Connect packet error = {:?}", e);
@@ -53,10 +53,10 @@ struct Connection<'eventloop, S> {
 }
 
 impl<'eventloop, S: Network> Connection<'eventloop, S> {
-    async fn new(state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
+    async fn new(config: Arc<ServerSettings>, state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
         let (this_tx, this_rx) = channel(100);
         
-        let timeout = Duration::from_millis(1000);
+        let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let (id, keep_alive, connack) = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
             let o = state.handle_incoming_connect(packet)?;

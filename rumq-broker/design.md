@@ -16,4 +16,14 @@ Broker constitutes of following components
 TODO
 ---------------
 
-* Create a map connection id strings to numbers
+* Create a map connection id strings to numbers (Validate perf?)
+* Better errors when tls connection happens on tcp port
+
+```
+Client side error:
+Received = StreamEnd(Network(Io(Custom { kind: UnexpectedEof, error: "tls handshake eof" })))
+
+Server side error:
+ERROR librumqd::connection > Connect packet error = Timeout(Elapsed(()))
+```
+

@@ -111,21 +111,14 @@ pub fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
 #[derive(Debug, From)]
 pub enum Error {
     InvalidConnectReturnCode(u8),
-    InvalidProtocolName(String),
     InvalidProtocolLevel(String, u8),
     IncorrectPacketFormat,
-    InvalidTopic,
-    UnsupportedProtocolName,
-    UnsupportedProtocolVersion,
     UnsupportedQoS,
     UnsupportedPacketType(u8),
-    UnsupportedConnectReturnCode,
     PayloadSizeIncorrect,
     PayloadTooLong,
     PayloadRequired,
     TopicNameMustNotContainNonUtf8(FromUtf8Error),
-    TopicNameMustNotContainWildcard,
     MalformedRemainingLength,
-    UnexpectedEof,
     Io(io::Error),
 }
