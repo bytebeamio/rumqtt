@@ -21,6 +21,7 @@ use std::fs::File;
 use std::path::Path;
 
 mod connection;
+mod http;
 mod graveyard;
 mod router;
 mod state;
