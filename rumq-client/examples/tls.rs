@@ -17,10 +17,10 @@ async fn main() {
     let client_key = fs::read("certs/tlsfiles/device-1.key.pem").unwrap();
     
     let (requests_tx, requests_rx) = channel(10);
-    let mut mqttoptions = MqttOptions::new("device-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("device-1", "mqtt.bytebeam.io", 8883);
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
     mqttoptions.set_ca(ca);
-    mqttoptions.set_client_auth(client_cert, client_key);
+    // mqttoptions.set_client_auth(client_cert, client_key);
     
     let mut eventloop = eventloop(mqttoptions, requests_rx);
     task::spawn(async move {
