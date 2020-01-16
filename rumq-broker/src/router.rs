@@ -3,9 +3,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use rumq_core::{Publish, Subscribe};
 
 use std::collections::HashMap;
-use std::sync::Arc;
-
-use crate::ServerSettings;
 
 #[derive(Debug, From)]
 pub enum Error {

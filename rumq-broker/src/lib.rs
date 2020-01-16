@@ -22,7 +22,8 @@ use std::fs::File;
 use std::path::Path;
 
 mod connection;
-mod http;
+mod actionserver;
+mod statusclient;
 mod graveyard;
 mod router;
 mod state;
@@ -153,7 +154,12 @@ pub async fn start(config: Config) {
 
     let http_router_tx = router_tx.clone();
     task::spawn(async move {
-        http::start(http_router_tx).await
+        actionserver::start(http_router_tx).await
+    });
+
+    let status_router_tx = router_tx.clone();
+    task::spawn(async move {
+        statusclient::start(status_router_tx).await;
     });
 
     let mut servers = Vec::new();
