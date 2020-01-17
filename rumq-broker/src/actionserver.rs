@@ -3,12 +3,13 @@ use hyper::{Body, Response, Server};
 use tokio::sync::mpsc::Sender;
 
 use crate::router::RouterMessage;
+use crate::Config;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub async fn start(router_tx: Sender<RouterMessage>) {
-    let addr = ([0, 0, 0, 0], 8080).into();
+pub async fn start(config: Arc<Config>, router_tx: Sender<RouterMessage>) {
+    let addr = ([0, 0, 0, 0], config.httpserver.port).into();
 
     let router_tx = Arc::new(Mutex::new(router_tx));
     let server = Server::bind(&addr).serve(make_service_fn(move |_| {

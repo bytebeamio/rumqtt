@@ -43,12 +43,26 @@ pub enum Error {
     Disconnected,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    servers: Vec<ServerSettings>
+    servers: Vec<ServerSettings>,
+    httppush: HttpPush,
+    httpserver: HttpServer
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpPush {
+    url: String,
+    topic: String
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpServer {
+    port: u16,
+    topic: String
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerSettings {
     pub port: u16,
     pub connection_timeout_ms: u16,
@@ -153,13 +167,17 @@ pub async fn start(config: Config) {
 
 
     let http_router_tx = router_tx.clone();
+    // TODO: Remove clone on main config
+    let httpserver_config = Arc::new(config.clone());
     task::spawn(async move {
-        actionserver::start(http_router_tx).await
+        actionserver::start(httpserver_config, http_router_tx).await
     });
 
     let status_router_tx = router_tx.clone();
+    // TODO: Remove clone on main config
+    let httppush_config = Arc::new(config.clone());
     task::spawn(async move {
-        statusclient::start(status_router_tx).await;
+        statusclient::start(httppush_config, status_router_tx).await;
     });
 
     let mut servers = Vec::new();
