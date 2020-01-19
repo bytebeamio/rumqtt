@@ -118,7 +118,7 @@ pub struct Publish {
     pub(crate) retain: bool,
     pub(crate) topic_name: String,
     pub(crate) pkid: Option<PacketIdentifier>,
-    pub(crate) payload: Arc<Vec<u8>>,
+    pub payload: Arc<Vec<u8>>,
 }
 
 pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, payload: P) -> Publish {

@@ -23,7 +23,7 @@ use std::path::Path;
 
 mod connection;
 mod httpserver;
-mod pushclient;
+mod httppush;
 mod graveyard;
 mod router;
 mod state;
@@ -59,7 +59,6 @@ pub struct HttpPush {
 #[derive(Debug, Deserialize, Clone)]
 pub struct HttpServer {
     port: u16,
-    topic: String
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -177,7 +176,7 @@ pub async fn start(config: Config) {
     // TODO: Remove clone on main config
     let httppush_config = Arc::new(config.clone());
     task::spawn(async move {
-        pushclient::start(httppush_config, status_router_tx).await;
+        httppush::start(httppush_config, status_router_tx).await;
     });
 
     let mut servers = Vec::new();
