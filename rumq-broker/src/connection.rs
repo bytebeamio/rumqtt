@@ -23,24 +23,29 @@ pub enum Error {
     Mpsc(mpsc::error::SendError<RouterMessage>),
 }
 
-pub async fn eventloop(config: Arc<ServerSettings>, graveyard: Graveyard, stream: impl Network, router_tx: Sender<RouterMessage>) {
+pub async fn eventloop(config: Arc<ServerSettings>, graveyard: Graveyard, stream: impl Network, mut router_tx: Sender<RouterMessage>) -> Result<String, Error> {
     // state of the given connection
     let mut state = MqttState::new();
 
-    let mut connection = match Connection::new(config, &mut state, stream, router_tx).await {
-        Ok(id) => id,
-        Err(e) => {
-            error!("Connect packet error = {:?}", e);
-            return;
-        }
-    };
+    // TODO: persistent new connection should get state back from the graveyard and send pending packets
+    // along with outstanding publishes that the router received when the client connection is offline
+    let mut connection = Connection::new(config, &mut state, stream, router_tx.clone()).await?;
+    let id = connection.id.clone();
 
-    if let Err(e) = connection.run().await {
-        error!("Connection error = {:?}", e);
+    if let Err(err) = connection.run().await {
+        let id = id.clone();
+        error!("Connection error = {:?}", err);
+        
+        match err {
+            Error::State(state::Error::Disconnect(id)) => router_tx.send(RouterMessage::Disconnect(id)).await?,
+            _ => router_tx.send(RouterMessage::Death(id)).await?,
+        }
     }
 
-    info!("Reaping the connection in graveyard");
-    graveyard.reap(&connection.id, state);
+    info!("Reaping the connection in graveyard. Id = {}", id);
+    graveyard.reap(&id, state);
+
+    Ok(id)
 }
 
 struct Connection<'eventloop, S> {
@@ -55,7 +60,6 @@ struct Connection<'eventloop, S> {
 impl<'eventloop, S: Network> Connection<'eventloop, S> {
     async fn new(config: Arc<ServerSettings>, state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
         let (this_tx, this_rx) = channel(100);
-        
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let (id, keep_alive, connack) = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
@@ -65,19 +69,16 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
 
         // write connack packet
         stream.mqtt_write(&connack).await?;
-        
         // construct connect router message with cliend id and handle to this connection 
         let routermessage = RouterMessage::Connect((id.clone(), this_tx));
         router_tx.send(routermessage).await?;
         let connection = Connection { id, keep_alive, state, stream, this_rx, router_tx };
-        
         Ok(connection)
     }
 
 
     async fn run(&mut self) -> Result<(), Error> {
-        // TODO: Enable to and monitor perf. Default buffer size of 8K. Might've to periodically 
-        // flush?
+        // TODO: Enable and monitor perf. Default buffer size of 8K. Might've to periodically flush?
         // Q. What happens when socket receives only 4K of data and there is no new data? 
         // Will the userspace not receive this data indefinitely. I don't see any timeouts?
         // Carl says calls to read only issue one syscall. read_exact will "wait for that 
@@ -85,9 +86,7 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
         // Verify BufReader code
         // https://docs.rs/tokio/0.2.6/src/tokio/io/util/buf_reader.rs.html#117
         // let mut stream = BufStream::new(stream);
-        
         let id = &self.id;
-        
         // eventloop which processes packets and router messages
         loop {
             let stream = &mut self.stream;
@@ -96,7 +95,7 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
                 let packet = stream.mqtt_read().await?;
                 Ok::<_, Error>(packet)
             });
-            
+
             let (routerpacket, outpacket) = select! {
                 // read packets from network and generate network reply and router message
                 o = packet.fuse() => self.state.handle_incoming_mqtt_packet(id, o??)?,

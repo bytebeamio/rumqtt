@@ -30,6 +30,8 @@ pub enum Error {
     UnsupportedQoS,
     /// Invalid client ID
     InvalidClientId,
+    /// Disconnect received
+    Disconnect(String),
 }
 
 /// `MqttState` saves the state of the mqtt connection. Methods will
@@ -94,7 +96,7 @@ impl MqttState {
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(id, subscribe),
             Packet::Pingreq => self.handle_incoming_pingreq(),
-            // Packet::Disconnect => self.handle_incoming_disconnect(id),
+            Packet::Disconnect => self.handle_incoming_disconnect(id),
             _ => return Err(Error::UnsupportedPacket(packet)),
         };
 
@@ -227,8 +229,8 @@ impl MqttState {
     }
 
     fn handle_incoming_disconnect(&mut self, id: &str) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
-        let routermessage = RouterMessage::Disconnect(id.to_owned());
-        Ok((Some(routermessage), None))
+        // TODO: Do will handling here
+        Err(Error::Disconnect(id.to_owned()))
     }
 
     /// Add publish packet to the state and return the packet. This method clones the

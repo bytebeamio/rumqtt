@@ -20,7 +20,10 @@ pub enum RouterMessage {
     /// Publish message to forward to connections
     Publish(Publish),
     /// Client id and subscription
-    Subscribe((String, Subscribe))
+    Subscribe((String, Subscribe)),
+    /// Disconnect
+    Disconnect(String),
+    Death(String)
 }
 
 pub struct Router {
@@ -53,11 +56,12 @@ impl Router {
     }
 
     async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
-        
         match message {
             RouterMessage::Connect((id, connection_handle)) => self.handle_connect(id, connection_handle)?,
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
+            RouterMessage::Disconnect(id) => (),
+            RouterMessage::Death(id) => (),
         }
 
         Ok(())
@@ -74,7 +78,6 @@ impl Router {
         
         // TODO: Will direct member access perform better than method call at higher frequency?
         let topic = publish.topic_name();
-
         // TODO: Directly get connection handles instead of client ids?
         if let Some(ids) = self.subscriptions.get(topic) {
             for id in ids.iter() {
@@ -95,7 +98,12 @@ impl Router {
             let id = id.clone();
             match self.subscriptions.get_mut(topic.topic_path()) {
                 // push client id to list of clients intrested in this subspcription
-                Some(connections) => connections.push(id),
+                Some(connections) => {
+                    // don't add same id twice
+                    if !connections.contains(&id) {
+                        connections.push(id)
+                    }
+                }
                 // create a new subscription and push the client id
                 None => {
                     let mut connections = Vec::new();
@@ -108,4 +116,18 @@ impl Router {
         // TODO: Handle duplicate subscriptions from the same client
         Ok(())
     }
+}
+
+
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn router_should_remove_the_connection_during_disconnect() {}
+
+    #[test]
+    fn router_should_not_add_same_client_to_subscription_list() {}
+
+    #[test]
+    fn router_saves_offline_messages_of_a_persistent_dead_connection() {}
 }

@@ -20,6 +20,5 @@ async fn main() {
     let config = fs::read_to_string(commandline.config_path).unwrap();
     let config = toml::from_str::<librumqd::Config>(&config).unwrap();
 
-    println!("Config = {:?}", config);
     librumqd::start(config).await
 }

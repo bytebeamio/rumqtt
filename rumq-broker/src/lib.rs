@@ -143,14 +143,21 @@ pub async fn accept_loop(config: Arc<ServerSettings>, graveyard: graveyard::Grav
                 }
             };
 
-            task::spawn(connection::eventloop(config, graveyard, stream, router_tx));
+            task::spawn(eventloop(config, graveyard, stream, router_tx));
         } else {
-            task::spawn(connection::eventloop(config, graveyard, stream, router_tx));
+            task::spawn(eventloop(config, graveyard, stream, router_tx));
         };
-
 
         time::delay_for(Duration::from_millis(1)).await;
     }
+}
+
+
+async fn eventloop(config: Arc<ServerSettings>, graveyard: graveyard::Graveyard, stream: impl Network, router_tx: Sender<router::RouterMessage>) {
+    match connection::eventloop(config, graveyard, stream, router_tx).await {
+        Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
+        Err(e) => error!("Connection eventloop error = {:?}", e),
+    } 
 }
 
 pub async fn start(config: Config) {
