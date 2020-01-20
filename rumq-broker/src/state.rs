@@ -94,6 +94,7 @@ impl MqttState {
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(id, subscribe),
             Packet::Pingreq => self.handle_incoming_pingreq(),
+            // Packet::Disconnect => self.handle_incoming_disconnect(id),
             _ => return Err(Error::UnsupportedPacket(packet)),
         };
 
@@ -124,7 +125,14 @@ impl MqttState {
         };
 
         let id = connect.client_id();
-        let keep_alive = *connect.keep_alive();
+        let mut keep_alive = *connect.keep_alive();
+
+        // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
+        if keep_alive == 0 {
+            warn!("0 keepalive. Promoting it to 10 minutes");
+            keep_alive = 10 * 60;
+        }
+
         let keep_alive = Duration::from_secs(keep_alive as u64);
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
 
@@ -216,6 +224,11 @@ impl MqttState {
         let packet = Packet::Suback(suback(*pkid, subscription_return_codes));
         let routermessage = RouterMessage::Subscribe((id, subscription));
         Ok((Some(routermessage), Some(packet)))
+    }
+
+    fn handle_incoming_disconnect(&mut self, id: &str) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+        let routermessage = RouterMessage::Disconnect(id.to_owned());
+        Ok((Some(routermessage), None))
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
