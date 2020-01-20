@@ -72,6 +72,11 @@ pub trait MqttRead: AsyncReadExt + Unpin {
     async fn read_connect(&mut self) -> Result<Connect, Error> {
         let protocol_name = self.read_mqtt_string().await?;
         let protocol_level = self.read_u8().await?;
+        
+        if protocol_name != "MQTT" {
+            return Err(Error::InvalidProtocolLevel(protocol_name, protocol_level));
+        }
+
         let protocol = match protocol_level {
             4 => Protocol::MQTT(4),
             _ => return Err(Error::InvalidProtocolLevel(protocol_name, protocol_level)),
