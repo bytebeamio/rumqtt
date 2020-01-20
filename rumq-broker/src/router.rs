@@ -1,5 +1,5 @@
 use derive_more::From;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use rumq_core::{Publish, Subscribe};
 
 use std::collections::HashMap;
@@ -7,6 +7,7 @@ use std::collections::HashMap;
 #[derive(Debug, From)]
 pub enum Error {
     AllSendersDown,
+    Mpsc(mpsc::error::SendError<RouterMessage>),
 }
 
 /// Router message to orchestrate data between connections. We can also
@@ -79,7 +80,7 @@ impl Router {
             for id in ids.iter() {
                 let connection = self.connections.get_mut(id).unwrap();
                 let message = RouterMessage::Publish(publish.clone());
-                connection.send(message).await.unwrap();
+                connection.send(message).await?;
             }
         }
 
