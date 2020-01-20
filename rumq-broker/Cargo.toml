@@ -9,6 +9,8 @@ edition = "2018"
 [dependencies]
 tokio = { version = "0.2", features = ["full"] }
 tokio-rustls = "0.12"
+hyper = "0.13"
+hyper-tls = "0.4"
 quinn = "0.5"
 futures-util = "0.3"
 rumq-core = { path = "../rumq-core" }

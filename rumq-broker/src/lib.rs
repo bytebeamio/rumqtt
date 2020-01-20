@@ -3,7 +3,7 @@ extern crate log;
 
 use derive_more::From;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time::{self, Elapsed};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -11,6 +11,7 @@ use tokio_rustls::rustls::{ RootCertStore, AllowAnyAuthenticatedClient, NoClient
 use tokio_rustls::rustls::internal::pemfile::{ certs, rsa_private_keys };
 use tokio_rustls::rustls::TLSError;
 use tokio_rustls::TlsAcceptor;
+use futures_util::future::join_all;
 
 use serde::Deserialize;
 
@@ -21,6 +22,8 @@ use std::fs::File;
 use std::path::Path;
 
 mod connection;
+mod httpserver;
+mod httppush;
 mod graveyard;
 mod router;
 mod state;
@@ -40,7 +43,25 @@ pub enum Error {
     Disconnected,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct Config {
+    servers: Vec<ServerSettings>,
+    httppush: HttpPush,
+    httpserver: HttpServer
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpPush {
+    url: String,
+    topic: String
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpServer {
+    port: u16,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerSettings {
     pub port: u16,
     pub connection_timeout_ms: u16,
@@ -77,26 +98,16 @@ async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_pa
 
     let certs = certs(&mut BufReader::new(File::open(cert_path)?)).map_err(|_|Error::NoServerCertFile)?;
     let mut keys = rsa_private_keys(&mut BufReader::new(File::open(key_path)?)).map_err(|_| Error::NoServerKeyFile)?;
-    
+
     server_config.set_single_cert(certs, keys.remove(0))?;
     let acceptor = TlsAcceptor::from(Arc::new(server_config));
     Ok(acceptor)
 }
 
-pub async fn accept_loop(config: Arc<ServerSettings>) -> Result<(), Error> {
+pub async fn accept_loop(config: Arc<ServerSettings>, graveyard: graveyard::Graveyard, router_tx: Sender<router::RouterMessage>) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
-    
-    let router_config = config.clone();
     let connection_config = config.clone();
-    let (router_tx, router_rx) = channel::<router::RouterMessage>(10);
-    let graveyard = graveyard::Graveyard::new();
 
-    // router to route data between connections. creates an extra copy but
-    // might not be a big deal if we prevent clones/send fat pointers and batch
-    task::spawn(async move {
-        let mut router = router::Router::new(router_config, router_rx);
-        router.start().await
-    });
 
     let acceptor = if let Some(cert_path) = config.cert_path.clone() {
         let key_path = config.key_path.clone().ok_or(Error::NoServerPrivateKey)?;
@@ -116,7 +127,7 @@ pub async fn accept_loop(config: Arc<ServerSettings>) -> Result<(), Error> {
                 continue
             }
         };
-        
+
         info!("Accepting from: {}", addr);
 
         let config = connection_config.clone(); 
@@ -140,6 +151,44 @@ pub async fn accept_loop(config: Arc<ServerSettings>) -> Result<(), Error> {
 
         time::delay_for(Duration::from_millis(1)).await;
     }
+}
+
+pub async fn start(config: Config) {
+    let (router_tx, router_rx) = channel::<router::RouterMessage>(10);
+    let graveyard = graveyard::Graveyard::new();
+
+    // router to route data between connections. creates an extra copy but
+    // might not be a big deal if we prevent clones/send fat pointers and batch
+    task::spawn(async move {
+        let mut router = router::Router::new(router_rx);
+        router.start().await
+    });
+
+
+    let http_router_tx = router_tx.clone();
+    // TODO: Remove clone on main config
+    let httpserver_config = Arc::new(config.clone());
+    task::spawn(async move {
+        httpserver::start(httpserver_config, http_router_tx).await
+    });
+
+    let status_router_tx = router_tx.clone();
+    // TODO: Remove clone on main config
+    let httppush_config = Arc::new(config.clone());
+    task::spawn(async move {
+        httppush::start(httppush_config, status_router_tx).await;
+    });
+
+    let mut servers = Vec::new();
+    for server in config.servers.into_iter() {
+        let config = Arc::new(server);
+
+        let fut = accept_loop(config, graveyard.clone(), router_tx.clone());
+        let o = task::spawn(fut);
+        servers.push(o);
+    }
+
+    join_all(servers).await;
 }
 
 pub trait Network: AsyncWrite + AsyncRead + Unpin + Send {}

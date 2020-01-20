@@ -1,15 +1,13 @@
 use derive_more::From;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use rumq_core::{Publish, Subscribe};
 
 use std::collections::HashMap;
-use std::sync::Arc;
-
-use crate::ServerSettings;
 
 #[derive(Debug, From)]
 pub enum Error {
     AllSendersDown,
+    Mpsc(mpsc::error::SendError<RouterMessage>),
 }
 
 /// Router message to orchestrate data between connections. We can also
@@ -26,7 +24,6 @@ pub enum RouterMessage {
 }
 
 pub struct Router {
-    config: Arc<ServerSettings>,
     // handles to all connections. used to route data
     connections:   HashMap<String, Sender<RouterMessage>>,
     // maps subscription to interested clients. wildcards
@@ -38,8 +35,8 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(config: Arc<ServerSettings>, data_rx: Receiver<RouterMessage>) -> Self {
-        Router { config, connections: HashMap::new(), subscriptions: HashMap::new(), data_rx }
+    pub fn new(data_rx: Receiver<RouterMessage>) -> Self {
+        Router { connections: HashMap::new(), subscriptions: HashMap::new(), data_rx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -83,7 +80,7 @@ impl Router {
             for id in ids.iter() {
                 let connection = self.connections.get_mut(id).unwrap();
                 let message = RouterMessage::Publish(publish.clone());
-                connection.send(message).await.unwrap();
+                connection.send(message).await?;
             }
         }
 

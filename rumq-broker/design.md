@@ -13,6 +13,13 @@ Broker constitutes of following components
   to disk and tries to simulate kafka
 
 
+Device id as part of topic in subscriptions and publishes
+-----------------
+
+* Maybe useful to directly send publishes to backend (where router picks up device id directly)
+* Subscriptions only receive data directed to it
+* Get in the way of wildcards inplace of device ids
+
 TODO
 ---------------
 
