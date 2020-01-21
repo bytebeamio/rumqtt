@@ -1,6 +1,6 @@
 use derive_more::From;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use rumq_core::{Publish, Subscribe};
+use rumq_core::{Publish, Subscribe, matches};
 
 use std::collections::HashMap;
 
@@ -29,9 +29,10 @@ pub enum RouterMessage {
 pub struct Router {
     // handles to all connections. used to route data
     connections:   HashMap<String, Sender<RouterMessage>>,
-    // maps subscription to interested clients. wildcards
-    // aren't supported
-    subscriptions: HashMap<String, Vec<String>>,
+    // maps concrete subscriptions to interested clients
+    subscriptions_concrete: HashMap<String, Vec<String>>,
+    // maps wildcard subscriptions to interested clients
+    subscriptions_wild: HashMap<String, Vec<String>>,
     // channel receiver to receive data from all the connections.
     // each connection will have a tx handle
     data_rx:       Receiver<RouterMessage>,
@@ -39,7 +40,7 @@ pub struct Router {
 
 impl Router {
     pub fn new(data_rx: Receiver<RouterMessage>) -> Self {
-        Router { connections: HashMap::new(), subscriptions: HashMap::new(), data_rx }
+        Router { connections: HashMap::new(), subscriptions_concrete: HashMap::new(), subscriptions_wild: HashMap::new(), data_rx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -60,8 +61,7 @@ impl Router {
             RouterMessage::Connect((id, connection_handle)) => self.handle_connect(id, connection_handle)?,
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
-            RouterMessage::Disconnect(id) => (),
-            RouterMessage::Death(id) => (),
+            RouterMessage::Disconnect(_) | RouterMessage::Death(_) => (),
         }
 
         Ok(())
@@ -79,7 +79,7 @@ impl Router {
         // TODO: Will direct member access perform better than method call at higher frequency?
         let topic = publish.topic_name();
         // TODO: Directly get connection handles instead of client ids?
-        if let Some(ids) = self.subscriptions.get(topic) {
+        if let Some(ids) = self.subscriptions_concrete.get(topic) {
             for id in ids.iter() {
                 let connection = self.connections.get_mut(id).unwrap();
                 let message = RouterMessage::Publish(publish.clone());
@@ -96,7 +96,7 @@ impl Router {
         // Each subscribe message can send multiple topics to subscribe to
         for topic in subscribe.topics() {
             let id = id.clone();
-            match self.subscriptions.get_mut(topic.topic_path()) {
+            match self.subscriptions_concrete.get_mut(topic.topic_path()) {
                 // push client id to list of clients intrested in this subspcription
                 Some(connections) => {
                     // don't add same id twice
@@ -108,12 +108,11 @@ impl Router {
                 None => {
                     let mut connections = Vec::new();
                     connections.push(id);
-                    self.subscriptions.insert(topic.topic_path().to_owned(), connections);
+                    self.subscriptions_concrete.insert(topic.topic_path().to_owned(), connections);
                 }
             }
         }
 
-        // TODO: Handle duplicate subscriptions from the same client
         Ok(())
     }
 }

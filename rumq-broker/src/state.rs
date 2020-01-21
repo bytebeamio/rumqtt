@@ -18,6 +18,8 @@ pub enum Error {
     Connect(ConnectReturnCode),
     /// Invalid state for a given operation
     InvalidState,
+    /// Invalid topic
+    InvalidTopic,
     /// Received a packet (ack) which isn't asked for
     Unsolicited,
     /// Last pingreq isn't acked
@@ -162,6 +164,11 @@ impl MqttState {
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let qos = publish.qos();
 
+        if !valid_topic(publish.topic_name()) {
+            error!("Invalid topic = {} on publish", publish.topic_name());
+            return Err(Error::InvalidTopic);
+        }
+
         match qos {
             QoS::AtMostOnce => {
                 let routermessage = RouterMessage::Publish(publish);
@@ -213,7 +220,7 @@ impl MqttState {
 
             let topic = topic.topic_path();
             // we don't support wildcards yet
-            let code = if topic.chars().all(|v| v == '#' || v == '+') { SubscribeReturnCodes::Failure } else { SubscribeReturnCodes::Success(qos) };
+            let code = if valid_filter(topic) { SubscribeReturnCodes::Success(qos) } else { SubscribeReturnCodes::Failure };
 
             // add only successful subscriptions to router message
             if let SubscribeReturnCodes::Success(qos) = code {
