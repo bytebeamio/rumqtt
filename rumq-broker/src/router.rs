@@ -1,6 +1,6 @@
 use derive_more::From;
+use rumq_core::{matches, Publish, Subscribe};
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use rumq_core::{Publish, Subscribe, matches};
 
 use std::collections::HashMap;
 
@@ -23,24 +23,29 @@ pub enum RouterMessage {
     Subscribe((String, Subscribe)),
     /// Disconnect
     Disconnect(String),
-    Death(String)
+    Death(String),
 }
 
 pub struct Router {
     // handles to all connections. used to route data
-    connections:   HashMap<String, Sender<RouterMessage>>,
+    connections:            HashMap<String, Sender<RouterMessage>>,
     // maps concrete subscriptions to interested clients
     subscriptions_concrete: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
-    subscriptions_wild: HashMap<String, Vec<String>>,
+    subscriptions_wild:     HashMap<String, Vec<String>>,
     // channel receiver to receive data from all the connections.
     // each connection will have a tx handle
-    data_rx:       Receiver<RouterMessage>,
+    data_rx:                Receiver<RouterMessage>,
 }
 
 impl Router {
     pub fn new(data_rx: Receiver<RouterMessage>) -> Self {
-        Router { connections: HashMap::new(), subscriptions_concrete: HashMap::new(), subscriptions_wild: HashMap::new(), data_rx }
+        Router {
+            connections: HashMap::new(),
+            subscriptions_concrete: HashMap::new(),
+            subscriptions_wild: HashMap::new(),
+            data_rx,
+        }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -58,7 +63,9 @@ impl Router {
 
     async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
         match message {
-            RouterMessage::Connect((id, connection_handle)) => self.handle_connect(id, connection_handle)?,
+            RouterMessage::Connect((id, connection_handle)) => {
+                self.handle_connect(id, connection_handle)?
+            }
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
             RouterMessage::Disconnect(_) | RouterMessage::Death(_) => (),
@@ -67,15 +74,24 @@ impl Router {
         Ok(())
     }
 
-    fn handle_connect(&mut self, id: String, connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
+    fn handle_connect(
+        &mut self,
+        id: String,
+        connection_handle: Sender<RouterMessage>,
+    ) -> Result<(), Error> {
         debug!("Connect. Id = {:?}", id);
         self.connections.insert(id, connection_handle);
         Ok(())
     }
 
     async fn handle_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        debug!("Publish. Topic = {:?}, Qos = {:?}, Payload len = {}", publish.topic_name(), publish.qos(), publish.payload().len());
-        
+        debug!(
+            "Publish. Topic = {:?}, Qos = {:?}, Payload len = {}",
+            publish.topic_name(),
+            publish.qos(),
+            publish.payload().len()
+        );
+
         // TODO: Will direct member access perform better than method call at higher frequency?
         let topic = publish.topic_name();
         // TODO: Directly get connection handles instead of client ids?
@@ -92,7 +108,7 @@ impl Router {
 
     fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
         debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
-        
+
         // Each subscribe message can send multiple topics to subscribe to
         for topic in subscribe.topics() {
             let id = id.clone();
@@ -116,8 +132,6 @@ impl Router {
         Ok(())
     }
 }
-
-
 
 #[cfg(test)]
 mod test {

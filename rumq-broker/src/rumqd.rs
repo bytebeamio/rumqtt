@@ -3,14 +3,17 @@ use structopt::StructOpt;
 use std::fs;
 use std::path::PathBuf;
 
-
 #[derive(StructOpt, Debug)]
 #[structopt(name = "Rumqd", about = "High performance asynchronous mqtt broker")]
 pub struct CommandLine {
-    #[structopt(short = "c", help = "Rumqd config file", default_value = "rumqd.conf", parse(from_os_str))]
+    #[structopt(
+        short = "c",
+        help = "Rumqd config file",
+        default_value = "rumqd.conf",
+        parse(from_os_str)
+    )]
     config_path: PathBuf,
 }
-
 
 #[tokio::main]
 async fn main() {
