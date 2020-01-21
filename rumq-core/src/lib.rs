@@ -8,6 +8,7 @@ use std::string::FromUtf8Error;
 mod deserialize;
 mod packets;
 mod serialize;
+pub mod topic;
 
 pub use deserialize::MqttRead;
 pub use packets::*;
