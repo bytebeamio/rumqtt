@@ -1,15 +1,15 @@
 use crate::router::RouterMessage;
 use crate::Config;
 
-use tokio::sync::mpsc::{channel, Sender};
 use rumq_core::QoS;
+use tokio::sync::mpsc::{channel, Sender};
 
-use hyper::{body, Client, Request};
 use hyper::body::Bytes;
+use hyper::{body, Client, Request};
 use hyper_tls::HttpsConnector;
 
-use std::sync::Arc;
 use std::mem;
+use std::sync::Arc;
 
 pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
     let (this_tx, mut this_rx) = channel(100);
@@ -18,7 +18,7 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
     // let client = Client::builder().build::<_, hyper::Body>(https);
     let client = Client::new();
 
-    // construct connect router message with client id and handle to this connection 
+    // construct connect router message with client id and handle to this connection
     let routermessage = RouterMessage::Connect(("pushclient".to_owned(), this_tx));
     router_tx.send(routermessage).await.unwrap();
 
@@ -38,7 +38,10 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
 
         let payload = mem::replace(&mut publish.payload, Arc::new(Vec::new()));
         let body = Bytes::from(Arc::try_unwrap(payload).unwrap());
-        let request = match Request::put(&config.httppush.url).header("Content-type", "application/json").body(body.into()) {
+        let request = match Request::put(&config.httppush.url)
+            .header("Content-type", "application/json")
+            .body(body.into())
+        {
             Ok(request) => request,
             Err(e) => {
                 error!("Post create error = {:?}", e);
@@ -50,12 +53,12 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
             Ok(res) => res,
             Err(e) => {
                 error!("Http request error = {:?}", e);
-                continue
+                continue;
             }
         };
 
         info!("Response = {:?}", o);
-        
+
         let body_bytes = body::to_bytes(o.into_body()).await.unwrap();
         info!("Body = {:?}", body_bytes);
     }

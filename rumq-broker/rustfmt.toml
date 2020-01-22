@@ -2,4 +2,4 @@ version = "Two"
 use_small_heuristics = "Max"
 merge_derives = false
 struct_field_align_threshold = 20
-max_width = 150
+max_width = 100

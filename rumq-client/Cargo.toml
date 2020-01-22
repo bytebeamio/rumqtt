@@ -27,5 +27,5 @@ color-backtrace = "0.2.3"
 crossbeam-channel = "0.4"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
-jsonwebtoken = "7.0.0-alpha.2"
+jsonwebtoken = "7.0.0-beta.1"
 tokio = { version = "0.2", features = ["full", "macros"] }

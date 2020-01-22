@@ -2,29 +2,31 @@
 extern crate log;
 
 use derive_more::From;
+use futures_util::future::join_all;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time::{self, Elapsed};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::rustls::{ RootCertStore, AllowAnyAuthenticatedClient, NoClientAuth, ServerConfig };
-use tokio_rustls::rustls::internal::pemfile::{ certs, rsa_private_keys };
+use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::TLSError;
+use tokio_rustls::rustls::{
+    AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig,
+};
 use tokio_rustls::TlsAcceptor;
-use futures_util::future::join_all;
 
 use serde::Deserialize;
 
-use std::time::Duration;
-use std::sync::Arc;
-use std::io::{ self, BufReader };
 use std::fs::File;
+use std::io::{self, BufReader};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 mod connection;
-mod httpserver;
-mod httppush;
 mod graveyard;
+mod httppush;
+mod httpserver;
 mod router;
 mod state;
 
@@ -45,15 +47,15 @@ pub enum Error {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    servers: Vec<ServerSettings>,
-    httppush: HttpPush,
-    httpserver: HttpServer
+    servers:    Vec<ServerSettings>,
+    httppush:   HttpPush,
+    httpserver: HttpServer,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct HttpPush {
-    url: String,
-    topic: String
+    url:   String,
+    topic: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -72,7 +74,7 @@ pub struct ServerSettings {
     /// Throughput from device to cloud
     pub max_device_to_cloud_throughput: usize,
     /// Minimum delay time between consecutive outgoing packets
-    pub max_incoming_messages_per_sec:  usize,
+    pub max_incoming_messages_per_sec: usize,
     pub disk_persistence: bool,
     pub disk_retention_size: usize,
     pub disk_retention_time_sec: usize,
@@ -86,28 +88,39 @@ pub struct ServerSettings {
     pub password: Option<String>,
 }
 
-async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_path: P) -> Result<TlsAcceptor, Error> {
+async fn tls_connection<P: AsRef<Path>>(
+    ca_path: Option<P>,
+    cert_path: P,
+    key_path: P,
+) -> Result<TlsAcceptor, Error> {
     // client authentication with a CA. CA isn't required otherwise
     let mut server_config = if let Some(ca_path) = ca_path {
         let mut root_cert_store = RootCertStore::empty();
-        root_cert_store.add_pem_file(&mut BufReader::new(File::open(ca_path)?)).map_err(|_| Error::NoCAFile)?;
+        root_cert_store
+            .add_pem_file(&mut BufReader::new(File::open(ca_path)?))
+            .map_err(|_| Error::NoCAFile)?;
         ServerConfig::new(AllowAnyAuthenticatedClient::new(root_cert_store))
     } else {
         ServerConfig::new(NoClientAuth::new())
     };
 
-    let certs = certs(&mut BufReader::new(File::open(cert_path)?)).map_err(|_|Error::NoServerCertFile)?;
-    let mut keys = rsa_private_keys(&mut BufReader::new(File::open(key_path)?)).map_err(|_| Error::NoServerKeyFile)?;
+    let certs =
+        certs(&mut BufReader::new(File::open(cert_path)?)).map_err(|_| Error::NoServerCertFile)?;
+    let mut keys = rsa_private_keys(&mut BufReader::new(File::open(key_path)?))
+        .map_err(|_| Error::NoServerKeyFile)?;
 
     server_config.set_single_cert(certs, keys.remove(0))?;
     let acceptor = TlsAcceptor::from(Arc::new(server_config));
     Ok(acceptor)
 }
 
-pub async fn accept_loop(config: Arc<ServerSettings>, graveyard: graveyard::Graveyard, router_tx: Sender<router::RouterMessage>) -> Result<(), Error> {
+pub async fn accept_loop(
+    config: Arc<ServerSettings>,
+    graveyard: graveyard::Graveyard,
+    router_tx: Sender<router::RouterMessage>,
+) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
     let connection_config = config.clone();
-
 
     let acceptor = if let Some(cert_path) = config.cert_path.clone() {
         let key_path = config.key_path.clone().ok_or(Error::NoServerPrivateKey)?;
@@ -124,13 +137,13 @@ pub async fn accept_loop(config: Arc<ServerSettings>, graveyard: graveyard::Grav
             Ok(s) => s,
             Err(e) => {
                 error!("Tcp connection error = {:?}", e);
-                continue
+                continue;
             }
         };
 
         info!("Accepting from: {}", addr);
 
-        let config = connection_config.clone(); 
+        let config = connection_config.clone();
         let graveyard = graveyard.clone();
         let router_tx = router_tx.clone();
 
@@ -139,17 +152,28 @@ pub async fn accept_loop(config: Arc<ServerSettings>, graveyard: graveyard::Grav
                 Ok(s) => s,
                 Err(e) => {
                     error!("Tls connection error = {:?}", e);
-                    continue
+                    continue;
                 }
             };
 
-            task::spawn(connection::eventloop(config, graveyard, stream, router_tx));
+            task::spawn(eventloop(config, graveyard, stream, router_tx));
         } else {
-            task::spawn(connection::eventloop(config, graveyard, stream, router_tx));
+            task::spawn(eventloop(config, graveyard, stream, router_tx));
         };
 
-
         time::delay_for(Duration::from_millis(1)).await;
+    }
+}
+
+async fn eventloop(
+    config: Arc<ServerSettings>,
+    graveyard: graveyard::Graveyard,
+    stream: impl Network,
+    router_tx: Sender<router::RouterMessage>,
+) {
+    match connection::eventloop(config, graveyard, stream, router_tx).await {
+        Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
+        Err(e) => error!("Connection eventloop error = {:?}", e),
     }
 }
 
@@ -164,13 +188,10 @@ pub async fn start(config: Config) {
         router.start().await
     });
 
-
     let http_router_tx = router_tx.clone();
     // TODO: Remove clone on main config
     let httpserver_config = Arc::new(config.clone());
-    task::spawn(async move {
-        httpserver::start(httpserver_config, http_router_tx).await
-    });
+    task::spawn(async move { httpserver::start(httpserver_config, http_router_tx).await });
 
     let status_router_tx = router_tx.clone();
     // TODO: Remove clone on main config

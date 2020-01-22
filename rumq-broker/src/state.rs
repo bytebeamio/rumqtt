@@ -18,6 +18,8 @@ pub enum Error {
     Connect(ConnectReturnCode),
     /// Invalid state for a given operation
     InvalidState,
+    /// Invalid topic
+    InvalidTopic,
     /// Received a packet (ack) which isn't asked for
     Unsolicited,
     /// Last pingreq isn't acked
@@ -30,6 +32,8 @@ pub enum Error {
     UnsupportedQoS,
     /// Invalid client ID
     InvalidClientId,
+    /// Disconnect received
+    Disconnect(String),
 }
 
 /// `MqttState` saves the state of the mqtt connection. Methods will
@@ -43,17 +47,17 @@ pub struct MqttState {
     /// Connection status
     connection_status: MqttConnectionStatus,
     /// Keep alive
-    keep_alive: Option<Duration>,
+    keep_alive:        Option<Duration>,
     /// Status of last ping
-    await_pingresp: bool,
+    await_pingresp:    bool,
     /// Last incoming packet time
-    last_incoming: Instant,
+    last_incoming:     Instant,
     /// Last outgoing packet time
-    last_outgoing: Instant,
+    last_outgoing:     Instant,
     /// Packet id of the last outgoing packet
-    last_pkid: PacketIdentifier,
+    last_pkid:         PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
-    outgoing_pub: VecDeque<Publish>,
+    outgoing_pub:      VecDeque<Publish>,
 }
 
 impl MqttState {
@@ -63,12 +67,12 @@ impl MqttState {
     pub fn new() -> Self {
         MqttState {
             connection_status: MqttConnectionStatus::Handshake,
-            keep_alive: None,
-            await_pingresp: false,
-            last_incoming: Instant::now(),
-            last_outgoing: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            outgoing_pub: VecDeque::new(),
+            keep_alive:        None,
+            await_pingresp:    false,
+            last_incoming:     Instant::now(),
+            last_outgoing:     Instant::now(),
+            last_pkid:         PacketIdentifier(0),
+            outgoing_pub:      VecDeque::new(),
         }
     }
 
@@ -88,12 +92,17 @@ impl MqttState {
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, id: &str, packet: Packet) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    pub fn handle_incoming_mqtt_packet(
+        &mut self,
+        id: &str,
+        packet: Packet,
+    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(id, subscribe),
             Packet::Pingreq => self.handle_incoming_pingreq(),
+            Packet::Disconnect => self.handle_incoming_disconnect(id),
             _ => return Err(Error::UnsupportedPacket(packet)),
         };
 
@@ -109,11 +118,19 @@ impl MqttState {
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        debug!("Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}", publish.topic_name(), publish.pkid(), publish.payload().len());
+        debug!(
+            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic_name(),
+            publish.pkid(),
+            publish.payload().len()
+        );
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(String, Duration, Packet), Error> {
+    pub fn handle_incoming_connect(
+        &mut self,
+        packet: Packet,
+    ) -> Result<(String, Duration, Packet), Error> {
         let connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -124,7 +141,14 @@ impl MqttState {
         };
 
         let id = connect.client_id();
-        let keep_alive = *connect.keep_alive();
+        let mut keep_alive = *connect.keep_alive();
+
+        // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
+        if keep_alive == 0 {
+            warn!("0 keepalive. Promoting it to 10 minutes");
+            keep_alive = 10 * 60;
+        }
+
         let keep_alive = Duration::from_secs(keep_alive as u64);
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
 
@@ -142,15 +166,25 @@ impl MqttState {
         Ok((id.to_owned(), keep_alive, reply))
     }
 
-    fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_pingreq(
+        &mut self,
+    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let packet = Packet::Pingresp;
         Ok((None, Some(packet)))
     }
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_publish(
+        &mut self,
+        publish: Publish,
+    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let qos = publish.qos();
+
+        if !valid_topic(publish.topic_name()) {
+            error!("Invalid topic = {} on publish", publish.topic_name());
+            return Err(Error::InvalidTopic);
+        }
 
         match qos {
             QoS::AtMostOnce => {
@@ -170,7 +204,10 @@ impl MqttState {
     /// Iterates through the list of stored publishes and removes the publish with the
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions.
-    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_puback(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -186,7 +223,11 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_subscribe(&mut self, id: &str, subscription: Subscribe) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_subscribe(
+        &mut self,
+        id: &str,
+        subscription: Subscribe,
+    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
 
         let pkid = subscription.pkid();
@@ -203,7 +244,11 @@ impl MqttState {
 
             let topic = topic.topic_path();
             // we don't support wildcards yet
-            let code = if topic.chars().all(|v| v == '#' || v == '+') { SubscribeReturnCodes::Failure } else { SubscribeReturnCodes::Success(qos) };
+            let code = if valid_filter(topic) {
+                SubscribeReturnCodes::Success(qos)
+            } else {
+                SubscribeReturnCodes::Failure
+            };
 
             // add only successful subscriptions to router message
             if let SubscribeReturnCodes::Success(qos) = code {
@@ -216,6 +261,14 @@ impl MqttState {
         let packet = Packet::Suback(suback(*pkid, subscription_return_codes));
         let routermessage = RouterMessage::Subscribe((id, subscription));
         Ok((Some(routermessage), Some(packet)))
+    }
+
+    fn handle_incoming_disconnect(
+        &mut self,
+        id: &str,
+    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+        // TODO: Do will handling here
+        Err(Error::Disconnect(id.to_owned()))
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
