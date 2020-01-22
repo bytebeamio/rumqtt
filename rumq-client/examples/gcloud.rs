@@ -5,7 +5,7 @@ use std::fs;
 
 use rumq_client::{self, MqttOptions, Request, MqttEventLoop, eventloop};
 use serde::{Serialize, Deserialize};
-use jsonwebtoken::{encode, Algorithm, Header};
+use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 use futures_util::stream::StreamExt;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
@@ -80,6 +80,8 @@ fn id() -> String {
 
 fn gen_iotcore_password() -> String {
     let key = fs::read("certs/bike-1/rsa_private.pem").unwrap();
+    let key = EncodingKey::from_rsa_pem(&key).unwrap();
+
     let project = env::var("PROJECT").unwrap();
     #[derive(Debug, Serialize, Deserialize)]
     struct Claims {
