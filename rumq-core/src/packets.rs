@@ -20,12 +20,12 @@ pub struct Connect {
     #[set = "pub"]
     pub(crate) keep_alive: u16,
     /// Client Id
-    pub(crate) client_id: String,
+    pub client_id: String,
     /// Clean session. Asks the broker to clear previous state
     #[set = "pub"]
     pub(crate) clean_session: bool,
     /// Will that broker needs to publish when the client disconnects
-    pub(crate) last_will: Option<LastWill>,
+    pub last_will: Option<LastWill>,
     /// Username of the client
     pub(crate) username: Option<String>,
     /// Password of the client
@@ -101,9 +101,9 @@ pub fn connack(code: ConnectReturnCode, session_present: bool) -> Connack {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LastWill {
-    pub(crate) topic: String,
-    pub(crate) message: String,
-    pub(crate) qos: QoS,
+    pub topic: String,
+    pub message: String,
+    pub qos: QoS,
     pub(crate) retain: bool,
 }
 

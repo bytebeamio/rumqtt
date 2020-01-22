@@ -1,8 +1,9 @@
 use derive_more::From;
-use rumq_core::{matches, has_wildcards, Publish, Subscribe};
+use rumq_core::{matches, has_wildcards, LastWill, Publish, Subscribe};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use std::collections::HashMap;
+use std::mem;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -16,7 +17,7 @@ pub enum Error {
 #[derive(Debug)]
 pub enum RouterMessage {
     /// Client id and connection handle
-    Connect((String, Sender<RouterMessage>)),
+    Connect((String, Option<LastWill>, Sender<RouterMessage>)),
     /// Publish message to forward to connections
     Publish(Publish),
     /// Client id and subscription
@@ -32,6 +33,8 @@ pub struct Router {
     active_connections:     HashMap<String, Sender<RouterMessage>>,
     // inactive persistent connections
     inactive_connections: HashMap<String, Vec<rumq_core::Publish>>, 
+    // connection will
+    connections_will: HashMap<String, LastWill>,
     // maps concrete subscriptions to interested clients
     subscriptions_concrete: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
@@ -46,6 +49,7 @@ impl Router {
         Router {
             active_connections: HashMap::new(),
             inactive_connections: HashMap::new(),
+            connections_will: HashMap::new(),
             subscriptions_concrete: HashMap::new(),
             subscriptions_wild: HashMap::new(),
             data_rx,
@@ -67,13 +71,13 @@ impl Router {
 
     async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
         match message {
-            RouterMessage::Connect((id, connection_handle)) => {
-                self.handle_connect(id, connection_handle)?
+            RouterMessage::Connect((id, will, connection_handle)) => {
+                self.handle_connect(id, will, connection_handle)?
             }
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
             RouterMessage::Disconnect(id) => self.handle_disconnection(id)?,
-            RouterMessage::Death(id) => self.handle_death(id)?
+            RouterMessage::Death(id) => self.handle_death(id).await?
         }
 
         Ok(())
@@ -82,10 +86,15 @@ impl Router {
     fn handle_connect(
         &mut self,
         id: String,
+        will: Option<LastWill>,
         connection_handle: Sender<RouterMessage>,
     ) -> Result<(), Error> {
         debug!("Connect. Id = {:?}", id);
-        self.active_connections.insert(id, connection_handle);
+        self.active_connections.insert(id.clone(), connection_handle);
+
+        if let Some(will) = will {
+            self.connections_will.insert(id, will);
+        }
         Ok(())
     }
 
@@ -96,9 +105,6 @@ impl Router {
             publish.qos(),
             publish.payload().len()
         );
-
-        dbg!(&self.subscriptions_concrete);
-        dbg!(&self.subscriptions_wild);
 
         // TODO: Will direct member access perform better than method call at higher frequency?
         // TODO: Directly get connection handles instead of client ids?
@@ -196,13 +202,22 @@ impl Router {
         Ok(())
     }
 
-    fn handle_death(&mut self, id: String) -> Result<(), Error> {
+    async fn handle_death(&mut self, id: String) -> Result<(), Error> {
         if let Some(_) = self.active_connections.remove(&id) {
-            self.inactive_connections.insert(id, Vec::new());
+            self.inactive_connections.insert(id.clone(), Vec::new());
         }
 
+        if let Some(mut will) = self.connections_will.remove(&id) {
+            let topic = mem::replace(&mut will.topic, "".to_owned());
+            let message = mem::replace(&mut will.message, "".to_owned());
+            let qos = will.qos;
 
-        // TODO: Handle will of the connection
+            let mut publish = rumq_core::publish(topic, message);
+            publish.set_qos(qos);
+
+            self.handle_publish(publish).await?;
+        }
+
         Ok(())
     }
 }

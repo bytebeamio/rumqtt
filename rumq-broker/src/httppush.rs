@@ -19,7 +19,7 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
     let client = Client::new();
 
     // construct connect router message with client id and handle to this connection
-    let routermessage = RouterMessage::Connect(("pushclient".to_owned(), this_tx));
+    let routermessage = RouterMessage::Connect(("pushclient".to_owned(), None, this_tx));
     router_tx.send(routermessage).await.unwrap();
 
     let mut subscription = rumq_core::empty_subscribe();
