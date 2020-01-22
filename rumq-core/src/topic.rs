@@ -1,5 +1,3 @@
-use std::iter::Iterator;
-
 // checks if a topic or topic filter has wildcards
 pub fn has_wildcards(s: &str) -> bool {
     s.contains("+") || s.contains("#")
@@ -117,6 +115,10 @@ mod test {
         let topic = "a/b/c";
         let filter = "a/b/c/d";
         assert!(!super::matches(topic, filter));
+
+        let topic = "a/b/c";
+        let filter = "#";
+        assert!(super::matches(topic, filter));
 
         let topic = "a/b/c";
         let filter = "a/b/c/#";
