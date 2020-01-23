@@ -10,9 +10,7 @@ use tokio::task;
 use tokio::time::{self, Elapsed};
 use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::TLSError;
-use tokio_rustls::rustls::{
-    AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig,
-};
+use tokio_rustls::rustls::{AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig};
 use tokio_rustls::TlsAcceptor;
 
 use serde::Deserialize;
@@ -88,26 +86,18 @@ pub struct ServerSettings {
     pub password: Option<String>,
 }
 
-async fn tls_connection<P: AsRef<Path>>(
-    ca_path: Option<P>,
-    cert_path: P,
-    key_path: P,
-) -> Result<TlsAcceptor, Error> {
+async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_path: P) -> Result<TlsAcceptor, Error> {
     // client authentication with a CA. CA isn't required otherwise
     let mut server_config = if let Some(ca_path) = ca_path {
         let mut root_cert_store = RootCertStore::empty();
-        root_cert_store
-            .add_pem_file(&mut BufReader::new(File::open(ca_path)?))
-            .map_err(|_| Error::NoCAFile)?;
+        root_cert_store.add_pem_file(&mut BufReader::new(File::open(ca_path)?)).map_err(|_| Error::NoCAFile)?;
         ServerConfig::new(AllowAnyAuthenticatedClient::new(root_cert_store))
     } else {
         ServerConfig::new(NoClientAuth::new())
     };
 
-    let certs =
-        certs(&mut BufReader::new(File::open(cert_path)?)).map_err(|_| Error::NoServerCertFile)?;
-    let mut keys = rsa_private_keys(&mut BufReader::new(File::open(key_path)?))
-        .map_err(|_| Error::NoServerKeyFile)?;
+    let certs = certs(&mut BufReader::new(File::open(cert_path)?)).map_err(|_| Error::NoServerCertFile)?;
+    let mut keys = rsa_private_keys(&mut BufReader::new(File::open(key_path)?)).map_err(|_| Error::NoServerKeyFile)?;
 
     server_config.set_single_cert(certs, keys.remove(0))?;
     let acceptor = TlsAcceptor::from(Arc::new(server_config));

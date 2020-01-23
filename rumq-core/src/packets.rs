@@ -15,21 +15,21 @@ pub enum Protocol {
 #[get = "pub"]
 pub struct Connect {
     /// Mqtt protocol version
-    pub(crate) protocol: Protocol,
+    pub protocol: Protocol,
     /// Mqtt keep alive time
     #[set = "pub"]
-    pub(crate) keep_alive: u16,
+    pub keep_alive: u16,
     /// Client Id
-    pub(crate) client_id: String,
+    pub client_id: String,
     /// Clean session. Asks the broker to clear previous state
     #[set = "pub"]
-    pub(crate) clean_session: bool,
+    pub clean_session: bool,
     /// Will that broker needs to publish when the client disconnects
-    pub(crate) last_will: Option<LastWill>,
+    pub last_will: Option<LastWill>,
     /// Username of the client
-    pub(crate) username: Option<String>,
+    pub username: Option<String>,
     /// Password of the client
-    pub(crate) password: Option<String>,
+    pub password: Option<String>,
 }
 
 pub fn connect<S: Into<String>>(id: S) -> Connect {
@@ -91,8 +91,8 @@ pub enum ConnectReturnCode {
 #[derive(Debug, Clone, Copy, PartialEq, Getters)]
 #[get = "pub"]
 pub struct Connack {
-    pub(crate) session_present: bool,
-    pub(crate) code: ConnectReturnCode,
+    pub session_present: bool,
+    pub code: ConnectReturnCode,
 }
 
 pub fn connack(code: ConnectReturnCode, session_present: bool) -> Connack {
@@ -101,23 +101,23 @@ pub fn connack(code: ConnectReturnCode, session_present: bool) -> Connack {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LastWill {
-    pub(crate) topic: String,
-    pub(crate) message: String,
-    pub(crate) qos: QoS,
-    pub(crate) retain: bool,
+    pub topic: String,
+    pub message: String,
+    pub qos: QoS,
+    pub retain: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Getters, Setters)]
 #[get = "pub"]
 pub struct Publish {
     #[set = "pub"]
-    pub(crate) dup: bool,
+    pub dup: bool,
     #[set = "pub"]
-    pub(crate) qos: QoS,
+    pub qos: QoS,
     #[set = "pub"]
-    pub(crate) retain: bool,
-    pub(crate) topic_name: String,
-    pub(crate) pkid: Option<PacketIdentifier>,
+    pub retain: bool,
+    pub topic_name: String,
+    pub pkid: Option<PacketIdentifier>,
     pub payload: Arc<Vec<u8>>,
 }
 
@@ -143,8 +143,8 @@ impl Publish {
 #[get = "pub"]
 pub struct Subscribe {
     #[set = "pub"]
-    pub(crate) pkid: PacketIdentifier,
-    pub(crate) topics: Vec<SubscribeTopic>,
+    pub pkid: PacketIdentifier,
+    pub topics: Vec<SubscribeTopic>,
 }
 
 pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
@@ -177,8 +177,8 @@ impl Subscribe {
 #[derive(Debug, Clone, PartialEq, Getters)]
 #[get = "pub"]
 pub struct SubscribeTopic {
-    pub(crate) topic_path: String,
-    pub(crate) qos: QoS,
+    pub topic_path: String,
+    pub qos: QoS,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,8 +189,8 @@ pub enum SubscribeReturnCodes {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Suback {
-    pub(crate) pkid: PacketIdentifier,
-    pub(crate) return_codes: Vec<SubscribeReturnCodes>,
+    pub pkid: PacketIdentifier,
+    pub return_codes: Vec<SubscribeReturnCodes>,
 }
 
 pub fn suback(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -> Suback {
@@ -199,6 +199,6 @@ pub fn suback(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unsubscribe {
-    pub(crate) pkid: PacketIdentifier,
-    pub(crate) topics: Vec<String>,
+    pub pkid: PacketIdentifier,
+    pub topics: Vec<String>,
 }

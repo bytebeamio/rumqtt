@@ -42,9 +42,7 @@ pub async fn eventloop(
         error!("Connection error = {:?}", err);
 
         match err {
-            Error::State(state::Error::Disconnect(id)) => {
-                router_tx.send(RouterMessage::Disconnect(id)).await?
-            }
+            Error::State(state::Error::Disconnect(id)) => router_tx.send(RouterMessage::Disconnect(id)).await?,
             _ => router_tx.send(RouterMessage::Death(id)).await?,
         }
     }
@@ -65,15 +63,10 @@ struct Connection<'eventloop, S> {
 }
 
 impl<'eventloop, S: Network> Connection<'eventloop, S> {
-    async fn new(
-        config: Arc<ServerSettings>,
-        state: &'eventloop mut MqttState,
-        mut stream: S,
-        mut router_tx: Sender<RouterMessage>,
-    ) -> Result<Connection<'eventloop, S>, Error> {
+    async fn new(config: Arc<ServerSettings>, state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
-        let (id, keep_alive, connack) = time::timeout(timeout, async {
+        let (connect, connack) = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
             let o = state.handle_incoming_connect(packet)?;
             Ok::<_, Error>(o)
@@ -82,8 +75,12 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
 
         // write connack packet
         stream.mqtt_write(&connack).await?;
+       
+        let id = connect.client_id.clone();
+        let keep_alive = Duration::from_secs(connect.keep_alive as u64);
+        
         // construct connect router message with cliend id and handle to this connection
-        let routermessage = RouterMessage::Connect((id.clone(), this_tx));
+        let routermessage = RouterMessage::Connect((connect, this_tx));
         router_tx.send(routermessage).await?;
         let connection = Connection { id, keep_alive, state, stream, this_rx, router_tx };
         Ok(connection)
@@ -102,8 +99,10 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
         // eventloop which processes packets and router messages
         loop {
             let stream = &mut self.stream;
+            let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
+            
             // TODO: Use Delay::reset to not construct this timeout future everytime
-            let packet = time::timeout(self.keep_alive, async {
+            let packet = time::timeout(keep_alive, async {
                 let packet = stream.mqtt_read().await?;
                 Ok::<_, Error>(packet)
             });

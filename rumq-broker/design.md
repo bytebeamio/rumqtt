@@ -23,9 +23,18 @@ Device id as part of topic in subscriptions and publishes
 TODO
 ---------------
 
-* Create a map connection id strings to numbers (Validate perf?)
+* Use hash of connection id strings to numbers and validate perf 
+* Make sure that whole router doesn't slowdown because of one slow connection
+* Inflight message limits. This should be similar to client. Slow acks should 
+  throttle down the connection eventloop channel receiver. This
+  pushes the backpressure to the router. But this should not slow down 
+  other connections. Essentially everything should be concurrent in a 
+  select! in the router
+* Add throughput metrics to every connection. Logging based
+  instrumentation will be very handy here but we don't have a design on
+  dashboards on top of log based metrics
+* Production ready accept loop. https://github.com/async-rs/async-std/pull/666/files
 * Better errors when tls connection happens on tcp port
-
 ```
 Client side error:
 Received = StreamEnd(Network(Io(Custom { kind: UnexpectedEof, error: "tls handshake eof" })))

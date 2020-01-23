@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, result::Result, time::Instant};
 
 use rumq_core::*;
+use std::mem;
 use std::time::Duration;
 
 use crate::router::RouterMessage;
@@ -47,17 +48,17 @@ pub struct MqttState {
     /// Connection status
     connection_status: MqttConnectionStatus,
     /// Keep alive
-    keep_alive:        Option<Duration>,
+    keep_alive: Option<Duration>,
     /// Status of last ping
-    await_pingresp:    bool,
+    await_pingresp: bool,
     /// Last incoming packet time
-    last_incoming:     Instant,
+    last_incoming: Instant,
     /// Last outgoing packet time
-    last_outgoing:     Instant,
+    last_outgoing: Instant,
     /// Packet id of the last outgoing packet
-    last_pkid:         PacketIdentifier,
+    last_pkid: PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
-    outgoing_pub:      VecDeque<Publish>,
+    outgoing_pub: VecDeque<Publish>,
 }
 
 impl MqttState {
@@ -67,12 +68,12 @@ impl MqttState {
     pub fn new() -> Self {
         MqttState {
             connection_status: MqttConnectionStatus::Handshake,
-            keep_alive:        None,
-            await_pingresp:    false,
-            last_incoming:     Instant::now(),
-            last_outgoing:     Instant::now(),
-            last_pkid:         PacketIdentifier(0),
-            outgoing_pub:      VecDeque::new(),
+            keep_alive: None,
+            await_pingresp: false,
+            last_incoming: Instant::now(),
+            last_outgoing: Instant::now(),
+            last_pkid: PacketIdentifier(0),
+            outgoing_pub: VecDeque::new(),
         }
     }
 
@@ -119,7 +120,7 @@ impl MqttState {
         };
 
         debug!(
-            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            "Outgoing Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
             publish.topic_name(),
             publish.pkid(),
             publish.payload().len()
@@ -127,11 +128,8 @@ impl MqttState {
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(
-        &mut self,
-        packet: Packet,
-    ) -> Result<(String, Duration, Packet), Error> {
-        let connect = match packet {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Connect, Packet), Error> {
+        let mut connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
                 error!("Invalid packet. Expecting connect. Received = {:?}", packet);
@@ -140,46 +138,41 @@ impl MqttState {
             }
         };
 
-        let id = connect.client_id();
-        let mut keep_alive = *connect.keep_alive();
-
         // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
-        if keep_alive == 0 {
+        if connect.keep_alive == 0 {
             warn!("0 keepalive. Promoting it to 10 minutes");
-            keep_alive = 10 * 60;
+            connect.keep_alive = 10 * 60;
         }
 
-        let keep_alive = Duration::from_secs(keep_alive as u64);
-        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
-
-        if connect.client_id().starts_with(' ') || connect.client_id().is_empty() {
+        if connect.client_id.starts_with(' ') || connect.client_id.is_empty() {
             error!("Client id shouldn't start with space (or) shouldn't be emptys");
             return Err(Error::InvalidClientId);
         }
 
         self.connection_status = MqttConnectionStatus::Connected;
         let connack = connack(ConnectReturnCode::Accepted, false);
-        // TODO: Handle connect packet
         // TODO: Handle session present
         let reply = Packet::Connack(connack);
 
-        Ok((id.to_owned(), keep_alive, reply))
+        Ok((connect, reply))
     }
 
-    fn handle_incoming_pingreq(
-        &mut self,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let packet = Packet::Pingresp;
         Ok((None, Some(packet)))
     }
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(
-        &mut self,
-        publish: Publish,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let qos = publish.qos();
+
+        debug!(
+            "Incoming Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic_name(),
+            publish.pkid(),
+            publish.payload().len()
+        );
 
         if !valid_topic(publish.topic_name()) {
             error!("Invalid topic = {} on publish", publish.topic_name());
@@ -204,10 +197,7 @@ impl MqttState {
     /// Iterates through the list of stored publishes and removes the publish with the
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions.
-    fn handle_incoming_puback(
-        &mut self,
-        pkid: PacketIdentifier,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -244,11 +234,7 @@ impl MqttState {
 
             let topic = topic.topic_path();
             // we don't support wildcards yet
-            let code = if valid_filter(topic) {
-                SubscribeReturnCodes::Success(qos)
-            } else {
-                SubscribeReturnCodes::Failure
-            };
+            let code = if valid_filter(topic) { SubscribeReturnCodes::Success(qos) } else { SubscribeReturnCodes::Failure };
 
             // add only successful subscriptions to router message
             if let SubscribeReturnCodes::Success(qos) = code {
@@ -263,10 +249,7 @@ impl MqttState {
         Ok((Some(routermessage), Some(packet)))
     }
 
-    fn handle_incoming_disconnect(
-        &mut self,
-        id: &str,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_disconnect(&mut self, id: &str) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         // TODO: Do will handling here
         Err(Error::Disconnect(id.to_owned()))
     }

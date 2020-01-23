@@ -1,8 +1,9 @@
 use derive_more::From;
-use rumq_core::{matches, has_wildcards, Publish, Subscribe};
+use rumq_core::{has_wildcards, matches, LastWill, Connect, Publish, Subscribe};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use std::collections::HashMap;
+use std::mem;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -16,7 +17,7 @@ pub enum Error {
 #[derive(Debug)]
 pub enum RouterMessage {
     /// Client id and connection handle
-    Connect((String, Sender<RouterMessage>)),
+    Connect((Connect, Sender<RouterMessage>)),
     /// Publish message to forward to connections
     Publish(Publish),
     /// Client id and subscription
@@ -31,11 +32,15 @@ pub struct Router {
     // handles to all active connections. used to route data
     active_connections:     HashMap<String, Sender<RouterMessage>>,
     // inactive persistent connections
-    inactive_connections: HashMap<String, Vec<rumq_core::Publish>>, 
+    inactive_connections:   HashMap<String, Vec<rumq_core::Publish>>,
+    // connection will
+    connections_will:       HashMap<String, LastWill>,
     // maps concrete subscriptions to interested clients
-    subscriptions_concrete: HashMap<String, Vec<String>>,
+    concrete_subscriptions: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
-    subscriptions_wild:     HashMap<String, Vec<String>>,
+    wild_subscriptions:     HashMap<String, Vec<String>>,
+    // retained publishes
+    retained_publishes:     HashMap<String, Publish>,
     // channel receiver to receive data from all the active_connections.
     // each connection will have a tx handle
     data_rx:                Receiver<RouterMessage>,
@@ -46,8 +51,10 @@ impl Router {
         Router {
             active_connections: HashMap::new(),
             inactive_connections: HashMap::new(),
-            subscriptions_concrete: HashMap::new(),
-            subscriptions_wild: HashMap::new(),
+            connections_will: HashMap::new(),
+            concrete_subscriptions: HashMap::new(),
+            wild_subscriptions: HashMap::new(),
+            retained_publishes: HashMap::new(),
             data_rx,
         }
     }
@@ -67,25 +74,43 @@ impl Router {
 
     async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
         match message {
-            RouterMessage::Connect((id, connection_handle)) => {
-                self.handle_connect(id, connection_handle)?
+            RouterMessage::Connect((connect, connection_handle)) => {
+                self.handle_connect(connect, connection_handle)?
             }
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
-            RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
+            RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe).await?,
             RouterMessage::Disconnect(id) => self.handle_disconnection(id)?,
-            RouterMessage::Death(id) => self.handle_death(id)?
+            RouterMessage::Death(id) => self.handle_death(id).await?,
         }
 
         Ok(())
     }
 
-    fn handle_connect(
-        &mut self,
-        id: String,
-        connection_handle: Sender<RouterMessage>,
-    ) -> Result<(), Error> {
+    fn handle_connect(&mut self, connect: Connect, connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
+        let id = connect.client_id;
+        let clean_session = connect.clean_session;
+        
         debug!("Connect. Id = {:?}", id);
-        self.active_connections.insert(id, connection_handle);
+        self.active_connections.insert(id.clone(), connection_handle);
+
+        if clean_session {
+            // FIXME: This is costly for every clean connection with a lot of subscriptions
+            for (_, ids) in self.concrete_subscriptions.iter_mut() {
+                if let Some(index) = ids.iter().position(|r| r == &id) {
+                    ids.remove(index);
+                }
+            }
+
+            for (_, ids) in self.wild_subscriptions.iter_mut() {
+                if let Some(index) = ids.iter().position(|r| r == &id) {
+                    ids.remove(index);
+                }
+            }
+        }
+
+        if let Some(will) = connect.last_will {
+            self.connections_will.insert(id, will);
+        }
         Ok(())
     }
 
@@ -97,17 +122,25 @@ impl Router {
             publish.payload().len()
         );
 
-        dbg!(&self.subscriptions_concrete);
-        dbg!(&self.subscriptions_wild);
+        if publish.retain {
+            if publish.payload.len() == 0 {
+                self.retained_publishes.remove(&publish.topic_name);
+                return Ok(());
+            } else {
+                self.retained_publishes.insert(publish.topic_name.clone(), publish.clone());
+            }
+        }
 
         // TODO: Will direct member access perform better than method call at higher frequency?
         // TODO: Directly get connection handles instead of client ids?
         let topic = publish.topic_name();
-        if let Some(ids) = self.subscriptions_concrete.get(topic) {
+        if let Some(ids) = self.concrete_subscriptions.get(topic) {
             for id in ids.iter() {
                 if let Some(connection) = self.active_connections.get_mut(id) {
                     let message = RouterMessage::Publish(publish.clone());
-                    connection.send(message).await?;
+                    if let Err(e) = connection.send(message).await {
+                        error!("1 Forward failed. Error = {:?}", e);
+                    }
                 }
 
                 // TODO: Offline message handling
@@ -116,14 +149,16 @@ impl Router {
 
         // TODO: O(n) which happens during every publish. publish perf is going to be
         // linearly degraded based on number of wildcard subscriptions. fix this
-        for (filter, ids) in self.subscriptions_wild.iter() {
+        for (filter, ids) in self.wild_subscriptions.iter() {
             if matches(topic, filter) {
                 for id in ids.iter() {
                     if let Some(connection) = self.active_connections.get_mut(id) {
                         let message = RouterMessage::Publish(publish.clone());
-                        connection.send(message).await?;
+                        if let Err(e) = connection.send(message).await {
+                            error!("2 Forward failed. Error = {:?}", e);
+                        }
                     }
-                
+
                     // TODO: Offline message handling
                 }
             }
@@ -132,55 +167,73 @@ impl Router {
         Ok(())
     }
 
-    fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
+    async fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
         debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
 
-        // Each subscribe message can send multiple topics to subscribe to
+        // Each subscribe message can send multiple topics to subscribe to. handle dupicates
         for topic in subscribe.topics() {
             let id = id.clone();
             let filter = topic.topic_path();
 
+            // client subscribing to a/b/c and a/+/c should receive message only once when
+            // a publish happens on a/b/c.
             let subscriptions = if has_wildcards(filter) {
-                // client subscribing to a/b/c and a/+/c should receive message only once when
-                // a publish happens on a/b/c. 
-                // remove a client from concrete subscription list when a new matching wildcard
-                // subscription occurs on the same connection
-                for (topic, clients) in self.subscriptions_concrete.iter_mut() {
+                // remove client from the concrete subscription list incase of a matching wildcard
+                // subscription
+                for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(index) = clients.iter().position(|r| r == &id) {
                             clients.remove(index);
                         }
                     }
-                } 
+                }
 
-                &mut self.subscriptions_wild
+                &mut self.wild_subscriptions
             } else {
                 // ignore a new concrete subscription if the client already has a matching wildcard
                 // subscription
-                for (topic, clients) in self.subscriptions_concrete.iter_mut() {
+                for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(_) = clients.iter().position(|r| r == &id) {
-                            return Ok(()) 
+                            return Ok(());
                         }
                     }
-                } 
+                }
 
-                &mut self.subscriptions_concrete
+                &mut self.concrete_subscriptions
             };
 
+            // add client id to subscriptions
             match subscriptions.get_mut(filter) {
                 // push client id to the list of clients intrested in this subspcription
                 Some(connections) => {
                     // don't add the same id twice
                     if !connections.contains(&id) {
-                        connections.push(id)
+                        connections.push(id.clone())
                     }
                 }
                 // create a new subscription and push the client id
                 None => {
                     let mut connections = Vec::new();
-                    connections.push(id);
+                    connections.push(id.clone());
                     subscriptions.insert(filter.to_owned(), connections);
+                }
+            }
+
+            // Handle retained publishes after subscription duplicates are handled above
+            if has_wildcards(filter) {
+                for (topic, publish) in self.retained_publishes.iter() {
+                    if matches(topic, filter) {
+                        if let Some(connection) = self.active_connections.get_mut(&id) {
+                            connection.send(RouterMessage::Publish(publish.clone())).await?;
+                        }
+                    }
+                }
+            } else {
+                if let Some(publish) = self.retained_publishes.get(filter) {
+                    if let Some(connection) = self.active_connections.get_mut(&id) {
+                        connection.send(RouterMessage::Publish(publish.clone())).await?;
+                    }
                 }
             }
         }
@@ -189,6 +242,8 @@ impl Router {
     }
 
     fn handle_disconnection(&mut self, id: String) -> Result<(), Error> {
+        self.connections_will.remove(&id);
+
         if let Some(_) = self.active_connections.remove(&id) {
             self.inactive_connections.insert(id, Vec::new());
         }
@@ -196,13 +251,22 @@ impl Router {
         Ok(())
     }
 
-    fn handle_death(&mut self, id: String) -> Result<(), Error> {
+    async fn handle_death(&mut self, id: String) -> Result<(), Error> {
         if let Some(_) = self.active_connections.remove(&id) {
-            self.inactive_connections.insert(id, Vec::new());
+            self.inactive_connections.insert(id.clone(), Vec::new());
         }
 
+        if let Some(mut will) = self.connections_will.remove(&id) {
+            let topic = mem::replace(&mut will.topic, "".to_owned());
+            let message = mem::replace(&mut will.message, "".to_owned());
+            let qos = will.qos;
 
-        // TODO: Handle will of the connection
+            let mut publish = rumq_core::publish(topic, message);
+            publish.set_qos(qos);
+
+            self.handle_publish(publish).await?;
+        }
+
         Ok(())
     }
 }
@@ -210,19 +274,13 @@ impl Router {
 #[cfg(test)]
 mod test {
     #[test]
-    fn persistent_disconnected_and_dead_connections_are_moved_to_inactive_state() {
-
-    }
+    fn persistent_disconnected_and_dead_connections_are_moved_to_inactive_state() {}
 
     #[test]
-    fn persistend_reconnections_are_move_from_inactive_to_active_state() {
-
-    } 
+    fn persistend_reconnections_are_move_from_inactive_to_active_state() {}
 
     #[test]
-    fn offline_messages_are_given_back_to_reconnected_persistent_connection() {
-
-    }
+    fn offline_messages_are_given_back_to_reconnected_persistent_connection() {}
 
     #[test]
     fn remove_client_from_concrete_subsctiptions_if_new_wildcard_subscription_matches_existing_concrecte_subscription() {
@@ -231,9 +289,7 @@ mod test {
     }
 
     #[test]
-    fn ingnore_new_concrete_subscription_if_a_matching_wildcard_subscription_exists_for_the_client() {
-
-    }
+    fn ingnore_new_concrete_subscription_if_a_matching_wildcard_subscription_exists_for_the_client() {}
 
     #[test]
     fn router_should_remove_the_connection_during_disconnect() {}
