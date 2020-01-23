@@ -73,7 +73,7 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
     ) -> Result<Connection<'eventloop, S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
-        let (id, keep_alive, will, connack) = time::timeout(timeout, async {
+        let (id, clean_session, keep_alive, will, connack) = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
             let o = state.handle_incoming_connect(packet)?;
             Ok::<_, Error>(o)
@@ -83,7 +83,7 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
         // write connack packet
         stream.mqtt_write(&connack).await?;
         // construct connect router message with cliend id and handle to this connection
-        let routermessage = RouterMessage::Connect((id.clone(), will, this_tx));
+        let routermessage = RouterMessage::Connect((id.clone(), clean_session, will, this_tx));
         router_tx.send(routermessage).await?;
         let connection = Connection { id, keep_alive, state, stream, this_rx, router_tx };
         Ok(connection)

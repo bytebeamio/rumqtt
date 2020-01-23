@@ -120,7 +120,7 @@ impl MqttState {
         };
 
         debug!(
-            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            "Outgoing Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
             publish.topic_name(),
             publish.pkid(),
             publish.payload().len()
@@ -131,7 +131,7 @@ impl MqttState {
     pub fn handle_incoming_connect(
         &mut self,
         packet: Packet,
-    ) -> Result<(String, Duration, Option<LastWill>, Packet), Error> {
+    ) -> Result<(String, bool, Duration, Option<LastWill>, Packet), Error> {
         let mut connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -142,7 +142,8 @@ impl MqttState {
         };
 
         let id = mem::replace(&mut connect.client_id, "".to_owned());
-        let mut keep_alive = *connect.keep_alive();
+        let mut keep_alive = connect.keep_alive;
+        let clean_session = connect.clean_session;
 
         // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
         if keep_alive == 0 {
@@ -164,7 +165,7 @@ impl MqttState {
         // TODO: Handle session present
         let reply = Packet::Connack(connack);
 
-        Ok((id.to_owned(), keep_alive, last_will, reply))
+        Ok((id.to_owned(), clean_session, keep_alive, last_will, reply))
     }
 
     fn handle_incoming_pingreq(
@@ -181,6 +182,13 @@ impl MqttState {
         publish: Publish,
     ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let qos = publish.qos();
+
+        debug!(
+            "Incoming Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic_name(),
+            publish.pkid(),
+            publish.payload().len()
+        );
 
         if !valid_topic(publish.topic_name()) {
             error!("Invalid topic = {} on publish", publish.topic_name());

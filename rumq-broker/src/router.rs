@@ -17,7 +17,7 @@ pub enum Error {
 #[derive(Debug)]
 pub enum RouterMessage {
     /// Client id and connection handle
-    Connect((String, Option<LastWill>, Sender<RouterMessage>)),
+    Connect((String, bool, Option<LastWill>, Sender<RouterMessage>)),
     /// Publish message to forward to connections
     Publish(Publish),
     /// Client id and subscription
@@ -74,8 +74,8 @@ impl Router {
 
     async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
         match message {
-            RouterMessage::Connect((id, will, connection_handle)) => {
-                self.handle_connect(id, will, connection_handle)?
+            RouterMessage::Connect((id, clean_session, will, connection_handle)) => {
+                self.handle_connect(id, clean_session, will, connection_handle)?
             }
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe).await?,
@@ -89,11 +89,27 @@ impl Router {
     fn handle_connect(
         &mut self,
         id: String,
+        clean_session: bool,
         will: Option<LastWill>,
         connection_handle: Sender<RouterMessage>,
     ) -> Result<(), Error> {
         debug!("Connect. Id = {:?}", id);
         self.active_connections.insert(id.clone(), connection_handle);
+
+        if clean_session {
+            // FIXME: This is costly for every clean connection with a lot of subscriptions
+            for (_, ids) in self.concrete_subscriptions.iter_mut() {
+                if let Some(index) = ids.iter().position(|r| r == &id) {
+                    ids.remove(index);
+                }
+            }
+            
+            for (_, ids) in self.wild_subscriptions.iter_mut() {
+                if let Some(index) = ids.iter().position(|r| r == &id) {
+                    ids.remove(index);
+                }
+            }
+        }
 
         if let Some(will) = will {
             self.connections_will.insert(id, will);
@@ -110,7 +126,12 @@ impl Router {
         );
 
         if publish.retain {
-            self.retained_publishes.insert(publish.topic_name.clone(), publish.clone());
+            if publish.payload.len() == 0 {
+                self.retained_publishes.remove(&publish.topic_name);
+                return Ok(())
+            } else {
+                self.retained_publishes.insert(publish.topic_name.clone(), publish.clone());
+            }
         }
 
         // TODO: Will direct member access perform better than method call at higher frequency?
@@ -120,7 +141,9 @@ impl Router {
             for id in ids.iter() {
                 if let Some(connection) = self.active_connections.get_mut(id) {
                     let message = RouterMessage::Publish(publish.clone());
-                    connection.send(message).await?;
+                    if let Err(e) = connection.send(message).await {
+                        error!("1 Forward failed. Error = {:?}", e);
+                    }
                 }
 
                 // TODO: Offline message handling
@@ -134,7 +157,9 @@ impl Router {
                 for id in ids.iter() {
                     if let Some(connection) = self.active_connections.get_mut(id) {
                         let message = RouterMessage::Publish(publish.clone());
-                        connection.send(message).await?;
+                        if let Err(e) = connection.send(message).await {
+                            error!("2 Forward failed. Error = {:?}", e);
+                        }
                     }
 
                     // TODO: Offline message handling
@@ -221,6 +246,8 @@ impl Router {
     }
 
     fn handle_disconnection(&mut self, id: String) -> Result<(), Error> {
+        self.connections_will.remove(&id);
+
         if let Some(_) = self.active_connections.remove(&id) {
             self.inactive_connections.insert(id, Vec::new());
         }
