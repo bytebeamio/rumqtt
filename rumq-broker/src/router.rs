@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{has_wildcards, matches, LastWill, Publish, Subscribe};
+use rumq_core::{has_wildcards, matches, LastWill, Connect, Publish, Subscribe};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ pub enum Error {
 #[derive(Debug)]
 pub enum RouterMessage {
     /// Client id and connection handle
-    Connect((String, bool, Option<LastWill>, Sender<RouterMessage>)),
+    Connect((Connect, Sender<RouterMessage>)),
     /// Publish message to forward to connections
     Publish(Publish),
     /// Client id and subscription
@@ -74,8 +74,8 @@ impl Router {
 
     async fn handle_router_message(&mut self, message: RouterMessage) -> Result<(), Error> {
         match message {
-            RouterMessage::Connect((id, clean_session, will, connection_handle)) => {
-                self.handle_connect(id, clean_session, will, connection_handle)?
+            RouterMessage::Connect((connect, connection_handle)) => {
+                self.handle_connect(connect, connection_handle)?
             }
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe).await?,
@@ -86,13 +86,10 @@ impl Router {
         Ok(())
     }
 
-    fn handle_connect(
-        &mut self,
-        id: String,
-        clean_session: bool,
-        will: Option<LastWill>,
-        connection_handle: Sender<RouterMessage>,
-    ) -> Result<(), Error> {
+    fn handle_connect(&mut self, connect: Connect, connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
+        let id = connect.client_id;
+        let clean_session = connect.clean_session;
+        
         debug!("Connect. Id = {:?}", id);
         self.active_connections.insert(id.clone(), connection_handle);
 
@@ -111,7 +108,7 @@ impl Router {
             }
         }
 
-        if let Some(will) = will {
+        if let Some(will) = connect.last_will {
             self.connections_will.insert(id, will);
         }
         Ok(())

@@ -48,17 +48,17 @@ pub struct MqttState {
     /// Connection status
     connection_status: MqttConnectionStatus,
     /// Keep alive
-    keep_alive:        Option<Duration>,
+    keep_alive: Option<Duration>,
     /// Status of last ping
-    await_pingresp:    bool,
+    await_pingresp: bool,
     /// Last incoming packet time
-    last_incoming:     Instant,
+    last_incoming: Instant,
     /// Last outgoing packet time
-    last_outgoing:     Instant,
+    last_outgoing: Instant,
     /// Packet id of the last outgoing packet
-    last_pkid:         PacketIdentifier,
+    last_pkid: PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
-    outgoing_pub:      VecDeque<Publish>,
+    outgoing_pub: VecDeque<Publish>,
 }
 
 impl MqttState {
@@ -68,12 +68,12 @@ impl MqttState {
     pub fn new() -> Self {
         MqttState {
             connection_status: MqttConnectionStatus::Handshake,
-            keep_alive:        None,
-            await_pingresp:    false,
-            last_incoming:     Instant::now(),
-            last_outgoing:     Instant::now(),
-            last_pkid:         PacketIdentifier(0),
-            outgoing_pub:      VecDeque::new(),
+            keep_alive: None,
+            await_pingresp: false,
+            last_incoming: Instant::now(),
+            last_outgoing: Instant::now(),
+            last_pkid: PacketIdentifier(0),
+            outgoing_pub: VecDeque::new(),
         }
     }
 
@@ -128,10 +128,7 @@ impl MqttState {
         Packet::Publish(publish)
     }
 
-    pub fn handle_incoming_connect(
-        &mut self,
-        packet: Packet,
-    ) -> Result<(String, bool, Duration, Option<LastWill>, Packet), Error> {
+    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Connect, Packet), Error> {
         let mut connect = match packet {
             Packet::Connect(connect) => connect,
             packet => {
@@ -141,21 +138,13 @@ impl MqttState {
             }
         };
 
-        let id = mem::replace(&mut connect.client_id, "".to_owned());
-        let mut keep_alive = connect.keep_alive;
-        let clean_session = connect.clean_session;
-
         // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
-        if keep_alive == 0 {
+        if connect.keep_alive == 0 {
             warn!("0 keepalive. Promoting it to 10 minutes");
-            keep_alive = 10 * 60;
+            connect.keep_alive = 10 * 60;
         }
 
-        let keep_alive = Duration::from_secs(keep_alive as u64);
-        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
-
-        let last_will = mem::replace(&mut connect.last_will, None);
-        if id.starts_with(' ') || id.is_empty() {
+        if connect.client_id.starts_with(' ') || connect.client_id.is_empty() {
             error!("Client id shouldn't start with space (or) shouldn't be emptys");
             return Err(Error::InvalidClientId);
         }
@@ -165,7 +154,7 @@ impl MqttState {
         // TODO: Handle session present
         let reply = Packet::Connack(connack);
 
-        Ok((id.to_owned(), clean_session, keep_alive, last_will, reply))
+        Ok((connect, reply))
     }
 
     fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
