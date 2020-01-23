@@ -38,10 +38,7 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
 
         let payload = mem::replace(&mut publish.payload, Arc::new(Vec::new()));
         let body = Bytes::from(Arc::try_unwrap(payload).unwrap());
-        let request = match Request::put(&config.httppush.url)
-            .header("Content-type", "application/json")
-            .body(body.into())
-        {
+        let request = match Request::put(&config.httppush.url).header("Content-type", "application/json").body(body.into()) {
             Ok(request) => request,
             Err(e) => {
                 error!("Post create error = {:?}", e);

@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{matches, has_wildcards, LastWill, Publish, Subscribe};
+use rumq_core::{has_wildcards, matches, LastWill, Publish, Subscribe};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use std::collections::HashMap;
@@ -32,15 +32,15 @@ pub struct Router {
     // handles to all active connections. used to route data
     active_connections:     HashMap<String, Sender<RouterMessage>>,
     // inactive persistent connections
-    inactive_connections: HashMap<String, Vec<rumq_core::Publish>>, 
+    inactive_connections:   HashMap<String, Vec<rumq_core::Publish>>,
     // connection will
-    connections_will: HashMap<String, LastWill>,
+    connections_will:       HashMap<String, LastWill>,
     // maps concrete subscriptions to interested clients
     concrete_subscriptions: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
     wild_subscriptions:     HashMap<String, Vec<String>>,
     // retained publishes
-    retained_publishes: HashMap<String, Publish>,
+    retained_publishes:     HashMap<String, Publish>,
     // channel receiver to receive data from all the active_connections.
     // each connection will have a tx handle
     data_rx:                Receiver<RouterMessage>,
@@ -80,7 +80,7 @@ impl Router {
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe).await?,
             RouterMessage::Disconnect(id) => self.handle_disconnection(id)?,
-            RouterMessage::Death(id) => self.handle_death(id).await?
+            RouterMessage::Death(id) => self.handle_death(id).await?,
         }
 
         Ok(())
@@ -103,7 +103,7 @@ impl Router {
                     ids.remove(index);
                 }
             }
-            
+
             for (_, ids) in self.wild_subscriptions.iter_mut() {
                 if let Some(index) = ids.iter().position(|r| r == &id) {
                     ids.remove(index);
@@ -128,7 +128,7 @@ impl Router {
         if publish.retain {
             if publish.payload.len() == 0 {
                 self.retained_publishes.remove(&publish.topic_name);
-                return Ok(())
+                return Ok(());
             } else {
                 self.retained_publishes.insert(publish.topic_name.clone(), publish.clone());
             }
@@ -179,7 +179,7 @@ impl Router {
             let filter = topic.topic_path();
 
             // client subscribing to a/b/c and a/+/c should receive message only once when
-            // a publish happens on a/b/c. 
+            // a publish happens on a/b/c.
             let subscriptions = if has_wildcards(filter) {
                 // remove client from the concrete subscription list incase of a matching wildcard
                 // subscription
@@ -189,7 +189,7 @@ impl Router {
                             clients.remove(index);
                         }
                     }
-                } 
+                }
 
                 &mut self.wild_subscriptions
             } else {
@@ -198,14 +198,13 @@ impl Router {
                 for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(_) = clients.iter().position(|r| r == &id) {
-                            return Ok(()) 
+                            return Ok(());
                         }
                     }
-                } 
+                }
 
                 &mut self.concrete_subscriptions
             };
-
 
             // add client id to subscriptions
             match subscriptions.get_mut(filter) {
@@ -278,19 +277,13 @@ impl Router {
 #[cfg(test)]
 mod test {
     #[test]
-    fn persistent_disconnected_and_dead_connections_are_moved_to_inactive_state() {
-
-    }
+    fn persistent_disconnected_and_dead_connections_are_moved_to_inactive_state() {}
 
     #[test]
-    fn persistend_reconnections_are_move_from_inactive_to_active_state() {
-
-    } 
+    fn persistend_reconnections_are_move_from_inactive_to_active_state() {}
 
     #[test]
-    fn offline_messages_are_given_back_to_reconnected_persistent_connection() {
-
-    }
+    fn offline_messages_are_given_back_to_reconnected_persistent_connection() {}
 
     #[test]
     fn remove_client_from_concrete_subsctiptions_if_new_wildcard_subscription_matches_existing_concrecte_subscription() {
@@ -299,9 +292,7 @@ mod test {
     }
 
     #[test]
-    fn ingnore_new_concrete_subscription_if_a_matching_wildcard_subscription_exists_for_the_client() {
-
-    }
+    fn ingnore_new_concrete_subscription_if_a_matching_wildcard_subscription_exists_for_the_client() {}
 
     #[test]
     fn router_should_remove_the_connection_during_disconnect() {}

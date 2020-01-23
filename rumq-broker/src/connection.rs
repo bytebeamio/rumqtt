@@ -42,9 +42,7 @@ pub async fn eventloop(
         error!("Connection error = {:?}", err);
 
         match err {
-            Error::State(state::Error::Disconnect(id)) => {
-                router_tx.send(RouterMessage::Disconnect(id)).await?
-            }
+            Error::State(state::Error::Disconnect(id)) => router_tx.send(RouterMessage::Disconnect(id)).await?,
             _ => router_tx.send(RouterMessage::Death(id)).await?,
         }
     }

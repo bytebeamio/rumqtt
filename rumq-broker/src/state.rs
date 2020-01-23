@@ -48,17 +48,17 @@ pub struct MqttState {
     /// Connection status
     connection_status: MqttConnectionStatus,
     /// Keep alive
-    keep_alive: Option<Duration>,
+    keep_alive:        Option<Duration>,
     /// Status of last ping
-    await_pingresp: bool,
+    await_pingresp:    bool,
     /// Last incoming packet time
-    last_incoming: Instant,
+    last_incoming:     Instant,
     /// Last outgoing packet time
-    last_outgoing: Instant,
+    last_outgoing:     Instant,
     /// Packet id of the last outgoing packet
-    last_pkid: PacketIdentifier,
+    last_pkid:         PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
-    outgoing_pub: VecDeque<Publish>,
+    outgoing_pub:      VecDeque<Publish>,
 }
 
 impl MqttState {
@@ -68,12 +68,12 @@ impl MqttState {
     pub fn new() -> Self {
         MqttState {
             connection_status: MqttConnectionStatus::Handshake,
-            keep_alive: None,
-            await_pingresp: false,
-            last_incoming: Instant::now(),
-            last_outgoing: Instant::now(),
-            last_pkid: PacketIdentifier(0),
-            outgoing_pub: VecDeque::new(),
+            keep_alive:        None,
+            await_pingresp:    false,
+            last_incoming:     Instant::now(),
+            last_outgoing:     Instant::now(),
+            last_pkid:         PacketIdentifier(0),
+            outgoing_pub:      VecDeque::new(),
         }
     }
 
@@ -168,19 +168,14 @@ impl MqttState {
         Ok((id.to_owned(), clean_session, keep_alive, last_will, reply))
     }
 
-    fn handle_incoming_pingreq(
-        &mut self,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let packet = Packet::Pingresp;
         Ok((None, Some(packet)))
     }
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(
-        &mut self,
-        publish: Publish,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         let qos = publish.qos();
 
         debug!(
@@ -213,10 +208,7 @@ impl MqttState {
     /// Iterates through the list of stored publishes and removes the publish with the
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions.
-    fn handle_incoming_puback(
-        &mut self,
-        pkid: PacketIdentifier,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         match self.outgoing_pub.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -253,11 +245,7 @@ impl MqttState {
 
             let topic = topic.topic_path();
             // we don't support wildcards yet
-            let code = if valid_filter(topic) {
-                SubscribeReturnCodes::Success(qos)
-            } else {
-                SubscribeReturnCodes::Failure
-            };
+            let code = if valid_filter(topic) { SubscribeReturnCodes::Success(qos) } else { SubscribeReturnCodes::Failure };
 
             // add only successful subscriptions to router message
             if let SubscribeReturnCodes::Success(qos) = code {
@@ -272,10 +260,7 @@ impl MqttState {
         Ok((Some(routermessage), Some(packet)))
     }
 
-    fn handle_incoming_disconnect(
-        &mut self,
-        id: &str,
-    ) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
+    fn handle_incoming_disconnect(&mut self, id: &str) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {
         // TODO: Do will handling here
         Err(Error::Disconnect(id.to_owned()))
     }
