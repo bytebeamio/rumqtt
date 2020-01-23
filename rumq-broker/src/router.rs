@@ -36,9 +36,9 @@ pub struct Router {
     // connection will
     connections_will: HashMap<String, LastWill>,
     // maps concrete subscriptions to interested clients
-    subscriptions_concrete: HashMap<String, Vec<String>>,
+    concrete_subscriptions: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
-    subscriptions_wild:     HashMap<String, Vec<String>>,
+    wild_subscriptions:     HashMap<String, Vec<String>>,
     // channel receiver to receive data from all the active_connections.
     // each connection will have a tx handle
     data_rx:                Receiver<RouterMessage>,
@@ -50,8 +50,8 @@ impl Router {
             active_connections: HashMap::new(),
             inactive_connections: HashMap::new(),
             connections_will: HashMap::new(),
-            subscriptions_concrete: HashMap::new(),
-            subscriptions_wild: HashMap::new(),
+            concrete_subscriptions: HashMap::new(),
+            wild_subscriptions: HashMap::new(),
             data_rx,
         }
     }
@@ -109,7 +109,7 @@ impl Router {
         // TODO: Will direct member access perform better than method call at higher frequency?
         // TODO: Directly get connection handles instead of client ids?
         let topic = publish.topic_name();
-        if let Some(ids) = self.subscriptions_concrete.get(topic) {
+        if let Some(ids) = self.concrete_subscriptions.get(topic) {
             for id in ids.iter() {
                 if let Some(connection) = self.active_connections.get_mut(id) {
                     let message = RouterMessage::Publish(publish.clone());
@@ -122,7 +122,7 @@ impl Router {
 
         // TODO: O(n) which happens during every publish. publish perf is going to be
         // linearly degraded based on number of wildcard subscriptions. fix this
-        for (filter, ids) in self.subscriptions_wild.iter() {
+        for (filter, ids) in self.wild_subscriptions.iter() {
             if matches(topic, filter) {
                 for id in ids.iter() {
                     if let Some(connection) = self.active_connections.get_mut(id) {
@@ -151,7 +151,7 @@ impl Router {
                 // a publish happens on a/b/c. 
                 // remove a client from concrete subscription list when a new matching wildcard
                 // subscription occurs on the same connection
-                for (topic, clients) in self.subscriptions_concrete.iter_mut() {
+                for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(index) = clients.iter().position(|r| r == &id) {
                             clients.remove(index);
@@ -159,11 +159,11 @@ impl Router {
                     }
                 } 
 
-                &mut self.subscriptions_wild
+                &mut self.wild_subscriptions
             } else {
                 // ignore a new concrete subscription if the client already has a matching wildcard
                 // subscription
-                for (topic, clients) in self.subscriptions_concrete.iter_mut() {
+                for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(_) = clients.iter().position(|r| r == &id) {
                             return Ok(()) 
@@ -171,7 +171,7 @@ impl Router {
                     }
                 } 
 
-                &mut self.subscriptions_concrete
+                &mut self.concrete_subscriptions
             };
 
             match subscriptions.get_mut(filter) {
