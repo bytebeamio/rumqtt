@@ -39,6 +39,8 @@ pub struct Router {
     concrete_subscriptions: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
     wild_subscriptions:     HashMap<String, Vec<String>>,
+    // retained publishes
+    retained_publishes: HashMap<String, Publish>,
     // channel receiver to receive data from all the active_connections.
     // each connection will have a tx handle
     data_rx:                Receiver<RouterMessage>,
@@ -52,6 +54,7 @@ impl Router {
             connections_will: HashMap::new(),
             concrete_subscriptions: HashMap::new(),
             wild_subscriptions: HashMap::new(),
+            retained_publishes: HashMap::new(),
             data_rx,
         }
     }
@@ -75,7 +78,7 @@ impl Router {
                 self.handle_connect(id, will, connection_handle)?
             }
             RouterMessage::Publish(publish) => self.handle_publish(publish).await?,
-            RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe)?,
+            RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe).await?,
             RouterMessage::Disconnect(id) => self.handle_disconnection(id)?,
             RouterMessage::Death(id) => self.handle_death(id).await?
         }
@@ -106,6 +109,10 @@ impl Router {
             publish.payload().len()
         );
 
+        if publish.retain {
+            self.retained_publishes.insert(publish.topic_name.clone(), publish.clone());
+        }
+
         // TODO: Will direct member access perform better than method call at higher frequency?
         // TODO: Directly get connection handles instead of client ids?
         let topic = publish.topic_name();
@@ -129,7 +136,7 @@ impl Router {
                         let message = RouterMessage::Publish(publish.clone());
                         connection.send(message).await?;
                     }
-                
+
                     // TODO: Offline message handling
                 }
             }
@@ -138,19 +145,19 @@ impl Router {
         Ok(())
     }
 
-    fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
+    async fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
         debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
 
-        // Each subscribe message can send multiple topics to subscribe to
+        // Each subscribe message can send multiple topics to subscribe to. handle dupicates
         for topic in subscribe.topics() {
             let id = id.clone();
             let filter = topic.topic_path();
 
+            // client subscribing to a/b/c and a/+/c should receive message only once when
+            // a publish happens on a/b/c. 
             let subscriptions = if has_wildcards(filter) {
-                // client subscribing to a/b/c and a/+/c should receive message only once when
-                // a publish happens on a/b/c. 
-                // remove a client from concrete subscription list when a new matching wildcard
-                // subscription occurs on the same connection
+                // remove client from the concrete subscription list incase of a matching wildcard
+                // subscription
                 for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(index) = clients.iter().position(|r| r == &id) {
@@ -174,19 +181,38 @@ impl Router {
                 &mut self.concrete_subscriptions
             };
 
+
+            // add client id to subscriptions
             match subscriptions.get_mut(filter) {
                 // push client id to the list of clients intrested in this subspcription
                 Some(connections) => {
                     // don't add the same id twice
                     if !connections.contains(&id) {
-                        connections.push(id)
+                        connections.push(id.clone())
                     }
                 }
                 // create a new subscription and push the client id
                 None => {
                     let mut connections = Vec::new();
-                    connections.push(id);
+                    connections.push(id.clone());
                     subscriptions.insert(filter.to_owned(), connections);
+                }
+            }
+
+            // Handle retained publishes after subscription duplicates are handled above
+            if has_wildcards(filter) {
+                for (topic, publish) in self.retained_publishes.iter() {
+                    if matches(topic, filter) {
+                        if let Some(connection) = self.active_connections.get_mut(&id) {
+                            connection.send(RouterMessage::Publish(publish.clone())).await?;
+                        }
+                    }
+                }
+            } else {
+                if let Some(publish) = self.retained_publishes.get(filter) {
+                    if let Some(connection) = self.active_connections.get_mut(&id) {
+                        connection.send(RouterMessage::Publish(publish.clone())).await?;
+                    }
                 }
             }
         }
