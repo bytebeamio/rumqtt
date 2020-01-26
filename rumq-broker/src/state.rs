@@ -1,7 +1,6 @@
 use std::{collections::VecDeque, result::Result, time::Instant};
 
 use rumq_core::*;
-use std::mem;
 use std::time::Duration;
 
 use crate::router::RouterMessage;
