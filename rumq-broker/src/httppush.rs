@@ -41,7 +41,9 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
 
         let url = config.httppush.url.clone() + &topic;
         let body = Bytes::from(Arc::try_unwrap(payload).unwrap());
-        let request = match Request::put(url).header("Content-type", "application/json").body(body.into()) {
+
+        info!("Http push = {}", url);
+        let request = match Request::post(url).header("Content-type", "application/json").body(body.into()) {
             Ok(request) => request,
             Err(e) => {
                 error!("Post create error = {:?}", e);
