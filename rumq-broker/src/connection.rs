@@ -2,13 +2,12 @@ use derive_more::From;
 use futures_util::future::FutureExt;
 use futures_util::select;
 use futures_util::stream::StreamExt;
-use rumq_core::{MqttRead, MqttWrite};
-use tokio::sync::mpsc::{self, channel, Receiver, Sender};
+use rumq_core::{connack, MqttRead, MqttWrite, Packet, Connect, ConnectReturnCode};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::time;
 
-use crate::graveyard::Graveyard;
 use crate::router::RouterMessage;
-use crate::state::{self, MqttState};
 use crate::Network;
 use crate::ServerSettings;
 
@@ -17,72 +16,66 @@ use std::time::Duration;
 
 #[derive(Debug, From)]
 pub enum Error {
-    State(state::Error),
     Core(rumq_core::Error),
     Timeout(time::Elapsed),
-    Mpsc(mpsc::error::SendError<RouterMessage>),
+    Mpsc(TrySendError<RouterMessage>),
+    /// Received a wrong packet while waiting for another packet
+    WrongPacket,
+    /// Invalid client ID
+    InvalidClientId,
+    Disconnect,
+    SlowRouter,
+    NoReceiver
 }
 
-pub async fn eventloop(
-    config: Arc<ServerSettings>,
-    graveyard: Graveyard,
-    stream: impl Network,
-    mut router_tx: Sender<RouterMessage>,
-) -> Result<String, Error> {
-    // state of the given connection
-    let mut state = MqttState::new();
-
+pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut router_tx: Sender<RouterMessage>) -> Result<String, Error> {
     // TODO: persistent new connection should get state back from the graveyard and send pending packets
     // along with outstanding publishes that the router received when the client connection is offline
-    let mut connection = Connection::new(config, &mut state, stream, router_tx.clone()).await?;
+    let mut connection = Connection::new(config, stream, router_tx.clone()).await?;
     let id = connection.id.clone();
 
     if let Err(err) = connection.run().await {
-        let id = id.clone();
         error!("Connection error = {:?}", err);
-
-        match err {
-            Error::State(state::Error::Disconnect(id)) => router_tx.send(RouterMessage::Disconnect(id)).await?,
-            _ => router_tx.send(RouterMessage::Death(id)).await?,
+     
+        if let Error::Disconnect = err {
+            router_tx.try_send(RouterMessage::Disconnect(id.clone()))?;
+        } else {
+            router_tx.try_send(RouterMessage::Death(id.clone()))?;
         }
     }
-
-    info!("Reaping the connection in graveyard. Id = {}", id);
-    graveyard.reap(&id, state);
 
     Ok(id)
 }
 
-struct Connection<'eventloop, S> {
+struct Connection<S> {
     id:         String,
     keep_alive: Duration,
-    state:      &'eventloop mut MqttState,
     stream:     S,
     this_rx:    Receiver<RouterMessage>,
     router_tx:  Sender<RouterMessage>,
 }
 
-impl<'eventloop, S: Network> Connection<'eventloop, S> {
-    async fn new(config: Arc<ServerSettings>, state: &'eventloop mut MqttState, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<'eventloop, S>, Error> {
+impl<S: Network> Connection<S> {
+    async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let (connect, connack) = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
-            let o = state.handle_incoming_connect(packet)?;
+            let o = handle_incoming_connect(packet)?;
             Ok::<_, Error>(o)
         })
         .await??;
 
         // write connack packet
         stream.mqtt_write(&connack).await?;
-       
+
         let id = connect.client_id.clone();
         let keep_alive = Duration::from_secs(connect.keep_alive as u64);
-        
+
         // construct connect router message with cliend id and handle to this connection
         let routermessage = RouterMessage::Connect((connect, this_tx));
-        router_tx.send(routermessage).await?;
-        let connection = Connection { id, keep_alive, state, stream, this_rx, router_tx };
+        router_tx.try_send(routermessage)?;
+        let connection = Connection { id, keep_alive, stream, this_rx, router_tx };
         Ok(connection)
     }
 
@@ -100,32 +93,93 @@ impl<'eventloop, S: Network> Connection<'eventloop, S> {
         loop {
             let stream = &mut self.stream;
             let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
-            
+
             // TODO: Use Delay::reset to not construct this timeout future everytime
             let packet = time::timeout(keep_alive, async {
                 let packet = stream.mqtt_read().await?;
                 Ok::<_, Error>(packet)
             });
 
-            let (routerpacket, outpacket) = select! {
+            select! {
                 // read packets from network and generate network reply and router message
-                o = packet.fuse() => self.state.handle_incoming_mqtt_packet(id, o??)?,
+                o = packet.fuse() => {
+                    let packet = o??;
+                    let message = match packet {
+                        Packet::Publish(publish) => RouterMessage::Publish(publish),
+                        Packet::Subscribe(subscribe) => RouterMessage::Subscribe((id.clone(), subscribe)),
+                        Packet::Disconnect => {
+                            return Err(Error::Disconnect)
+                        }
+                        _ => {
+                            error!("Incorrect packet = {:?} received", packet);
+                            return Err(Error::WrongPacket)
+                        }
+                    };
+
+                    match self.router_tx.try_send(message) {
+                        Err(TrySendError::Full(_)) => {
+                            error!("Slow router. Disconnecting");
+                            return Err(Error::SlowRouter)
+                        }
+                        Err(TrySendError::Closed(_)) => {
+                            error!("Slow router. Disconnecting");
+                            return Err(Error::NoReceiver)
+                        }
+                        Ok(_) => ()
+                    }
+                }
+
                 // read packets from router and generate packets to write to network
                 o = self.this_rx.next().fuse() => {
-                    let packet = self.state.handle_outgoing_mqtt_packet(o.unwrap())?;
-                    (None, Some(packet))
+                    if let Some(packet) = o {
+                        match packet {
+                            RouterMessage::Publish(publish) => {
+                                let packet = Packet::Publish(publish);
+                                self.stream.mqtt_write(&packet).await?;
+                            }
+                            RouterMessage::PubAck(pkid) => {
+                                let packet = Packet::Puback(pkid);
+                                self.stream.mqtt_write(&packet).await?;
+                            }
+                            RouterMessage::SubAck(suback) => {
+                                let packet = Packet::Suback(suback);
+                                self.stream.mqtt_write(&packet).await?;
+                            }
+                            _ => {
+                                error!("Incorrect packet = {:?} received", packet);
+                                return Err(Error::WrongPacket)
+                            }
+                        }
+                    }
                 }
             };
-
-            // send packet to router
-            if let Some(packet) = routerpacket {
-                self.router_tx.send(packet).await?;
-            }
-
-            // write packet to network
-            if let Some(packet) = outpacket {
-                self.stream.mqtt_write(&packet).await?;
-            }
         }
     }
+}
+
+pub fn handle_incoming_connect(packet: Packet) -> Result<(Connect, Packet), Error> {
+    let mut connect = match packet {
+        Packet::Connect(connect) => connect,
+        packet => {
+            error!("Invalid packet. Expecting connect. Received = {:?}", packet);
+            return Err(Error::WrongPacket);
+        }
+    };
+
+    // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
+    if connect.keep_alive == 0 {
+        warn!("0 keepalive. Promoting it to 10 minutes");
+        connect.keep_alive = 10 * 60;
+    }
+
+    if connect.client_id.starts_with(' ') || connect.client_id.is_empty() {
+        error!("Client id shouldn't start with space (or) shouldn't be emptys");
+        return Err(Error::InvalidClientId);
+    }
+
+    let connack = connack(ConnectReturnCode::Accepted, false);
+    // TODO: Handle session present
+    let reply = Packet::Connack(connack);
+
+    Ok((connect, reply))
 }

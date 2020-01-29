@@ -5,13 +5,6 @@ use std::time::Duration;
 
 use crate::router::RouterMessage;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MqttConnectionStatus {
-    Handshake,
-    Connected,
-    Disconnected,
-}
-
 #[derive(Debug)]
 pub enum Error {
     /// Broker's error reply to client's connect packet
@@ -44,8 +37,6 @@ pub enum Error {
 /// async/await
 #[derive(Debug)]
 pub struct MqttState {
-    /// Connection status
-    connection_status: MqttConnectionStatus,
     /// Keep alive
     keep_alive: Option<Duration>,
     /// Status of last ping
@@ -66,7 +57,6 @@ impl MqttState {
     /// instantiated for clean sessions
     pub fn new() -> Self {
         MqttState {
-            connection_status: MqttConnectionStatus::Handshake,
             keep_alive: None,
             await_pingresp: false,
             last_incoming: Instant::now(),
@@ -125,35 +115,6 @@ impl MqttState {
             publish.payload().len()
         );
         Packet::Publish(publish)
-    }
-
-    pub fn handle_incoming_connect(&mut self, packet: Packet) -> Result<(Connect, Packet), Error> {
-        let mut connect = match packet {
-            Packet::Connect(connect) => connect,
-            packet => {
-                error!("Invalid packet. Expecting connect. Received = {:?}", packet);
-                self.connection_status = MqttConnectionStatus::Disconnected;
-                return Err(Error::WrongPacket);
-            }
-        };
-
-        // this broker expects a keepalive. 0 keepalives are promoted to 10 minutes
-        if connect.keep_alive == 0 {
-            warn!("0 keepalive. Promoting it to 10 minutes");
-            connect.keep_alive = 10 * 60;
-        }
-
-        if connect.client_id.starts_with(' ') || connect.client_id.is_empty() {
-            error!("Client id shouldn't start with space (or) shouldn't be emptys");
-            return Err(Error::InvalidClientId);
-        }
-
-        self.connection_status = MqttConnectionStatus::Connected;
-        let connack = connack(ConnectReturnCode::Accepted, false);
-        // TODO: Handle session present
-        let reply = Packet::Connack(connack);
-
-        Ok((connect, reply))
     }
 
     fn handle_incoming_pingreq(&mut self) -> Result<(Option<RouterMessage>, Option<Packet>), Error> {

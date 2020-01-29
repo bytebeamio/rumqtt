@@ -1,3 +1,5 @@
+#![recursion_limit="512"]
+
 #[macro_use]
 extern crate log;
 
@@ -104,11 +106,7 @@ async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_pa
     Ok(acceptor)
 }
 
-pub async fn accept_loop(
-    config: Arc<ServerSettings>,
-    graveyard: graveyard::Graveyard,
-    router_tx: Sender<router::RouterMessage>,
-) -> Result<(), Error> {
+pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<router::RouterMessage>) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
     let connection_config = config.clone();
 
@@ -134,7 +132,6 @@ pub async fn accept_loop(
         info!("Accepting from: {}", addr);
 
         let config = connection_config.clone();
-        let graveyard = graveyard.clone();
         let router_tx = router_tx.clone();
 
         if let Some(acceptor) = &acceptor {
@@ -146,22 +143,17 @@ pub async fn accept_loop(
                 }
             };
 
-            task::spawn(eventloop(config, graveyard, stream, router_tx));
+            task::spawn(eventloop(config, stream, router_tx));
         } else {
-            task::spawn(eventloop(config, graveyard, stream, router_tx));
+            task::spawn(eventloop(config, stream, router_tx));
         };
 
         time::delay_for(Duration::from_millis(1)).await;
     }
 }
 
-async fn eventloop(
-    config: Arc<ServerSettings>,
-    graveyard: graveyard::Graveyard,
-    stream: impl Network,
-    router_tx: Sender<router::RouterMessage>,
-) {
-    match connection::eventloop(config, graveyard, stream, router_tx).await {
+async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, router_tx: Sender<router::RouterMessage>) {
+    match connection::eventloop(config, stream, router_tx).await {
         Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
         Err(e) => error!("Connection eventloop error = {:?}", e),
     }
@@ -194,7 +186,7 @@ pub async fn start(config: Config) {
     for server in config.servers.into_iter() {
         let config = Arc::new(server);
 
-        let fut = accept_loop(config, graveyard.clone(), router_tx.clone());
+        let fut = accept_loop(config, router_tx.clone());
         let o = task::spawn(fut);
         servers.push(o);
     }
