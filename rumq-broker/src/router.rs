@@ -1,14 +1,17 @@
 use derive_more::From;
-use rumq_core::{has_wildcards, matches, LastWill, Connect, Publish, Subscribe};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use rumq_core::{has_wildcards, matches, PacketIdentifier, LastWill, Connect, Publish, Subscribe, Suback};
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::error::TrySendError;
 
 use std::collections::HashMap;
 use std::mem;
 
+use crate::state::MqttState;
+
 #[derive(Debug, From)]
 pub enum Error {
     AllSendersDown,
-    Mpsc(mpsc::error::SendError<RouterMessage>),
+    Mpsc(TrySendError<RouterMessage>),
 }
 
 /// Router message to orchestrate data between connections. We can also
@@ -22,17 +25,37 @@ pub enum RouterMessage {
     Publish(Publish),
     /// Client id and subscription
     Subscribe((String, Subscribe)),
+    /// Ack
+    PubAck(PacketIdentifier),
+    /// Suback
+    SubAck(Suback),
     /// Disconnects a client from active connections list. No will handling
     Disconnect(String),
     /// Disconnects a client from active connections list. Will handling
     Death(String),
 }
 
+
+#[derive(Debug)]
+struct Connection {
+    state: MqttState,
+    tx: Sender<RouterMessage>
+}
+
+impl Connection {
+    pub fn new(tx: Sender<RouterMessage>) -> Connection {
+        Connection {
+            state: MqttState::new(),
+            tx
+        }
+    }
+}
+
 pub struct Router {
     // handles to all active connections. used to route data
-    active_connections:     HashMap<String, Sender<RouterMessage>>,
+    active_connections:     HashMap<String, Connection>,
     // inactive persistent connections
-    inactive_connections:   HashMap<String, Vec<rumq_core::Publish>>,
+    inactive_connections:   HashMap<String, Vec<RouterMessage>>,
     // connection will
     connections_will:       HashMap<String, LastWill>,
     // maps concrete subscriptions to interested clients
@@ -81,6 +104,7 @@ impl Router {
             RouterMessage::Subscribe((id, subscribe)) => self.handle_subscribe(id, subscribe).await?,
             RouterMessage::Disconnect(id) => self.handle_disconnection(id)?,
             RouterMessage::Death(id) => self.handle_death(id).await?,
+            _ => unimplemented!(),
         }
 
         Ok(())
@@ -89,9 +113,9 @@ impl Router {
     fn handle_connect(&mut self, connect: Connect, connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
         let id = connect.client_id;
         let clean_session = connect.clean_session;
-        
+
         debug!("Connect. Id = {:?}", id);
-        self.active_connections.insert(id.clone(), connection_handle);
+        self.active_connections.insert(id.clone(), Connection::new(connection_handle));
 
         if clean_session {
             // FIXME: This is costly for every clean connection with a lot of subscriptions
@@ -131,19 +155,10 @@ impl Router {
             }
         }
 
-        // TODO: Will direct member access perform better than method call at higher frequency?
-        // TODO: Directly get connection handles instead of client ids?
         let topic = publish.topic_name();
         if let Some(ids) = self.concrete_subscriptions.get(topic) {
             for id in ids.iter() {
-                if let Some(connection) = self.active_connections.get_mut(id) {
-                    let message = RouterMessage::Publish(publish.clone());
-                    if let Err(e) = connection.send(message).await {
-                        error!("1 Forward failed. Error = {:?}", e);
-                    }
-                }
-
-                // TODO: Offline message handling
+                forward_publish(id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
             }
         }
 
@@ -152,20 +167,14 @@ impl Router {
         for (filter, ids) in self.wild_subscriptions.iter() {
             if matches(topic, filter) {
                 for id in ids.iter() {
-                    if let Some(connection) = self.active_connections.get_mut(id) {
-                        let message = RouterMessage::Publish(publish.clone());
-                        if let Err(e) = connection.send(message).await {
-                            error!("2 Forward failed. Error = {:?}", e);
-                        }
-                    }
-
-                    // TODO: Offline message handling
+                    forward_publish(id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                 }
             }
         }
 
         Ok(())
     }
+
 
     async fn handle_subscribe(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
         debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
@@ -224,16 +233,12 @@ impl Router {
             if has_wildcards(filter) {
                 for (topic, publish) in self.retained_publishes.iter() {
                     if matches(topic, filter) {
-                        if let Some(connection) = self.active_connections.get_mut(&id) {
-                            connection.send(RouterMessage::Publish(publish.clone())).await?;
-                        }
+                        forward_publish(&id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                     }
                 }
             } else {
                 if let Some(publish) = self.retained_publishes.get(filter) {
-                    if let Some(connection) = self.active_connections.get_mut(&id) {
-                        connection.send(RouterMessage::Publish(publish.clone())).await?;
-                    }
+                    forward_publish(&id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                 }
             }
         }
@@ -268,6 +273,28 @@ impl Router {
         }
 
         Ok(())
+    }
+}
+
+// forwards data to the connection with the following id
+fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<String, Connection>, inactive_connections: &mut HashMap<String, Vec<RouterMessage>>)  {
+    if let Some(connection) = active_connections.get_mut(id) {
+        let message = RouterMessage::Publish(publish);
+        if let Err(e) = connection.tx.try_send(message) {
+            match e {
+                TrySendError::Full(m) => {
+                    error!("Slow connection. Dropping handle and moving id to inactive list");
+                    if let Some(_) = active_connections.remove(id) {
+                        let data = vec![m];
+                        inactive_connections.insert(id.to_owned(), data);
+                    }
+                }
+                TrySendError::Closed(_m) => {
+                    error!("Closed connection. Forward failed");
+                    unimplemented!()
+                }
+            }
+        }
     }
 }
 

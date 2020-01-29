@@ -41,8 +41,24 @@ Alternate:
 	                  |
 	    ack   <-  replication
 
-But this puts the overhead of sending all acks back to the connection.
-Maybe we can microbatch smartly. 
+But this puts the overhead of sending all acks back to the connection
+over a channel and receiving acks of forwards to update the state. Maybe 
+we can microbatch smartly. 
+
+Advantages of router maintaining the state
+---------------
+
+* Necessary for replication to happen centrally. Router maintains
+  connections to all the other brokers with out each connection
+  maintaining these. Router replicates and sends ack to the connection
+  where it's written to the network
+* All distributed logic at one place
+* Connections are stateless
+
+Disadvantages
+-------------
+
+* Acks from/to router. Adds to processing. Microbatching can help here 
 
 
 TODO
