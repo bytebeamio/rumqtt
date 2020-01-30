@@ -1,9 +1,9 @@
 use derive_more::From;
-use rumq_core::{has_wildcards, matches, Packet, LastWill, Connect, Publish, Subscribe};
+use rumq_core::{has_wildcards, matches, Packet, Connect, Publish, Subscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::mem;
 
 use crate::state::MqttState;
@@ -26,29 +26,44 @@ pub enum RouterMessage {
     Packet(rumq_core::Packet),
     /// Disconnects a client from active connections list. Will handling
     Death(String),
+    /// Pending messages of the previous connection
+    Pending(Option<VecDeque<Publish>>)
 }
 
 
 #[derive(Debug)]
-struct Connection {
+struct ActiveConnection {
     pub state: MqttState,
     tx: Sender<RouterMessage>
 }
 
-impl Connection {
-    pub fn new(tx: Sender<RouterMessage>, will: Option<LastWill>) -> Connection {
-        Connection {
-            state: MqttState::new(will),
+impl ActiveConnection {
+    pub fn new(tx: Sender<RouterMessage>, state: MqttState) -> ActiveConnection {
+        ActiveConnection {
+            state,
             tx
+        }
+    }
+}
+
+#[derive(Debug)]
+struct InactiveConnection {
+    pub state: MqttState
+}
+
+impl InactiveConnection {
+    pub fn new(state: MqttState) -> InactiveConnection {
+        InactiveConnection {
+            state,
         }
     }
 }
 
 pub struct Router {
     // handles to all active connections. used to route data
-    active_connections:     HashMap<String, Connection>,
+    active_connections:     HashMap<String, ActiveConnection>,
     // inactive persistent connections
-    inactive_connections:   HashMap<String, Vec<RouterMessage>>,
+    inactive_connections:   HashMap<String, InactiveConnection>,
     // maps concrete subscriptions to interested clients
     concrete_subscriptions: HashMap<String, Vec<String>>,
     // maps wildcard subscriptions to interested clients
@@ -92,7 +107,6 @@ impl Router {
             }
             RouterMessage::Packet(packet) => {
                 handle_incoming_packet(&id, packet.clone(), &mut self.active_connections)?;
-
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions_and_forward(publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe).await?,
@@ -101,18 +115,22 @@ impl Router {
                 }
             }
             RouterMessage::Death(id) => self.deactivate_and_forward_will(id).await?,
+            RouterMessage::Pending(_) => return Ok(())
         }
 
         Ok(())
     }
 
-    fn handle_connect(&mut self, connect: Connect, connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
+    fn handle_connect(&mut self, connect: Connect, mut connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
         let id = connect.client_id;
         let clean_session = connect.clean_session;
         let will = connect.last_will;
 
         debug!("Connect. Id = {:?}", id);
-        self.active_connections.insert(id.clone(), Connection::new(connection_handle, will));
+        let state = MqttState::new(will);
+        
+        // connection_handle.try_send(RouterMessage::Pending(None))?;
+        self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
 
         if clean_session {
             // FIXME: This is costly for every clean connection with a lot of subscriptions
@@ -143,7 +161,7 @@ impl Router {
         if publish.retain {
             if publish.payload.len() == 0 {
                 self.retained_publishes.remove(&publish.topic_name);
-                return ;
+                return
             } else {
                 self.retained_publishes.insert(publish.topic_name.clone(), publish.clone());
             }
@@ -239,8 +257,8 @@ impl Router {
     }
 
     fn deactivate(&mut self, id: String) -> Result<(), Error> {
-        if let Some(_) = self.active_connections.remove(&id) {
-            self.inactive_connections.insert(id, Vec::new());
+        if let Some(connection) = self.active_connections.remove(&id) {
+            self.inactive_connections.insert(id, InactiveConnection::new(connection.state));
         }
 
         Ok(())
@@ -248,8 +266,6 @@ impl Router {
 
     async fn deactivate_and_forward_will(&mut self, id: String) -> Result<(), Error> {
         if let Some(mut connection) = self.active_connections.remove(&id) {
-            self.inactive_connections.insert(id.clone(), Vec::new());
-
             if let Some(mut will) = connection.state.will.take() {
                 let topic = mem::replace(&mut will.topic, "".to_owned());
                 let message = mem::replace(&mut will.message, "".to_owned());
@@ -260,6 +276,8 @@ impl Router {
 
                 self.match_subscriptions_and_forward(publish);
             }
+
+            self.inactive_connections.insert(id.clone(), InactiveConnection::new(connection.state));
         }
 
 
@@ -268,18 +286,25 @@ impl Router {
 }
 
 // forwards data to the connection with the following id
-fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<String, Connection>, inactive_connections: &mut HashMap<String, Vec<RouterMessage>>)  {
+fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
+    if let Some(connection) = inactive_connections.get_mut(id) {
+        connection.state.handle_outgoing_publish(publish); 
+        return
+    }
+
     if let Some(connection) = active_connections.get_mut(id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);
 
+
+        // slow connections should be moved to inactive connections. This drops tx handle of the
+        // connection leading to connection disconnection
         if let Err(e) = connection.tx.try_send(message) {
             match e {
-                TrySendError::Full(m) => {
+                TrySendError::Full(_m) => {
                     error!("Slow connection. Dropping handle and moving id to inactive list");
-                    if let Some(_) = active_connections.remove(id) {
-                        let data = vec![m];
-                        inactive_connections.insert(id.to_owned(), data);
+                    if let Some(connection) = active_connections.remove(id) {
+                        inactive_connections.insert(id.to_owned(), InactiveConnection::new(connection.state));
                     }
                 }
                 TrySendError::Closed(_m) => {
@@ -291,7 +316,7 @@ fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<
     }
 }
 
-fn handle_incoming_packet(id: &str, packet: Packet, active_connections: &mut HashMap<String, Connection>) -> Result<(), Error> {
+fn handle_incoming_packet(id: &str, packet: Packet, active_connections: &mut HashMap<String, ActiveConnection>) -> Result<(), Error> {
     if let Some(connection) = active_connections.get_mut(id) {
         let reply = match connection.state.handle_incoming_mqtt_packet(packet) {
             Ok(Some(reply)) => reply,

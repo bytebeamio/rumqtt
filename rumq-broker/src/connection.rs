@@ -5,6 +5,7 @@ use futures_util::stream::StreamExt;
 use rumq_core::{connack, MqttRead, MqttWrite, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::stream::iter;
 use tokio::time;
 
 use crate::router::RouterMessage;
@@ -28,14 +29,11 @@ pub enum Error {
 }
 
 pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
-    // TODO: persistent new connection should get state back from the graveyard and send pending packets
-    // along with outstanding publishes that the router received when the client connection is offline
     let mut connection = Connection::new(config, stream, router_tx.clone()).await?;
     let id = connection.id.clone();
 
     if let Err(err) = connection.run().await {
         error!("Connection error = {:?}", err);
-
         router_tx.try_send((id.clone(), RouterMessage::Death(id.clone())))?;
     }
 
@@ -74,6 +72,14 @@ impl<S: Network> Connection<S> {
         Ok(connection)
     }
 
+    fn forward_to_router(&mut self, id: &str, message: RouterMessage) -> Result<(), Error> {
+        match self.router_tx.try_send((id.to_owned(), message)) {
+            Err(TrySendError::Full(_)) => Err(Error::SlowRouter),
+            Err(TrySendError::Closed(_)) => Err(Error::NoReceiver),
+            Ok(_) => Ok(()) 
+        }
+    }
+
     async fn run(&mut self) -> Result<(), Error> {
         // TODO: Enable and monitor perf. Default buffer size of 8K. Might've to periodically flush?
         // Q. What happens when socket receives only 4K of data and there is no new data?
@@ -83,7 +89,46 @@ impl<S: Network> Connection<S> {
         // Verify BufReader code
         // https://docs.rs/tokio/0.2.6/src/tokio/io/util/buf_reader.rs.html#117
         // let mut stream = BufStream::new(stream);
-        let id = &self.id;
+        let id = self.id.to_owned();
+/*
+        // eventloop which pending packets from the last session 
+        if let Some(RouterMessage::Pending(Some(mut pending))) = self.this_rx.next().await {
+            let mut pending = iter(pending.drain(..)).map(Packet::Publish);
+            loop {
+                let stream = &mut self.stream;
+                let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
+
+                let packet = time::timeout(keep_alive, async {
+                    let packet = stream.mqtt_read().await?;
+                    Ok::<_, Error>(packet)
+                });
+
+                select! {
+                    // read packets from network and generate network reply and router message
+                    o = packet.fuse() => {
+                        let message = match o?? {
+                            Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
+                            packet => {
+                                let message = RouterMessage::Packet(packet);
+                                self.forward_to_router(&id, message)?;
+                            }
+                        };
+                    }
+
+                    // read packets from the router and write to network
+                    // router can close the connection by dropping tx handle. this should stop this
+                    // eventloop without sending the death notification
+                    o = pending.next().fuse() => match o {
+                        Some(packet) => self.stream.mqtt_write(&packet).await?,
+                        None => {
+                            info!("Tx closed!! Stopping the connection");
+                            return Ok(())
+                        }
+                    }
+                };
+            }
+        }
+*/
         // eventloop which processes packets and router messages
         loop {
             let stream = &mut self.stream;
@@ -99,36 +144,27 @@ impl<S: Network> Connection<S> {
                 // read packets from network and generate network reply and router message
                 o = packet.fuse() => {
                     let message = match o?? {
-                        Packet::Pingreq => {
-                            self.stream.mqtt_write(&Packet::Pingresp).await?;
-                            continue
+                        Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
+                        packet => {
+                            let message = RouterMessage::Packet(packet);
+                            self.forward_to_router(&id, message)?;
                         }
-                        packet => RouterMessage::Packet(packet)
                     };
-
-                    match self.router_tx.try_send((id.clone(), message)) {
-                        Err(TrySendError::Full(_)) => {
-                            error!("Slow router. Disconnecting");
-                            return Err(Error::SlowRouter)
-                        }
-                        Err(TrySendError::Closed(_)) => {
-                            error!("Slow router. Disconnecting");
-                            return Err(Error::NoReceiver)
-                        }
-                        Ok(_) => ()
-                    }
                 }
 
-                // read packets from router and generate packets to write to network
-                o = self.this_rx.next().fuse() => {
-                    if let Some(message) = o {
+                // read packets from the router and write to network
+                // router can close the connection by dropping tx handle. this should stop this
+                // eventloop without sending the death notification
+                o = self.this_rx.next().fuse() => match o {
+                    Some(message) => {
                         match message {
                             RouterMessage::Packet(packet) => self.stream.mqtt_write(&packet).await?,
-                            _ => {
-                                error!("Incorrect message = {:?} received", message);
-                                return Err(Error::WrongPacket)
-                            }
+                            _ => return Err(Error::WrongPacket)
                         }
+                    }
+                    None => {
+                        info!("Tx closed!! Stopping the connection");
+                        return Ok(())
                     }
                 }
             };
