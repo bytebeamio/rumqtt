@@ -127,9 +127,9 @@ impl Router {
         let will = connect.last_will;
 
         debug!("Connect. Id = {:?}", id);
-        let state = MqttState::new(will);
+        let state = MqttState::new(clean_session, will);
         
-        // connection_handle.try_send(RouterMessage::Pending(None))?;
+        connection_handle.try_send(RouterMessage::Pending(None))?;
         self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
 
         if clean_session {
@@ -258,7 +258,9 @@ impl Router {
 
     fn deactivate(&mut self, id: String) -> Result<(), Error> {
         if let Some(connection) = self.active_connections.remove(&id) {
-            self.inactive_connections.insert(id, InactiveConnection::new(connection.state));
+            if !connection.state.clean_session {
+                self.inactive_connections.insert(id, InactiveConnection::new(connection.state));
+            }
         }
 
         Ok(())
@@ -277,7 +279,9 @@ impl Router {
                 self.match_subscriptions_and_forward(publish);
             }
 
-            self.inactive_connections.insert(id.clone(), InactiveConnection::new(connection.state));
+            if !connection.state.clean_session {
+                self.inactive_connections.insert(id.clone(), InactiveConnection::new(connection.state));
+            }
         }
 
 
@@ -291,7 +295,7 @@ fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<
         connection.state.handle_outgoing_publish(publish); 
         return
     }
-
+    
     if let Some(connection) = active_connections.get_mut(id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);

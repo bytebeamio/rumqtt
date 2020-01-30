@@ -90,7 +90,7 @@ impl<S: Network> Connection<S> {
         // https://docs.rs/tokio/0.2.6/src/tokio/io/util/buf_reader.rs.html#117
         // let mut stream = BufStream::new(stream);
         let id = self.id.to_owned();
-/*
+        
         // eventloop which pending packets from the last session 
         if let Some(RouterMessage::Pending(Some(mut pending))) = self.this_rx.next().await {
             let mut pending = iter(pending.drain(..)).map(Packet::Publish);
@@ -128,7 +128,7 @@ impl<S: Network> Connection<S> {
                 };
             }
         }
-*/
+        
         // eventloop which processes packets and router messages
         loop {
             let stream = &mut self.stream;

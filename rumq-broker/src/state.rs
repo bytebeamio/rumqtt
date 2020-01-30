@@ -44,6 +44,8 @@ pub struct MqttState {
     last_pkid: PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
     outgoing_publishes: VecDeque<Publish>,
+    /// Clean session
+    pub clean_session: bool,
     /// Lastwill
     pub will: Option<LastWill>,
 }
@@ -52,12 +54,13 @@ impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(will: Option<LastWill>) -> Self {
+    pub fn new(clean_session: bool, will: Option<LastWill>) -> Self {
         MqttState {
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: PacketIdentifier(0),
             outgoing_publishes: VecDeque::new(),
+            clean_session,
             will,
         }
     }
