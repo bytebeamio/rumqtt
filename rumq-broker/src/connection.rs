@@ -18,17 +18,16 @@ use std::time::Duration;
 pub enum Error {
     Core(rumq_core::Error),
     Timeout(time::Elapsed),
-    Mpsc(TrySendError<RouterMessage>),
+    Mpsc(TrySendError<(String, RouterMessage)>),
     /// Received a wrong packet while waiting for another packet
     WrongPacket,
     /// Invalid client ID
     InvalidClientId,
-    Disconnect,
     SlowRouter,
     NoReceiver
 }
 
-pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut router_tx: Sender<RouterMessage>) -> Result<String, Error> {
+pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
     // TODO: persistent new connection should get state back from the graveyard and send pending packets
     // along with outstanding publishes that the router received when the client connection is offline
     let mut connection = Connection::new(config, stream, router_tx.clone()).await?;
@@ -36,12 +35,8 @@ pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut ro
 
     if let Err(err) = connection.run().await {
         error!("Connection error = {:?}", err);
-     
-        if let Error::Disconnect = err {
-            router_tx.try_send(RouterMessage::Disconnect(id.clone()))?;
-        } else {
-            router_tx.try_send(RouterMessage::Death(id.clone()))?;
-        }
+
+        router_tx.try_send((id.clone(), RouterMessage::Death(id.clone())))?;
     }
 
     Ok(id)
@@ -52,11 +47,11 @@ struct Connection<S> {
     keep_alive: Duration,
     stream:     S,
     this_rx:    Receiver<RouterMessage>,
-    router_tx:  Sender<RouterMessage>,
+    router_tx:  Sender<(String, RouterMessage)>,
 }
 
 impl<S: Network> Connection<S> {
-    async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<RouterMessage>) -> Result<Connection<S>, Error> {
+    async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let (connect, connack) = time::timeout(timeout, async {
@@ -74,7 +69,7 @@ impl<S: Network> Connection<S> {
 
         // construct connect router message with cliend id and handle to this connection
         let routermessage = RouterMessage::Connect((connect, this_tx));
-        router_tx.try_send(routermessage)?;
+        router_tx.try_send((id.clone(), routermessage))?;
         let connection = Connection { id, keep_alive, stream, this_rx, router_tx };
         Ok(connection)
     }
@@ -103,20 +98,15 @@ impl<S: Network> Connection<S> {
             select! {
                 // read packets from network and generate network reply and router message
                 o = packet.fuse() => {
-                    let packet = o??;
-                    let message = match packet {
-                        Packet::Publish(publish) => RouterMessage::Publish(publish),
-                        Packet::Subscribe(subscribe) => RouterMessage::Subscribe((id.clone(), subscribe)),
-                        Packet::Disconnect => {
-                            return Err(Error::Disconnect)
+                    let message = match o?? {
+                        Packet::Pingreq => {
+                            self.stream.mqtt_write(&Packet::Pingresp).await?;
+                            continue
                         }
-                        _ => {
-                            error!("Incorrect packet = {:?} received", packet);
-                            return Err(Error::WrongPacket)
-                        }
+                        packet => RouterMessage::Packet(packet)
                     };
 
-                    match self.router_tx.try_send(message) {
+                    match self.router_tx.try_send((id.clone(), message)) {
                         Err(TrySendError::Full(_)) => {
                             error!("Slow router. Disconnecting");
                             return Err(Error::SlowRouter)
@@ -131,22 +121,11 @@ impl<S: Network> Connection<S> {
 
                 // read packets from router and generate packets to write to network
                 o = self.this_rx.next().fuse() => {
-                    if let Some(packet) = o {
-                        match packet {
-                            RouterMessage::Publish(publish) => {
-                                let packet = Packet::Publish(publish);
-                                self.stream.mqtt_write(&packet).await?;
-                            }
-                            RouterMessage::PubAck(pkid) => {
-                                let packet = Packet::Puback(pkid);
-                                self.stream.mqtt_write(&packet).await?;
-                            }
-                            RouterMessage::SubAck(suback) => {
-                                let packet = Packet::Suback(suback);
-                                self.stream.mqtt_write(&packet).await?;
-                            }
+                    if let Some(message) = o {
+                        match message {
+                            RouterMessage::Packet(packet) => self.stream.mqtt_write(&packet).await?,
                             _ => {
-                                error!("Incorrect packet = {:?} received", packet);
+                                error!("Incorrect message = {:?} received", message);
                                 return Err(Error::WrongPacket)
                             }
                         }

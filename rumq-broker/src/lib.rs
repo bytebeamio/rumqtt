@@ -24,7 +24,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod connection;
-mod graveyard;
 mod httppush;
 mod httpserver;
 mod router;
@@ -106,7 +105,7 @@ async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_pa
     Ok(acceptor)
 }
 
-pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<router::RouterMessage>) -> Result<(), Error> {
+pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, router::RouterMessage)>) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
     let connection_config = config.clone();
 
@@ -152,7 +151,7 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<router::
     }
 }
 
-async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, router_tx: Sender<router::RouterMessage>) {
+async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, router_tx: Sender<(String, router::RouterMessage)>) {
     match connection::eventloop(config, stream, router_tx).await {
         Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
         Err(e) => error!("Connection eventloop error = {:?}", e),
@@ -160,8 +159,7 @@ async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, router_tx:
 }
 
 pub async fn start(config: Config) {
-    let (router_tx, router_rx) = channel::<router::RouterMessage>(10);
-    let graveyard = graveyard::Graveyard::new();
+    let (router_tx, router_rx) = channel(10);
 
     // router to route data between connections. creates an extra copy but
     // might not be a big deal if we prevent clones/send fat pointers and batch
