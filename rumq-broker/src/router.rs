@@ -127,10 +127,21 @@ impl Router {
         let will = connect.last_will;
 
         debug!("Connect. Id = {:?}", id);
-        let state = MqttState::new(clean_session, will);
-        
-        connection_handle.try_send(RouterMessage::Pending(None))?;
-        self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
+
+        if clean_session {
+            let state = MqttState::new(clean_session, will);
+            connection_handle.try_send(RouterMessage::Pending(None))?;
+            self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
+        } else {
+            if let Some(connection) = self.inactive_connections.remove(&id) {
+                connection_handle.try_send(RouterMessage::Pending(Some(connection.state.outgoing_publishes.clone())))?;
+                self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, connection.state));
+            } else {
+                let state = MqttState::new(clean_session, will);
+                connection_handle.try_send(RouterMessage::Pending(None))?;
+                self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
+            }
+        }
 
         if clean_session {
             // FIXME: This is costly for every clean connection with a lot of subscriptions
@@ -257,6 +268,8 @@ impl Router {
     }
 
     fn deactivate(&mut self, id: String) -> Result<(), Error> {
+        info!("Deactivating client due to disconnect packet");
+
         if let Some(connection) = self.active_connections.remove(&id) {
             if !connection.state.clean_session {
                 self.inactive_connections.insert(id, InactiveConnection::new(connection.state));
@@ -267,6 +280,8 @@ impl Router {
     }
 
     async fn deactivate_and_forward_will(&mut self, id: String) -> Result<(), Error> {
+        info!("Deactivating client due to connection death");
+        
         if let Some(mut connection) = self.active_connections.remove(&id) {
             if let Some(mut will) = connection.state.will.take() {
                 let topic = mem::replace(&mut will.topic, "".to_owned());
@@ -295,7 +310,7 @@ fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<
         connection.state.handle_outgoing_publish(publish); 
         return
     }
-    
+
     if let Some(connection) = active_connections.get_mut(id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);

@@ -43,7 +43,7 @@ pub struct MqttState {
     /// Packet id of the last outgoing packet
     last_pkid: PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
-    outgoing_publishes: VecDeque<Publish>,
+    pub outgoing_publishes: VecDeque<Publish>,
     /// Clean session
     pub clean_session: bool,
     /// Lastwill
