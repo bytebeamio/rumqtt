@@ -74,6 +74,7 @@ impl MqttState {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(subscribe),
+            Packet::Unsubscribe(unsubscribe) => self.handle_incoming_unsubscribe(unsubscribe),
             Packet::Disconnect => Ok(None),
             _ => return Err(Error::UnsupportedPacket(packet)),
         };
@@ -170,6 +171,12 @@ impl MqttState {
         }
 
         let packet = Packet::Suback(suback(*pkid, subscription_return_codes));
+        let routermessage = RouterMessage::Packet(packet);
+        Ok(Some(routermessage))
+    }
+
+    fn handle_incoming_unsubscribe(&mut self, unsubscribe: Unsubscribe) -> Result<Option<RouterMessage>, Error> {
+        let packet = Packet::Unsuback(unsubscribe.pkid);
         let routermessage = RouterMessage::Packet(packet);
         Ok(Some(routermessage))
     }

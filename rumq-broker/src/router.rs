@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{has_wildcards, matches, Packet, Connect, Publish, Subscribe};
+use rumq_core::{has_wildcards, matches, Packet, Connect, Publish, Subscribe, Unsubscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -109,12 +109,13 @@ impl Router {
                 handle_incoming_packet(&id, packet.clone(), &mut self.active_connections)?;
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions_and_forward(publish),
-                    Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe).await?,
-                    Packet::Disconnect => self.deactivate(id)?,
+                    Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
+                    Packet::Unsubscribe(unsubscribe) => self.remove_from_subscriptions(id, unsubscribe),
+                    Packet::Disconnect => self.deactivate(id),
                     _ => return Ok(()),
                 }
             }
-            RouterMessage::Death(id) => self.deactivate_and_forward_will(id).await?,
+            RouterMessage::Death(id) => self.deactivate_and_forward_will(id),
             RouterMessage::Pending(_) => return Ok(())
         }
 
@@ -199,7 +200,7 @@ impl Router {
     }
 
 
-    async fn add_to_subscriptions(&mut self, id: String, subscribe: Subscribe) -> Result<(), Error> {
+    fn add_to_subscriptions(&mut self, id: String, subscribe: Subscribe) {
         debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
 
         // Each subscribe message can send multiple topics to subscribe to. handle dupicates
@@ -227,7 +228,7 @@ impl Router {
                 for (topic, clients) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
                         if let Some(_) = clients.iter().position(|r| r == &id) {
-                            return Ok(());
+                            return
                         }
                     }
                 }
@@ -265,11 +266,35 @@ impl Router {
                 }
             }
         }
-
-        Ok(())
     }
 
-    fn deactivate(&mut self, id: String) -> Result<(), Error> {
+    fn remove_from_subscriptions(&mut self, id: String, unsubscribe: Unsubscribe) {
+        for topic in unsubscribe.topics.iter() {
+            if has_wildcards(topic) {
+                // remove client from the concrete subscription list incase of a matching wildcard
+                // subscription
+                for (filter, clients) in self.concrete_subscriptions.iter_mut() {
+                    if topic == filter {
+                        if let Some(index) = clients.iter().position(|r| r == &id) {
+                            clients.remove(index);
+                        }
+                    }
+                }
+            } else {
+                // ignore a new concrete subscription if the client already has a matching wildcard
+                // subscription
+                for (filter, clients) in self.concrete_subscriptions.iter_mut() {
+                    if topic == filter {
+                        if let Some(index) = clients.iter().position(|r| r == &id) {
+                            clients.remove(index);
+                        }
+                    }
+                }
+            };
+        }
+    }
+
+    fn deactivate(&mut self, id: String) {
         info!("Deactivating client due to disconnect packet");
 
         if let Some(connection) = self.active_connections.remove(&id) {
@@ -277,11 +302,9 @@ impl Router {
                 self.inactive_connections.insert(id, InactiveConnection::new(connection.state));
             }
         }
-
-        Ok(())
     }
 
-    async fn deactivate_and_forward_will(&mut self, id: String) -> Result<(), Error> {
+    fn deactivate_and_forward_will(&mut self, id: String) {
         info!("Deactivating client due to connection death");
         
         if let Some(mut connection) = self.active_connections.remove(&id) {
@@ -300,9 +323,6 @@ impl Router {
                 self.inactive_connections.insert(id.clone(), InactiveConnection::new(connection.state));
             }
         }
-
-
-        Ok(())
     }
 }
 
@@ -339,6 +359,7 @@ fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<
     }
 }
 
+/// Saves state and sends network reply back to the connection
 fn handle_incoming_packet(id: &str, packet: Packet, active_connections: &mut HashMap<String, ActiveConnection>) -> Result<(), Error> {
     if let Some(connection) = active_connections.get_mut(id) {
         let reply = match connection.state.handle_incoming_mqtt_packet(packet) {
