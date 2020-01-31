@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{has_wildcards, matches, Packet, Connect, Publish, Subscribe, Unsubscribe};
+use rumq_core::{has_wildcards, matches, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -59,15 +59,29 @@ impl InactiveConnection {
     }
 }
 
+#[derive(Debug, Clone)]
+struct Subscriber {
+    client_id: String,
+    qos: QoS
+}
+
+impl Subscriber {
+    pub fn new(id: &str, qos: QoS) -> Subscriber {
+        Subscriber {
+            client_id: id.to_owned(),
+            qos
+        }
+    }
+}
 pub struct Router {
     // handles to all active connections. used to route data
     active_connections:     HashMap<String, ActiveConnection>,
     // inactive persistent connections
     inactive_connections:   HashMap<String, InactiveConnection>,
-    // maps concrete subscriptions to interested clients
-    concrete_subscriptions: HashMap<String, Vec<String>>,
-    // maps wildcard subscriptions to interested clients
-    wild_subscriptions:     HashMap<String, Vec<String>>,
+    // maps concrete subscriptions to interested subscribers
+    concrete_subscriptions: HashMap<String, Vec<Subscriber>>,
+    // maps wildcard subscriptions to interested subscribers
+    wild_subscriptions:     HashMap<String, Vec<Subscriber>>,
     // retained publishes
     retained_publishes:     HashMap<String, Publish>,
     // channel receiver to receive data from all the active_connections.
@@ -147,16 +161,16 @@ impl Router {
         }
 
         if clean_session {
-            // FIXME: This is costly for every clean connection with a lot of subscriptions
-            for (_, ids) in self.concrete_subscriptions.iter_mut() {
-                if let Some(index) = ids.iter().position(|r| r == &id) {
-                    ids.remove(index);
+            // FIXME: This is costly for every clean connection with a lot of subscribers
+            for (_, subscribers) in self.concrete_subscriptions.iter_mut() {
+                if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                    subscribers.remove(index);
                 }
             }
 
-            for (_, ids) in self.wild_subscriptions.iter_mut() {
-                if let Some(index) = ids.iter().position(|r| r == &id) {
-                    ids.remove(index);
+            for (_, subscribers) in self.wild_subscriptions.iter_mut() {
+                if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                    subscribers.remove(index);
                 }
             }
         }
@@ -182,18 +196,18 @@ impl Router {
         }
 
         let topic = publish.topic_name();
-        if let Some(ids) = self.concrete_subscriptions.get(topic) {
-            for id in ids.iter() {
-                forward_publish(id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+        if let Some(subscribers) = self.concrete_subscriptions.get(topic) {
+            for subscriber in subscribers.iter() {
+                forward_publish(subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
             }
         }
 
         // TODO: O(n) which happens during every publish. publish perf is going to be
         // linearly degraded based on number of wildcard subscriptions. fix this
-        for (filter, ids) in self.wild_subscriptions.iter() {
+        for (filter, subscribers) in self.wild_subscriptions.iter() {
             if matches(topic, filter) {
-                for id in ids.iter() {
-                    forward_publish(id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+                for subscriber in subscribers.iter() {
+                    forward_publish(subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                 }
             }
         };
@@ -205,18 +219,19 @@ impl Router {
 
         // Each subscribe message can send multiple topics to subscribe to. handle dupicates
         for topic in subscribe.topics() {
-            let id = id.clone();
             let filter = topic.topic_path();
+            let qos = topic.qos;
+            let subscriber = Subscriber::new(&id, qos);
 
             // client subscribing to a/b/c and a/+/c should receive message only once when
             // a publish happens on a/b/c.
             let subscriptions = if has_wildcards(filter) {
                 // remove client from the concrete subscription list incase of a matching wildcard
                 // subscription
-                for (topic, clients) in self.concrete_subscriptions.iter_mut() {
+                for (topic, subscribers) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
-                        if let Some(index) = clients.iter().position(|r| r == &id) {
-                            clients.remove(index);
+                        if let Some(index) = subscribers.iter().position(|s| s.client_id == subscriber.client_id) {
+                            subscribers.remove(index);
                         }
                     }
                 }
@@ -225,9 +240,9 @@ impl Router {
             } else {
                 // ignore a new concrete subscription if the client already has a matching wildcard
                 // subscription
-                for (topic, clients) in self.concrete_subscriptions.iter_mut() {
+                for (topic, subscribers) in self.concrete_subscriptions.iter_mut() {
                     if matches(topic, filter) {
-                        if let Some(_) = clients.iter().position(|r| r == &id) {
+                        if let Some(_) = subscribers.iter().position(|s| s.client_id == subscriber.client_id) {
                             return
                         }
                     }
@@ -239,17 +254,17 @@ impl Router {
             // add client id to subscriptions
             match subscriptions.get_mut(filter) {
                 // push client id to the list of clients intrested in this subspcription
-                Some(connections) => {
+                Some(subscribers) => {
                     // don't add the same id twice
-                    if !connections.contains(&id) {
-                        connections.push(id.clone())
+                    if !subscribers.iter().any(|s| s.client_id == id) {
+                        subscribers.push(subscriber.clone())
                     }
                 }
                 // create a new subscription and push the client id
                 None => {
-                    let mut connections = Vec::new();
-                    connections.push(id.clone());
-                    subscriptions.insert(filter.to_owned(), connections);
+                    let mut subscribers = Vec::new();
+                    subscribers.push(subscriber.clone());
+                    subscriptions.insert(filter.to_owned(), subscribers);
                 }
             }
 
@@ -257,12 +272,12 @@ impl Router {
             if has_wildcards(filter) {
                 for (topic, publish) in self.retained_publishes.iter() {
                     if matches(topic, filter) {
-                        forward_publish(&id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+                        forward_publish(&subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                     }
                 }
             } else {
                 if let Some(publish) = self.retained_publishes.get(filter) {
-                    forward_publish(&id, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+                    forward_publish(&subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                 }
             }
         }
@@ -273,20 +288,20 @@ impl Router {
             if has_wildcards(topic) {
                 // remove client from the concrete subscription list incase of a matching wildcard
                 // subscription
-                for (filter, clients) in self.concrete_subscriptions.iter_mut() {
+                for (filter, subscribers) in self.concrete_subscriptions.iter_mut() {
                     if topic == filter {
-                        if let Some(index) = clients.iter().position(|r| r == &id) {
-                            clients.remove(index);
+                        if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                            subscribers.remove(index);
                         }
                     }
                 }
             } else {
                 // ignore a new concrete subscription if the client already has a matching wildcard
                 // subscription
-                for (filter, clients) in self.concrete_subscriptions.iter_mut() {
+                for (filter, subscribers) in self.concrete_subscriptions.iter_mut() {
                     if topic == filter {
-                        if let Some(index) = clients.iter().position(|r| r == &id) {
-                            clients.remove(index);
+                        if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                            subscribers.remove(index);
                         }
                     }
                 }
@@ -327,18 +342,17 @@ impl Router {
 }
 
 // forwards data to the connection with the following id
-fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
-    if let Some(connection) = inactive_connections.get_mut(id) {
-        debug!("Forwarding publish to inactive connection. Id = {}", id);
+fn forward_publish(subscription: &Subscriber, publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
+    if let Some(connection) = inactive_connections.get_mut(&subscription.client_id) {
+        debug!("Forwarding publish to inactive connection. Id = {}", subscription.client_id);
         connection.state.handle_outgoing_publish(publish); 
         return
     }
 
-    debug!("Forwarding publish to an active connection. Id = {}", id);
-    if let Some(connection) = active_connections.get_mut(id) {
+    debug!("Forwarding publish to an active connection. Id = {}", subscription.client_id);
+    if let Some(connection) = active_connections.get_mut(&subscription.client_id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);
-
 
         // slow connections should be moved to inactive connections. This drops tx handle of the
         // connection leading to connection disconnection
@@ -346,13 +360,13 @@ fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<
             match e {
                 TrySendError::Full(_m) => {
                     error!("Slow connection. Dropping handle and moving id to inactive list");
-                    if let Some(connection) = active_connections.remove(id) {
-                        inactive_connections.insert(id.to_owned(), InactiveConnection::new(connection.state));
+                    if let Some(connection) = active_connections.remove(&subscription.client_id) {
+                        inactive_connections.insert(subscription.client_id.clone(), InactiveConnection::new(connection.state));
                     }
                 }
                 TrySendError::Closed(_m) => {
                     error!("Closed connection. Forward failed");
-                    active_connections.remove(id);
+                    active_connections.remove(&subscription.client_id);
                 }
             }
         }
