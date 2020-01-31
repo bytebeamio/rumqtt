@@ -295,7 +295,7 @@ impl Router {
     }
 
     fn deactivate(&mut self, id: String) {
-        info!("Deactivating client due to disconnect packet");
+        info!("Deactivating client due to disconnect packet. Id = {}", id);
 
         if let Some(connection) = self.active_connections.remove(&id) {
             if !connection.state.clean_session {
@@ -305,7 +305,7 @@ impl Router {
     }
 
     fn deactivate_and_forward_will(&mut self, id: String) {
-        info!("Deactivating client due to connection death");
+        info!("Deactivating client due to connection death. Id = {}", id);
         
         if let Some(mut connection) = self.active_connections.remove(&id) {
             if let Some(mut will) = connection.state.will.take() {
