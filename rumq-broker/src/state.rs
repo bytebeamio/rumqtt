@@ -90,12 +90,12 @@ impl MqttState {
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
 
-        debug!(
-            "Outgoing Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
-            publish.topic_name(),
-            publish.pkid(),
-            publish.payload().len()
-        );
+        // debug!(
+        //     "Outgoing Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+        //     publish.topic_name(),
+        //     publish.pkid(),
+        //     publish.payload().len()
+        // );
         Packet::Publish(publish)
     }
 
@@ -104,12 +104,12 @@ impl MqttState {
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<Option<RouterMessage>, Error> {
         let qos = publish.qos();
 
-        debug!(
-            "Incoming Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
-            publish.topic_name(),
-            publish.pkid(),
-            publish.payload().len()
-        );
+        // debug!(
+        //     "Incoming Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
+        //     publish.topic_name(),
+        //     publish.pkid(),
+        //     publish.payload().len()
+        // );
 
         if !valid_topic(publish.topic_name()) {
             error!("Invalid topic = {} on publish", publish.topic_name());
@@ -145,7 +145,7 @@ impl MqttState {
     }
 
     fn handle_incoming_subscribe(&mut self, subscription: Subscribe) -> Result<Option<RouterMessage>, Error> {
-        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
+        // debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
 
         let pkid = subscription.pkid();
 

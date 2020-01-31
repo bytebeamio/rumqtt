@@ -129,6 +129,8 @@ impl Router {
         debug!("Connect. Id = {:?}", id);
 
         if clean_session {
+            self.inactive_connections.remove(&id);
+            
             let state = MqttState::new(clean_session, will);
             connection_handle.try_send(RouterMessage::Pending(None))?;
             self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
@@ -307,10 +309,12 @@ impl Router {
 // forwards data to the connection with the following id
 fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
     if let Some(connection) = inactive_connections.get_mut(id) {
+        debug!("Forwarding publish to inactive connection. Id = {}", id);
         connection.state.handle_outgoing_publish(publish); 
         return
     }
 
+    debug!("Forwarding publish to an active connection. Id = {}", id);
     if let Some(connection) = active_connections.get_mut(id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);
