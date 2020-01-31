@@ -19,8 +19,11 @@ pub fn valid_topic(topic: &str) -> bool {
 /// checks if the filter is valid
 /// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106
 pub fn valid_filter(filter: &str) -> bool {
-    let hirerarchy = filter.split("/").collect::<Vec<&str>>();
+    if filter.len() == 0 {
+        return false;
+    }
 
+    let hirerarchy = filter.split("/").collect::<Vec<&str>>();
     if let Some((last, remaining)) = hirerarchy.split_last() {
         // # is not allowed in filer except as a last entry
         // invalid: sport/tennis#/player
@@ -45,6 +48,10 @@ pub fn valid_filter(filter: &str) -> bool {
 /// NOTE: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
+    if topic.len() > 0 && topic[..1].contains("$") {
+        return false;
+    }
+
     let mut topics = topic.split("/");
     let mut filters = filter.split("/");
 
@@ -96,6 +103,18 @@ mod test {
         assert!(!super::valid_filter("wrong/wr#ng/filter"));
         assert!(!super::valid_filter("wrong/filter#"));
         assert!(super::valid_filter("correct/filter/#"));
+    }
+
+    #[test]
+    fn zero_len_subscriptions_are_not_allowed() {
+        assert!(!super::valid_filter(""));
+    }
+
+    #[test]
+    fn dollar_subscriptions_doesnt_match_dollar_topic() {
+        assert!(super::matches("sy$tem/metrics", "sy$tem/+"));
+        assert!(!super::matches("$system/metrics", "$system/+"));
+        assert!(!super::matches("$system/metrics", "+/+"));
     }
 
     #[test]

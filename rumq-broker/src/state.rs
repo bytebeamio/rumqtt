@@ -159,7 +159,6 @@ impl MqttState {
             };
 
             let topic = topic.topic_path();
-            // we don't support wildcards yet
             let code = if valid_filter(topic) { SubscribeReturnCodes::Success(qos) } else { SubscribeReturnCodes::Failure };
 
             // add only successful subscriptions to router message
