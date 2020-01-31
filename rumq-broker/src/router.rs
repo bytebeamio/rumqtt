@@ -328,7 +328,7 @@ fn forward_publish(id: &str, publish: Publish, active_connections: &mut HashMap<
                 }
                 TrySendError::Closed(_m) => {
                     error!("Closed connection. Forward failed");
-                    unimplemented!()
+                    active_connections.remove(id);
                 }
             }
         }
@@ -355,7 +355,7 @@ fn handle_incoming_packet(id: &str, packet: Packet, active_connections: &mut Has
                 }
                 TrySendError::Closed(_m) => {
                     error!("Closed connection. Forward failed");
-                    unimplemented!()
+                    active_connections.remove(id);
                 }
             }
         }

@@ -165,7 +165,9 @@ pub async fn start(config: Config) {
     // might not be a big deal if we prevent clones/send fat pointers and batch
     task::spawn(async move {
         let mut router = router::Router::new(router_rx);
-        router.start().await
+        if let Err(e) = router.start().await {
+            error!("Router stopped. Error = {:?}", e);
+        }
     });
 
     let http_router_tx = router_tx.clone();

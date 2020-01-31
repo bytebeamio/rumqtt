@@ -121,9 +121,9 @@ impl<S: Network> Connection<S> {
                     o = pending.next().fuse() => match o {
                         Some(packet) => self.stream.mqtt_write(&packet).await?,
                         None => {
-                            info!("Tx closed!! Stopping the connection");
-                            return Ok(())
-                        }
+                            debug!("Done processing previous session and offline messages");
+                            break
+                        } 
                     }
                 };
             }
