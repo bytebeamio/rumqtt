@@ -25,7 +25,8 @@ pub enum Error {
     /// Invalid client ID
     InvalidClientId,
     SlowRouter,
-    NoReceiver
+    NoReceiver,
+    NotConnack
 }
 
 pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
@@ -52,15 +53,13 @@ impl<S: Network> Connection<S> {
     async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
-        let (connect, connack) = time::timeout(timeout, async {
+        let connect = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
             let o = handle_incoming_connect(packet)?;
             Ok::<_, Error>(o)
         })
         .await??;
 
-        // write connack packet
-        stream.mqtt_write(&connack).await?;
 
         let id = connect.client_id.clone();
         let keep_alive = Duration::from_secs(connect.keep_alive as u64);
@@ -91,8 +90,26 @@ impl<S: Network> Connection<S> {
         // let mut stream = BufStream::new(stream);
         let id = self.id.to_owned();
         
+        let message = match self.this_rx.next().await {
+            Some(m) => m,
+            None => {
+                info!("Tx closed!! Stopping the connection");
+                return Ok(()) 
+            }
+        };
+
+
+        let connectionack = match message {
+            RouterMessage::Pending(connack) => connack,
+            _ => return Err(Error::NotConnack)
+        };
+        
         // eventloop which pending packets from the last session 
-        if let Some(RouterMessage::Pending(Some(mut pending))) = self.this_rx.next().await {
+        if let Some(mut pending) = connectionack {
+            let connack = connack(ConnectReturnCode::Accepted, true);
+            let packet = Packet::Connack(connack);
+            self.stream.mqtt_write(&packet).await?;
+            
             let mut pending = iter(pending.drain(..)).map(Packet::Publish);
             loop {
                 let stream = &mut self.stream;
@@ -127,6 +144,10 @@ impl<S: Network> Connection<S> {
                     }
                 };
             }
+        } else {
+            let connack = connack(ConnectReturnCode::Accepted, false);
+            let packet = Packet::Connack(connack);
+            self.stream.mqtt_write(&packet).await?;
         }
         
         // eventloop which processes packets and router messages
@@ -172,7 +193,7 @@ impl<S: Network> Connection<S> {
     }
 }
 
-pub fn handle_incoming_connect(packet: Packet) -> Result<(Connect, Packet), Error> {
+pub fn handle_incoming_connect(packet: Packet) -> Result<Connect, Error> {
     let mut connect = match packet {
         Packet::Connect(connect) => connect,
         packet => {
@@ -192,9 +213,5 @@ pub fn handle_incoming_connect(packet: Packet) -> Result<(Connect, Packet), Erro
         return Err(Error::InvalidClientId);
     }
 
-    let connack = connack(ConnectReturnCode::Accepted, false);
-    // TODO: Handle session present
-    let reply = Packet::Connack(connack);
-
-    Ok((connect, reply))
+    Ok(connect)
 }
