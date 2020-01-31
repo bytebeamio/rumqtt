@@ -1,7 +1,7 @@
 use crate::router::RouterMessage;
 use crate::Config;
 
-use rumq_core::QoS;
+use rumq_core::{Packet, QoS};
 use tokio::sync::mpsc::{channel, Sender};
 
 use hyper::body::Bytes;
@@ -10,7 +10,7 @@ use hyper::{body, Client, Request};
 use std::mem;
 use std::sync::Arc;
 
-pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
+pub async fn start(config: Arc<Config>, mut router_tx: Sender<(String, RouterMessage)>) {
     let (this_tx, mut this_rx) = channel(100);
 
     // let https = HttpsConnector::new();
@@ -20,20 +20,28 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<RouterMessage>) {
     // construct connect router message with client id and handle to this connection
     let connect = rumq_core::connect("pushclient");
     let routermessage = RouterMessage::Connect((connect, this_tx));
-    router_tx.send(routermessage).await.unwrap();
+    router_tx.send(("pushclient".to_owned(), routermessage)).await.unwrap();
 
     let mut subscription = rumq_core::empty_subscribe();
     subscription.add(config.httppush.topic.clone(), QoS::AtLeastOnce);
-    let routermessage = RouterMessage::Subscribe(("pushclient".to_owned(), subscription));
-    router_tx.send(routermessage).await.unwrap();
+    
+    let packet = Packet::Subscribe(subscription);
+    let routermessage = RouterMessage::Packet(packet);
+    router_tx.send(("pushclient".to_owned(), routermessage)).await.unwrap();
 
     loop {
-        let mut publish = match this_rx.recv().await.unwrap() {
-            RouterMessage::Publish(p) => p,
+        let packet = match this_rx.recv().await.unwrap() {
+            RouterMessage::Packet(p) => p,
             _ => {
                 error!("Invalid message. Expecting only status publishes");
                 continue;
             }
+        };
+
+        let mut publish = match packet {
+            Packet::Publish(p) => p,
+            Packet::Suback(_s) => continue,
+            _ => unimplemented!(),
         };
 
         let payload = mem::replace(&mut publish.payload, Arc::new(Vec::new()));

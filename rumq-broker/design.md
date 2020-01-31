@@ -20,6 +20,47 @@ Device id as part of topic in subscriptions and publishes
 * Subscriptions only receive data directed to it
 * Get in the way of wildcards inplace of device ids
 
+
+Broker cluster and replication
+-----------------
+
+* State sits with connection at this time. Connection receives publishes
+  acks and forwards data to router.
+* This might get in the way of HA and replication as connection acks
+  without not being sure if router has replicated the data
+
+Current design:
+
+	connection 1 -> router -> connection 2
+	     |           |
+	    ack     replication
+
+Alternate:
+
+	connection 1 -> router -> connection 2
+	                  |
+	    ack   <-  replication
+
+But this puts the overhead of sending all acks back to the connection
+over a channel and receiving acks of forwards to update the state. Maybe 
+we can microbatch smartly. 
+
+Advantages of router maintaining the state
+---------------
+
+* Necessary for replication to happen centrally. Router maintains
+  connections to all the other brokers with out each connection
+  maintaining these. Router replicates and sends ack to the connection
+  where it's written to the network
+* All distributed logic at one place
+* Connections are stateless
+
+Disadvantages
+-------------
+
+* Acks from/to router. Adds to processing. Microbatching can help here 
+
+
 TODO
 ---------------
 
@@ -43,3 +84,7 @@ Server side error:
 ERROR librumqd::connection > Connect packet error = Timeout(Elapsed(()))
 ```
 
+References
+--------------
+
+* https://bulldog2011.github.io/blog/2013/03/27/the-architecture-and-design-of-a-pub-sub-messaging-system/
