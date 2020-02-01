@@ -16,7 +16,7 @@ pub use serialize::MqttWrite;
 pub use topic::*;
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum QoS {
     AtMostOnce = 0,
     AtLeastOnce = 1,

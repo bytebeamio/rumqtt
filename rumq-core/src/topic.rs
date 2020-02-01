@@ -45,6 +45,7 @@ pub fn valid_filter(filter: &str) -> bool {
 }
 
 /// checks if topic matches a filter. topic and filter validation isn't done here.
+/// NOTE: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
 /// NOTE: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
@@ -66,6 +67,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
         // filter = a/b/c/d should not match topic = a/b/c
         let top = topics.next();
         match top {
+            Some(t) if t == "#" => return false,
             Some(_) if f == "+" => continue,
             Some(t) if f != t => return false,
             Some(_) => continue,
@@ -165,5 +167,19 @@ mod test {
         let topic = "a/b";
         let filter = "a/b/+";
         assert!(!super::matches(topic, filter));
+
+        let filter1 = "a/b/+";
+        let filter2 = "a/b/#";
+        assert!(super::matches(filter1, filter2));
+        assert!(!super::matches(filter2, filter1));
+
+        let filter1 = "a/b/+";
+        let filter2 = "#";
+        assert!(super::matches(filter1, filter2));
+
+        let filter1 = "a/+/c/d";
+        let filter2 = "a/+/+/d";
+        assert!(super::matches(filter1, filter2));
+        assert!(!super::matches(filter2, filter1));
     }
 }
