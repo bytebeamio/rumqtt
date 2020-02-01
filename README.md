@@ -6,7 +6,7 @@ MQTT ecosystem in rust which strives to be simple, robust and performant
 
 * Fully asynchronous. Built on top of tokio 0.2 and futures 0.3
 
-#### client
+#### Client
 * Mqtt eventloop is just a stream. Easily plug it into async ecosystem
 * Takes a `Stream` for user requests. Solves both bounded and unbounded
   usecases
@@ -14,6 +14,15 @@ MQTT ecosystem in rust which strives to be simple, robust and performant
 * Request throttling
 * Inflight queue size based throttling
 * Tls using RustTLS. Cross compilation and multi platform support is painless
+
+#### Broker
+* Embeddable
+* Passes mqtt 3.1.1 paho conformance test suite (Without qos2)
+* Supports retained messages
+* Supports will messages
+* Offline message queueing
+* Deduplicates overlapping subscriptions
+
 
 
 #### REFERENCES
