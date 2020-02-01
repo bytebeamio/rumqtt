@@ -72,41 +72,8 @@ impl Subscriber {
             qos,
         }
     }
-
-    // Any concrete subscription can match a wildcard subscription
-    // on client 1: new subscription a/+/c (qos 1) matches existing subscription a/b/c (qos 0)
-    // --------
-    //
-    // * if the new subscription is wider than existing subscription, move the subscriber to wider
-    // subscription with highest qos
-    //
-    // * any new wildcard subsciption checks for matching concrete subscriber
-    // * if matches, add the subscriber to `wild_subscriptions` if with greatest qos 
-    //
-    // * any new concrete subscriber checks for matching wildcard subscriber
-    // * if matches, add the subscriber to `wild_subscriptions`  with greatest qos
-    // 
-    // coming to overlapping wildcard subscriptions
-    //
-    // * new subsciber-a a/+/c/d  mathes subscriber-a in a/# 
-    // * add subscriber-a to a/# directly with highest qos
-    // 
-    // * new subscriber a/# matches with existing a/+/c/d
-    // * remove subscriber from a/+/c/d and move it to a/# with highest qos
-    // 
-    // * finally a subscriber won't be part of multiple subscriptions
-    /*
-       pub fn add_wildcard_alias(&mut self, subscribe: Subscribe) {
-       if let Some(aliases) = &mut self.wildcard_aliases {
-       aliases.push(subscribe)
-       } else {
-       let mut aliases = Vec::new();
-       aliases.push(subscribe);
-       self.wildcard_aliases = Some(aliases)
-       }
-       }
-       */
 }
+
 pub struct Router {
     // handles to all active connections. used to route data
     active_connections:     HashMap<String, ActiveConnection>,
@@ -305,12 +272,34 @@ impl Router {
 
     /// removes the subscriber from subscription if the current subscription is wider than the
     /// existing subscription and returns it
+    ///
     /// if wildcard subscription:
     /// move subscriber from concrete to wild subscription with greater qos
     /// move subscriber from existing wild to current wild subscription if current is wider
     /// move subscriber from current wild to existing wild if the existing wild is wider
     /// returns the subscriber and the wild subscription it is to be added to
     /// none implies that there are no overlapping subscriptions for this subscriber
+    /// new subscriber a/+/c (qos 1) matches existing subscription a/b/c
+    /// subscriber should be moved from a/b/c to a/+/c
+    ///
+    /// * if the new subscription is wider than existing subscription, move the subscriber to wider
+    /// subscription with highest qos
+    ///
+    /// * any new wildcard subsciption checks for matching concrete subscriber
+    /// * if matches, add the subscriber to `wild_subscriptions` with greatest qos 
+    ///
+    /// * any new concrete subscriber checks for matching wildcard subscriber
+    /// * if matches, add the subscriber to `wild_subscriptions` (instead of concrete subscription) with greatest qos
+    /// 
+    /// coming to overlapping wildcard subscriptions
+    ///
+    /// * new subsciber-a a/+/c/d  mathes subscriber-a in a/# 
+    /// * add subscriber-a to a/# directly with highest qos
+    /// 
+    /// * new subscriber a/# matches with existing a/+/c/d
+    /// * remove subscriber from a/+/c/d and move it to a/# with highest qos
+    /// 
+    /// * finally a subscriber won't be part of multiple subscriptions
     fn fix_overlapping_subscriptions(&mut self, id: &str, current_filter: &str, qos: QoS) -> Option<(String, Subscriber)> {
         let mut subscriber = None;
         let mut filter = current_filter.to_owned();
