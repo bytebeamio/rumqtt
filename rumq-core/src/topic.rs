@@ -19,8 +19,11 @@ pub fn valid_topic(topic: &str) -> bool {
 /// checks if the filter is valid
 /// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106
 pub fn valid_filter(filter: &str) -> bool {
-    let hirerarchy = filter.split("/").collect::<Vec<&str>>();
+    if filter.len() == 0 {
+        return false;
+    }
 
+    let hirerarchy = filter.split("/").collect::<Vec<&str>>();
     if let Some((last, remaining)) = hirerarchy.split_last() {
         // # is not allowed in filer except as a last entry
         // invalid: sport/tennis#/player
@@ -42,9 +45,14 @@ pub fn valid_filter(filter: &str) -> bool {
 }
 
 /// checks if topic matches a filter. topic and filter validation isn't done here.
+/// NOTE: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
 /// NOTE: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
+    if topic.len() > 0 && topic[..1].contains("$") {
+        return false;
+    }
+
     let mut topics = topic.split("/");
     let mut filters = filter.split("/");
 
@@ -59,6 +67,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
         // filter = a/b/c/d should not match topic = a/b/c
         let top = topics.next();
         match top {
+            Some(t) if t == "#" => return false,
             Some(_) if f == "+" => continue,
             Some(t) if f != t => return false,
             Some(_) => continue,
@@ -96,6 +105,18 @@ mod test {
         assert!(!super::valid_filter("wrong/wr#ng/filter"));
         assert!(!super::valid_filter("wrong/filter#"));
         assert!(super::valid_filter("correct/filter/#"));
+    }
+
+    #[test]
+    fn zero_len_subscriptions_are_not_allowed() {
+        assert!(!super::valid_filter(""));
+    }
+
+    #[test]
+    fn dollar_subscriptions_doesnt_match_dollar_topic() {
+        assert!(super::matches("sy$tem/metrics", "sy$tem/+"));
+        assert!(!super::matches("$system/metrics", "$system/+"));
+        assert!(!super::matches("$system/metrics", "+/+"));
     }
 
     #[test]
@@ -146,5 +167,19 @@ mod test {
         let topic = "a/b";
         let filter = "a/b/+";
         assert!(!super::matches(topic, filter));
+
+        let filter1 = "a/b/+";
+        let filter2 = "a/b/#";
+        assert!(super::matches(filter1, filter2));
+        assert!(!super::matches(filter2, filter1));
+
+        let filter1 = "a/b/+";
+        let filter2 = "#";
+        assert!(super::matches(filter1, filter2));
+
+        let filter1 = "a/+/c/d";
+        let filter2 = "a/+/+/d";
+        assert!(super::matches(filter1, filter2));
+        assert!(!super::matches(filter2, filter1));
     }
 }

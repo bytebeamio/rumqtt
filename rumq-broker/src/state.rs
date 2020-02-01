@@ -74,6 +74,7 @@ impl MqttState {
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Subscribe(subscribe) => self.handle_incoming_subscribe(subscribe),
+            Packet::Unsubscribe(unsubscribe) => self.handle_incoming_unsubscribe(unsubscribe),
             Packet::Disconnect => Ok(None),
             _ => return Err(Error::UnsupportedPacket(packet)),
         };
@@ -144,22 +145,25 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_subscribe(&mut self, subscription: Subscribe) -> Result<Option<RouterMessage>, Error> {
+    fn handle_incoming_subscribe(&mut self, mut subscription: Subscribe) -> Result<Option<RouterMessage>, Error> {
         // debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics(), subscription.pkid());
 
-        let pkid = subscription.pkid();
+        let pkid = subscription.pkid;
 
         let mut router_subscription = empty_subscribe();
         let mut subscription_return_codes = Vec::new();
-        for topic in subscription.topics().iter() {
-            let qos = topic.qos();
+        for topic in subscription.topics.iter_mut() {
+            let qos = topic.qos;
             let qos = match qos {
-                QoS::AtMostOnce | QoS::AtLeastOnce => *qos,
-                QoS::ExactlyOnce => QoS::AtLeastOnce,
+                QoS::AtMostOnce | QoS::AtLeastOnce => qos,
+                QoS::ExactlyOnce => {
+                    topic.qos = QoS::AtLeastOnce;
+                    warn!("QoS 2 subscriptions not supported. Downgrading to QoS 1");
+                    QoS::AtLeastOnce
+                }
             };
 
             let topic = topic.topic_path();
-            // we don't support wildcards yet
             let code = if valid_filter(topic) { SubscribeReturnCodes::Success(qos) } else { SubscribeReturnCodes::Failure };
 
             // add only successful subscriptions to router message
@@ -170,7 +174,13 @@ impl MqttState {
             subscription_return_codes.push(code);
         }
 
-        let packet = Packet::Suback(suback(*pkid, subscription_return_codes));
+        let packet = Packet::Suback(suback(pkid, subscription_return_codes));
+        let routermessage = RouterMessage::Packet(packet);
+        Ok(Some(routermessage))
+    }
+
+    fn handle_incoming_unsubscribe(&mut self, unsubscribe: Unsubscribe) -> Result<Option<RouterMessage>, Error> {
+        let packet = Packet::Unsuback(unsubscribe.pkid);
         let routermessage = RouterMessage::Packet(packet);
         Ok(Some(routermessage))
     }
