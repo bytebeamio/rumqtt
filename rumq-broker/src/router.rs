@@ -432,15 +432,17 @@ impl Router {
 
 
 // forwards data to the connection with the following id
-fn forward_publish(subscription: &Subscriber, publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
-    if let Some(connection) = inactive_connections.get_mut(&subscription.client_id) {
-        debug!("Forwarding publish to inactive connection. Id = {}", subscription.client_id);
+fn forward_publish(subscriber: &Subscriber, mut publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
+    publish.qos = subscriber.qos;
+
+    if let Some(connection) = inactive_connections.get_mut(&subscriber.client_id) {
+        debug!("Forwarding publish to inactive connection. Id = {}", subscriber.client_id);
         connection.state.handle_outgoing_publish(publish); 
         return
     }
 
-    debug!("Forwarding publish to an active connection. Id = {}", subscription.client_id);
-    if let Some(connection) = active_connections.get_mut(&subscription.client_id) {
+    debug!("Forwarding publish to an active connection. Id = {}", subscriber.client_id);
+    if let Some(connection) = active_connections.get_mut(&subscriber.client_id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);
 
@@ -450,13 +452,13 @@ fn forward_publish(subscription: &Subscriber, publish: Publish, active_connectio
             match e {
                 TrySendError::Full(_m) => {
                     error!("Slow connection. Dropping handle and moving id to inactive list");
-                    if let Some(connection) = active_connections.remove(&subscription.client_id) {
-                        inactive_connections.insert(subscription.client_id.clone(), InactiveConnection::new(connection.state));
+                    if let Some(connection) = active_connections.remove(&subscriber.client_id) {
+                        inactive_connections.insert(subscriber.client_id.clone(), InactiveConnection::new(connection.state));
                     }
                 }
                 TrySendError::Closed(_m) => {
                     error!("Closed connection. Forward failed");
-                    active_connections.remove(&subscription.client_id);
+                    active_connections.remove(&subscriber.client_id);
                 }
             }
         }
