@@ -156,7 +156,10 @@ impl MqttState {
             let qos = topic.qos();
             let qos = match qos {
                 QoS::AtMostOnce | QoS::AtLeastOnce => *qos,
-                QoS::ExactlyOnce => QoS::AtLeastOnce,
+                QoS::ExactlyOnce => {
+                    warn!("QoS 2 subscriptions not supported. Downgrading to QoS 1");
+                    QoS::AtLeastOnce
+                }
             };
 
             let topic = topic.topic_path();

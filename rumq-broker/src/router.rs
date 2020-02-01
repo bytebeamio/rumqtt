@@ -62,16 +62,50 @@ impl InactiveConnection {
 #[derive(Debug, Clone)]
 struct Subscriber {
     client_id: String,
-    qos: QoS
+    qos: QoS,
 }
 
 impl Subscriber {
     pub fn new(id: &str, qos: QoS) -> Subscriber {
         Subscriber {
             client_id: id.to_owned(),
-            qos
+            qos,
         }
     }
+
+    // Any concrete subscription can match a wildcard subscription
+    // on client 1: new subscription a/+/c (qos 1) matches existing subscription a/b/c (qos 0)
+    // --------
+    //
+    // * if the new subscription is wider than existing subscription, move the subscriber to wider
+    // subscription with highest qos
+    //
+    // * any new wildcard subsciption checks for matching concrete subscriber
+    // * if matches, add the subscriber to `wild_subscriptions` if with greatest qos 
+    //
+    // * any new concrete subscriber checks for matching wildcard subscriber
+    // * if matches, add the subscriber to `wild_subscriptions`  with greatest qos
+    // 
+    // coming to overlapping wildcard subscriptions
+    //
+    // * new subsciber-a a/+/c/d  mathes subscriber-a in a/# 
+    // * add subscriber-a to a/# directly with highest qos
+    // 
+    // * new subscriber a/# matches with existing a/+/c/d
+    // * remove subscriber from a/+/c/d and move it to a/# with highest qos
+    // 
+    // * finally a subscriber won't be part of multiple subscriptions
+    /*
+       pub fn add_wildcard_alias(&mut self, subscribe: Subscribe) {
+       if let Some(aliases) = &mut self.wildcard_aliases {
+       aliases.push(subscribe)
+       } else {
+       let mut aliases = Vec::new();
+       aliases.push(subscribe);
+       self.wildcard_aliases = Some(aliases)
+       }
+       }
+       */
 }
 pub struct Router {
     // handles to all active connections. used to route data
@@ -145,7 +179,7 @@ impl Router {
 
         if clean_session {
             self.inactive_connections.remove(&id);
-            
+
             let state = MqttState::new(clean_session, will);
             connection_handle.try_send(RouterMessage::Pending(None))?;
             self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
@@ -219,40 +253,26 @@ impl Router {
 
         // Each subscribe message can send multiple topics to subscribe to. handle dupicates
         for topic in subscribe.topics() {
-            let filter = topic.topic_path();
+            let mut filter = topic.topic_path().clone();
             let qos = topic.qos;
             let subscriber = Subscriber::new(&id, qos);
 
-            // client subscribing to a/b/c and a/+/c should receive message only once when
-            // a publish happens on a/b/c.
-            let subscriptions = if has_wildcards(filter) {
-                // remove client from the concrete subscription list incase of a matching wildcard
-                // subscription
-                for (topic, subscribers) in self.concrete_subscriptions.iter_mut() {
-                    if matches(topic, filter) {
-                        if let Some(index) = subscribers.iter().position(|s| s.client_id == subscriber.client_id) {
-                            subscribers.remove(index);
-                        }
-                    }
-                }
+            let subscriber = if let Some((f, subscriber)) = self.fix_overlapping_subscriptions(&id, &filter, qos) {
+                filter = f;
+                subscriber
+            } else {
+                subscriber
+            };
 
+            // a publish happens on a/b/c.
+            let subscriptions = if has_wildcards(&filter) {
                 &mut self.wild_subscriptions
             } else {
-                // ignore a new concrete subscription if the client already has a matching wildcard
-                // subscription
-                for (topic, subscribers) in self.concrete_subscriptions.iter_mut() {
-                    if matches(topic, filter) {
-                        if let Some(_) = subscribers.iter().position(|s| s.client_id == subscriber.client_id) {
-                            return
-                        }
-                    }
-                }
-
                 &mut self.concrete_subscriptions
             };
 
             // add client id to subscriptions
-            match subscriptions.get_mut(filter) {
+            match subscriptions.get_mut(&filter) {
                 // push client id to the list of clients intrested in this subspcription
                 Some(subscribers) => {
                     // don't add the same id twice
@@ -269,17 +289,86 @@ impl Router {
             }
 
             // Handle retained publishes after subscription duplicates are handled above
-            if has_wildcards(filter) {
+            if has_wildcards(&filter) {
                 for (topic, publish) in self.retained_publishes.iter() {
-                    if matches(topic, filter) {
+                    if matches(topic, &filter) {
                         forward_publish(&subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                     }
                 }
             } else {
-                if let Some(publish) = self.retained_publishes.get(filter) {
+                if let Some(publish) = self.retained_publishes.get(&filter) {
                     forward_publish(&subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
                 }
             }
+        }
+    }
+
+    /// removes the subscriber from subscription if the current subscription is wider than the
+    /// existing subscription and returns it
+    /// if wildcard subscription:
+    /// move subscriber from concrete to wild subscription with greater qos
+    /// move subscriber from existing wild to current wild subscription if current is wider
+    /// move subscriber from current wild to existing wild if the existing wild is wider
+    /// returns the subscriber and the wild subscription it is to be added to
+    /// none implies that there are no overlapping subscriptions for this subscriber
+    fn fix_overlapping_subscriptions(&mut self, id: &str, current_filter: &str, qos: QoS) -> Option<(String, Subscriber)> {
+        let mut subscriber = None;
+        let mut filter = current_filter.to_owned();
+        let mut qos = qos;
+
+        // subscriber in concrete_subscriptions a/b/c/d matchs new subscription a/+/c/d on same
+        // subscriber. move it from concrete to wild
+        if has_wildcards(current_filter) {
+            for (existing_filter, subscribers) in self.concrete_subscriptions.iter_mut() {
+                if matches(existing_filter, current_filter) {
+                    if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                        let mut s = subscribers.remove(index);
+                        if qos > s.qos {
+                            s.qos = qos;
+                        }
+                        subscriber = Some(s);
+                    }
+                }
+            }
+
+            for (existing_filter, subscribers) in self.wild_subscriptions.iter_mut() {
+                // current filter is wider than existing filter. remove subscriber (if it exists)
+                // from current filter
+                if matches(existing_filter, current_filter) {
+                    if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                        let s = subscribers.remove(index);
+
+                        if s.qos > qos {
+                            qos = s.qos
+                        }
+
+                        subscriber = Some(s);
+                    }
+                } else if matches(current_filter, existing_filter) {
+                    // existing filter is wider than current filter, return the subscriber with
+                    // wider subscription (to be added outside this method)
+                    filter = existing_filter.clone();
+                    // remove the subscriber and update the global qos (this subscriber will be
+                    // added again outside)
+                    if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
+                        let s = subscribers.remove(index);
+                        
+                        if s.qos > qos {
+                            qos = s.qos
+                        }
+
+                        subscriber = Some(s);
+                    }   
+                }
+            }
+        } 
+
+        match subscriber {
+            Some(mut subscriber) => {
+                subscriber.qos = qos;
+                Some((filter, subscriber))
+            }
+            None => None
         }
     }
 
@@ -321,7 +410,7 @@ impl Router {
 
     fn deactivate_and_forward_will(&mut self, id: String) {
         info!("Deactivating client due to connection death. Id = {}", id);
-        
+
         if let Some(mut connection) = self.active_connections.remove(&id) {
             if let Some(mut will) = connection.state.will.take() {
                 let topic = mem::replace(&mut will.topic, "".to_owned());
@@ -340,6 +429,7 @@ impl Router {
         }
     }
 }
+
 
 // forwards data to the connection with the following id
 fn forward_publish(subscription: &Subscriber, publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
