@@ -10,13 +10,12 @@ pub struct CommandLine {
     config_path: PathBuf,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     pretty_env_logger::init();
 
     let commandline = CommandLine::from_args();
     let config = fs::read_to_string(commandline.config_path).unwrap();
     let config = toml::from_str::<librumqd::Config>(&config).unwrap();
 
-    librumqd::start(config).await
+    librumqd::start(config)
 }

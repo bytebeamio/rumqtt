@@ -1,12 +1,12 @@
 use derive_more::From;
 use futures_util::future::FutureExt;
-use futures_util::select;
 use futures_util::stream::StreamExt;
 use rumq_core::{connack, MqttRead, MqttWrite, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::stream::iter;
 use tokio::time;
+use tokio::select;
 
 use crate::router::RouterMessage;
 use crate::Network;
@@ -122,8 +122,8 @@ impl<S: Network> Connection<S> {
 
                 select! {
                     // read packets from network and generate network reply and router message
-                    o = packet.fuse() => {
-                        let message = match o?? {
+                    o = packet => {
+                        match o?? {
                             Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
                             packet => {
                                 let message = RouterMessage::Packet(packet);
@@ -135,7 +135,7 @@ impl<S: Network> Connection<S> {
                     // read packets from the router and write to network
                     // router can close the connection by dropping tx handle. this should stop this
                     // eventloop without sending the death notification
-                    o = pending.next().fuse() => match o {
+                    o = pending.next() => match o {
                         Some(packet) => self.stream.mqtt_write(&packet).await?,
                         None => {
                             debug!("Done processing previous session and offline messages");
@@ -164,7 +164,7 @@ impl<S: Network> Connection<S> {
             select! {
                 // read packets from network and generate network reply and router message
                 o = packet.fuse() => {
-                    let message = match o?? {
+                    match o?? {
                         Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
                         packet => {
                             let message = RouterMessage::Packet(packet);
