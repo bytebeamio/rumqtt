@@ -40,6 +40,24 @@ pub enum Request {
     Disconnect,
 }
 
+impl From<Publish> for Request {
+    fn from(publish: Publish) -> Request {
+        return Request::Publish(publish);
+    }
+}
+
+impl From<Subscribe> for Request {
+    fn from(subscribe: Subscribe) -> Request {
+        return Request::Subscribe(subscribe);
+    }
+}
+
+impl From<Unsubscribe> for Request {
+    fn from(unsubscribe: Unsubscribe) -> Request {
+        return Request::Unsubscribe(unsubscribe);
+    }
+}
+
 #[doc(hidden)]
 /// Commands sent by the client to mqtt event loop. Commands
 /// are of higher priority and will be `select`ed along with
