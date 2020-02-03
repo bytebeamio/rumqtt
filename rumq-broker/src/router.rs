@@ -440,7 +440,7 @@ fn forward_publish(subscriber: &Subscriber, mut publish: Publish, active_connect
         if let Err(e) = connection.tx.try_send(message) {
             match e {
                 TrySendError::Full(_m) => {
-                    error!("Slow connection. Dropping handle and moving id to inactive list");
+                    error!("Slow connection. Dropping handle and moving id to inactive list. Id = {}", subscriber.client_id);
                     if let Some(connection) = active_connections.remove(&subscriber.client_id) {
                         inactive_connections.insert(subscriber.client_id.clone(), InactiveConnection::new(connection.state));
                     }

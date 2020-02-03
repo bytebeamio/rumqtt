@@ -117,7 +117,7 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String,
         None
     };
 
-    info!("Waiting for connection on {}", addr);
+    info!("Waiting for connections on {}", addr);
     // eventloop which accepts connections
     let mut listener = TcpListener::bind(addr).await?;
     loop {
@@ -148,7 +148,7 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String,
             task::spawn(eventloop(config, stream, router_tx));
         };
 
-        time::delay_for(Duration::from_millis(1)).await;
+        time::delay_for(Duration::from_millis(10)).await;
     }
 }
 
@@ -194,7 +194,10 @@ pub async fn start(config: Config) {
         let config = Arc::new(server);
 
         let fut = accept_loop(config, router_tx.clone());
-        let o = task::spawn(fut);
+        let o = task::spawn(async {
+            error!("Accept loop returned = {:?}", fut.await);
+        });
+
         servers.push(o);
     }
 
