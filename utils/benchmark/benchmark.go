@@ -1,24 +1,34 @@
 package main
 
 import (
-	"os"
 	"fmt"
 	"sync/atomic"
 	"time"
 	"math/rand"
+	arg "github.com/alexflint/go-arg" 
 	progressbar "github.com/schollz/progressbar/v2"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 
-var counter uint64
-var end = time.Now()
+var opts struct {
+	Connections int `arg:"-c" help:"Number of connections"`
+	Messages int `arg:"-m" help:"Number of messages per connection"`
+	PayloadSize int `arg:"-s" help:"Size of each message"`
+}
 
-const payloadSize= 1024
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+func init() {
+	opts.Connections = 1
+	opts.Messages = 10000
+	opts.PayloadSize = 1024
+
+	arg.MustParse(&opts)
+}
 
 func data(n int) string {
+	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 	b := make([]byte, n)
 	for i := range b {
 		b[i] = letterBytes[rand.Intn(len(letterBytes))]
@@ -27,15 +37,32 @@ func data(n int) string {
 	return string(b)
 }
 
+type Statistics struct {
+	id string
+	timeTaken time.Duration
+	totalMessageCount uint64
+	totalSize float64
+}
+
+func NewStatiscs(id string, timeTaken time.Duration, count uint64, totalSize float64) Statistics {
+	return Statistics {
+		id: id,
+		timeTaken: timeTaken,
+		totalMessageCount: count,
+		totalSize: totalSize,
+	}
+}
+
+
 type Connection struct {
 	id string
 	total int
 	client mqtt.Client
-	stats chan uint64
+	stats chan Statistics
 	progress chan uint64
 }
 
-func NewConnection(id string, total int, stats, progress chan uint64) *Connection {
+func NewConnection(id string, total int, stats chan Statistics, progress chan uint64) *Connection {
 	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883")
 	opts.SetClientID(id)
 	opts.SetProtocolVersion(4)
@@ -44,8 +71,7 @@ func NewConnection(id string, total int, stats, progress chan uint64) *Connectio
 
 	c := mqtt.NewClient(opts)
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
-		fmt.Println("Error = ", token.Error())
-		os.Exit(1)
+		panic(token.Error())
 	}
 
 	return &Connection {
@@ -70,69 +96,77 @@ func (c *Connection) Start() {
 	}
 
 	if token := c.client.Subscribe("hello/mqtt/rumqtt", 1, msgHandler); token.Wait() && token.Error() != nil {
-		fmt.Println("Error = ", token.Error())
-		os.Exit(1)
+		panic(token.Error())
 	}
 
 	go func() {
-		text := data(payloadSize)
+		text := data(opts.PayloadSize)
 		for i := 0; i < c.total ; i++ {
 			token := c.client.Publish("hello/mqtt/rumqtt", 1, false, text)
 			token.Wait()
 		}
 	}()
-	
+
+
+	var last uint64
 	for {
 		select {
 		case <-time.After(100 * time.Millisecond):
-			c.progress <- counter
+			c.progress <- counter - last
+			last = counter
 		case <-exit:
-			c.progress <- counter
-			totalSize := float64(c.total * payloadSize)
-			throughput := totalSize/1024.0/1024.0/time.Since(start).Seconds()
-			c.stats <- uint64(throughput)
+			c.progress <- counter - last
+			totalSize := float64(c.total * opts.PayloadSize)
+			statistics := NewStatiscs(c.id, time.Since(start), counter, totalSize)
+			c.stats <- statistics 
+			time.Sleep(1 * time.Second)
 			return	
 		}
 	}
 }
 
 func main() {
-	exit := make(chan uint64, 10)
+	exit := make(chan Statistics, 10)
 	progress := make(chan uint64, 100)
-	totalConnections := 1
-	msgsPerConnection := 100000
-	totalDone := 0
-	throughputs := make([]uint64, 0)
-	percetage := totalConnections * msgsPerConnection
-	progressbar := progressbar.NewOptions(percetage, progressbar.OptionSetTheme(progressbar.Theme{Saucer: "|", SaucerPadding: "-"}))
-	// var start = time.Now()
+	totalMessages :=  opts.Connections * opts.Messages
+	totalConnectionsDone := 0
+	totalMessagesDone := 0
+	progressbar := progressbar.NewOptions(totalMessages, progressbar.OptionSetTheme(progressbar.Theme{Saucer: "|", SaucerPadding: "."}))
+	results := make([]Statistics, 0)
+	var start = time.Now()
 
-	for i := 0; i < totalConnections; i++ {
+	for i := 0; i < opts.Connections; i++ {
 		id := fmt.Sprintf("bench-%v", i)
-		connection := NewConnection(id, msgsPerConnection, exit, progress)
+		connection := NewConnection(id, opts.Messages, exit, progress)
 		go connection.Start()
 	}
 
 	L:
 	for {
 		select {
-		case throughput := <-exit:
-			totalDone += 1
-			throughputs = append(throughputs, throughput)
-			if totalDone >= totalConnections {
+		case  statistics := <-exit:
+			results = append(results, statistics)
+			totalConnectionsDone += 1
+			if totalConnectionsDone >= opts.Connections {
+				fmt.Println("\n")
 				break L
 			}
 		case p := <- progress:
-			progressbar.Set(int(p))
+			totalMessagesDone += int(p)
+			progressbar.Add(int(p))
 		}
 	}
 
 
-	count := len(throughputs)
-	var total uint64 = 0
-	for i := 0; i < count; i++ {
-		total += throughputs[i]
+	// size in MB
+	totalSize := float64(totalMessagesDone * opts.PayloadSize ) / 1024.0 / 1024.0
+	// time in seconds
+	timeTaken := time.Since(start).Seconds()
+
+	time.Sleep(1 * time.Second)
+	for _, statistics := range results {
+		fmt.Println("Id =", statistics.id, "Total Messages =", statistics.totalMessageCount, "Average throughput =", statistics.totalSize/1024.0/1024.0/statistics.timeTaken.Seconds(), "MB/s")
 	}
 
-	fmt.Println("\n\n\nAverage throughput = ", float64(total)/float64(count), "MB/s")
+	fmt.Println("\n\n Total Messages = ", totalMessagesDone, "Average throughput = ", totalSize/timeTaken, "MB/s")
 }
