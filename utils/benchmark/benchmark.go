@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 	"math/rand"
-
+	progressbar "github.com/schollz/progressbar/v2"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -14,7 +14,6 @@ import (
 var counter uint64
 var end = time.Now()
 
-const totalPublishes = 100000
 const payloadSize= 1024
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -30,12 +29,13 @@ func data(n int) string {
 
 type Connection struct {
 	id string
-	total uint64
+	total int
 	client mqtt.Client
 	stats chan uint64
+	progress chan uint64
 }
 
-func NewConnection(id string, total uint64, stats chan uint64) *Connection {
+func NewConnection(id string, total int, stats, progress chan uint64) *Connection {
 	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883")
 	opts.SetClientID(id)
 	opts.SetProtocolVersion(4)
@@ -53,20 +53,19 @@ func NewConnection(id string, total uint64, stats chan uint64) *Connection {
 		client: c,
 		total: total,
 		stats: stats,
+		progress: progress,
 	}
 }
 
 func (c *Connection) Start() {
 	var counter uint64
 	var start = time.Now()
+	exit := make(chan bool, 10)
 
 	msgHandler := func(client mqtt.Client, msg mqtt.Message) {
 		count := atomic.AddUint64(&counter, 1)
-
-		if count == c.total {
-			throughput := (totalPublishes * payloadSize)/1024.0/1024.0/time.Since(start).Seconds()
-			fmt.Println("Id = ", c.id, "Throughput = ", throughput,  "MB/s")
-			c.stats <- uint64(throughput)
+		if count == uint64(c.total) {
+			exit <- true
 		}
 	}
 
@@ -77,29 +76,40 @@ func (c *Connection) Start() {
 
 	go func() {
 		text := data(payloadSize)
-		for i := 0; i < totalPublishes; i++ {
+		for i := 0; i < c.total ; i++ {
 			token := c.client.Publish("hello/mqtt/rumqtt", 1, false, text)
 			token.Wait()
 		}
 	}()
 	
 	for {
-		<-time.After(100 * time.Second)
-		fmt.Println("incoming pub count = ", atomic.LoadUint64(&counter), ". time taken for incoming pubs = ",  time.Since(start))
+		select {
+		case <-time.After(100 * time.Millisecond):
+			c.progress <- counter
+		case <-exit:
+			c.progress <- counter
+			totalSize := float64(c.total * payloadSize)
+			throughput := totalSize/1024.0/1024.0/time.Since(start).Seconds()
+			c.stats <- uint64(throughput)
+			return	
+		}
 	}
 }
 
 func main() {
-	exit := make(chan uint64, 1)
-	totalConnections := 10
+	exit := make(chan uint64, 10)
+	progress := make(chan uint64, 100)
+	totalConnections := 1
+	msgsPerConnection := 100000
 	totalDone := 0
 	throughputs := make([]uint64, 0)
+	percetage := totalConnections * msgsPerConnection
+	progressbar := progressbar.NewOptions(percetage, progressbar.OptionSetTheme(progressbar.Theme{Saucer: "|", SaucerPadding: "-"}))
 	// var start = time.Now()
 
 	for i := 0; i < totalConnections; i++ {
-		time.Sleep(10 * time.Millisecond)
 		id := fmt.Sprintf("bench-%v", i)
-		connection := NewConnection(id, 10000, exit)
+		connection := NewConnection(id, msgsPerConnection, exit, progress)
 		go connection.Start()
 	}
 
@@ -112,8 +122,8 @@ func main() {
 			if totalDone >= totalConnections {
 				break L
 			}
-		case <-time.After(5 * time.Second):
-			// fmt.Println("incoming pub count = ", atomic.LoadUint64(&counter), ". time taken for incoming pubs = ",  time.Since(start))
+		case p := <- progress:
+			progressbar.Set(int(p))
 		}
 	}
 
@@ -124,6 +134,5 @@ func main() {
 		total += throughputs[i]
 	}
 
-	time.Sleep(5 * time.Second)
-	fmt.Println("Average throughput = ", float64(total)/float64(count), "MB/s")
+	fmt.Println("\n\n\nAverage throughput = ", float64(total)/float64(count), "MB/s")
 }

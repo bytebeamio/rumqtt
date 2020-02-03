@@ -157,7 +157,6 @@ impl<S: Network> Connection<S> {
 
             let this_rx = &mut self.this_rx;
             let message = async {
-                time::delay_for(Duration::from_millis(100)).await;
                 this_rx.next().await
             };
 
