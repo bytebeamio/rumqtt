@@ -1,6 +1,7 @@
 use derive_more::From;
 
 use crate::QoS;
+use std::fmt;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]
@@ -107,7 +108,7 @@ pub struct LastWill {
     pub retain: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Getters, Setters)]
+#[derive(Clone, PartialEq, Getters, Setters)]
 #[get = "pub"]
 pub struct Publish {
     #[set = "pub"]
@@ -129,6 +130,20 @@ pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, payload: P) -> Publi
         pkid: None,
         topic_name: topic.into(),
         payload: Arc::new(payload.into()),
+    }
+}
+
+impl fmt::Debug for Publish {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Topic = {}, Qos = {:?}, Retain = {}, Pkid = {:?}, Payload Size = {}",
+            self.topic_name,
+            self.qos,
+            self.retain,
+            self.pkid,
+            self.payload.len()
+        )
     }
 }
 

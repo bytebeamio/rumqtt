@@ -12,3 +12,7 @@ Cargo.lock
 .vscode
 *.pem
 *.der
+perf.data*
+flamegraph.svg
+utils/benchmark/benchmark
+cachegrind.out

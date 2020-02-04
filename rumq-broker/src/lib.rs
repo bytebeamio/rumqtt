@@ -7,7 +7,7 @@ use derive_more::From;
 use futures_util::future::join_all;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{channel, Sender, Receiver};
 use tokio::task;
 use tokio::time::{self, Elapsed};
 use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
@@ -22,6 +22,7 @@ use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use std::thread;
 
 mod connection;
 mod httppush;
@@ -116,7 +117,7 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String,
         None
     };
 
-    info!("Waiting for connection on {}", addr);
+    info!("Waiting for connections on {}", addr);
     // eventloop which accepts connections
     let mut listener = TcpListener::bind(addr).await?;
     loop {
@@ -147,7 +148,7 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String,
             task::spawn(eventloop(config, stream, router_tx));
         };
 
-        time::delay_for(Duration::from_millis(1)).await;
+        time::delay_for(Duration::from_millis(10)).await;
     }
 }
 
@@ -158,16 +159,22 @@ async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, router_tx:
     }
 }
 
+#[tokio::main(core_threads = 1)]
+async fn router(rx: Receiver<(String, router::RouterMessage)>) {
+    let mut router = router::Router::new(rx);
+    if let Err(e) = router.start().await {
+        error!("Router stopped. Error = {:?}", e);
+    }
+}
+
+#[tokio::main(core_threads = 1)]
 pub async fn start(config: Config) {
-    let (router_tx, router_rx) = channel(10);
+    let (router_tx, router_rx) = channel(100);
 
     // router to route data between connections. creates an extra copy but
     // might not be a big deal if we prevent clones/send fat pointers and batch
-    task::spawn(async move {
-        let mut router = router::Router::new(router_rx);
-        if let Err(e) = router.start().await {
-            error!("Router stopped. Error = {:?}", e);
-        }
+    thread::spawn(move || {
+        router(router_rx)
     });
 
     let http_router_tx = router_tx.clone();
@@ -187,7 +194,10 @@ pub async fn start(config: Config) {
         let config = Arc::new(server);
 
         let fut = accept_loop(config, router_tx.clone());
-        let o = task::spawn(fut);
+        let o = task::spawn(async {
+            error!("Accept loop returned = {:?}", fut.await);
+        });
+
         servers.push(o);
     }
 
