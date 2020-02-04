@@ -68,20 +68,8 @@ impl<S: Network> Connection<S> {
         Ok(connection)
     }
 
-    async fn forward_to_router(&mut self, id: &str, message: RouterMessage) -> Result<(), Error> {
-        self.router_tx.send((id.to_owned(), message)).await?;
-        Ok(())
-    }
-
     async fn run(&mut self) -> Result<(), Error> {
-        // TODO: Enable and monitor perf. Default buffer size of 8K. Might've to periodically flush?
-        // Q. What happens when socket receives only 4K of data and there is no new data?
-        // Will the userspace not receive this data indefinitely. I don't see any timeouts?
-        // Carl says calls to read only issue one syscall. read_exact will "wait for that
-        // amount to be read
-        // Verify BufReader code
-        // https://docs.rs/tokio/0.2.6/src/tokio/io/util/buf_reader.rs.html#117
-        // let mut stream = BufStream::new(stream);
+        let stream = &mut self.stream;
         let id = self.id.to_owned();
         
         let message = match self.this_rx.next().await {
@@ -103,11 +91,11 @@ impl<S: Network> Connection<S> {
             error!("Pending = {:?}", pending);
             let connack = connack(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
-            self.stream.mqtt_write(&packet).await?;
+            stream.mqtt_write(&packet).await?;
             
             let mut pending = iter(pending.drain(..)).map(Packet::Publish);
             loop {
-                let stream = &mut self.stream;
+                // let stream = &mut self.stream;
                 let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
 
                 let packet = time::timeout(keep_alive, async {
@@ -119,10 +107,10 @@ impl<S: Network> Connection<S> {
                     // read packets from network and generate network reply and router message
                     o = packet => {
                         match o?? {
-                            Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
+                            Packet::Pingreq => stream.mqtt_write(&Packet::Pingresp).await?,
                             packet => {
                                 let message = RouterMessage::Packet(packet);
-                                self.forward_to_router(&id, message).await?;
+                                self.router_tx.send((id.to_owned(), message)).await?;
                             }
                         };
                     }
@@ -131,7 +119,7 @@ impl<S: Network> Connection<S> {
                     // router can close the connection by dropping tx handle. this should stop this
                     // eventloop without sending the death notification
                     o = pending.next() => match o {
-                        Some(packet) => self.stream.mqtt_write(&packet).await?,
+                        Some(packet) => stream.mqtt_write(&packet).await?,
                         None => {
                             debug!("Done processing previous session and offline messages");
                             break
@@ -168,7 +156,7 @@ impl<S: Network> Connection<S> {
                         Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
                         packet => {
                             let message = RouterMessage::Packet(packet);
-                            self.forward_to_router(&id, message).await?;
+                            self.router_tx.send((id.to_owned(), message)).await?;
                         }
                     };
                 }
