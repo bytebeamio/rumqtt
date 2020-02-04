@@ -48,7 +48,7 @@ pub struct Connection<S> {
 
 impl<S: Network> Connection<S> {
     async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
-        let (this_tx, this_rx) = channel(2);
+        let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let connect = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
