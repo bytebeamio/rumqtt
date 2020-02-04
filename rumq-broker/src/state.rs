@@ -13,7 +13,7 @@ pub enum Error {
     /// Invalid topic
     InvalidTopic,
     /// Received a packet (ack) which isn't asked for
-    Unsolicited,
+    Unsolicited(Packet),
     /// Last pingreq isn't acked
     AwaitPingResp,
     /// Received a wrong packet while waiting for another packet
@@ -133,15 +133,14 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions.
     fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Option<RouterMessage>, Error> {
+        let pkids: Vec<Option<rumq_core::PacketIdentifier>> = self.outgoing_publishes.iter().map(|p| p.pkid).collect();
+        debug!("Pkids = {:?}", pkids);
         match self.outgoing_publishes.iter().position(|x| *x.pkid() == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_publishes.remove(index).expect("Wrong index");
                 Ok(None)
             }
-            None => {
-                error!("Unsolicited puback packet: {:?}", pkid);
-                Err(Error::Unsolicited)
-            }
+            None => Err(Error::Unsolicited(Packet::Puback(pkid))),
         }
     }
 
@@ -190,14 +189,8 @@ impl MqttState {
     /// frequency/size data publishes but should ideally be `Arc`d while returning to
     /// prevent deep copy of large messages as this is anyway immutable after adding pkid
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
-        let publish = if *publish.pkid() == None {
-            let pkid = self.next_pkid();
-            publish.set_pkid(pkid);
-            publish
-        } else {
-            publish
-        };
-
+        let pkid = self.next_pkid();
+        publish.set_pkid(pkid);
         self.outgoing_publishes.push_back(publish.clone());
         publish
     }

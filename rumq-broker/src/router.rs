@@ -5,12 +5,13 @@ use tokio::sync::mpsc::error::TrySendError;
 
 use std::collections::{HashMap, VecDeque};
 use std::mem;
+use std::fmt;
 
-use crate::state::MqttState;
+use crate::state::{self, MqttState};
 
 #[derive(Debug, From)]
 pub enum Error {
-    State,
+    State(state::Error),
     AllSendersDown,
     Mpsc(TrySendError<RouterMessage>),
 }
@@ -21,7 +22,7 @@ pub enum Error {
 #[derive(Debug)]
 pub enum RouterMessage {
     /// Client id and connection handle
-    Connect((Connect, Sender<RouterMessage>)),
+    Connect(Connection),
     /// Packet
     Packet(rumq_core::Packet),
     /// Disconnects a client from active connections list. Will handling
@@ -30,6 +31,25 @@ pub enum RouterMessage {
     Pending(Option<VecDeque<Publish>>)
 }
 
+pub struct Connection {
+    pub connect: rumq_core::Connect,
+    pub handle: Sender<RouterMessage>
+}
+
+impl Connection {
+    pub fn new(connect: rumq_core::Connect, handle: Sender<RouterMessage>) -> Connection {
+        Connection {
+            connect,
+            handle
+        }
+    }
+}
+
+impl fmt::Debug for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.connect)
+    }
+}
 
 #[derive(Debug)]
 struct ActiveConnection {
@@ -116,14 +136,15 @@ impl Router {
     }
 
     async fn handle_incoming_router_message(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
+        debug!("Incoming router message. Id = {}, {:?}", id, message);
         match message {
-            RouterMessage::Connect((connect, connection_handle)) => {
-                self.handle_connect(connect, connection_handle)?
+            RouterMessage::Connect(connection) => {
+                self.handle_connect(connection.connect, connection.handle)?
             }
             RouterMessage::Packet(packet) => {
                 handle_incoming_packet(&id, packet.clone(), &mut self.active_connections)?;
                 match packet {
-                    Packet::Publish(publish) => self.match_subscriptions_and_forward(publish),
+                    Packet::Publish(publish) => self.match_subscriptions_and_forward(&id, publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
                     Packet::Unsubscribe(unsubscribe) => self.remove_from_subscriptions(id, unsubscribe),
                     Packet::Disconnect => self.deactivate(id),
@@ -142,7 +163,7 @@ impl Router {
         let clean_session = connect.clean_session;
         let will = connect.last_will;
 
-        debug!("Connect. Id = {:?}", id);
+        info!("Connect. Id = {:?}", id);
 
         if clean_session {
             self.inactive_connections.remove(&id);
@@ -179,14 +200,7 @@ impl Router {
         Ok(())
     }
 
-    fn match_subscriptions_and_forward(&mut self,  publish: Publish) {
-        debug!(
-            "Publish. Topic = {:?}, Qos = {:?}, Payload len = {}",
-            publish.topic_name(),
-            publish.qos(),
-            publish.payload().len()
-        );
-
+    fn match_subscriptions_and_forward(&mut self, _id: &str, publish: Publish) {
         if publish.retain {
             if publish.payload.len() == 0 {
                 self.retained_publishes.remove(&publish.topic_name);
@@ -216,8 +230,6 @@ impl Router {
 
 
     fn add_to_subscriptions(&mut self, id: String, subscribe: Subscribe) {
-        debug!("Subscribe. Id = {:?},  Topics = {:?}", id, subscribe.topics());
-
         // Each subscribe message can send multiple topics to subscribe to. handle dupicates
         for topic in subscribe.topics() {
             let mut filter = topic.topic_path().clone();
@@ -341,7 +353,7 @@ impl Router {
                     // added again outside)
                     if let Some(index) = subscribers.iter().position(|s| s.client_id == id) {
                         let s = subscribers.remove(index);
-                        
+
                         if s.qos > qos {
                             qos = s.qos
                         }
@@ -409,7 +421,7 @@ impl Router {
                 let mut publish = rumq_core::publish(topic, message);
                 publish.set_qos(qos);
 
-                self.match_subscriptions_and_forward(publish);
+                self.match_subscriptions_and_forward(&id, publish);
             }
 
             if !connection.state.clean_session {
@@ -425,22 +437,22 @@ fn forward_publish(subscriber: &Subscriber, mut publish: Publish, active_connect
     publish.qos = subscriber.qos;
 
     if let Some(connection) = inactive_connections.get_mut(&subscriber.client_id) {
-        debug!("Forwarding publish to inactive connection. Id = {}", subscriber.client_id);
+        debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, publish);
         connection.state.handle_outgoing_publish(publish); 
         return
     }
 
-    debug!("Forwarding publish to an active connection. Id = {}", subscriber.client_id);
     if let Some(connection) = active_connections.get_mut(&subscriber.client_id) {
         let packet = connection.state.handle_outgoing_publish(publish); 
         let message = RouterMessage::Packet(packet);
+        debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, message);
 
         // slow connections should be moved to inactive connections. This drops tx handle of the
         // connection leading to connection disconnection
         if let Err(e) = connection.tx.try_send(message) {
             match e {
                 TrySendError::Full(_m) => {
-                    error!("Slow connection. Dropping handle and moving id to inactive list. Id = {}", subscriber.client_id);
+                    error!("1. Slow connection durin forward. Dropping handle and moving id to inactive list. Id = {}", subscriber.client_id);
                     if let Some(connection) = active_connections.remove(&subscriber.client_id) {
                         inactive_connections.insert(subscriber.client_id.clone(), InactiveConnection::new(connection.state));
                     }
@@ -460,17 +472,23 @@ fn handle_incoming_packet(id: &str, packet: Packet, active_connections: &mut Has
         let reply = match connection.state.handle_incoming_mqtt_packet(packet) {
             Ok(Some(reply)) => reply,
             Ok(None) => return Ok(()),
+            Err(state::Error::Unsolicited(packet)) => {
+                // NOTE: Some clients seems to be sending pending acks after reconnection
+                // even during a clean session. Let's be little lineant for now
+                error!("Unsolicited ack = {:?}. Id = {}", packet, id);
+                return Ok(())
+            }
             Err(e) => {
-                error!("State error = {:?}", e);
+                error!("State error = {:?}. Id = {}", e, id);
                 active_connections.remove(id);
-                return Err(Error::State)
+                return Err::<_, Error>(e.into())
             }
         };
 
         if let Err(e) = connection.tx.try_send(reply) {
             match e {
                 TrySendError::Full(_m) => {
-                    error!("Slow connection. Dropping handle and moving id to inactive list");
+                    error!("Slow connection during reply. Dropping handle and moving id to inactive list. Id = {}", id);
                     active_connections.remove(id);
                 }
                 TrySendError::Closed(_m) => {

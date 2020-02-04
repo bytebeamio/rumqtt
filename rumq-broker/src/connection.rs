@@ -7,7 +7,7 @@ use tokio::stream::StreamExt;
 use tokio::time;
 use tokio::select;
 
-use crate::router::RouterMessage;
+use crate::router::{self, RouterMessage};
 use crate::Network;
 use crate::ServerSettings;
 
@@ -31,14 +31,14 @@ pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut ro
     let id = connection.id.clone();
 
     if let Err(err) = connection.run().await {
-        error!("Connection error = {:?}", err);
+        error!("Connection error = {:?}. Id = {}", err, id);
         router_tx.send((id.clone(), RouterMessage::Death(id.clone()))).await?;
     }
 
     Ok(id)
 }
 
-struct Connection<S> {
+pub struct Connection<S> {
     id:         String,
     keep_alive: Duration,
     stream:     S,
@@ -48,7 +48,7 @@ struct Connection<S> {
 
 impl<S: Network> Connection<S> {
     async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
-        let (this_tx, this_rx) = channel(100);
+        let (this_tx, this_rx) = channel(2);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let connect = time::timeout(timeout, async {
             let packet = stream.mqtt_read().await?;
@@ -62,7 +62,7 @@ impl<S: Network> Connection<S> {
         let keep_alive = Duration::from_secs(connect.keep_alive as u64);
 
         // construct connect router message with cliend id and handle to this connection
-        let routermessage = RouterMessage::Connect((connect, this_tx));
+        let routermessage = RouterMessage::Connect(router::Connection::new(connect, this_tx));
         router_tx.send((id.clone(), routermessage)).await?;
         let connection = Connection { id, keep_alive, stream, this_rx, router_tx };
         Ok(connection)
@@ -100,6 +100,7 @@ impl<S: Network> Connection<S> {
         
         // eventloop which pending packets from the last session 
         if let Some(mut pending) = connectionack {
+            error!("Pending = {:?}", pending);
             let connack = connack(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
             self.stream.mqtt_write(&packet).await?;

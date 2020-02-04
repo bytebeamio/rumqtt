@@ -1,4 +1,4 @@
-use crate::router::RouterMessage;
+use crate::router::{Connection, RouterMessage};
 use crate::Config;
 
 use rumq_core::{Packet, QoS};
@@ -19,7 +19,7 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<(String, RouterMes
 
     // construct connect router message with client id and handle to this connection
     let connect = rumq_core::connect("pushclient");
-    let routermessage = RouterMessage::Connect((connect, this_tx));
+    let routermessage = RouterMessage::Connect(Connection::new(connect, this_tx));
     router_tx.send(("pushclient".to_owned(), routermessage)).await.unwrap();
 
     let mut subscription = rumq_core::empty_subscribe();
