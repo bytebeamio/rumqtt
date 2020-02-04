@@ -2,7 +2,6 @@ use derive_more::From;
 
 use crate::QoS;
 use std::fmt;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]
 pub struct PacketIdentifier(pub u16);
@@ -119,7 +118,7 @@ pub struct Publish {
     pub retain: bool,
     pub topic_name: String,
     pub pkid: Option<PacketIdentifier>,
-    pub payload: Arc<Vec<u8>>,
+    pub payload: Vec<u8>,
 }
 
 pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, payload: P) -> Publish {
@@ -129,7 +128,7 @@ pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, payload: P) -> Publi
         retain: false,
         pkid: None,
         topic_name: topic.into(),
-        payload: Arc::new(payload.into()),
+        payload: payload.into(),
     }
 }
 

@@ -44,11 +44,11 @@ pub async fn start(config: Arc<Config>, mut router_tx: Sender<(String, RouterMes
             _ => unimplemented!(),
         };
 
-        let payload = mem::replace(&mut publish.payload, Arc::new(Vec::new()));
+        let payload = mem::replace(&mut publish.payload, Vec::new());
         let topic = mem::replace(&mut publish.topic_name, String::new());
 
         let url = config.httppush.url.clone() + &topic;
-        let body = Bytes::from(Arc::try_unwrap(payload).unwrap());
+        let body = Bytes::from(payload);
 
         info!("Http push = {}", url);
         let request = match Request::post(url).header("Content-type", "application/json").body(body.into()) {

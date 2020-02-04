@@ -3,8 +3,6 @@ use crate::*;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
-use std::sync::Arc;
-
 #[async_trait]
 pub trait MqttRead: AsyncReadExt + Unpin {
     async fn mqtt_read(&mut self) -> Result<Packet, Error> {
@@ -171,7 +169,7 @@ pub trait MqttRead: AsyncReadExt + Unpin {
             retain,
             topic_name,
             pkid,
-            payload: Arc::new(payload),
+            payload: payload,
         })
     }
 
