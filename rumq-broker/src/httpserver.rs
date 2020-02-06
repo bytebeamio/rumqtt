@@ -26,7 +26,7 @@ pub async fn start(config: Arc<Config>, router_tx: Sender<(String, RouterMessage
                     info!("Path = {:?}", path);
                     info!("Body = {:?}", body_bytes);
 
-                    let publish = rumq_core::publish(path, body_bytes.to_vec());
+                    let publish = rumq_core::publish(path, rumq_core::QoS::AtMostOnce, body_bytes.to_vec());
                     let packet = Packet::Publish(publish);
                     let mut router_tx = router_tx.lock().await;
                     router_tx.send(("httpserver".to_owned(), RouterMessage::Packet(packet))).await.unwrap();

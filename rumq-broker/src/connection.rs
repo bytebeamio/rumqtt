@@ -1,21 +1,25 @@
 use derive_more::From;
-use rumq_core::{connack, MqttRead, MqttWrite, Packet, Connect, ConnectReturnCode};
+use rumq_core::{connack, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::SendError;
 use tokio::stream::iter;
 use tokio::stream::StreamExt;
 use tokio::time;
 use tokio::select;
+use futures_util::sink::Sink;
+use futures_util::sink::SinkExt;
+use futures_util::stream::Stream;
 
 use crate::router::{self, RouterMessage};
-use crate::Network;
 use crate::ServerSettings;
 
 use std::sync::Arc;
 use std::time::Duration;
+use std::io;
 
 #[derive(Debug, From)]
 pub enum Error {
+    Io(io::Error),
     Core(rumq_core::Error),
     Timeout(time::Elapsed),
     Send(SendError<(String, RouterMessage)>),
@@ -23,10 +27,11 @@ pub enum Error {
     WrongPacket,
     /// Invalid client ID
     InvalidClientId,
-    NotConnack
+    NotConnack,
+    StreamDone
 }
 
-pub async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
+pub async fn eventloop<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin>(config: Arc<ServerSettings>, stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
     let mut connection = Connection::new(config, stream, router_tx.clone()).await?;
     let id = connection.id.clone();
 
@@ -46,12 +51,12 @@ pub struct Connection<S> {
     router_tx:  Sender<(String, RouterMessage)>,
 }
 
-impl<S: Network> Connection<S> {
+impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin> Connection<S> {
     async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let connect = time::timeout(timeout, async {
-            let packet = stream.mqtt_read().await?;
+            let packet = stream.next().await.ok_or(Error::StreamDone)??;
             let o = handle_incoming_connect(packet)?;
             Ok::<_, Error>(o)
         })
@@ -71,7 +76,7 @@ impl<S: Network> Connection<S> {
     async fn run(&mut self) -> Result<(), Error> {
         let stream = &mut self.stream;
         let id = self.id.to_owned();
-        
+
         let message = match self.this_rx.next().await {
             Some(m) => m,
             None => {
@@ -81,25 +86,24 @@ impl<S: Network> Connection<S> {
         };
 
 
-        let connectionack = match message {
+        let mut pending = match message {
             RouterMessage::Pending(connack) => connack,
             _ => return Err(Error::NotConnack)
         };
-        
+
         // eventloop which pending packets from the last session 
-        if let Some(mut pending) = connectionack {
-            error!("Pending = {:?}", pending);
+        if pending.len() > 0 {
             let connack = connack(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
-            stream.mqtt_write(&packet).await?;
-            
+            stream.send(packet).await?;
+
             let mut pending = iter(pending.drain(..)).map(Packet::Publish);
             loop {
                 // let stream = &mut self.stream;
                 let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
 
                 let packet = time::timeout(keep_alive, async {
-                    let packet = stream.mqtt_read().await?;
+                    let packet = stream.next().await.ok_or(Error::StreamDone)??;
                     Ok::<_, Error>(packet)
                 });
 
@@ -107,7 +111,7 @@ impl<S: Network> Connection<S> {
                     // read packets from network and generate network reply and router message
                     o = packet => {
                         match o?? {
-                            Packet::Pingreq => stream.mqtt_write(&Packet::Pingresp).await?,
+                            Packet::Pingreq => stream.send(Packet::Pingresp).await?,
                             packet => {
                                 let message = RouterMessage::Packet(packet);
                                 self.router_tx.send((id.to_owned(), message)).await?;
@@ -119,7 +123,7 @@ impl<S: Network> Connection<S> {
                     // router can close the connection by dropping tx handle. this should stop this
                     // eventloop without sending the death notification
                     o = pending.next() => match o {
-                        Some(packet) => stream.mqtt_write(&packet).await?,
+                        Some(packet) => stream.send(packet).await?,
                         None => {
                             debug!("Done processing previous session and offline messages");
                             break
@@ -130,9 +134,9 @@ impl<S: Network> Connection<S> {
         } else {
             let connack = connack(ConnectReturnCode::Accepted, false);
             let packet = Packet::Connack(connack);
-            self.stream.mqtt_write(&packet).await?;
+            self.stream.send(packet).await?;
         }
-        
+
         // eventloop which processes packets and router messages
         loop {
             let stream = &mut self.stream;
@@ -140,10 +144,10 @@ impl<S: Network> Connection<S> {
 
             // TODO: Use Delay::reset to not construct this timeout future everytime
             let packet = time::timeout(keep_alive, async {
-                let packet = stream.mqtt_read().await?;
+                let packet = stream.next().await.ok_or(Error::StreamDone)??;
                 Ok::<_, Error>(packet)
             });
-
+            
             let this_rx = &mut self.this_rx;
             let message = async {
                 this_rx.next().await
@@ -153,7 +157,7 @@ impl<S: Network> Connection<S> {
                 // read packets from network and generate network reply and router message
                 o = packet => {
                     match o?? {
-                        Packet::Pingreq => self.stream.mqtt_write(&Packet::Pingresp).await?,
+                        Packet::Pingreq => self.stream.send(Packet::Pingresp).await?,
                         packet => {
                             let message = RouterMessage::Packet(packet);
                             self.router_tx.send((id.to_owned(), message)).await?;
@@ -167,7 +171,7 @@ impl<S: Network> Connection<S> {
                 o = message => match o {
                     Some(message) => {
                         match message {
-                            RouterMessage::Packet(packet) => self.stream.mqtt_write(&packet).await?,
+                            RouterMessage::Packet(packet) => self.stream.send(packet).await?,
                             _ => return Err(Error::WrongPacket)
                         }
                     }

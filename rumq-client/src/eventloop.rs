@@ -1,6 +1,6 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::{self, Packet, Publish, PacketIdentifier, MqttRead, MqttWrite};
+use rumq_core::{self, Packet, Publish, PacketIdentifier, AsyncMqttRead, AsyncMqttWrite};
 use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
@@ -276,7 +276,8 @@ impl MqttEventLoop {
         let clean_session = self.options.clean_session();
 
         let mut connect = rumq_core::connect(id);
-        connect.set_keep_alive(keep_alive).set_clean_session(clean_session);
+        connect.keep_alive = keep_alive;
+        connect.clean_session = clean_session;
 
         if let Some((username, password)) = self.options.credentials() {
             connect.set_username(username).set_password(password);
@@ -446,7 +447,7 @@ mod test {
         let (mut requests_tx, requests_rx) = channel(5);
         task::spawn(async move {
             for i in 0..10 {
-                let publish = publish("hello/world", vec![i]);
+                let publish = publish("hello/world", QoS::AtLeastOnce, vec![i]);
                 let request = Request::Publish(publish);
                 let _ = requests_tx.send(request).await;
                 time::delay_for(Duration::from_secs(1)).await;
@@ -493,7 +494,7 @@ mod test {
         let (mut requests_tx, requests_rx) = channel(5);
         task::spawn(async move {
             for i in 0..10 {
-                let publish = publish("hello/world", vec![i]);
+                let publish = publish("hello/world", QoS::AtLeastOnce, vec![i]);
                 let request = Request::Publish(publish);
                 let _ = requests_tx.send(request).await;
                 time::delay_for(Duration::from_secs(1)).await;
@@ -530,7 +531,7 @@ mod test {
         let (mut requests_tx, requests_rx) = channel(5);
         task::spawn(async move {
             for i in 0..5 {
-                let publish = publish("hello/world", vec![i]);
+                let publish = publish("hello/world", QoS::AtLeastOnce, vec![i]);
                 let request = Request::Publish(publish);
                 let _ = requests_tx.send(request).await;
                 time::delay_for(Duration::from_secs(1)).await;
@@ -583,7 +584,7 @@ mod test {
         let (mut requests_tx, requests_rx) = channel(5);
         task::spawn(async move {
             for i in 0..10 {
-                let publish = publish("hello/world", vec![i]);
+                let publish = publish("hello/world", QoS::AtLeastOnce, vec![i]);
                 let request = Request::Publish(publish);
                 let _ = requests_tx.send(request).await;
                 time::delay_for(Duration::from_secs(1)).await;
@@ -633,7 +634,7 @@ mod test {
         let (mut requests_tx, requests_rx) = channel(5);
         task::spawn(async move {
             for i in 0..10 {
-                let publish = publish("hello/world", vec![i]);
+                let publish = publish("hello/world", QoS::AtLeastOnce, vec![i]);
                 let request = Request::Publish(publish);
                 let _ = requests_tx.send(request).await;
                 time::delay_for(Duration::from_secs(1)).await;
@@ -681,7 +682,7 @@ mod test {
             let topic = "hello/world".to_owned();
             let payload = vec![1, 2, 3, i];
 
-            let publish = publish(topic, payload);
+            let publish = publish(topic, QoS::AtLeastOnce, payload);
             let request = Request::Publish(publish);
             let _ = requests_tx.send(request).await;
         }
@@ -717,7 +718,7 @@ mod test {
             });
 
             if let Ok(Packet::Publish(publish)) = mqtt_read.await {
-                Some(publish.pkid().unwrap())
+                Some(publish.pkid.unwrap())
             } else {
                 None
             }
