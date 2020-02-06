@@ -183,7 +183,6 @@ mod test {
     use super::MqttWrite;
     use crate::{Connack, Connect, Packet, Publish, Subscribe};
     use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn write_packet_connect_mqtt_protocol_works() {
@@ -241,7 +240,7 @@ mod test {
             retain: false,
             topic_name: "a/b".to_owned(),
             pkid: Some(PacketIdentifier(10)),
-            payload: Arc::new(vec![0xF1, 0xF2, 0xF3, 0xF4]),
+            payload: vec![0xF1, 0xF2, 0xF3, 0xF4]
         });
 
         let mut stream = Vec::new();
@@ -261,7 +260,7 @@ mod test {
             retain: false,
             topic_name: "a/b".to_owned(),
             pkid: None,
-            payload: Arc::new(vec![0xE1, 0xE2, 0xE3, 0xE4]),
+            payload: vec![0xE1, 0xE2, 0xE3, 0xE4],
         });
 
         let mut stream = Vec::new();

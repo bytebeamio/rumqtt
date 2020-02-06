@@ -276,7 +276,6 @@ mod test {
         ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes,
         SubscribeTopic,
     };
-    use std::sync::Arc;
     use std::io::Cursor;
 
     #[tokio::test]
@@ -354,7 +353,7 @@ mod test {
                 retain: false,
                 topic_name: "a/b".to_owned(),
                 pkid: Some(PacketIdentifier(10)),
-                payload: Arc::new(vec![0xF1, 0xF2, 0xF3, 0xF4])
+                payload: vec![0xF1, 0xF2, 0xF3, 0xF4]
             })
         );
     }
@@ -378,7 +377,7 @@ mod test {
                 retain: false,
                 topic_name: "a/b".to_owned(),
                 pkid: None,
-                payload: Arc::new(vec![0x01, 0x02])
+                payload: vec![0x01, 0x02]
             })
         );
     }
