@@ -218,7 +218,7 @@ impl Router {
             }
         }
 
-        let topic = publish.topic_name();
+        let topic = &publish.topic_name;
         if let Some(subscribers) = self.concrete_subscriptions.get(topic) {
             let subscribers = subscribers.clone();
             for subscriber in subscribers.iter() {
@@ -230,7 +230,7 @@ impl Router {
         // linearly degraded based on number of wildcard subscriptions. fix this
         let wild_subscriptions = self.wild_subscriptions.clone(); 
         for (filter, subscribers) in wild_subscriptions.into_iter() {
-            if matches(topic, &filter) {
+            if matches(&topic, &filter) {
                 for subscriber in subscribers.into_iter() {
                     let publish = publish.clone();
                     self.forward_publish(&subscriber, publish);
@@ -242,8 +242,8 @@ impl Router {
 
     fn add_to_subscriptions(&mut self, id: String, subscribe: Subscribe) {
         // Each subscribe message can send multiple topics to subscribe to. handle dupicates
-        for topic in subscribe.topics() {
-            let mut filter = topic.topic_path().clone();
+        for topic in subscribe.topics {
+            let mut filter = topic.topic_path.clone();
             let qos = topic.qos;
             let subscriber = Subscriber::new(&id, qos);
 
@@ -431,9 +431,7 @@ impl Router {
                 let message = mem::replace(&mut will.message, "".to_owned());
                 let qos = will.qos;
 
-                let mut publish = rumq_core::publish(topic, message);
-                publish.set_qos(qos);
-
+                let publish = rumq_core::publish(topic, qos, message);
                 self.match_subscriptions_and_forward(&id, publish);
             }
 
@@ -543,4 +541,4 @@ mod test {
 
     #[test]
     fn router_saves_offline_messages_of_a_persistent_dead_connection() {}
-}
+} 

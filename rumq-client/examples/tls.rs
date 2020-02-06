@@ -61,6 +61,6 @@ fn publish_request(i: u8) -> Request {
     let topic = "hello/world".to_owned();
     let payload = vec![1, 2, 3, i];
 
-    let publish = rumq_client::publish(topic, payload);
+    let publish = rumq_client::publish(&topic, QoS::AtLeastOnce, payload);
     Request::Publish(publish)
 }

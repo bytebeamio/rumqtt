@@ -11,18 +11,15 @@ pub enum Protocol {
     MQTT(u8),
 }
 
-#[derive(Debug, Clone, PartialEq, Getters, Setters)]
-#[get = "pub"]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Connect {
     /// Mqtt protocol version
     pub protocol: Protocol,
     /// Mqtt keep alive time
-    #[set = "pub"]
     pub keep_alive: u16,
     /// Client Id
     pub client_id: String,
     /// Clean session. Asks the broker to clear previous state
-    #[set = "pub"]
     pub clean_session: bool,
     /// Will that broker needs to publish when the client disconnects
     pub last_will: Option<LastWill>,
@@ -88,8 +85,7 @@ pub enum ConnectReturnCode {
     NotAuthorized,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Getters)]
-#[get = "pub"]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Connack {
     pub session_present: bool,
     pub code: ConnectReturnCode,
@@ -107,24 +103,20 @@ pub struct LastWill {
     pub retain: bool,
 }
 
-#[derive(Clone, PartialEq, Getters, Setters)]
-#[get = "pub"]
+#[derive(Clone, PartialEq)]
 pub struct Publish {
-    #[set = "pub"]
     pub dup: bool,
-    #[set = "pub"]
     pub qos: QoS,
-    #[set = "pub"]
     pub retain: bool,
     pub topic_name: String,
     pub pkid: Option<PacketIdentifier>,
     pub payload: Vec<u8>,
 }
 
-pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, payload: P) -> Publish {
+pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
     Publish {
         dup: false,
-        qos: QoS::AtLeastOnce,
+        qos,
         retain: false,
         pkid: None,
         topic_name: topic.into(),
@@ -153,10 +145,8 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Getters, Setters)]
-#[get = "pub"]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Subscribe {
-    #[set = "pub"]
     pub pkid: PacketIdentifier,
     pub topics: Vec<SubscribeTopic>,
 }
@@ -188,8 +178,7 @@ impl Subscribe {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Getters)]
-#[get = "pub"]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SubscribeTopic {
     pub topic_path: String,
     pub qos: QoS,

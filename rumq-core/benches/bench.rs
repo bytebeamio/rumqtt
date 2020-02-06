@@ -2,13 +2,13 @@ use tokio::{
     runtime::{Builder, Runtime},
 };
 
-use rumq_core::*;
+use rumq_core::{publish, QoS, Packet, AsyncMqttRead, AsyncMqttWrite};
 
 use bencher::{Bencher, black_box, benchmark_group, benchmark_main};
 
 fn publish_serialize_perf(bench: &mut Bencher) {
     let mut runtime = rt();
-    let publish = publish("hello/world", payload(100));
+    let publish = publish("hello/world", QoS::AtLeastOnce, payload(100));
     let publish = Packet::Publish(publish);
     let mut stream = Vec::new();
 

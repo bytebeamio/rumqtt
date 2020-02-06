@@ -86,7 +86,7 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Packet {
-        let publish = match publish.qos() {
+        let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
         };
@@ -103,7 +103,7 @@ impl MqttState {
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<Option<RouterMessage>, Error> {
-        let qos = publish.qos();
+        let qos = publish.qos;
 
         // debug!(
         //     "Incoming Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
@@ -112,15 +112,15 @@ impl MqttState {
         //     publish.payload().len()
         // );
 
-        if !valid_topic(publish.topic_name()) {
-            error!("Invalid topic = {} on publish", publish.topic_name());
+        if !valid_topic(&publish.topic_name) {
+            error!("Invalid topic = {} on publish", publish.topic_name);
             return Err(Error::InvalidTopic);
         }
 
         match qos {
             QoS::AtMostOnce => Ok(None),
             QoS::AtLeastOnce => {
-                let pkid = publish.pkid().unwrap();
+                let pkid = publish.pkid.unwrap();
                 let packet = Packet::Puback(pkid);
                 let routermessage = RouterMessage::Packet(packet);
                 Ok(Some(routermessage))
@@ -135,7 +135,7 @@ impl MqttState {
     fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Option<RouterMessage>, Error> {
         let pkids: Vec<Option<rumq_core::PacketIdentifier>> = self.outgoing_publishes.iter().map(|p| p.pkid).collect();
         debug!("Pkids = {:?}", pkids);
-        match self.outgoing_publishes.iter().position(|x| *x.pkid() == Some(pkid)) {
+        match self.outgoing_publishes.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_publishes.remove(index).expect("Wrong index");
                 Ok(None)
@@ -162,7 +162,7 @@ impl MqttState {
                 }
             };
 
-            let topic = topic.topic_path();
+            let topic = &topic.topic_path;
             let code = if valid_filter(topic) { SubscribeReturnCodes::Success(qos) } else { SubscribeReturnCodes::Failure };
 
             // add only successful subscriptions to router message

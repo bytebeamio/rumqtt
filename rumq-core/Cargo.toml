@@ -12,7 +12,6 @@ derive_more = "0.15"
 tokio = { version = "0.2", features = ["io-util"] }
 async-trait = "0.1"
 byteorder = "1"
-getset = "0.0.9"
 
 
 [dev-dependencies]

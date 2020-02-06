@@ -3,7 +3,7 @@ use std::ops::Add;
 use std::env;
 use std::fs;
 
-use rumq_client::{self, MqttOptions, Request, MqttEventLoop, eventloop};
+use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, eventloop};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 use futures_util::stream::StreamExt;
@@ -66,8 +66,7 @@ fn publish_request(i: u8) -> Request {
     let topic = "/devices/".to_owned() +  "bike-1/events/imu";
     let payload = vec![1, 2, 3, i];
 
-    let mut publish = rumq_client::publish(topic, payload);
-    publish.set_qos(rumq_core::QoS::AtLeastOnce);
+    let publish = rumq_client::publish(&topic, QoS::AtLeastOnce, payload);
     Request::Publish(publish)
 }
 

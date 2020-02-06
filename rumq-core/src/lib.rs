@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate getset;
-
 use derive_more::From;
 use std::io;
 use std::string::FromUtf8Error;
