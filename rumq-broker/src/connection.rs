@@ -80,15 +80,13 @@ impl<S: Network> Connection<S> {
             }
         };
 
-
-        let connectionack = match message {
-            RouterMessage::Pending(connack) => connack,
+        let mut pending = match message {
+            RouterMessage::Pending(pending) => pending,
             _ => return Err(Error::NotConnack)
         };
         
         // eventloop which pending packets from the last session 
-        if let Some(mut pending) = connectionack {
-            error!("Pending = {:?}", pending);
+        if pending.len() > 0 {
             let connack = connack(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
             stream.mqtt_write(&packet).await?;

@@ -28,7 +28,7 @@ pub enum RouterMessage {
     /// Disconnects a client from active connections list. Will handling
     Death(String),
     /// Pending messages of the previous connection
-    Pending(Option<VecDeque<Publish>>)
+    Pending(VecDeque<Publish>)
 }
 
 pub struct Connection {
@@ -129,58 +129,66 @@ impl Router {
                 None => return Err(Error::AllSendersDown),
             };
 
-            if let Err(err) = self.handle_incoming_router_message(id, message).await {
+            if let Err(err) = self.handle_incoming_router_message(id, message) {
                 error!("Handle packet error = {:?}", err);
             }
         }
     }
 
-    async fn handle_incoming_router_message(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
+    fn handle_incoming_router_message(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
         debug!("Incoming router message. Id = {}, {:?}", id, message);
         match message {
             RouterMessage::Connect(connection) => {
-                self.handle_connect(connection.connect, connection.handle)?
+                if let Some(reply) = self.handle_connect(connection.connect, connection.handle)? {
+                    self.forward(&id, reply)
+                } else {
+                    self.forward(&id, RouterMessage::Pending(VecDeque::new()))
+                }
             }
             RouterMessage::Packet(packet) => {
-                handle_incoming_packet(&id, packet.clone(), &mut self.active_connections)?;
+                // handles message and returns replys (which are sent to connection and then n/w) 
+                if let Some(reply) = self.handle_incoming_packet(&id, packet.clone())? {
+                    self.forward(&id, reply)
+                }
+                // all routing logic
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions_and_forward(&id, publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
                     Packet::Unsubscribe(unsubscribe) => self.remove_from_subscriptions(id, unsubscribe),
                     Packet::Disconnect => self.deactivate(id),
-                    _ => return Ok(()),
+                    _ => return Ok(())
                 }
             }
             RouterMessage::Death(id) => self.deactivate_and_forward_will(id),
-            RouterMessage::Pending(_) => return Ok(())
+            _ => unimplemented!()
         }
 
         Ok(())
     }
 
-    fn handle_connect(&mut self, connect: Connect, mut connection_handle: Sender<RouterMessage>) -> Result<(), Error> {
+    fn handle_connect(&mut self, connect: Connect, connection_handle: Sender<RouterMessage>) -> Result<Option<RouterMessage>, Error> {
         let id = connect.client_id;
         let clean_session = connect.clean_session;
         let will = connect.last_will;
 
         info!("Connect. Id = {:?}", id);
-
-        if clean_session {
+        let reply = if clean_session {
             self.inactive_connections.remove(&id);
 
             let state = MqttState::new(clean_session, will);
-            connection_handle.try_send(RouterMessage::Pending(None))?;
             self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
+            None
         } else {
             if let Some(connection) = self.inactive_connections.remove(&id) {
-                connection_handle.try_send(RouterMessage::Pending(Some(connection.state.outgoing_publishes.clone())))?;
+                let pending = connection.state.outgoing_publishes.clone();
                 self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, connection.state));
+                Some(RouterMessage::Pending(pending))
             } else {
                 let state = MqttState::new(clean_session, will);
-                connection_handle.try_send(RouterMessage::Pending(None))?;
                 self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
+                None
             }
-        }
+        };
 
         if clean_session {
             // FIXME: This is costly for every clean connection with a lot of subscribers
@@ -197,7 +205,7 @@ impl Router {
             }
         }
 
-        Ok(())
+        Ok(reply)
     }
 
     fn match_subscriptions_and_forward(&mut self, _id: &str, publish: Publish) {
@@ -212,17 +220,20 @@ impl Router {
 
         let topic = publish.topic_name();
         if let Some(subscribers) = self.concrete_subscriptions.get(topic) {
+            let subscribers = subscribers.clone();
             for subscriber in subscribers.iter() {
-                forward_publish(subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+                self.forward_publish(subscriber, publish.clone());
             }
         }
 
         // TODO: O(n) which happens during every publish. publish perf is going to be
         // linearly degraded based on number of wildcard subscriptions. fix this
-        for (filter, subscribers) in self.wild_subscriptions.iter() {
-            if matches(topic, filter) {
-                for subscriber in subscribers.iter() {
-                    forward_publish(subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+        let wild_subscriptions = self.wild_subscriptions.clone(); 
+        for (filter, subscribers) in wild_subscriptions.into_iter() {
+            if matches(topic, &filter) {
+                for subscriber in subscribers.into_iter() {
+                    let publish = publish.clone();
+                    self.forward_publish(&subscriber, publish);
                 }
             }
         };
@@ -269,14 +280,16 @@ impl Router {
 
             // Handle retained publishes after subscription duplicates are handled above
             if has_wildcards(&filter) {
-                for (topic, publish) in self.retained_publishes.iter() {
-                    if matches(topic, &filter) {
-                        forward_publish(&subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+                let retained_publishes = self.retained_publishes.clone();
+                for (topic, publish) in retained_publishes.into_iter() {
+                    if matches(&topic, &filter) {
+                        self.forward_publish(&subscriber, publish);
                     }
                 }
             } else {
                 if let Some(publish) = self.retained_publishes.get(&filter) {
-                    forward_publish(&subscriber, publish.clone(), &mut self.active_connections, &mut self.inactive_connections);
+                    let publish = publish.clone();
+                    self.forward_publish(&subscriber, publish);
                 }
             }
         }
@@ -429,78 +442,78 @@ impl Router {
             }
         }
     }
-}
 
-
-// forwards data to the connection with the following id
-fn forward_publish(subscriber: &Subscriber, mut publish: Publish, active_connections: &mut HashMap<String, ActiveConnection>, inactive_connections: &mut HashMap<String, InactiveConnection>)  {
-    publish.qos = subscriber.qos;
-
-    if let Some(connection) = inactive_connections.get_mut(&subscriber.client_id) {
-        debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, publish);
-        connection.state.handle_outgoing_publish(publish); 
-        return
-    }
-
-    if let Some(connection) = active_connections.get_mut(&subscriber.client_id) {
-        let packet = connection.state.handle_outgoing_publish(publish); 
-        let message = RouterMessage::Packet(packet);
-        debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, message);
-
-        // slow connections should be moved to inactive connections. This drops tx handle of the
-        // connection leading to connection disconnection
-        if let Err(e) = connection.tx.try_send(message) {
-            match e {
-                TrySendError::Full(_m) => {
-                    error!("1. Slow connection durin forward. Dropping handle and moving id to inactive list. Id = {}", subscriber.client_id);
-                    if let Some(connection) = active_connections.remove(&subscriber.client_id) {
-                        inactive_connections.insert(subscriber.client_id.clone(), InactiveConnection::new(connection.state));
-                    }
+    /// Saves state and sends network reply back to the connection
+    fn handle_incoming_packet(&mut self, id: &str, packet: Packet) -> Result<Option<RouterMessage>, Error> {
+        if let Some(connection) = self.active_connections.get_mut(id) {
+            let reply = match connection.state.handle_incoming_mqtt_packet(packet) {
+                Ok(Some(reply)) => reply,
+                Ok(None) => return Ok(None),
+                Err(state::Error::Unsolicited(packet)) => {
+                    // NOTE: Some clients seems to be sending pending acks after reconnection
+                    // even during a clean session. Let's be little lineant for now
+                    error!("Unsolicited ack = {:?}. Id = {}", packet, id);
+                    return Ok(None)
                 }
-                TrySendError::Closed(_m) => {
-                    error!("Closed connection. Forward failed");
-                    active_connections.remove(&subscriber.client_id);
+                Err(e) => {
+                    error!("State error = {:?}. Id = {}", e, id);
+                    self.active_connections.remove(id);
+                    return Err::<_, Error>(e.into())
                 }
-            }
+            };
+
+            return Ok(Some(reply))
         }
-    }
-}
 
-/// Saves state and sends network reply back to the connection
-fn handle_incoming_packet(id: &str, packet: Packet, active_connections: &mut HashMap<String, ActiveConnection>) -> Result<(), Error> {
-    if let Some(connection) = active_connections.get_mut(id) {
-        let reply = match connection.state.handle_incoming_mqtt_packet(packet) {
-            Ok(Some(reply)) => reply,
-            Ok(None) => return Ok(()),
-            Err(state::Error::Unsolicited(packet)) => {
-                // NOTE: Some clients seems to be sending pending acks after reconnection
-                // even during a clean session. Let's be little lineant for now
-                error!("Unsolicited ack = {:?}. Id = {}", packet, id);
-                return Ok(())
-            }
-            Err(e) => {
-                error!("State error = {:?}. Id = {}", e, id);
-                active_connections.remove(id);
-                return Err::<_, Error>(e.into())
-            }
+        Ok(None)
+    }
+
+    // forwards data to the connection with the following id
+    fn forward_publish(&mut self, subscriber: &Subscriber, mut publish: Publish)  {
+        publish.qos = subscriber.qos;
+
+        if let Some(connection) = self.inactive_connections.get_mut(&subscriber.client_id) {
+            debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, publish);
+            connection.state.handle_outgoing_publish(publish); 
+            return
+        }
+
+        let message = if let Some(connection) = self.active_connections.get_mut(&subscriber.client_id) {
+            let packet = connection.state.handle_outgoing_publish(publish); 
+            let message = RouterMessage::Packet(packet);
+            debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, message);
+            message
+        } else {
+            return
         };
 
-        if let Err(e) = connection.tx.try_send(reply) {
-            match e {
-                TrySendError::Full(_m) => {
-                    error!("Slow connection during reply. Dropping handle and moving id to inactive list. Id = {}", id);
-                    active_connections.remove(id);
-                }
-                TrySendError::Closed(_m) => {
-                    error!("Closed connection. Forward failed");
-                    active_connections.remove(id);
+        self.forward(&subscriber.client_id, message);
+    }
+
+    fn forward(&mut self, id: &str, message: RouterMessage) {
+        if let Some(connection) = self.active_connections.get_mut(id) {
+            // slow connections should be moved to inactive connections. This drops tx handle of the
+            // connection leading to connection disconnection
+            if let Err(e) = connection.tx.try_send(message) {
+                match e {
+                    TrySendError::Full(_m) => {
+                        error!("Slow connection during forward. Dropping handle and moving id to inactive list. Id = {}", id);
+                        if let Some(connection) = self.active_connections.remove(id) {
+                            self.inactive_connections.insert(id.to_owned(), InactiveConnection::new(connection.state));
+                        }
+                    }
+                    TrySendError::Closed(_m) => {
+                        error!("Closed connection. Forward failed");
+                        self.active_connections.remove(id);
+                    }
                 }
             }
         }
     }
-
-    Ok(())
 }
+
+
+
 
 #[cfg(test)]
 mod test {
