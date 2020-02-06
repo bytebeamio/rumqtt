@@ -1,6 +1,9 @@
 [package]
 name = "rumq-broker"
 version = "0.1.0-alpha.4"
+description = "Library for embeddable mqtt broker"
+license = "MIT"
+repository = "https://github.com/tekjar/rumq"
 authors = ["tekjar <kraviteza@gmail.com>"]
 edition = "2018"
 
