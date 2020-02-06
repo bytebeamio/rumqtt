@@ -7,12 +7,16 @@ use std::string::FromUtf8Error;
 
 mod asyncdeserialize;
 mod asyncserialize;
+mod deserialize;
 mod packets;
+mod serialize;
 mod topic;
 
 pub use asyncdeserialize::AsyncMqttRead;
 pub use asyncserialize::AsyncMqttWrite;
+pub use deserialize::MqttRead;
 pub use packets::*;
+pub use serialize::MqttWrite;
 pub use topic::*;
 
 #[repr(u8)]
