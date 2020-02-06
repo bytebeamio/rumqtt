@@ -1,6 +1,7 @@
+use bytes::buf::Buf;
 use bytes::BytesMut;
-use rumq_core::{self, MqttRead, MqttWrite, Packet};
-use std::io::{self, Cursor, ErrorKind};
+use rumq_core::{self, Error, MqttRead, MqttWrite, Packet};
+use std::io::{self, Cursor, ErrorKind::TimedOut, ErrorKind::WouldBlock};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub struct MqttCodec;
@@ -28,13 +29,9 @@ impl Decoder for MqttCodec {
 
         let mut buf_ref = buf.as_ref();
 
-        // NOTE: we are reading remaining length twice. once in `header_and_remaining_length` and other
-        // in `mqtt_read`. Remove the duplicate later
         let (packet_type, remaining_len) = match buf_ref.read_packet_type_and_remaining_length() {
             Ok(len) => len,
-            Err(rumq_core::Error::Io(e)) if e.kind() == ErrorKind::TimedOut || e.kind() == ErrorKind::WouldBlock => {
-                return Ok(None)
-            }
+            Err(Error::Io(e)) if e.kind() == TimedOut || e.kind() == WouldBlock => return Ok(None),
             Err(e) => return Err(e.into()),
         };
 
@@ -46,11 +43,12 @@ impl Decoder for MqttCodec {
         // and the next time decode` gets called, there will be more bytes in `buf`,
         // hopefully enough to frame the packet
         if buf.len() < len {
+            buf.reserve(len);
             return Ok(None);
         }
 
         let packet = buf_ref.deserialize(packet_type, remaining_len)?;
-        buf.split_to(len);
+        buf.advance(len);
         Ok(Some(packet))
     }
 }

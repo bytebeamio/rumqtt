@@ -174,7 +174,7 @@ async fn router(rx: Receiver<(String, router::RouterMessage)>) {
     }
 }
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(core_threads = 4)]
 pub async fn start(config: Config) {
     let (router_tx, router_rx) = channel(100);
 
