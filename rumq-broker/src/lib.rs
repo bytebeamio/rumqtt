@@ -29,6 +29,7 @@ mod httppush;
 mod httpserver;
 mod router;
 mod state;
+mod codec;
 
 #[derive(From, Debug)]
 pub enum Error {
