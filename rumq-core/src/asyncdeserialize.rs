@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
 #[async_trait]
-pub trait MqttRead: AsyncReadExt + Unpin {
+pub trait AsyncMqttRead: AsyncReadExt + Unpin {
     async fn mqtt_read(&mut self) -> Result<Packet, Error> {
         let p = self.read_u8().await?;
         let remaining_len = self.read_remaining_length().await?;
@@ -266,11 +266,11 @@ pub trait MqttRead: AsyncReadExt + Unpin {
 }
 
 /// Implement MattRead for every AsyncReadExt type (and hence AsyncRead type)
-impl<R: AsyncReadExt + ?Sized + Unpin> MqttRead for R {}
+impl<R: AsyncReadExt + ?Sized + Unpin> AsyncMqttRead for R {}
 
 #[cfg(test)]
 mod test {
-    use super::MqttRead;
+    use super::AsyncMqttRead;
     use crate::{Connack, Connect, Packet, Publish, Suback, Subscribe, Unsubscribe};
     use crate::{
         ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes,

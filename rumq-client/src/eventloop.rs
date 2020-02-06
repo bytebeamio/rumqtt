@@ -1,6 +1,6 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::{self, Packet, Publish, PacketIdentifier, MqttRead, MqttWrite};
+use rumq_core::{self, Packet, Publish, PacketIdentifier, AsyncMqttRead, AsyncMqttWrite};
 use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};

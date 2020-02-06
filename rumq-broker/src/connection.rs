@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{connack, MqttRead, MqttWrite, Packet, Connect, ConnectReturnCode};
+use rumq_core::{connack, AsyncMqttRead, AsyncMqttWrite, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::SendError;
 use tokio::stream::iter;

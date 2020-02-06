@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
 #[async_trait]
-pub trait MqttWrite: AsyncWriteExt + Unpin {
+pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
     async fn mqtt_write(&mut self, packet: &Packet) -> Result<(), Error> {
         match packet {
             Packet::Connect(connect) => {
@@ -176,11 +176,11 @@ pub trait MqttWrite: AsyncWriteExt + Unpin {
 }
 
 /// Implement MqttWrite for every AsyncWriteExt type (and hence AsyncWrite type)
-impl<W: AsyncWriteExt + ?Sized + Unpin> MqttWrite for W {}
+impl<W: AsyncWriteExt + ?Sized + Unpin> AsyncMqttWrite for W {}
 
 #[cfg(test)]
 mod test {
-    use super::MqttWrite;
+    use super::AsyncMqttWrite;
     use crate::{Connack, Connect, Packet, Publish, Subscribe};
     use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
 
