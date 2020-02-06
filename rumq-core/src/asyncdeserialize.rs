@@ -6,8 +6,13 @@ use tokio::io::AsyncReadExt;
 #[async_trait]
 pub trait AsyncMqttRead: AsyncReadExt + Unpin {
     async fn mqtt_read(&mut self) -> Result<Packet, Error> {
-        let byte1 = self.read_u8().await?;
+        let packet_type = self.read_u8().await?;
         let remaining_len = self.read_remaining_length().await?;
+
+        self.deserialize(packet_type, remaining_len).await
+    }
+
+    async fn deserialize(&mut self, byte1: u8, remaining_len: usize) -> Result<Packet, Error> {
         let kind = packet_type(byte1 >> 4)?;
         
         if remaining_len == 0 {

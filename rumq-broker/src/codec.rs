@@ -13,9 +13,9 @@ impl MqttCodec {
 
 impl Decoder for MqttCodec {
     type Item = Packet;
-    type Error = io::Error;
+    type Error = rumq_core::Error;
 
-    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Packet>, io::Error> {
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Packet>, rumq_core::Error> {
         // NOTE: `decode` might be called with `buf.len == 0` when prevous
         // decode call read all the bytes in the stream. We should return
         // Ok(None) in those cases or else the `read` call will return
@@ -30,8 +30,16 @@ impl Decoder for MqttCodec {
 
         // NOTE: we are reading remaining length twice. once in `header_and_remaining_length` and other
         // in `mqtt_read`. Remove the duplicate later
-        let len = buf_ref.header_and_remaining_length().unwrap();
-        let packet = buf_ref.mqtt_read().unwrap();
+        let (packet_type, remaining_len) = match buf_ref.read_packet_type_and_remaining_length() {
+            Ok(len) => len,
+            Err(rumq_core::Error::Io(e)) if e.kind() == ErrorKind::TimedOut || e.kind() == ErrorKind::WouldBlock => {
+                return Ok(None)
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let header_len = buf_ref.header_len(remaining_len);
+        let len = header_len + remaining_len;
 
         // NOTE: It's possible that `decode` got called before `buf` has full bytes
         // necessary to frame raw bytes into a packet. In that case return Ok(None)
@@ -41,6 +49,7 @@ impl Decoder for MqttCodec {
             return Ok(None);
         }
 
+        let packet = buf_ref.deserialize(packet_type, remaining_len)?;
         buf.split_to(len);
         Ok(Some(packet))
     }
@@ -50,7 +59,7 @@ impl Encoder for MqttCodec {
     type Item = Packet;
     type Error = io::Error;
 
-    fn encode(&mut self, msg: Packet, buf: &mut BytesMut) -> io::Result<()> {
+    fn encode(&mut self, msg: Packet, buf: &mut BytesMut) -> Result<(), io::Error> {
         let mut stream = Cursor::new(Vec::new());
 
         // TODO: Implement `write_packet` for `&mut BytesMut`

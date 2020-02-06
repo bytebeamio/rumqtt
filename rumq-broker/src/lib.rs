@@ -5,6 +5,7 @@ extern crate log;
 
 use derive_more::From;
 use futures_util::future::join_all;
+use tokio_util::codec::Framed;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{channel, Sender, Receiver};
@@ -144,19 +145,24 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String,
                 }
             };
 
-            task::spawn(eventloop(config, stream, router_tx));
+            let framed = Framed::new(stream, codec::MqttCodec::new());
+            task::spawn( async {
+                match connection::eventloop(config, framed, router_tx).await {
+                    Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
+                    Err(e) => error!("Connection eventloop error = {:?}", e),
+                }
+            });
         } else {
-            task::spawn(eventloop(config, stream, router_tx));
+            let framed = Framed::new(stream, codec::MqttCodec::new());
+            task::spawn( async {
+                match connection::eventloop(config, framed, router_tx).await {
+                    Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
+                    Err(e) => error!("Connection eventloop error = {:?}", e),
+                }
+            });
         };
 
         time::delay_for(Duration::from_millis(10)).await;
-    }
-}
-
-async fn eventloop(config: Arc<ServerSettings>, stream: impl Network, router_tx: Sender<(String, router::RouterMessage)>) {
-    match connection::eventloop(config, stream, router_tx).await {
-        Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
-        Err(e) => error!("Connection eventloop error = {:?}", e),
     }
 }
 

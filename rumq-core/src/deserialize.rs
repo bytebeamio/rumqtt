@@ -3,16 +3,20 @@ use byteorder::ReadBytesExt;
 use std::io::Read;
 
 pub trait MqttRead: ReadBytesExt {
-    fn header_and_remaining_length(&mut self) -> Result<usize, Error> {
+    fn mqtt_read(&mut self) -> Result<Packet, Error> {
+        let packet_type = self.read_u8()?;
         let remaining_len = self.read_remaining_length()?;
-        let header_len = self.header_len(remaining_len);
 
-        Ok(header_len + remaining_len)
+        self.deserialize(packet_type, remaining_len)
     }
 
-    fn mqtt_read(&mut self) -> Result<Packet, Error> {
-        let byte1 = self.read_u8()?;
+    fn read_packet_type_and_remaining_length(&mut self) -> Result<(u8, usize), Error> {
+        let packet_type = self.read_u8()?;
         let remaining_len = self.read_remaining_length()?;
+        Ok((packet_type, remaining_len))
+    }
+
+    fn deserialize(&mut self, byte1: u8, remaining_len: usize) -> Result<Packet, Error> {
         let kind = packet_type(byte1 >> 4)?;
 
         if remaining_len == 0 {
