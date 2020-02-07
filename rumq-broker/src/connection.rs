@@ -5,6 +5,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::stream::iter;
 use tokio::stream::StreamExt;
 use tokio::time;
+use tokio::time::Instant;
 use tokio::select;
 use futures_util::sink::Sink;
 use futures_util::sink::SinkExt;
@@ -49,6 +50,8 @@ pub struct Connection<S> {
     stream:     S,
     this_rx:    Receiver<RouterMessage>,
     router_tx:  Sender<(String, RouterMessage)>,
+    throttle_flag: bool,
+    throttle: Instant,
 }
 
 impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin> Connection<S> {
@@ -69,12 +72,14 @@ impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = i
         // construct connect router message with cliend id and handle to this connection
         let routermessage = RouterMessage::Connect(router::Connection::new(connect, this_tx));
         router_tx.send((id.clone(), routermessage)).await?;
-        let connection = Connection { id, keep_alive, stream, this_rx, router_tx };
+        let connection = Connection { id, keep_alive, stream, this_rx, router_tx, throttle: Instant::now(), throttle_flag: false };
         Ok(connection)
     }
 
     async fn run(&mut self) -> Result<(), Error> {
         let stream = &mut self.stream;
+        let throttle = &mut self.throttle;
+        let throttle_flag = &mut self.throttle_flag;
         let id = self.id.to_owned();
 
         let message = match self.this_rx.next().await {
@@ -144,10 +149,17 @@ impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = i
 
             // TODO: Use Delay::reset to not construct this timeout future everytime
             let packet = time::timeout(keep_alive, async {
+                if *throttle_flag {
+                    time::delay_until(*throttle).await;
+                    *throttle_flag = false;
+                }
+                
                 let packet = stream.next().await.ok_or(Error::StreamDone)??;
+                *throttle_flag = true;
+                *throttle = Instant::now() + Duration::from_millis(10);
                 Ok::<_, Error>(packet)
             });
-            
+
             let this_rx = &mut self.this_rx;
             let message = async {
                 this_rx.next().await

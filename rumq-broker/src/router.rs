@@ -519,7 +519,7 @@ mod test {
     fn persistent_disconnected_and_dead_connections_are_moved_to_inactive_state() {}
 
     #[test]
-    fn persistend_reconnections_are_move_from_inactive_to_active_state() {}
+    fn persistend_reconnections_are_move_from_inactive_to_active_state() {};
 
     #[test]
     fn offline_messages_are_given_back_to_reconnected_persistent_connection() {}
