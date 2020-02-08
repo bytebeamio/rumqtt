@@ -29,7 +29,9 @@ pub async fn start(config: Arc<Config>, router_tx: Sender<(String, RouterMessage
                     let publish = rumq_core::publish(path, rumq_core::QoS::AtMostOnce, body_bytes.to_vec());
                     let packet = Packet::Publish(publish);
                     let mut router_tx = router_tx.lock().await;
-                    router_tx.send(("httpserver".to_owned(), RouterMessage::Packet(packet))).await.unwrap();
+                    if let Err(e) = router_tx.send(("httpserver".to_owned(), RouterMessage::Packet(packet))).await {
+                        error!("Failed sending data to the router. Error = {:?}", e);
+                    }
 
                     Ok::<_, hyper::Error>(Response::new(Body::from("Forwarding action")))
                 }

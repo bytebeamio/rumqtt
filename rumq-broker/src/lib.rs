@@ -189,11 +189,12 @@ pub async fn start(config: Config) {
     let httpserver_config = Arc::new(config.clone());
     task::spawn(async move { httpserver::start(httpserver_config, http_router_tx).await });
 
-    let status_router_tx = router_tx.clone();
     // TODO: Remove clone on main config
+    let status_router_tx = router_tx.clone();
     let httppush_config = Arc::new(config.clone());
     task::spawn(async move {
-        httppush::start(httppush_config, status_router_tx).await;
+        let out = httppush::start(httppush_config, status_router_tx).await;
+        error!("Http routine stopped. Result = {:?}", out);
     });
 
     let mut servers = Vec::new();

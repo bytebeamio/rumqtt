@@ -11,7 +11,7 @@ pub enum Protocol {
     MQTT(u8),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Connect {
     /// Mqtt protocol version
     pub protocol: Protocol,
@@ -124,20 +124,6 @@ pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P
     }
 }
 
-impl fmt::Debug for Publish {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Topic = {}, Qos = {:?}, Retain = {}, Pkid = {:?}, Payload Size = {}",
-            self.topic_name,
-            self.qos,
-            self.retain,
-            self.pkid,
-            self.payload.len()
-        )
-    }
-}
-
 impl Publish {
     pub fn set_pkid<P: Into<PacketIdentifier>>(&mut self, pkid: P) -> &mut Self {
         self.pkid = Some(pkid.into());
@@ -145,7 +131,7 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Subscribe {
     pub pkid: PacketIdentifier,
     pub topics: Vec<SubscribeTopic>,
@@ -178,7 +164,7 @@ impl Subscribe {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct SubscribeTopic {
     pub topic_path: String,
     pub qos: QoS,
@@ -204,4 +190,40 @@ pub fn suback(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -
 pub struct Unsubscribe {
     pub pkid: PacketIdentifier,
     pub topics: Vec<String>,
+}
+
+impl fmt::Debug for Publish {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Topic = {}, Qos = {:?}, Retain = {}, Pkid = {:?}, Payload Size = {}",
+            self.topic_name,
+            self.qos,
+            self.retain,
+            self.pkid,
+            self.payload.len()
+        )
+    }
+}
+
+impl fmt::Debug for Connect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Protocol = {:?}, Keep alive = {:?}, Client id = {}, Clean session = {}",
+            self.protocol, self.keep_alive, self.client_id, self.clean_session,
+        )
+    }
+}
+
+impl fmt::Debug for Subscribe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Filters = {:?}, Packet id = {:?}", self.pkid, self.topics)
+    }
+}
+
+impl fmt::Debug for SubscribeTopic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Filter = {}, Qos = {:?}", self.topic_path, self.qos)
+    }
 }
