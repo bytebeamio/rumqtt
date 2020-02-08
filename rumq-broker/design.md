@@ -61,6 +61,56 @@ Disadvantages
 * Acks from/to router. Adds to processing. Microbatching can help here 
 
 
+Router full design
+-------------
+
+* Router maintains all the state of connections
+
+Connections just forward data to the router
+
+* Router can be a shared with multiple connections on a thread with Rc
+
+This can make the router forwarding asynchronous
+
+Having a router as a separate thread makes asynchronous forwarding
+difficult as number of connections are dynamic and we need to `select`
+over them
+
+* 4 threaded broker will have 4 routers which caters n connections
+
+This is a good middle ground between each connection having knowledge of
+all the other connections vs single router thread maintaining all the
+connection knowledge. 
+
+Each router now has info about all it's connections and the other
+routers
+
+* Routers will talk to each other to forward publisher to a connection
+  on different router
+
+We don't want to forward data directly to the connection from a random
+router as we want to save the outgoing state of a connection on a
+single router. Prevents fragmentation
+
+* This inter router communication can be extended across network to make
+  the broker distributed
+
+Distributed commit log
+----------------
+
+* Router design should be extend to be a distributed commit log like
+  kafka
+
+* But doing disk operations on router (which is shared by async
+  connections) is not correct
+
+  We probably can use BufWriter to fill the file and forward it to a
+  different thread?
+
+* We are now copying the outoing state of each connection. We need to
+  save a single commitlog per topic make make the subscribers just hold
+  offset like kafka does
+
 TODO
 ---------------
 
