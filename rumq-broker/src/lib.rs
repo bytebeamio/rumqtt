@@ -6,7 +6,6 @@ extern crate log;
 use derive_more::From;
 use futures_util::future::join_all;
 use tokio_util::codec::Framed;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use tokio::task;
@@ -212,8 +211,13 @@ pub async fn start(config: Config) {
     join_all(servers).await;
 }
 
-pub trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
-impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
+
+use futures_util::sink::Sink;
+use futures_util::stream::Stream;
+use rumq_core::Packet;
+
+pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
 #[cfg(test)]
 mod test {
