@@ -33,14 +33,14 @@ pub enum RouterMessage {
 
 pub struct Connection {
     pub connect: rumq_core::Connect,
-    pub handle: Sender<RouterMessage>
+    pub handle: Option<Sender<RouterMessage>>
 }
 
 impl Connection {
     pub fn new(connect: rumq_core::Connect, handle: Sender<RouterMessage>) -> Connection {
         Connection {
             connect,
-            handle
+            handle: Some(handle)
         }
     }
 }
@@ -94,6 +94,7 @@ impl Subscriber {
     }
 }
 
+#[derive(Debug)]
 pub struct Router {
     // handles to all active connections. used to route data
     active_connections:     HashMap<String, ActiveConnection>,
@@ -124,33 +125,52 @@ impl Router {
 
     pub async fn start(&mut self) -> Result<(), Error> {
         loop {
-            let (id, message) = match self.data_rx.recv().await {
+            let (id, mut message) = match self.data_rx.recv().await {
                 Some(message) => message,
                 None => return Err(Error::AllSendersDown),
             };
 
-            if let Err(err) = self.handle_incoming_router_message(id, message) {
-                error!("Handle packet error = {:?}", err);
+            // replys beack to the connection
+            match self.handle_incoming_router_message(id.clone(), &mut message) {
+                Ok(Some(message)) => self.forward(&id, message),
+                Ok(None) => (),
+                Err(e) => {
+                    error!("Incoming handle error = {:?}", e);
+                    continue;
+                }
+            }
+
+            // route the message to other connections
+            if let Err(e) = self.route(id, message) {
+                    error!("Routing error = {:?}", e);
             }
         }
     }
 
-    fn handle_incoming_router_message(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
+    fn handle_incoming_router_message(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
         debug!("Incoming router message. Id = {}, {:?}", id, message);
+
         match message {
             RouterMessage::Connect(connection) => {
-                if let Some(reply) = self.handle_connect(connection.connect, connection.handle)? {
-                    self.forward(&id, reply)
-                } else {
-                    self.forward(&id, RouterMessage::Pending(VecDeque::new()))
-                }
+                let handle = connection.handle.take().unwrap();
+                let message = self.handle_connect(connection.connect.clone(), handle)?;
+                Ok(message)
             }
             RouterMessage::Packet(packet) => {
-                // handles message and returns replys (which are sent to connection and then n/w) 
-                if let Some(reply) = self.handle_incoming_packet(&id, packet.clone())? {
-                    self.forward(&id, reply)
-                }
-                // all routing logic
+                let message = self.handle_incoming_packet(&id, packet.clone())?;
+                Ok(message)
+            }
+            RouterMessage::Death(id) => {
+                self.deactivate_and_forward_will(id.to_owned());
+                Ok(None)
+            }
+            _ => unimplemented!()
+        }
+    }
+
+    fn route(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
+        if let RouterMessage::Packet(packet) = message {
+                debug!("Routing router message. Id = {}, {:?}", id, packet);
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions_and_forward(&id, publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
@@ -158,9 +178,6 @@ impl Router {
                     Packet::Disconnect => self.deactivate(id),
                     _ => return Ok(())
                 }
-            }
-            RouterMessage::Death(id) => self.deactivate_and_forward_will(id),
-            _ => unimplemented!()
         }
 
         Ok(())
@@ -177,7 +194,7 @@ impl Router {
 
             let state = MqttState::new(clean_session, will);
             self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
-            None
+            Some(RouterMessage::Pending(VecDeque::new()))
         } else {
             if let Some(connection) = self.inactive_connections.remove(&id) {
                 let pending = connection.state.outgoing_publishes.clone();
@@ -186,7 +203,7 @@ impl Router {
             } else {
                 let state = MqttState::new(clean_session, will);
                 self.active_connections.insert(id.clone(), ActiveConnection::new(connection_handle, state));
-                None
+                Some(RouterMessage::Pending(VecDeque::new()))
             }
         };
 

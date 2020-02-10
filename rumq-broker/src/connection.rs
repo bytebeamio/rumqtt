@@ -5,13 +5,15 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::stream::iter;
 use tokio::stream::StreamExt;
 use tokio::time;
+use tokio::time::Elapsed;
+use tokio::time::Instant;
 use tokio::select;
-use futures_util::sink::Sink;
 use futures_util::sink::SinkExt;
 use futures_util::stream::Stream;
 
 use crate::router::{self, RouterMessage};
 use crate::ServerSettings;
+use crate::Network;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +23,8 @@ use std::io;
 pub enum Error {
     Io(io::Error),
     Core(rumq_core::Error),
-    Timeout(time::Elapsed),
+    Timeout(Elapsed),
+    KeepAlive,
     Send(SendError<(String, RouterMessage)>),
     /// Received a wrong packet while waiting for another packet
     WrongPacket,
@@ -31,7 +34,7 @@ pub enum Error {
     StreamDone
 }
 
-pub async fn eventloop<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin>(config: Arc<ServerSettings>, stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
+pub async fn eventloop<S: Network>(config: Arc<ServerSettings>, stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
     let mut connection = Connection::new(config, stream, router_tx.clone()).await?;
     let id = connection.id.clone();
 
@@ -51,7 +54,7 @@ pub struct Connection<S> {
     router_tx:  Sender<(String, RouterMessage)>,
 }
 
-impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin> Connection<S> {
+impl<S: Network> Connection<S> {
     async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
@@ -73,9 +76,10 @@ impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = i
         Ok(connection)
     }
 
+
     async fn run(&mut self) -> Result<(), Error> {
-        let stream = &mut self.stream;
-        let id = self.id.to_owned();
+        let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
+        let id = self.id.clone();
 
         let message = match self.this_rx.next().await {
             Some(m) => m,
@@ -84,7 +88,6 @@ impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = i
                 return Ok(()) 
             }
         };
-
 
         let mut pending = match message {
             RouterMessage::Pending(connack) => connack,
@@ -95,41 +98,23 @@ impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = i
         if pending.len() > 0 {
             let connack = connack(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
-            stream.send(packet).await?;
+            let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
 
-            let mut pending = iter(pending.drain(..)).map(Packet::Publish);
+            self.stream.send(packet).await?;
+
+            let mut pending = iter(pending.drain(..)).map(|publish| RouterMessage::Packet(Packet::Publish(publish)));
+            let mut incoming = time::throttle(Duration::from_millis(100), &mut self.stream);
+            let mut timeout = time::delay_for(keep_alive);
+
             loop {
-                // let stream = &mut self.stream;
-                let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
+                let (done, routermessage) = select(&mut incoming, &mut pending, keep_alive, &mut timeout).await?;
+                if let Some(message) = routermessage {
+                    self.router_tx.send((id.clone(), message)).await?;
+                }
 
-                let packet = time::timeout(keep_alive, async {
-                    let packet = stream.next().await.ok_or(Error::StreamDone)??;
-                    Ok::<_, Error>(packet)
-                });
-
-                select! {
-                    // read packets from network and generate network reply and router message
-                    o = packet => {
-                        match o?? {
-                            Packet::Pingreq => stream.send(Packet::Pingresp).await?,
-                            packet => {
-                                let message = RouterMessage::Packet(packet);
-                                self.router_tx.send((id.to_owned(), message)).await?;
-                            }
-                        };
-                    }
-
-                    // read packets from the router and write to network
-                    // router can close the connection by dropping tx handle. this should stop this
-                    // eventloop without sending the death notification
-                    o = pending.next() => match o {
-                        Some(packet) => stream.send(packet).await?,
-                        None => {
-                            debug!("Done processing previous session and offline messages");
-                            break
-                        } 
-                    }
-                };
+                if done {
+                    break
+                }
             }
         } else {
             let connack = connack(ConnectReturnCode::Accepted, false);
@@ -138,51 +123,74 @@ impl<S: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = i
         }
 
         // eventloop which processes packets and router messages
+        let mut incoming = &mut self.stream;
+        let mut incoming = time::throttle(Duration::from_millis(0), &mut incoming);
         loop {
-            let stream = &mut self.stream;
-            let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
+            let mut timeout = time::delay_for(keep_alive);
+            let (done, routermessage) = select(&mut incoming, &mut self.this_rx, keep_alive, &mut timeout).await?; 
+            if let Some(message) = routermessage {
+                self.router_tx.send((id.clone(), message)).await?;
+            }
 
-            // TODO: Use Delay::reset to not construct this timeout future everytime
-            let packet = time::timeout(keep_alive, async {
-                let packet = stream.next().await.ok_or(Error::StreamDone)??;
-                Ok::<_, Error>(packet)
-            });
-            
-            let this_rx = &mut self.this_rx;
-            let message = async {
-                this_rx.next().await
-            };
+            if done {
+                break
+            }
+        }
 
-            select! {
-                // read packets from network and generate network reply and router message
-                o = packet => {
-                    match o?? {
-                        Packet::Pingreq => self.stream.send(Packet::Pingresp).await?,
-                        packet => {
-                            let message = RouterMessage::Packet(packet);
-                            self.router_tx.send((id.to_owned(), message)).await?;
-                        }
-                    };
-                }
+        Ok(())
+    }
+}
 
-                // read packets from the router and write to network
-                // router can close the connection by dropping tx handle. this should stop this
-                // eventloop without sending the death notification
-                o = message => match o {
-                    Some(message) => {
-                        match message {
-                            RouterMessage::Packet(packet) => self.stream.send(packet).await?,
-                            _ => return Err(Error::WrongPacket)
-                        }
-                    }
-                    None => {
-                        info!("Tx closed!! Stopping the connection");
-                        return Ok(())
-                    }
+use tokio::time::Throttle;
+use tokio::time::Delay;
+
+/// selects incoming packets from the network stream and router message stream
+/// Forwards router messages to network
+/// bool field can be used to instruct outer loop to stop processing messages
+async fn select<S: Network>(
+    stream: &mut Throttle<S>, 
+    mut outgoing: impl Stream<Item = RouterMessage> + Unpin,
+    keep_alive: Duration,
+    mut timeout: &mut Delay) -> Result<(bool, Option<RouterMessage>), Error> {
+
+    let keepalive = &mut timeout;
+    select! {
+        _ = keepalive => return Err(Error::KeepAlive),
+        o = stream.next() => {
+            timeout.reset(Instant::now() + keep_alive);
+            let o = match o {
+                Some(o) => o,
+                None => {
+                    let done = true;
+                    let packet = None;
+                    return Ok((done, packet))
                 }
             };
+
+            match o? {
+                Packet::Pingreq => stream.get_mut().send(Packet::Pingresp).await?,
+                packet => {
+                    let message = Some(RouterMessage::Packet(packet));
+                    let done = false;
+                    return Ok((done, message))
+                }
+            }
+        }
+        o = outgoing.next() => match o {
+            Some(RouterMessage::Packet(packet)) => stream.get_mut().send(packet).await?,
+            Some(message) => {
+                warn!("Invalid router message = {:?}", message);
+                return Ok((false, None))
+            }
+            None => {
+                let message = None;
+                let done = true;
+                return Ok((done, message))
+            }
         }
     }
+
+    Ok((false, None))
 }
 
 pub fn handle_incoming_connect(packet: Packet) -> Result<Connect, Error> {

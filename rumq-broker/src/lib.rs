@@ -6,7 +6,6 @@ extern crate log;
 use derive_more::From;
 use futures_util::future::join_all;
 use tokio_util::codec::Framed;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{channel, Sender, Receiver};
 use tokio::task;
@@ -189,11 +188,12 @@ pub async fn start(config: Config) {
     let httpserver_config = Arc::new(config.clone());
     task::spawn(async move { httpserver::start(httpserver_config, http_router_tx).await });
 
-    let status_router_tx = router_tx.clone();
     // TODO: Remove clone on main config
+    let status_router_tx = router_tx.clone();
     let httppush_config = Arc::new(config.clone());
     task::spawn(async move {
-        httppush::start(httppush_config, status_router_tx).await;
+        let out = httppush::start(httppush_config, status_router_tx).await;
+        error!("Http routine stopped. Result = {:?}", out);
     });
 
     let mut servers = Vec::new();
@@ -211,8 +211,13 @@ pub async fn start(config: Config) {
     join_all(servers).await;
 }
 
-pub trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
-impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
+
+use futures_util::sink::Sink;
+use futures_util::stream::Stream;
+use rumq_core::Packet;
+
+pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
 #[cfg(test)]
 mod test {
