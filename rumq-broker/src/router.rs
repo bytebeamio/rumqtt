@@ -130,8 +130,11 @@ impl Router {
                 None => return Err(Error::AllSendersDown),
             };
 
-            // replys beack to the connection
-            match self.handle_incoming_router_message(id.clone(), &mut message) {
+            // replys back to the connection sending the message
+            // doesn't modify any routing information of the router
+            // all the routing and route modifications due to subscriptions
+            // are part of `route` method
+            match self.reply(id.clone(), &mut message) {
                 Ok(Some(message)) => self.forward(&id, message),
                 Ok(None) => (),
                 Err(e) => {
@@ -140,14 +143,17 @@ impl Router {
                 }
             }
 
-            // route the message to other connections
+            // adds routes, routes the message to other connections etc etc
             if let Err(e) = self.route(id, message) {
-                    error!("Routing error = {:?}", e);
+                error!("Routing error = {:?}", e);
             }
         }
     }
 
-    fn handle_incoming_router_message(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
+    /// generates reply to send backto the connection. Shouldn't touch anything except active and 
+    /// inactive connections
+    /// No routing modifications here
+    fn reply(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
         debug!("Incoming router message. Id = {}, {:?}", id, message);
 
         match message {
@@ -160,16 +166,13 @@ impl Router {
                 let message = self.handle_incoming_packet(&id, packet.clone())?;
                 Ok(message)
             }
-            RouterMessage::Death(id) => {
-                self.deactivate_and_forward_will(id.to_owned());
-                Ok(None)
-            }
-            _ => unimplemented!()
+            _ => Ok(None)
         }
     }
 
     fn route(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
-        if let RouterMessage::Packet(packet) = message {
+        match message {
+            RouterMessage::Packet(packet) => {
                 debug!("Routing router message. Id = {}, {:?}", id, packet);
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions_and_forward(&id, publish),
@@ -178,8 +181,12 @@ impl Router {
                     Packet::Disconnect => self.deactivate(id),
                     _ => return Ok(())
                 }
+            }
+            RouterMessage::Death(id) => {
+                self.deactivate_and_forward_will(id.to_owned());
+            }
+            _ => () 
         }
-
         Ok(())
     }
 
