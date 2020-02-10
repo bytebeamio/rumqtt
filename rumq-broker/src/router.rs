@@ -2,6 +2,9 @@ use derive_more::From;
 use rumq_core::{has_wildcards, matches, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::select;
+use tokio::time::{self, Duration};
+use tokio::stream::StreamExt;
 
 use std::collections::{HashMap, VecDeque};
 use std::mem;
@@ -25,6 +28,8 @@ pub enum RouterMessage {
     Connect(Connection),
     /// Packet
     Packet(rumq_core::Packet),
+    /// Packets
+    Packets(VecDeque<rumq_core::Packet>),
     /// Disconnects a client from active connections list. Will handling
     Death(String),
     /// Pending messages of the previous connection
@@ -54,6 +59,7 @@ impl fmt::Debug for Connection {
 #[derive(Debug)]
 struct ActiveConnection {
     pub state: MqttState,
+    pub outgoing: VecDeque<rumq_core::Packet>,
     tx: Sender<RouterMessage>
 }
 
@@ -61,6 +67,7 @@ impl ActiveConnection {
     pub fn new(tx: Sender<RouterMessage>, state: MqttState) -> ActiveConnection {
         ActiveConnection {
             state,
+            outgoing: VecDeque::new(),
             tx
         }
     }
@@ -124,30 +131,48 @@ impl Router {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let mut interval = time::interval(Duration::from_millis(10));
+        
         loop {
-            let (id, mut message) = match self.data_rx.recv().await {
-                Some(message) => message,
-                None => return Err(Error::AllSendersDown),
-            };
+            select! {
+                o = self.data_rx.recv() => {
+                    let (id, mut message) = o.unwrap();
+                    match self.reply(id.clone(), &mut message) {
+                        Ok(Some(message)) => self.forward(&id, message),
+                        Ok(None) => (),
+                        Err(e) => {
+                            error!("Incoming handle error = {:?}", e);
+                            continue;
+                        }
+                    }
 
-            // replys beack to the connection
-            match self.handle_incoming_router_message(id.clone(), &mut message) {
-                Ok(Some(message)) => self.forward(&id, message),
-                Ok(None) => (),
-                Err(e) => {
-                    error!("Incoming handle error = {:?}", e);
-                    continue;
+                    // adds routes, routes the message to other connections etc etc
+                    if let Err(e) = self.route(id, message) {
+                        error!("Routing error = {:?}", e);
+                    }
+                }
+                o = interval.next() => {
+                    for (_, connection) in self.active_connections.iter_mut() {
+                        let pending = connection.outgoing.split_off(0);
+                        if pending.len() > 0 {
+                            let _ = connection.tx.try_send(RouterMessage::Packets(pending));
+                        }
+                    }
                 }
             }
 
-            // route the message to other connections
-            if let Err(e) = self.route(id, message) {
-                    error!("Routing error = {:?}", e);
-            }
+
         }
     }
 
-    fn handle_incoming_router_message(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
+    /// replys back to the connection sending the message
+    /// doesn't modify any routing information of the router
+    /// all the routing and route modifications due to subscriptions
+    /// are part of `route` method
+    /// generates reply to send backto the connection. Shouldn't touch anything except active and 
+    /// inactive connections
+    /// No routing modifications here
+    fn reply(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
         debug!("Incoming router message. Id = {}, {:?}", id, message);
 
         match message {
@@ -160,26 +185,27 @@ impl Router {
                 let message = self.handle_incoming_packet(&id, packet.clone())?;
                 Ok(message)
             }
-            RouterMessage::Death(id) => {
-                self.deactivate_and_forward_will(id.to_owned());
-                Ok(None)
-            }
-            _ => unimplemented!()
+            _ => Ok(None)
         }
     }
 
     fn route(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
-        if let RouterMessage::Packet(packet) = message {
+        match message {
+            RouterMessage::Packet(packet) => {
                 debug!("Routing router message. Id = {}, {:?}", id, packet);
                 match packet {
-                    Packet::Publish(publish) => self.match_subscriptions_and_forward(&id, publish),
+                    Packet::Publish(publish) => self.match_subscriptions(&id, publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
                     Packet::Unsubscribe(unsubscribe) => self.remove_from_subscriptions(id, unsubscribe),
                     Packet::Disconnect => self.deactivate(id),
                     _ => return Ok(())
                 }
+            }
+            RouterMessage::Death(id) => {
+                self.deactivate_and_forward_will(id.to_owned());
+            }
+            _ => () 
         }
-
         Ok(())
     }
 
@@ -225,7 +251,7 @@ impl Router {
         Ok(reply)
     }
 
-    fn match_subscriptions_and_forward(&mut self, _id: &str, publish: Publish) {
+    fn match_subscriptions(&mut self, _id: &str, publish: Publish) {
         if publish.retain {
             if publish.payload.len() == 0 {
                 self.retained_publishes.remove(&publish.topic_name);
@@ -239,7 +265,7 @@ impl Router {
         if let Some(subscribers) = self.concrete_subscriptions.get(topic) {
             let subscribers = subscribers.clone();
             for subscriber in subscribers.iter() {
-                self.forward_publish(subscriber, publish.clone());
+                self.fill_subscriber(subscriber, publish.clone());
             }
         }
 
@@ -250,7 +276,7 @@ impl Router {
             if matches(&topic, &filter) {
                 for subscriber in subscribers.into_iter() {
                     let publish = publish.clone();
-                    self.forward_publish(&subscriber, publish);
+                    self.fill_subscriber(&subscriber, publish);
                 }
             }
         };
@@ -300,13 +326,13 @@ impl Router {
                 let retained_publishes = self.retained_publishes.clone();
                 for (topic, publish) in retained_publishes.into_iter() {
                     if matches(&topic, &filter) {
-                        self.forward_publish(&subscriber, publish);
+                        self.fill_subscriber(&subscriber, publish);
                     }
                 }
             } else {
                 if let Some(publish) = self.retained_publishes.get(&filter) {
                     let publish = publish.clone();
-                    self.forward_publish(&subscriber, publish);
+                    self.fill_subscriber(&subscriber, publish);
                 }
             }
         }
@@ -449,7 +475,7 @@ impl Router {
                 let qos = will.qos;
 
                 let publish = rumq_core::publish(topic, qos, message);
-                self.match_subscriptions_and_forward(&id, publish);
+                self.match_subscriptions(&id, publish);
             }
 
             if !connection.state.clean_session {
@@ -484,7 +510,7 @@ impl Router {
     }
 
     // forwards data to the connection with the following id
-    fn forward_publish(&mut self, subscriber: &Subscriber, mut publish: Publish)  {
+    fn fill_subscriber(&mut self, subscriber: &Subscriber, mut publish: Publish)  {
         publish.qos = subscriber.qos;
 
         if let Some(connection) = self.inactive_connections.get_mut(&subscriber.client_id) {
@@ -493,16 +519,10 @@ impl Router {
             return
         }
 
-        let message = if let Some(connection) = self.active_connections.get_mut(&subscriber.client_id) {
+        if let Some(connection) = self.active_connections.get_mut(&subscriber.client_id) {
             let packet = connection.state.handle_outgoing_publish(publish); 
-            let message = RouterMessage::Packet(packet);
-            debug!("Forwarding publish to active connection. Id = {}, {:?}", subscriber.client_id, message);
-            message
-        } else {
-            return
-        };
-
-        self.forward(&subscriber.client_id, message);
+            connection.outgoing.push_back(packet);
+        }
     }
 
     fn forward(&mut self, id: &str, message: RouterMessage) {

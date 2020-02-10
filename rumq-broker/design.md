@@ -61,7 +61,7 @@ Disadvantages
 * Acks from/to router. Adds to processing. Microbatching can help here 
 
 
-Router full design
+Shared router experiment
 -------------
 
 * Router maintains all the state of connections
@@ -94,6 +94,18 @@ single router. Prevents fragmentation
 
 * This inter router communication can be extended across network to make
   the broker distributed
+
+
+Findings:
+-------
+
+* Need to separate mutable and immutable parts well
+* Can't use tokio channel as sends need mutable borrows
+* Even async std channels are a problem because the router can block
+  during `rc_router_tx.send()` causing Borrow mut panic while creating a
+  new connection
+* Difficult to see Bandwidth of router and connections separately
+
 
 Distributed commit log
 ----------------
