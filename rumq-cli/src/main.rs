@@ -18,5 +18,6 @@ fn main() {
     let config = fs::read_to_string(commandline.config_path).unwrap();
     let config = toml::from_str::<Config>(&config).unwrap();
 
-    rumq_broker::start(config)
+    let mut broker = rumq_broker::new(config);
+    broker.start();
 }
