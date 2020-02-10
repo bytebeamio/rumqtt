@@ -124,7 +124,7 @@ impl<S: Network> Connection<S> {
 
         // eventloop which processes packets and router messages
         let mut incoming = &mut self.stream;
-        let mut incoming = time::throttle(Duration::from_millis(0), &mut incoming);
+        let mut incoming = time::throttle(Duration::from_millis(10), &mut incoming);
         loop {
             let mut timeout = time::delay_for(keep_alive);
             let (done, routermessage) = select(&mut incoming, &mut self.this_rx, keep_alive, &mut timeout).await?; 
@@ -178,6 +178,12 @@ async fn select<S: Network>(
         }
         o = outgoing.next() => match o {
             Some(RouterMessage::Packet(packet)) => stream.get_mut().send(packet).await?,
+            Some(RouterMessage::Packets(packets)) => {
+                // TODO: Make these vectorized
+                for packet in packets.into_iter() {
+                    stream.get_mut().send(packet).await?
+                }
+            }
             Some(message) => {
                 warn!("Invalid router message = {:?}", message);
                 return Ok((false, None))
