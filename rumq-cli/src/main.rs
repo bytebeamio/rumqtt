@@ -11,7 +11,9 @@ pub struct CommandLine {
     config_path: PathBuf,
 }
 
-fn main() {
+
+#[tokio::main(core_threads = 1)]
+async fn main() {
     pretty_env_logger::init();
 
     let commandline = CommandLine::from_args();
@@ -19,5 +21,6 @@ fn main() {
     let config = toml::from_str::<Config>(&config).unwrap();
 
     let mut broker = rumq_broker::new(config);
-    broker.start();
+    let o = broker.start().await;
+    println!("Result = {:?}", o);
 }

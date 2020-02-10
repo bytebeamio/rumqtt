@@ -1,5 +1,3 @@
-#![recursion_limit="512"]
-
 #[macro_use]
 extern crate log;
 
@@ -189,8 +187,7 @@ impl Broker {
         self.router_handle.clone()
     }
 
-    #[tokio::main(core_threads = 4)]
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self) -> Vec<Result<(), task::JoinError>> {
         let mut servers = Vec::new();
         let server_configs = self.config.servers.split_off(0);
 
@@ -204,7 +201,7 @@ impl Broker {
             servers.push(o);
         }
 
-        join_all(servers).await;
+        join_all(servers).await
     }
 }
 
