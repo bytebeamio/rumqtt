@@ -17,14 +17,13 @@ pub use state::MqttState;
 /// Incoming notifications from the broker
 #[derive(Debug)]
 pub enum Notification {
-    Reconnection,
-    Disconnection,
     Publish(Publish),
     Puback(PacketIdentifier),
     Pubrec(PacketIdentifier),
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
-    Suback(PacketIdentifier),
+    Suback(Suback),
+    Unsuback(PacketIdentifier),
     StreamEnd(EventLoopError),
 }
 
