@@ -23,9 +23,12 @@ use std::time::Duration;
 use std::thread;
 
 mod connection;
-mod router;
 mod state;
 mod codec;
+mod router;
+
+pub use rumq_core as core;
+pub use router::{RouterMessage, Connection};
 
 #[derive(From, Debug)]
 pub enum Error {

@@ -14,7 +14,6 @@ tokio = { version = "0.2", features = ["full"] }
 tokio-util = { version = "0.2", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-rustls = "0.12"
-hyper = "0.13"
 rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.4" }
 derive_more = "0.99"
 log = "0.4"
