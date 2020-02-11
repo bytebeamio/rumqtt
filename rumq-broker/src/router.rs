@@ -137,6 +137,8 @@ impl Router {
             select! {
                 o = self.data_rx.recv() => {
                     let (id, mut message) = o.unwrap();
+                    
+                    debug!("In router message. Id = {}, {:?}", id, message);
                     match self.reply(id.clone(), &mut message) {
                         Ok(Some(message)) => self.forward(&id, message),
                         Ok(None) => (),
@@ -173,8 +175,6 @@ impl Router {
     /// inactive connections
     /// No routing modifications here
     fn reply(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
-        debug!("Incoming router message. Id = {}, {:?}", id, message);
-
         match message {
             RouterMessage::Connect(connection) => {
                 let handle = connection.handle.take().unwrap();
@@ -192,7 +192,6 @@ impl Router {
     fn route(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
         match message {
             RouterMessage::Packet(packet) => {
-                debug!("Routing router message. Id = {}, {:?}", id, packet);
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions(&id, publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
