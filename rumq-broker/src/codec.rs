@@ -1,7 +1,7 @@
 use bytes::buf::Buf;
 use bytes::BytesMut;
 use rumq_core::{self, Error, MqttRead, MqttWrite, Packet};
-use std::io::{self, Cursor, ErrorKind::TimedOut, ErrorKind::WouldBlock};
+use std::io::{self, Cursor, ErrorKind::TimedOut, ErrorKind::UnexpectedEof, ErrorKind::WouldBlock};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub struct MqttCodec;
@@ -17,21 +17,28 @@ impl Decoder for MqttCodec {
     type Error = rumq_core::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Packet>, rumq_core::Error> {
-        // NOTE: `decode` might be called with `buf.len == 0` when prevous
-        // decode call read all the bytes in the stream. We should return
-        // Ok(None) in those cases or else the `read` call will return
-        // Ok(0) => translated to UnexpectedEOF by `byteorder` crate.
-        // `read` call Ok(0) happens when buffer specified was 0 bytes in len
-        // https://doc.rust-lang.org/std/io/trait.Read.html#tymethod.read
+        // NOTE: `decode` might be called with `buf.len == 0`. We should return
+        // Ok(None) in those cases or else the internal `read_exact` call will return UnexpectedEOF
         if buf.len() < 2 {
             return Ok(None);
         }
 
+        // TODO: Better implementation by taking packet type and remaining len into account here
+        // Maybe the next `decode` call can wait for publish size byts to be filled in `buf` before being
+        // invoked again
+        // TODO: Find how the underlying implementation invokes this method. Is there an
+        // implementation with size awareness?
         let mut buf_ref = buf.as_ref();
-
         let (packet_type, remaining_len) = match buf_ref.read_packet_type_and_remaining_length() {
             Ok(len) => len,
-            Err(Error::Io(e)) if e.kind() == TimedOut || e.kind() == WouldBlock => return Ok(None),
+            // Not being able to fill `buf_ref` entirely is also UnexpectedEof
+            // This would be a problem if `buf` len is 2 and if the packet is not ping or other 2
+            // byte len, `read_packet_type_and_remaining_length` call tries reading more than 2 bytes
+            // from `buf` and results in Ok(0) which translates to Eof error when target buffer is
+            // not completely full
+            // https://doc.rust-lang.org/stable/std/io/trait.Read.html#tymethod.read
+            // https://doc.rust-lang.org/stable/src/std/io/mod.rs.html#501-944
+            Err(Error::Io(e)) if e.kind() == TimedOut || e.kind() == WouldBlock || e.kind() == UnexpectedEof => return Ok(None),
             Err(e) => return Err(e.into()),
         };
 
@@ -43,7 +50,6 @@ impl Decoder for MqttCodec {
         // and the next time decode` gets called, there will be more bytes in `buf`,
         // hopefully enough to frame the packet
         if buf.len() < len {
-            buf.reserve(len);
             return Ok(None);
         }
 
