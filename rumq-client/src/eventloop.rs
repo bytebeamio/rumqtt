@@ -84,7 +84,10 @@ impl MqttEventLoop {
     pub fn stream<'eventloop>(&'eventloop mut self) -> impl Stream<Item = Notification> + 'eventloop {
         let stream = stream! {
             let mut network = match self.connect().await {
-                Ok(network) => network,
+                Ok(network) => {
+                    yield Notification::Connected;
+                    network
+                },
                 Err(e) => {
                     yield Notification::StreamEnd(e);
                     return
@@ -99,7 +102,6 @@ impl MqttEventLoop {
 
             let (network_rx, mut network_tx) = split(network);
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
-
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
 
             pin_mut!(network_stream);

@@ -17,6 +17,7 @@ pub use state::MqttState;
 /// Incoming notifications from the broker
 #[derive(Debug)]
 pub enum Notification {
+    Connected,
     Publish(Publish),
     Puback(PacketIdentifier),
     Pubrec(PacketIdentifier),
