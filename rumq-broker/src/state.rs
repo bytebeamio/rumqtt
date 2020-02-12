@@ -134,7 +134,6 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions.
     fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Option<RouterMessage>, Error> {
         let pkids: Vec<Option<rumq_core::PacketIdentifier>> = self.outgoing_publishes.iter().map(|p| p.pkid).collect();
-        debug!("Pkids = {:?}", pkids);
         match self.outgoing_publishes.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_publishes.remove(index).expect("Wrong index");
