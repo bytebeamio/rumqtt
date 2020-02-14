@@ -5,14 +5,14 @@ use tokio::io::AsyncReadExt;
 
 #[async_trait]
 pub trait AsyncMqttRead: AsyncReadExt + Unpin {
-    async fn mqtt_read(&mut self) -> Result<Packet, Error> {
+    async fn async_mqtt_read(&mut self) -> Result<Packet, Error> {
         let packet_type = self.read_u8().await?;
         let remaining_len = self.read_remaining_length().await?;
 
-        self.deserialize(packet_type, remaining_len).await
+        self.async_deserialize(packet_type, remaining_len).await
     }
 
-    async fn deserialize(&mut self, byte1: u8, remaining_len: usize) -> Result<Packet, Error> {
+    async fn async_deserialize(&mut self, byte1: u8, remaining_len: usize) -> Result<Packet, Error> {
         let kind = packet_type(byte1 >> 4)?;
         
         if remaining_len == 0 {
@@ -294,7 +294,7 @@ mod test {
             0xDE, 0xAD, 0xBE, 0xEF                                          // extra packets in the stream
         ]);
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,
@@ -322,7 +322,7 @@ mod test {
             0x01, 0x00,                     // variable header. connack flags, connect return code
             0xDE, 0xAD, 0xBE, 0xEF          // extra packets in the stream
         ]);
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,
@@ -343,7 +343,7 @@ mod test {
             0xDE, 0xAD, 0xBE, 0xEF                       // extra packets in the stream
         ]);
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,
@@ -367,7 +367,7 @@ mod test {
             0xDE, 0xAD, 0xBE, 0xEF                          // extra packets in the stream
         ]);
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,
@@ -389,7 +389,7 @@ mod test {
             0x00, 0x0A,                                  // fixed header. packet identifier = 10
             0xDE, 0xAD, 0xBE, 0xEF                       // extra packets in the stream
         ]);
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(packet, Packet::Puback(PacketIdentifier(10)));
     }
@@ -408,7 +408,7 @@ mod test {
             0xDE, 0xAD, 0xBE, 0xEF                                              // extra packets in the stream
         ]);
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,
@@ -443,7 +443,7 @@ mod test {
             0xDE, 0xAD, 0xBE, 0xEF                                              // extra packets in the stream
         ]);
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,
@@ -463,7 +463,7 @@ mod test {
             0xDE, 0xAD, 0xBE, 0xEF      // extra packets in the stream
         ]);
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
 
         assert_eq!(
             packet,

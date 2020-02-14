@@ -8,6 +8,8 @@ authors = ["tekjar"]
 edition = "2018"
 
 [dependencies]
+bytes = "0.5"
+tokio-util = { version = "0.2", features = ["codec"] }
 derive_more = "0.15"
 tokio = { version = "0.2", features = ["io-util"] }
 async-trait = "0.1"
