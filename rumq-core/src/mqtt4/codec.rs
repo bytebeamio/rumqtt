@@ -5,8 +5,8 @@ use tokio_util::codec::{Decoder, Encoder};
 use std::io;
 use std::io::{Cursor, ErrorKind::TimedOut, ErrorKind::UnexpectedEof, ErrorKind::WouldBlock};
 
-use crate::{Error, Packet};
-use crate::{MqttRead, MqttWrite};
+use crate::mqtt4::{Error, Packet};
+use crate::mqtt4::{MqttRead, MqttWrite};
 
 pub struct MqttCodec;
 

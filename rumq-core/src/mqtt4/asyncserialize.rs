@@ -1,4 +1,4 @@
-use crate::*;
+use crate::mqtt4::*;
 
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
@@ -181,8 +181,8 @@ impl<W: AsyncWriteExt + ?Sized + Unpin> AsyncMqttWrite for W {}
 #[cfg(test)]
 mod test {
     use super::AsyncMqttWrite;
-    use crate::{Connack, Connect, Packet, Publish, Subscribe};
-    use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
+    use super::{Connack, Connect, Packet, Publish, Subscribe};
+    use super::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
 
     #[tokio::test]
     async fn write_packet_connect_mqtt_protocol_works() {
