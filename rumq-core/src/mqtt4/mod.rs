@@ -1,7 +1,3 @@
-use derive_more::From;
-use std::io;
-use std::string::FromUtf8Error;
-
 mod asyncdeserialize;
 mod asyncserialize;
 mod deserialize;
@@ -17,6 +13,8 @@ pub use deserialize::MqttRead;
 pub use packets::*;
 pub use serialize::MqttWrite;
 pub use topic::*;
+
+use crate::Error;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
@@ -111,19 +109,4 @@ pub fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
         5 => Ok(ConnectReturnCode::ServerUnavailable),
         _ => Err(Error::InvalidConnectReturnCode(num)),
     }
-}
-
-#[derive(Debug, From)]
-pub enum Error {
-    InvalidConnectReturnCode(u8),
-    InvalidProtocolLevel(String, u8),
-    IncorrectPacketFormat,
-    UnsupportedQoS,
-    UnsupportedPacketType(u8),
-    PayloadSizeIncorrect,
-    PayloadTooLong,
-    PayloadRequired,
-    TopicNameMustNotContainNonUtf8(FromUtf8Error),
-    MalformedRemainingLength,
-    Io(io::Error),
 }

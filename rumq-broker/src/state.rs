@@ -1,8 +1,10 @@
 use std::{collections::VecDeque, result::Result, time::Instant};
 
-use rumq_core::*;
-
 use crate::router::RouterMessage;
+use rumq_core::mqtt4::{
+    empty_subscribe, suback, valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS,
+    Subscribe, SubscribeReturnCodes, Unsubscribe,
+};
 
 #[derive(Debug)]
 pub enum Error {

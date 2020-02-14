@@ -12,6 +12,9 @@ use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::TLSError;
 use tokio_rustls::rustls::{AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig};
 use tokio_rustls::TlsAcceptor;
+use futures_util::sink::Sink;
+use futures_util::stream::Stream;
+use rumq_core::mqtt4::{codec, Packet};
 
 use serde::Deserialize;
 
@@ -24,7 +27,6 @@ use std::thread;
 
 mod connection;
 mod state;
-mod codec;
 mod router;
 
 pub use rumq_core as core;
@@ -151,10 +153,6 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
     }
 }
 
-
-use futures_util::sink::Sink;
-use futures_util::stream::Stream;
-use rumq_core::Packet;
 
 pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
