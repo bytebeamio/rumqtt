@@ -11,7 +11,7 @@ pub(crate) mod state;
 
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
-pub use rumq_core::*;
+pub use rumq_core::mqtt4::*;
 pub use state::MqttState;
 
 /// Incoming notifications from the broker

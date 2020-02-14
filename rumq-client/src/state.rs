@@ -2,7 +2,7 @@ use crate::Notification;
 
 use std::{collections::VecDeque, result::Result, time::Instant};
 
-use rumq_core::*;
+use rumq_core::mqtt4::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
@@ -372,7 +372,7 @@ impl MqttState {
 mod test {
     use super::{MqttConnectionStatus, MqttState, Packet, StateError};
     use crate::{MqttOptions, Notification};
-    use rumq_core::*;
+    use rumq_core::mqtt4::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
