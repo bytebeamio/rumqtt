@@ -136,8 +136,7 @@ impl Router {
         loop {
             select! {
                 o = self.data_rx.recv() => {
-                    let (id, mut message) = o.unwrap();
-                    
+                    let (id, mut message) = o.unwrap();                   
                     debug!("In router message. Id = {}, {:?}", id, message);
                     match self.reply(id.clone(), &mut message) {
                         Ok(Some(message)) => self.forward(&id, message),

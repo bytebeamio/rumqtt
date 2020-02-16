@@ -125,6 +125,7 @@ impl<S: Network> Connection<S> {
         // eventloop which processes packets and router messages
         let mut incoming = &mut self.stream;
         let mut incoming = time::throttle(Duration::from_millis(1), &mut incoming);
+
         loop {
             let mut timeout = time::delay_for(keep_alive);
             let (done, routermessage) = select(&mut incoming, &mut self.this_rx, keep_alive, &mut timeout).await?; 
