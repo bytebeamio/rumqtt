@@ -1,11 +1,12 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::{self, Packet, Publish, PacketIdentifier, AsyncMqttRead, AsyncMqttWrite};
+use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
-use tokio::io::{split, AsyncRead, AsyncWrite};
+use futures_util::sink::{Sink, SinkExt};
 use tokio::time::{self, Elapsed};
 use tokio::stream::iter;
+use tokio_util::codec::Framed;
 use async_stream::stream;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
@@ -15,6 +16,7 @@ use std::collections::VecDeque;
 use std::task::{Poll, Context};
 use std::pin::Pin;
 use std::mem;
+use std::io;
 
 pub struct MqttEventLoop {
     // intermediate state of the eventloop. this is set
@@ -48,6 +50,8 @@ pub enum EventLoopError {
     Timeout(Elapsed),
     Rumq(rumq_core::Error),
     Network(network::Error),
+    Io(io::Error),
+    StreamDone
 }
 
 /// Returns an object which encompasses state of the connection.
@@ -84,7 +88,10 @@ impl MqttEventLoop {
     pub fn stream<'eventloop>(&'eventloop mut self) -> impl Stream<Item = Notification> + 'eventloop {
         let stream = stream! {
             let mut network = match self.connect().await {
-                Ok(network) => network,
+                Ok(network) => {
+                    yield Notification::Connected;
+                    network
+                },
                 Err(e) => {
                     yield Notification::StreamEnd(e);
                     return
@@ -97,9 +104,8 @@ impl MqttEventLoop {
             let mut pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
             let mut pending = iter(self.pending_pub.drain(..)).map(Packet::Publish).chain(pending_rel);
 
-            let (network_rx, mut network_tx) = split(network);
+            let (mut network_tx, mut network_rx) = network.split();
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
-
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
 
             pin_mut!(network_stream);
@@ -134,10 +140,12 @@ impl MqttEventLoop {
 
                 // write the reply back to the network
                 if let Some(p) = outpacket {
-                    if let Err(e) = network_tx.mqtt_write(&p).await {
+                    if let Err(e) = network_tx.send(p).await {
                         yield Notification::StreamEnd(e.into());
                         break
                     }
+
+                    // network_tx.flush().await?;
                 }
 
                 // yield the notification to the user 
@@ -225,8 +233,12 @@ fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl 
     stream! {
         loop {
             let timeout_packet = time::timeout(keep_alive, async {
-                let packet = network.mqtt_read().await;
-                packet
+                let packet = match network.next().await {
+                    Some(o) => o?,
+                    None => return Err(EventLoopError::StreamDone)
+                };
+
+                Ok::<Packet, EventLoopError>(packet)
             }).await;
 
             let packet = match timeout_packet {
@@ -257,11 +269,11 @@ impl MqttEventLoop {
         let network= time::timeout(Duration::from_secs(5), async {
             if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
-                let o = Box::new(o);
+                let o = Box::new(Framed::new(o, rumq_core::mqtt4::codec::MqttCodec));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             } else {
                 let o = network::tcp_connect(&self.options).await?;
-                let o = Box::new(o);
+                let o = Box::new(Framed::new(o, rumq_core::mqtt4::codec::MqttCodec));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             }
         }).await??;
@@ -275,7 +287,7 @@ impl MqttEventLoop {
         let keep_alive = self.options.keep_alive().as_secs() as u16;
         let clean_session = self.options.clean_session();
 
-        let mut connect = rumq_core::connect(id);
+        let mut connect = connect(id);
         connect.keep_alive = keep_alive;
         connect.clean_session = clean_session;
 
@@ -285,14 +297,17 @@ impl MqttEventLoop {
 
         // mqtt connection with timeout
         time::timeout(Duration::from_secs(5), async {
-            network.mqtt_write(&Packet::Connect(connect)).await?;
+            network.send(Packet::Connect(connect)).await?;
             self.state.handle_outgoing_connect()?;
             Ok::<_, EventLoopError>(())
         }).await??;
 
         // wait for 'timeout' time to validate connack
         time::timeout(Duration::from_secs(5), async {
-            let packet = network.mqtt_read().await?;
+            let packet = match network.next().await {
+                Some(o) => o?,
+                None => return Err(EventLoopError::StreamDone)
+            };
             self.state.handle_incoming_connack(packet)?;
             Ok::<_, EventLoopError>(())
         }).await??;
@@ -313,14 +328,14 @@ impl From<Request> for Packet {
     }
 }
 
-trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
-impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
+pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
-trait NetworkRead: AsyncRead + Unpin + Send {}
-impl<T> NetworkRead for T where T: AsyncRead + Unpin + Send {}
+trait NetworkRead: Stream<Item = Result<Packet, rumq_core::Error>>+ Unpin + Send {}
+impl<T> NetworkRead for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Unpin + Send {}
 
-trait NetworkWrite: AsyncWrite + Unpin + Send + Sync {}
-impl<T> NetworkWrite for T where T: AsyncWrite + Unpin + Send + Sync {}
+trait NetworkWrite: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
+impl<T> NetworkWrite for T where T: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
@@ -331,7 +346,7 @@ impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
 
 #[cfg(test)]
 mod test {
-    use rumq_core::*;
+    use rumq_core::mqtt4::*;
     use tokio::sync::mpsc::{channel, Sender};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::{time, task};
@@ -513,7 +528,7 @@ mod test {
 
         let mut broker = broker(1887, true).await;
         for i in 1..=10 {
-            let packet = broker.mqtt_read().await; 
+            let packet = broker.async_mqtt_read().await; 
 
             if i > inflight { 
                 assert!(packet.is_none());
@@ -551,27 +566,27 @@ mod test {
         let mut broker = broker(1888, true).await;
 
         // packet 1
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_some());
         // packet 2
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_some());
         // packet 3
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_some());
         // packet 4 
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_none());
         // ack packet 1 and we should receiver packet 4
         broker.ack(PacketIdentifier(1)).await;
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_some());
         // packet 5 
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_none());
         // ack packet 2 and we should receiver packet 5
         broker.ack(PacketIdentifier(2)).await;
-        let packet = broker.mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await; 
         assert!(packet.is_some());
     }
 
@@ -608,7 +623,7 @@ mod test {
         {
             let mut broker = broker(1889, true).await;
             for i in 1..=2 {
-                let packet = broker.mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await; 
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
                 broker.ack(packet.unwrap()).await;
             }
@@ -618,7 +633,7 @@ mod test {
         {
             let mut broker = broker(1889, true).await;
             for i in 3..=4 {
-                let packet = broker.mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await; 
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
                 broker.ack(packet.unwrap()).await;
             }
@@ -658,7 +673,7 @@ mod test {
         {
             let mut broker = broker(1890, true).await;
             for i in 1..=2 {
-                let packet = broker.mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await; 
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
             }
         }
@@ -667,7 +682,7 @@ mod test {
         {
             let mut broker = broker(1890, true).await;
             for i in 1..=6 {
-                let packet = broker.mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await; 
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
             }
         }
@@ -692,16 +707,16 @@ mod test {
         stream: TcpStream
     }
 
-    async fn broker(port: u16, connack: bool) -> Broker {
+    async fn broker(port: u16, ack: bool) -> Broker {
         let addr = format!("127.0.0.1:{}", port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
         let (mut stream, _) = listener.accept().await.unwrap();
 
-        let packet = stream.mqtt_read().await.unwrap();
+        let packet = stream.async_mqtt_read().await.unwrap();
         if let Packet::Connect(_) = packet {
-            if connack {
-                let connack = rumq_core::connack(ConnectReturnCode::Accepted, false);
-                stream.mqtt_write(&Packet::Connack(connack)).await.unwrap();
+            if ack {
+                let connack = connack(ConnectReturnCode::Accepted, false);
+                stream.async_mqtt_write(&Packet::Connack(connack)).await.unwrap();
             }
         }
 
@@ -712,9 +727,9 @@ mod test {
 
     impl Broker {
         // reads a packet from the stream with 2 second timeout
-        async fn mqtt_read(&mut self) -> Option<PacketIdentifier> {
+        async fn async_mqtt_read(&mut self) -> Option<PacketIdentifier> {
             let mqtt_read = time::timeout(Duration::from_secs(2), async {
-                self.stream.mqtt_read().await.unwrap()
+                self.stream.async_mqtt_read().await.unwrap()
             });
 
             if let Ok(Packet::Publish(publish)) = mqtt_read.await {
@@ -726,19 +741,19 @@ mod test {
 
         async fn ack(&mut self, pkid: PacketIdentifier) {
             let packet = Packet::Puback(pkid); 
-            self.stream.mqtt_write(&packet).await.unwrap();
+            self.stream.async_mqtt_write(&packet).await.unwrap();
             self.stream.flush().await.unwrap();
         }
 
         fn stream(mut self) -> impl Stream<Item = Packet> {
             let stream = stream! {
                 loop {
-                    let packet = self.stream.mqtt_read().await.unwrap();
+                    let packet = self.stream.async_mqtt_read().await.unwrap();
 
                     match packet {
                         Packet::Connect(_) => {
-                            let connack = rumq_core::connack(ConnectReturnCode::Accepted, false);
-                            self.stream.mqtt_write(&Packet::Connack(connack)).await.unwrap();
+                            let connack = connack(ConnectReturnCode::Accepted, false);
+                            self.stream.async_mqtt_write(&Packet::Connack(connack)).await.unwrap();
                         }
                         p => yield p
                     }

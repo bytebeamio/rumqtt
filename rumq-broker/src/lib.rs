@@ -1,5 +1,3 @@
-#![recursion_limit="512"]
-
 #[macro_use]
 extern crate log;
 
@@ -14,6 +12,9 @@ use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::TLSError;
 use tokio_rustls::rustls::{AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig};
 use tokio_rustls::TlsAcceptor;
+use futures_util::sink::Sink;
+use futures_util::stream::Stream;
+use rumq_core::mqtt4::{codec, Packet};
 
 use serde::Deserialize;
 
@@ -25,11 +26,11 @@ use std::time::Duration;
 use std::thread;
 
 mod connection;
-mod httppush;
-mod httpserver;
-mod router;
 mod state;
-mod codec;
+mod router;
+
+pub use rumq_core as core;
+pub use router::{RouterMessage, Connection};
 
 #[derive(From, Debug)]
 pub enum Error {
@@ -49,19 +50,6 @@ pub enum Error {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     servers:    Vec<ServerSettings>,
-    httppush:   HttpPush,
-    httpserver: HttpServer,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct HttpPush {
-    url:   String,
-    topic: String,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct HttpServer {
-    port: u16,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -107,7 +95,7 @@ async fn tls_connection<P: AsRef<Path>>(ca_path: Option<P>, cert_path: P, key_pa
     Ok(acceptor)
 }
 
-pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, router::RouterMessage)>) -> Result<(), Error> {
+async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, router::RouterMessage)>) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
     let connection_config = config.clone();
 
@@ -165,6 +153,10 @@ pub async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String,
     }
 }
 
+
+pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+
 #[tokio::main(core_threads = 1)]
 async fn router(rx: Receiver<(String, router::RouterMessage)>) {
     let mut router = router::Router::new(rx);
@@ -173,51 +165,46 @@ async fn router(rx: Receiver<(String, router::RouterMessage)>) {
     }
 }
 
-#[tokio::main(core_threads = 4)]
-pub async fn start(config: Config) {
+pub struct Broker {
+    config: Config,
+    router_handle: Sender<(String, router::RouterMessage)>,
+}
+
+pub fn new(config: Config) -> Broker {
     let (router_tx, router_rx) = channel(100);
 
-    // router to route data between connections. creates an extra copy but
-    // might not be a big deal if we prevent clones/send fat pointers and batch
     thread::spawn(move || {
         router(router_rx)
     });
 
-    let http_router_tx = router_tx.clone();
-    // TODO: Remove clone on main config
-    let httpserver_config = Arc::new(config.clone());
-    task::spawn(async move { httpserver::start(httpserver_config, http_router_tx).await });
-
-    // TODO: Remove clone on main config
-    let status_router_tx = router_tx.clone();
-    let httppush_config = Arc::new(config.clone());
-    task::spawn(async move {
-        let out = httppush::start(httppush_config, status_router_tx).await;
-        error!("Http routine stopped. Result = {:?}", out);
-    });
-
-    let mut servers = Vec::new();
-    for server in config.servers.into_iter() {
-        let config = Arc::new(server);
-
-        let fut = accept_loop(config, router_tx.clone());
-        let o = task::spawn(async {
-            error!("Accept loop returned = {:?}", fut.await);
-        });
-
-        servers.push(o);
+    Broker {
+        config,
+        router_handle: router_tx
     }
-
-    join_all(servers).await;
 }
 
+impl Broker {
+    pub fn new_router_handle(&self) -> Sender<(String, router::RouterMessage)> {
+        self.router_handle.clone()
+    }
 
-use futures_util::sink::Sink;
-use futures_util::stream::Stream;
-use rumq_core::Packet;
+    pub async fn start(&mut self) -> Vec<Result<(), task::JoinError>> {
+        let mut servers = Vec::new();
+        let server_configs = self.config.servers.split_off(0);
 
-pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
-impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+        for server in server_configs.into_iter() {
+            let config = Arc::new(server);
+            let fut = accept_loop(config, self.router_handle.clone());
+            let o = task::spawn(async {
+                error!("Accept loop returned = {:?}", fut.await);
+            });
+
+            servers.push(o);
+        }
+
+        join_all(servers).await
+    }
+}
 
 #[cfg(test)]
 mod test {

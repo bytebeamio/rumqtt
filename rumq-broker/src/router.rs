@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{has_wildcards, matches, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
+use rumq_core::mqtt4::{has_wildcards, matches, publish, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::select;
@@ -27,9 +27,9 @@ pub enum RouterMessage {
     /// Client id and connection handle
     Connect(Connection),
     /// Packet
-    Packet(rumq_core::Packet),
+    Packet(Packet),
     /// Packets
-    Packets(VecDeque<rumq_core::Packet>),
+    Packets(VecDeque<Packet>),
     /// Disconnects a client from active connections list. Will handling
     Death(String),
     /// Pending messages of the previous connection
@@ -37,12 +37,12 @@ pub enum RouterMessage {
 }
 
 pub struct Connection {
-    pub connect: rumq_core::Connect,
+    pub connect: Connect,
     pub handle: Option<Sender<RouterMessage>>
 }
 
 impl Connection {
-    pub fn new(connect: rumq_core::Connect, handle: Sender<RouterMessage>) -> Connection {
+    pub fn new(connect: Connect, handle: Sender<RouterMessage>) -> Connection {
         Connection {
             connect,
             handle: Some(handle)
@@ -59,7 +59,7 @@ impl fmt::Debug for Connection {
 #[derive(Debug)]
 struct ActiveConnection {
     pub state: MqttState,
-    pub outgoing: VecDeque<rumq_core::Packet>,
+    pub outgoing: VecDeque<Packet>,
     tx: Sender<RouterMessage>
 }
 
@@ -136,7 +136,8 @@ impl Router {
         loop {
             select! {
                 o = self.data_rx.recv() => {
-                    let (id, mut message) = o.unwrap();
+                    let (id, mut message) = o.unwrap();                   
+                    debug!("In router message. Id = {}, {:?}", id, message);
                     match self.reply(id.clone(), &mut message) {
                         Ok(Some(message)) => self.forward(&id, message),
                         Ok(None) => (),
@@ -151,7 +152,7 @@ impl Router {
                         error!("Routing error = {:?}", e);
                     }
                 }
-                o = interval.next() => {
+                _ = interval.next() => {
                     for (_, connection) in self.active_connections.iter_mut() {
                         let pending = connection.outgoing.split_off(0);
                         if pending.len() > 0 {
@@ -173,8 +174,6 @@ impl Router {
     /// inactive connections
     /// No routing modifications here
     fn reply(&mut self, id: String, message: &mut RouterMessage) -> Result<Option<RouterMessage>, Error> {
-        debug!("Incoming router message. Id = {}, {:?}", id, message);
-
         match message {
             RouterMessage::Connect(connection) => {
                 let handle = connection.handle.take().unwrap();
@@ -192,7 +191,6 @@ impl Router {
     fn route(&mut self, id: String, message: RouterMessage) -> Result<(), Error> {
         match message {
             RouterMessage::Packet(packet) => {
-                debug!("Routing router message. Id = {}, {:?}", id, packet);
                 match packet {
                     Packet::Publish(publish) => self.match_subscriptions(&id, publish),
                     Packet::Subscribe(subscribe) => self.add_to_subscriptions(id, subscribe),
@@ -474,7 +472,7 @@ impl Router {
                 let message = mem::replace(&mut will.message, "".to_owned());
                 let qos = will.qos;
 
-                let publish = rumq_core::publish(topic, qos, message);
+                let publish = publish(topic, qos, message);
                 self.match_subscriptions(&id, publish);
             }
 

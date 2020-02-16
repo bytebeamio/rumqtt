@@ -1,8 +1,10 @@
 use std::{collections::VecDeque, result::Result, time::Instant};
 
-use rumq_core::*;
-
 use crate::router::RouterMessage;
+use rumq_core::mqtt4::{
+    empty_subscribe, suback, valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS,
+    Subscribe, SubscribeReturnCodes, Unsubscribe,
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -133,8 +135,6 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions.
     fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<Option<RouterMessage>, Error> {
-        let pkids: Vec<Option<rumq_core::PacketIdentifier>> = self.outgoing_publishes.iter().map(|p| p.pkid).collect();
-        debug!("Pkids = {:?}", pkids);
         match self.outgoing_publishes.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_publishes.remove(index).expect("Wrong index");

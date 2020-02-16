@@ -2,7 +2,7 @@ use crate::Notification;
 
 use std::{collections::VecDeque, result::Result, time::Instant};
 
-use rumq_core::*;
+use rumq_core::mqtt4::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
@@ -120,8 +120,8 @@ impl MqttState {
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
-            Packet::Suback(_pkid) => Ok((None, None)),
-            Packet::Unsuback(_pkid) => Ok((None, None)),
+            Packet::Suback(suback) => self.handle_incoming_suback(suback),
+            Packet::Unsuback(pkid) => self.handle_incoming_unsuback(pkid),
             Packet::Puback(pkid) => self.handle_incoming_puback(pkid),
             Packet::Pubrec(pkid) => self.handle_incoming_pubrec(pkid),
             Packet::Pubrel(pkid) => self.handle_incoming_pubrel(pkid),
@@ -172,6 +172,18 @@ impl MqttState {
                 Err(StateError::Unsolicited)
             }
         }
+    }
+
+    pub fn handle_incoming_suback(&mut self, suback: Suback) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+        let request = None;
+        let notification = Some(Notification::Suback(suback));
+        Ok((notification, request))
+    }
+
+    pub fn handle_incoming_unsuback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+        let request = None;
+        let notification = Some(Notification::Unsuback(pkid));
+        Ok((notification, request))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
@@ -360,7 +372,7 @@ impl MqttState {
 mod test {
     use super::{MqttConnectionStatus, MqttState, Packet, StateError};
     use crate::{MqttOptions, Notification};
-    use rumq_core::*;
+    use rumq_core::mqtt4::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

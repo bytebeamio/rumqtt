@@ -1,4 +1,4 @@
-use crate::*;
+use crate::mqtt4::*;
 use byteorder::ReadBytesExt;
 use std::io::Read;
 
@@ -283,8 +283,8 @@ impl<R: ReadBytesExt + ?Sized> MqttRead for R {}
 #[cfg(test)]
 mod test {
     use super::MqttRead;
-    use crate::{Connack, Connect, Packet, Publish, Suback, Subscribe, Unsubscribe};
-    use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes, SubscribeTopic};
+    use crate::mqtt4::{Connack, Connect, Packet, Publish, Suback, Subscribe, Unsubscribe};
+    use crate::mqtt4::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes, SubscribeTopic};
     use std::io::Cursor;
 
     #[test]

@@ -1,6 +1,6 @@
 use derive_more::From;
 
-use crate::QoS;
+use crate::mqtt4::QoS;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]

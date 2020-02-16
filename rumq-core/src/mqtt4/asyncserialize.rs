@@ -1,11 +1,11 @@
-use crate::*;
+use crate::mqtt4::*;
 
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
 #[async_trait]
 pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
-    async fn mqtt_write(&mut self, packet: &Packet) -> Result<(), Error> {
+    async fn async_mqtt_write(&mut self, packet: &Packet) -> Result<(), Error> {
         match packet {
             Packet::Connect(connect) => {
                 self.write_u8(0b00010000).await?;
@@ -181,8 +181,8 @@ impl<W: AsyncWriteExt + ?Sized + Unpin> AsyncMqttWrite for W {}
 #[cfg(test)]
 mod test {
     use super::AsyncMqttWrite;
-    use crate::{Connack, Connect, Packet, Publish, Subscribe};
-    use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
+    use super::{Connack, Connect, Packet, Publish, Subscribe};
+    use super::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
 
     #[tokio::test]
     async fn write_packet_connect_mqtt_protocol_works() {
@@ -202,7 +202,7 @@ mod test {
         });
 
         let mut stream = Vec::new();
-        stream.mqtt_write(&connect).await.unwrap();
+        stream.async_mqtt_write(&connect).await.unwrap();
 
         assert_eq!(
             stream.clone(),
@@ -227,7 +227,7 @@ mod test {
         });
 
         let mut stream = Vec::new();
-        stream.mqtt_write(&connack).await.unwrap();
+        stream.async_mqtt_write(&connack).await.unwrap();
 
         assert_eq!(stream, vec![0b00100000, 0x02, 0x01, 0x00]);
     }
@@ -244,7 +244,7 @@ mod test {
         });
 
         let mut stream = Vec::new();
-        stream.mqtt_write(&publish).await.unwrap();
+        stream.async_mqtt_write(&publish).await.unwrap();
 
         assert_eq!(
             stream,
@@ -264,7 +264,7 @@ mod test {
         });
 
         let mut stream = Vec::new();
-        stream.mqtt_write(&publish).await.unwrap();
+        stream.async_mqtt_write(&publish).await.unwrap();
 
         assert_eq!(
             stream,
@@ -293,7 +293,7 @@ mod test {
         });
 
         let mut stream = Vec::new();
-        stream.mqtt_write(&subscribe).await.unwrap();
+        stream.async_mqtt_write(&subscribe).await.unwrap();
 
         assert_eq!(
             stream,

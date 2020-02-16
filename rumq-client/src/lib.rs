@@ -11,20 +11,20 @@ pub(crate) mod state;
 
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
-pub use rumq_core::*;
+pub use rumq_core::mqtt4::*;
 pub use state::MqttState;
 
 /// Incoming notifications from the broker
 #[derive(Debug)]
 pub enum Notification {
-    Reconnection,
-    Disconnection,
+    Connected,
     Publish(Publish),
     Puback(PacketIdentifier),
     Pubrec(PacketIdentifier),
     Pubrel(PacketIdentifier),
     Pubcomp(PacketIdentifier),
-    Suback(PacketIdentifier),
+    Suback(Suback),
+    Unsuback(PacketIdentifier),
     StreamEnd(EventLoopError),
 }
 

@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::{connack, Packet, Connect, ConnectReturnCode};
+use rumq_core::mqtt4::{connack, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::SendError;
 use tokio::stream::iter;
@@ -124,7 +124,8 @@ impl<S: Network> Connection<S> {
 
         // eventloop which processes packets and router messages
         let mut incoming = &mut self.stream;
-        let mut incoming = time::throttle(Duration::from_millis(10), &mut incoming);
+        let mut incoming = time::throttle(Duration::from_millis(1), &mut incoming);
+
         loop {
             let mut timeout = time::delay_for(keep_alive);
             let (done, routermessage) = select(&mut incoming, &mut self.this_rx, keep_alive, &mut timeout).await?; 

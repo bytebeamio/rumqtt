@@ -1,4 +1,4 @@
-use crate::*;
+use crate::mqtt4::*;
 
 use byteorder::WriteBytesExt;
 
@@ -183,8 +183,8 @@ impl<W: WriteBytesExt + ?Sized> MqttWrite for W {}
 #[cfg(test)]
 mod test {
     use super::MqttWrite;
-    use crate::{Connack, Connect, Packet, Publish, Subscribe};
-    use crate::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
+    use crate::mqtt4::{Connack, Connect, Packet, Publish, Subscribe};
+    use crate::mqtt4::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
 
     #[test]
     fn write_packet_connect_mqtt_protocol_works() {

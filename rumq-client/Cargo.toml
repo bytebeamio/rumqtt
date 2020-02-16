@@ -12,8 +12,9 @@ edition = "2018"
 [dependencies]
 derive_more = "0.15"
 tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "sync", "time"] }
+tokio-util = { version = "0.2", features = ["codec"] }
+futures-util = { version =  "0.3", features = ["sink"] }
 async-stream = "0.2"
-futures-util = "0.3"
 webpki = "0.21"
 tokio-rustls = "0.12"
 rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.4" }
