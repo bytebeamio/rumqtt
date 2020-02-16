@@ -1,11 +1,12 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
-use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier, AsyncMqttRead, AsyncMqttWrite};
+use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
-use tokio::io::{split, AsyncRead, AsyncWrite};
+use futures_util::sink::{Sink, SinkExt};
 use tokio::time::{self, Elapsed};
 use tokio::stream::iter;
+use tokio_util::codec::Framed;
 use async_stream::stream;
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
@@ -15,6 +16,7 @@ use std::collections::VecDeque;
 use std::task::{Poll, Context};
 use std::pin::Pin;
 use std::mem;
+use std::io;
 
 pub struct MqttEventLoop {
     // intermediate state of the eventloop. this is set
@@ -48,6 +50,8 @@ pub enum EventLoopError {
     Timeout(Elapsed),
     Rumq(rumq_core::Error),
     Network(network::Error),
+    Io(io::Error),
+    StreamDone
 }
 
 /// Returns an object which encompasses state of the connection.
@@ -100,7 +104,7 @@ impl MqttEventLoop {
             let mut pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
             let mut pending = iter(self.pending_pub.drain(..)).map(Packet::Publish).chain(pending_rel);
 
-            let (network_rx, mut network_tx) = split(network);
+            let (mut network_tx, mut network_rx) = network.split();
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
 
@@ -136,10 +140,12 @@ impl MqttEventLoop {
 
                 // write the reply back to the network
                 if let Some(p) = outpacket {
-                    if let Err(e) = network_tx.async_mqtt_write(&p).await {
+                    if let Err(e) = network_tx.send(p).await {
                         yield Notification::StreamEnd(e.into());
                         break
                     }
+
+                    // network_tx.flush().await?;
                 }
 
                 // yield the notification to the user 
@@ -227,8 +233,12 @@ fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl 
     stream! {
         loop {
             let timeout_packet = time::timeout(keep_alive, async {
-                let packet = network.async_mqtt_read().await;
-                packet
+                let packet = match network.next().await {
+                    Some(o) => o?,
+                    None => return Err(EventLoopError::StreamDone)
+                };
+
+                Ok::<Packet, EventLoopError>(packet)
             }).await;
 
             let packet = match timeout_packet {
@@ -259,11 +269,11 @@ impl MqttEventLoop {
         let network= time::timeout(Duration::from_secs(5), async {
             if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
-                let o = Box::new(o);
+                let o = Box::new(Framed::new(o, rumq_core::mqtt4::codec::MqttCodec));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             } else {
                 let o = network::tcp_connect(&self.options).await?;
-                let o = Box::new(o);
+                let o = Box::new(Framed::new(o, rumq_core::mqtt4::codec::MqttCodec));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             }
         }).await??;
@@ -287,14 +297,17 @@ impl MqttEventLoop {
 
         // mqtt connection with timeout
         time::timeout(Duration::from_secs(5), async {
-            network.async_mqtt_write(&Packet::Connect(connect)).await?;
+            network.send(Packet::Connect(connect)).await?;
             self.state.handle_outgoing_connect()?;
             Ok::<_, EventLoopError>(())
         }).await??;
 
         // wait for 'timeout' time to validate connack
         time::timeout(Duration::from_secs(5), async {
-            let packet = network.async_mqtt_read().await?;
+            let packet = match network.next().await {
+                Some(o) => o?,
+                None => return Err(EventLoopError::StreamDone)
+            };
             self.state.handle_incoming_connack(packet)?;
             Ok::<_, EventLoopError>(())
         }).await??;
@@ -315,14 +328,14 @@ impl From<Request> for Packet {
     }
 }
 
-trait Network: AsyncWrite + AsyncRead + Unpin + Send {}
-impl<T> Network for T where T: AsyncWrite + AsyncRead + Unpin + Send {}
+pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
-trait NetworkRead: AsyncRead + Unpin + Send {}
-impl<T> NetworkRead for T where T: AsyncRead + Unpin + Send {}
+trait NetworkRead: Stream<Item = Result<Packet, rumq_core::Error>>+ Unpin + Send {}
+impl<T> NetworkRead for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Unpin + Send {}
 
-trait NetworkWrite: AsyncWrite + Unpin + Send + Sync {}
-impl<T> NetworkWrite for T where T: AsyncWrite + Unpin + Send + Sync {}
+trait NetworkWrite: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
+impl<T> NetworkWrite for T where T: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
