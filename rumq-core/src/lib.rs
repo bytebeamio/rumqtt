@@ -14,7 +14,9 @@ pub enum Error {
     PayloadSizeIncorrect,
     PayloadTooLong,
     PayloadRequired,
+    #[from]
     TopicNameMustNotContainNonUtf8(FromUtf8Error),
     MalformedRemainingLength,
+    #[from]
     Io(io::Error),
 }
