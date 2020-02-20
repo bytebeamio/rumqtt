@@ -9,11 +9,13 @@ use crate::mqtt4::Packet;
 use crate::mqtt4::{MqttRead, MqttWrite};
 use crate::Error;
 
-pub struct MqttCodec;
+pub struct MqttCodec {
+    max_payload_size: usize,
+}
 
 impl MqttCodec {
-    pub fn new() -> Self {
-        MqttCodec
+    pub fn new(max_payload_size: usize) -> Self {
+        MqttCodec { max_payload_size }
     }
 }
 
@@ -47,6 +49,10 @@ impl Decoder for MqttCodec {
             Err(e) => return Err(e.into()),
         };
 
+        if remaining_len > self.max_payload_size {
+            return Err(Error::PayloadSizeLimitExceeded);
+        }
+
         let header_len = buf_ref.header_len(remaining_len);
         let len = header_len + remaining_len;
 
@@ -77,7 +83,6 @@ impl Encoder for MqttCodec {
         }
 
         buf.extend(stream.get_ref());
-
         Ok(())
     }
 }

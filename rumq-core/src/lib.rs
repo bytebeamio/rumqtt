@@ -13,6 +13,7 @@ pub enum Error {
     UnsupportedPacketType(u8),
     PayloadSizeIncorrect,
     PayloadTooLong,
+    PayloadSizeLimitExceeded,
     PayloadRequired,
     #[from]
     TopicNameMustNotContainNonUtf8(FromUtf8Error),

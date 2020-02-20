@@ -1,6 +1,7 @@
 use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
+use rumq_core::mqtt4::codec::MqttCodec;
 use futures_util::{select, pin_mut, ready, FutureExt};
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::sink::{Sink, SinkExt};
@@ -269,11 +270,12 @@ impl MqttEventLoop {
         let network= time::timeout(Duration::from_secs(5), async {
             if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
-                let o = Box::new(Framed::new(o, rumq_core::mqtt4::codec::MqttCodec));
+                // TODO: Make maximum payload size part of mqtt options
+                let o = Box::new(Framed::new(o, MqttCodec::new(10 * 1024)));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             } else {
                 let o = network::tcp_connect(&self.options).await?;
-                let o = Box::new(Framed::new(o, rumq_core::mqtt4::codec::MqttCodec));
+                let o = Box::new(Framed::new(o, MqttCodec::new(10 * 1024)));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             }
         }).await??;

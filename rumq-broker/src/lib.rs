@@ -68,7 +68,7 @@ pub struct ServerSettings {
     pub disk_retention_size: usize,
     pub disk_retention_time_sec: usize,
     pub auto_save_interval_sec: u16,
-    pub max_packet_size: usize,
+    pub max_payload_size: usize,
     pub max_inflight_queue_size: usize,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
@@ -132,7 +132,7 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
                 }
             };
 
-            let framed = Framed::new(stream, codec::MqttCodec::new());
+            let framed = Framed::new(stream, codec::MqttCodec::new(config.max_payload_size));
             task::spawn( async {
                 match connection::eventloop(config, framed, router_tx).await {
                     Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
@@ -140,7 +140,7 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
                 }
             });
         } else {
-            let framed = Framed::new(stream, codec::MqttCodec::new());
+            let framed = Framed::new(stream, codec::MqttCodec::new(config.max_payload_size));
             task::spawn( async {
                 match connection::eventloop(config, framed, router_tx).await {
                     Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
