@@ -56,20 +56,16 @@ pub struct Config {
 pub struct ServerSettings {
     pub port: u16,
     pub connection_timeout_ms: u16,
+    pub next_connection_delay_ms: u64,
     pub max_client_id_len: usize,
     pub max_connections: usize,
-    /// Throughput from cloud to device
-    pub max_cloud_to_device_throughput: usize,
-    /// Throughput from device to cloud
-    pub max_device_to_cloud_throughput: usize,
-    /// Minimum delay time between consecutive outgoing packets
-    pub max_incoming_messages_per_sec: usize,
     pub disk_persistence: bool,
+    pub throttle_delay_ms: u64,
     pub disk_retention_size: usize,
     pub disk_retention_time_sec: usize,
     pub auto_save_interval_sec: u16,
     pub max_payload_size: usize,
-    pub max_inflight_queue_size: usize,
+    pub max_inflight_topic_size: usize,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
@@ -109,6 +105,7 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
     info!("Waiting for connections on {}", addr);
     // eventloop which accepts connections
     let mut listener = TcpListener::bind(addr).await?;
+    let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(s) => s,
@@ -149,7 +146,7 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
             });
         };
 
-        time::delay_for(Duration::from_millis(10)).await;
+        time::delay_for(accept_loop_delay).await;
     }
 }
 

@@ -47,6 +47,7 @@ pub async fn eventloop<S: Network>(config: Arc<ServerSettings>, stream: S, mut r
 }
 
 pub struct Connection<S> {
+    config: Arc<ServerSettings>,
     id:         String,
     keep_alive: Duration,
     stream:     S,
@@ -72,7 +73,7 @@ impl<S: Network> Connection<S> {
         // construct connect router message with cliend id and handle to this connection
         let routermessage = RouterMessage::Connect(router::Connection::new(connect, this_tx));
         router_tx.send((id.clone(), routermessage)).await?;
-        let connection = Connection { id, keep_alive, stream, this_rx, router_tx };
+        let connection = Connection { config, id, keep_alive, stream, this_rx, router_tx };
         Ok(connection)
     }
 
@@ -103,7 +104,7 @@ impl<S: Network> Connection<S> {
             self.stream.send(packet).await?;
 
             let mut pending = iter(pending.drain(..)).map(|publish| RouterMessage::Packet(Packet::Publish(publish)));
-            let mut incoming = time::throttle(Duration::from_millis(100), &mut self.stream);
+            let mut incoming = time::throttle(Duration::from_millis(self.config.throttle_delay_ms), &mut self.stream);
             let mut timeout = time::delay_for(keep_alive);
 
             loop {
@@ -124,7 +125,7 @@ impl<S: Network> Connection<S> {
 
         // eventloop which processes packets and router messages
         let mut incoming = &mut self.stream;
-        let mut incoming = time::throttle(Duration::from_millis(1), &mut incoming);
+        let mut incoming = time::throttle(Duration::from_millis(self.config.throttle_delay_ms), &mut incoming);
 
         loop {
             let mut timeout = time::delay_for(keep_alive);
