@@ -273,6 +273,7 @@ impl MqttState {
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
             error!("Error awaiting for last ping response");
+            self.await_pingresp = false;
             return Err(StateError::AwaitPingResp);
         }
 
