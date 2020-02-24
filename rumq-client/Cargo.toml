@@ -11,7 +11,7 @@ edition = "2018"
 
 [dependencies]
 derive_more = { version = "0.99", default-features = false, features = ["from"] }
-tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "sync", "time"] }
+tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "stream", "sync", "time"] }
 tokio-util = { version = "0.2", features = ["codec"] }
 futures-util = { version =  "0.3", features = ["sink"] }
 async-stream = "0.2"
