@@ -2,7 +2,8 @@ use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use rumq_core::mqtt4::codec::MqttCodec;
-use futures_util::{select, pin_mut, ready, FutureExt};
+use futures_util::{pin_mut, ready, FutureExt};
+use tokio::select;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::sink::{Sink, SinkExt};
 use tokio::time::{self, Elapsed};
@@ -112,21 +113,31 @@ impl MqttEventLoop {
             pin_mut!(network_stream);
             pin_mut!(request_stream);
 
+            let mut exit = None;
             loop {
                 let o = if self.state.outgoing_pub.len() >= self.options.inflight {
                     match network_stream.next().await {
                         Some(o) => self.state.handle_packet(o),
-                        None => break
+                        None => {
+                            exit = Some(Notification::NetworkClosed);
+                            break 
+                        }
                     }
                 } else {
                     select! {
                         o = network_stream.next().fuse() => match o {
                             Some(o) => self.state.handle_packet(o),
-                            None => break 
+                            None => {
+                                exit = Some(Notification::NetworkClosed);
+                                break
+                            }
                         },
                         o = request_stream.next().fuse() => match o {
                             Some(o) => self.state.handle_request(o),
-                            None => break 
+                            None => {
+                                exit = Some(Notification::RequestsDone);
+                                break 
+                            }
                         }
                     }
                 };
@@ -151,6 +162,11 @@ impl MqttEventLoop {
 
                 // yield the notification to the user 
                 if let Some(n) = notification { yield n }
+            }
+
+            if let Some(e) = exit {
+                yield e;
+                return
             }
         };
 
