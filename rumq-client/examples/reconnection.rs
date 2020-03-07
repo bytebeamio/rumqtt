@@ -11,7 +11,7 @@ async fn main() {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "test.mosquitto.org", 1883);
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
 
     let (requests_tx, requests_rx) = channel(10);
@@ -20,24 +20,21 @@ async fn main() {
     // start sending requests
     task::spawn(async move {
         requests(requests_tx).await;
-        time::delay_for(Duration::from_secs(30)).await;
     });
 
 
-    loop {
-        stream_it(&mut eventloop).await;
-        time::delay_for(Duration::from_secs(5)).await;
-    }
+    stream_it(&mut eventloop).await;
 }
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.stream();
+    loop {
+        let mut stream = eventloop.stream();
+        while let Some(item) = stream.next().await {
+            println!("Received = {:?}", item);
+        }
 
-    while let Some(item) = stream.next().await {
-        println!("Received = {:?}", item);
+        time::delay_for(Duration::from_secs(1)).await;
     }
-
-    println!("Stream done");
 }
 
 async fn requests(mut requests_tx: Sender<Request>) {
@@ -51,4 +48,6 @@ async fn requests(mut requests_tx: Sender<Request>) {
         requests_tx.send(publish).await.unwrap();
         time::delay_for(Duration::from_secs(1)).await; 
     }
+        
+    time::delay_for(Duration::from_secs(300)).await;
 }

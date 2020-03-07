@@ -26,6 +26,8 @@ pub enum Notification {
     Suback(Suback),
     Unsuback(PacketIdentifier),
     StreamEnd(EventLoopError),
+    RequestsDone,
+    NetworkClosed,
 }
 
 #[doc(hidden)]

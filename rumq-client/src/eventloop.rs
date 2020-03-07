@@ -2,7 +2,8 @@ use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use rumq_core::mqtt4::codec::MqttCodec;
-use futures_util::{select, pin_mut, ready, FutureExt};
+use futures_util::{pin_mut, ready, FutureExt};
+use tokio::select;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::sink::{Sink, SinkExt};
 use tokio::time::{self, Elapsed};
@@ -22,9 +23,9 @@ use std::io;
 pub struct MqttEventLoop {
     // intermediate state of the eventloop. this is set
     // by the state machine when the streaming ends
-    options: MqttOptions,
-    state: MqttState,
-    requests: Box<dyn Requests>,
+    pub options: MqttOptions,
+    pub state: MqttState,
+    pub requests: Box<dyn Requests>,
     pending_pub: VecDeque<Publish>,
     pending_rel: VecDeque<PacketIdentifier>
 }
@@ -56,13 +57,13 @@ pub enum EventLoopError {
 }
 
 /// Returns an object which encompasses state of the connection.
-/// Use this to create an `Stream` with `stream()` method and poll it with tokio 
+/// Use this to create a `Stream` with `stream()` method and poll it with tokio 
 /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
 /// internal state and mqtt options after the work with the `Stream` is done or stopped. 
 /// This is useful in scenarios like shutdown where the current state should be persisted or
-/// during reconnection when the state from last disconnection should be resumend.
+/// during reconnection when the state from last disconnection should be resumed.
 /// For a similar reason, requests are also initialized as part of this method to reuse same 
-/// request stream while retrying after the previous `Stream` from `stream()` method ends
+/// request stream while retrying after the previous `Stream` has stopped
 /// ```ignore
 /// let mut eventloop = eventloop(options, requests);
 /// loop {
@@ -74,7 +75,6 @@ pub enum EventLoopError {
 /// access and update `options`, `state` and `requests`.
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
-/// TODO: Remove `mqttoptions` from `state` to make sure that there is not chance of dirty opts
 pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
     let state = MqttState::new();
     let requests = Box::new(requests);
@@ -87,6 +87,8 @@ pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> Mqt
 
 impl MqttEventLoop {
     pub fn stream<'eventloop>(&'eventloop mut self) -> impl Stream<Item = Notification> + 'eventloop {
+        self.state.await_pingresp = false;
+
         let stream = stream! {
             let mut network = match self.connect().await {
                 Ok(network) => {
@@ -112,21 +114,34 @@ impl MqttEventLoop {
             pin_mut!(network_stream);
             pin_mut!(request_stream);
 
+            // FIX: stream! doesn't allow yield in select! yet and using a variable to store exit
+            // status of every branch is resulting in ICE crash
+            // exit = Notification::StreamEnd(e.into()); is causing the crash
+            let mut exit = None;
             loop {
                 let o = if self.state.outgoing_pub.len() >= self.options.inflight {
                     match network_stream.next().await {
                         Some(o) => self.state.handle_packet(o),
-                        None => break
+                        None => {
+                            exit = Some(Notification::NetworkClosed);
+                            break 
+                        }
                     }
                 } else {
                     select! {
                         o = network_stream.next().fuse() => match o {
                             Some(o) => self.state.handle_packet(o),
-                            None => break 
+                            None => {
+                                exit = Some(Notification::NetworkClosed);
+                                break
+                            }
                         },
                         o = request_stream.next().fuse() => match o {
                             Some(o) => self.state.handle_request(o),
-                            None => break 
+                            None => {
+                                exit = Some(Notification::RequestsDone);
+                                break 
+                            }
                         }
                     }
                 };
@@ -151,6 +166,11 @@ impl MqttEventLoop {
 
                 // yield the notification to the user 
                 if let Some(n) = notification { yield n }
+            }
+
+            if let Some(e) = exit {
+                yield e;
+                return
             }
         };
 
