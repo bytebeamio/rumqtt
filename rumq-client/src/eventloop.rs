@@ -2,7 +2,7 @@ use crate::{Notification, Request, network};
 use derive_more::From;
 use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use rumq_core::mqtt4::codec::MqttCodec;
-use futures_util::{pin_mut, ready, FutureExt};
+use futures_util::{pin_mut, FutureExt};
 use tokio::select;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::sink::{Sink, SinkExt};
@@ -15,37 +15,25 @@ use crate::MqttOptions;
 
 use std::time::Duration;
 use std::collections::VecDeque;
-use std::task::{Poll, Context};
-use std::pin::Pin;
 use std::mem;
 use std::io;
 
+/// Complete state of the eventloop
 pub struct MqttEventLoop {
     // intermediate state of the eventloop. this is set
     // by the state machine when the streaming ends
+    /// Options of the current mqtt connection
     pub options: MqttOptions,
+    /// Current state of the connection
     pub state: MqttState,
+    /// Request stream
     pub requests: Box<dyn Requests>,
     pending_pub: VecDeque<Publish>,
     pending_rel: VecDeque<PacketIdentifier>
 }
 
 
-// Return runtime instead of impl Stream<Item = Notification> + 'eventloop from `stream()`
-pub struct Runtime<'eventloop> {
-    // eventloop state machine
-    stream: &'eventloop mut Pin<Box<dyn Stream<Item = Notification>>>
-}
-
-impl<'eventloop> Stream for Runtime<'eventloop> {
-    type Item = Notification;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let o = ready!(self.stream.as_mut().poll_next(cx));
-        Poll::Ready(o)
-    }
-}
-
+/// Critical errors during eventloop polling 
 #[derive(From, Debug)]
 pub enum EventLoopError {
     MqttState(StateError),
@@ -57,7 +45,8 @@ pub enum EventLoopError {
 }
 
 /// Returns an object which encompasses state of the connection.
-/// Use this to create a `Stream` with `stream()` method and poll it with tokio 
+/// Use this to create a `Stream` with `stream()` method and poll it with tokio.
+///
 /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
 /// internal state and mqtt options after the work with the `Stream` is done or stopped. 
 /// This is useful in scenarios like shutdown where the current state should be persisted or
@@ -177,7 +166,7 @@ impl MqttEventLoop {
         Box::pin(stream)
     }
     
-    pub fn populate_pending(&mut self) {
+    fn populate_pending(&mut self) {
         let mut pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
         self.pending_pub.append(&mut pending_pub);
 

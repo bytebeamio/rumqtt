@@ -1,3 +1,108 @@
+//! A pure rust mqtt client which strives to be robust, efficient and easy to use.
+//! * Eventloop is just an async `Stream` which can be polled by tokio
+//! * Requests to eventloop is also a `Stream`. Solves both bounded an unbounded usecases
+//! * Robustness just a loop away
+//! * Flexible access to the state of eventloop to control its behaviour
+//!
+//! Accepts any stream of Requests
+//! ----------------------------
+//! Build bounded, unbounded, interruptible or any other stream (that fits your need) to
+//! feed the eventloop.
+//!
+//! **Few of our real world use cases**
+//!
+//! - A stream which orchestrates data between disk and memory by detecting backpressure and never (practically) loose data
+//! - A stream which juggles data between several channels based on priority of the data
+//!
+//! ```ignore
+//! #[tokio::main(core_threads = 1)]
+//! async fn main() {
+//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+//!     let requests = Vec::new::<Request>();
+//!
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
+//!     let mut stream = eventloop.stream();
+//!     while let Some(item) = stream.next().await {
+//!         println!("Received = {:?}", item);
+//!     }
+//! }
+//! ```
+//! Robustness a loop away
+//! ----------------------
+//! Networks are unreliable. But robustness is easy
+//!
+//! - Just create a new stream from the existing eventloop
+//! - Resumes from where it left
+//! - Access the state of the eventloop to customize the behaviour of the next connection
+//!
+//! ```ignore
+//! #[tokio::main(core_threads = 1)]
+//! async fn main() {
+//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+//!     let requests = Vec::new::<Request>();
+//!
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
+//!
+//!     // loop to reconnect and resume
+//!     loop {
+//!         let mut stream = eventloop.stream();
+//!         while let Some(item) = stream.next().await {
+//!             println!("Received = {:?}", item);
+//!         }
+//!         
+//!         time::delay_for(Duration::from_secs(1)).await;
+//!     }
+//! }
+//! ```
+//!
+//! Eventloop is just a stream which can be polled with tokio
+//! ----------------------
+//! - Plug it into `select!` `join!` to interleave with other streams on the the same thread
+//!
+//! ```ignore
+//! #[tokio::main(core_threads = 1)]
+//! async fn main() {
+//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+//!     let requests = Vec::new::<Request>();
+//!
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
+//!
+//!     // plug it into tokio ecosystem
+//!     let mut stream = eventloop.stream();
+//! }
+//! ```
+//!
+//! Powerful notification system to control the runtime
+//! ----------------------
+//! Eventloop stream yields all the interesting event ranging for data on the network to
+//! disconnections and reconnections. Use it the way you see fit
+//!
+//! - Resubscribe after reconnection
+//! - Stop after receiving Nth puback
+//!
+//! ```ignore
+//! #[tokio::main(core_threads = 1)]
+//! async fn main() {
+//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+//!     let (requests_tx, requests_rx) = channel(10);
+//!
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
+//!
+//!     // loop to reconnect and resume
+//!     loop {
+//!         let mut stream = eventloop.stream();
+//!         while let Some(notification) = stream.next().await {
+//!             println!("Received = {:?}", item);
+//!             match notification {
+//!                 Notification::Connect => requests_tx.send(subscribe).unwrap(),
+//!             }
+//!         }
+//!         
+//!         time::delay_for(Duration::from_secs(1)).await;
+//!     }
+//! }
+//! ```
+
 #![recursion_limit = "512"]
 
 #[macro_use]
@@ -11,22 +116,33 @@ pub(crate) mod state;
 
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
-pub use rumq_core::mqtt4::*;
 pub use state::MqttState;
 
-/// Incoming notifications from the broker
+#[doc(hidden)]
+pub use rumq_core::mqtt4::{publish, subscribe, PacketIdentifier, Publish, QoS, Suback, Subscribe, Unsubscribe};
+
+/// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
 pub enum Notification {
+    /// Successful mqtt connection
     Connected,
+    /// Incoming publish from the broker
     Publish(Publish),
+    /// Incoming puback from the broker
     Puback(PacketIdentifier),
+    /// Incoming pubrec from the broker
     Pubrec(PacketIdentifier),
-    Pubrel(PacketIdentifier),
+    /// Incoming pubcomp from the broker
     Pubcomp(PacketIdentifier),
+    /// Incoming suback from the broker
     Suback(Suback),
+    /// Incoming unsuback from the broker
     Unsuback(PacketIdentifier),
+    /// Eventloop error
     StreamEnd(EventLoopError),
+    /// Request stream done
     RequestsDone,
+    /// Network closed by the remote
     NetworkClosed,
 }
 
@@ -84,7 +200,7 @@ pub enum SecurityOptions {
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
-/// Mqtt options
+/// Options to configure the behaviour of mqtt connection
 #[derive(Clone, Debug)]
 pub struct MqttOptions {
     /// broker address that you want to connect to

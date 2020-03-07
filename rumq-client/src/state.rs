@@ -26,12 +26,10 @@ pub enum StateError {
     WrongPacket,
 }
 
-/// `MqttState` saves the state of the mqtt connection. Methods will
-/// just modify the state of the object without doing any network operations
-/// Methods returns so that n/w methods or n/w eventloop can
-/// operate directly. This abstracts the functionality better
-/// so that it's easy to switch between synchronous code, tokio (or)
-/// async/await
+/// State of the mqtt connection.
+// Methods will just modify the state of the object without doing any network operations
+// This abstracts the functionality better so that it's easy to switch between synchronous code,
+// tokio (or) async/await
 #[derive(Debug, Clone)]
 pub struct MqttState {
     /// Connection status
