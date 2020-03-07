@@ -1,6 +1,6 @@
 [package]
 name = "rumq-broker"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 description = "Library for embeddable mqtt broker"
 license = "MIT"
 repository = "https://github.com/tekjar/rumq"
@@ -14,7 +14,7 @@ tokio = { version = "0.2", features = ["full"] }
 tokio-util = { version = "0.2", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-rustls = "0.12"
-rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.5" }
+rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.6" }
 derive_more = { version = "0.99", default-features = false, features = ["from"] }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
