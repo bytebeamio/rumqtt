@@ -1,6 +1,6 @@
 [package]
 name = "rumq-client"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 description = "An efficeint and robust mqtt client for your connected devices"
 license = "MIT"
 repository = "https://github.com/tekjar/rumq"
@@ -19,6 +19,7 @@ webpki = "0.21"
 tokio-rustls = "0.12"
 rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.5" }
 log = "0.4"
+pin-project = "0.4"
 
 
 [dev-dependencies]
@@ -27,5 +28,5 @@ color-backtrace = "0.2.3"
 crossbeam-channel = "0.4"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
-jsonwebtoken = "7.0.0-beta.1"
+jsonwebtoken = "7"
 tokio = { version = "0.2", features = ["full", "macros"] }
