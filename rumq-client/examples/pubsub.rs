@@ -1,7 +1,6 @@
-use futures_util::stream::StreamExt;
 use tokio::sync::mpsc::{channel, Sender};
-use tokio::task;
-use tokio::time;
+use tokio::{time, task};
+use tokio::stream::StreamExt;
 
 use rumq_client::{self, MqttOptions, QoS, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
