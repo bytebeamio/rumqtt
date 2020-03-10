@@ -1,17 +1,17 @@
 use crate::{Notification, Request, network};
+use crate::state::{StateError, MqttState};
+use crate::MqttOptions;
 use derive_more::From;
 use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use rumq_core::mqtt4::codec::MqttCodec;
-use futures_util::{pin_mut, FutureExt};
-use tokio::select;
+use futures_util::pin_mut;
 use futures_util::stream::{Stream, StreamExt};
 use futures_util::sink::{Sink, SinkExt};
 use tokio::time::{self, Elapsed};
 use tokio::stream::iter;
 use tokio_util::codec::Framed;
+use tokio::select;
 use async_stream::stream;
-use crate::state::{StateError, MqttState};
-use crate::MqttOptions;
 
 use std::time::Duration;
 use std::collections::VecDeque;
@@ -118,14 +118,14 @@ impl MqttEventLoop {
                     }
                 } else {
                     select! {
-                        o = network_stream.next().fuse() => match o {
+                        o = network_stream.next() => match o {
                             Some(o) => self.state.handle_packet(o),
                             None => {
                                 exit = Some(Notification::NetworkClosed);
                                 break
                             }
                         },
-                        o = request_stream.next().fuse() => match o {
+                        o = request_stream.next() => match o {
                             Some(o) => self.state.handle_request(o),
                             None => {
                                 exit = Some(Notification::RequestsDone);
