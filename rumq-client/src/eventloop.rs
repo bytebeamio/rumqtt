@@ -1,16 +1,16 @@
 use crate::{Notification, Request, network};
 use crate::state::{StateError, MqttState};
 use crate::MqttOptions;
+
 use derive_more::From;
 use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
 use rumq_core::mqtt4::codec::MqttCodec;
-use futures_util::pin_mut;
-use futures_util::stream::{Stream, StreamExt};
-use futures_util::sink::{Sink, SinkExt};
 use tokio::time::{self, Elapsed};
 use tokio::stream::iter;
 use tokio_util::codec::Framed;
-use tokio::select;
+use tokio::{select, pin};
+use futures_util::sink::{Sink, SinkExt};
+use futures_util::stream::{Stream, StreamExt};
 use async_stream::stream;
 
 use std::time::Duration;
@@ -100,10 +100,9 @@ impl MqttEventLoop {
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
 
-            pin_mut!(network_stream);
-            pin_mut!(request_stream);
+            pin!(network_stream, request_stream); 
 
-            // FIX: stream! doesn't allow yield in select! yet and using a variable to store exit
+            // FIXME stream! doesn't allow yield in select! yet and using a variable to store exit
             // status of every branch is resulting in ICE crash
             // exit = Notification::StreamEnd(e.into()); is causing the crash
             let mut exit = None;
