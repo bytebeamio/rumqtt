@@ -4,6 +4,7 @@ use std::string::FromUtf8Error;
 
 pub mod mqtt4;
 
+// TODO Probably convert this to io::Error (for simplicity) and provide a function for meaningful enum?
 #[derive(Debug, From)]
 pub enum Error {
     InvalidConnectReturnCode(u8),
