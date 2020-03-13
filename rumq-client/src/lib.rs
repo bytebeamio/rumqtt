@@ -108,6 +108,8 @@
 #[macro_use]
 extern crate log;
 
+use rumq_core::mqtt4::{MqttRead, MqttWrite, Packet};
+use std::io::Cursor;
 use std::time::Duration;
 
 pub(crate) mod eventloop;
@@ -173,6 +175,34 @@ impl From<Subscribe> for Request {
 impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
         return Request::Unsubscribe(unsubscribe);
+    }
+}
+
+/// From implementations for serialized requests
+impl From<Request> for Vec<u8> {
+    fn from(request: Request) -> Vec<u8> {
+        let mut packet = Cursor::new(Vec::new());
+        let o = match request {
+            Request::Publish(publish) => packet.mqtt_write(&Packet::Publish(publish)),
+            Request::Subscribe(subscribe) => packet.mqtt_write(&Packet::Subscribe(subscribe)),
+            _ => unimplemented!(),
+        };
+
+        o.unwrap();
+        packet.into_inner()
+    }
+}
+
+impl From<Vec<u8>> for Request {
+    fn from(payload: Vec<u8>) -> Request {
+        let mut payload = Cursor::new(payload);
+        let packet = payload.mqtt_read().unwrap();
+
+        match packet {
+            Packet::Publish(publish) => Request::Publish(publish),
+            Packet::Subscribe(subscribe) => Request::Subscribe(subscribe),
+            _ => unimplemented!(),
+        }
     }
 }
 
