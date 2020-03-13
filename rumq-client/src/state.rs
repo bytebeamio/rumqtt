@@ -338,16 +338,17 @@ impl MqttState {
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
-    /// publish packet to save it to the state. This might not be a problem during low
-    /// frequency/size data publishes but should ideally be `Arc`d while returning to
-    /// prevent deep copy of large messages as this is anyway immutable after adding pkid
+    /// publish packet to save it to the state.
+    /// TODO Measure Arc vs copy perf and take a call regarding clones
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
-        let publish = if publish.pkid == None {
-            let pkid = self.next_pkid();
-            publish.set_pkid(pkid);
-            publish
-        } else {
-            publish
+        let publish = match publish.pkid {
+            // consider PacketIdentifier(0) and None as uninitialized packets
+            Some(PacketIdentifier(0)) | None => {
+                let pkid = self.next_pkid();
+                publish.set_pkid(pkid);
+                publish
+            }
+            _ => publish,
         };
 
         self.outgoing_pub.push_back(publish.clone());

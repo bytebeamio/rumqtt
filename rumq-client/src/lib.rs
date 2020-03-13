@@ -179,6 +179,7 @@ impl From<Unsubscribe> for Request {
 }
 
 /// From implementations for serialized requests
+/// TODO Probably implement for io::Result<Vec<u8>> if possible?
 impl From<Request> for Vec<u8> {
     fn from(request: Request) -> Vec<u8> {
         let mut packet = Cursor::new(Vec::new());
