@@ -125,6 +125,7 @@ pub struct Publish {
 }
 
 /// Creates a new publish packet
+//TODO: maybe this should become private, or just removed and inserted into Publish::new()
 pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
     Publish {
         dup: false,
@@ -137,9 +138,17 @@ pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P
 }
 
 impl Publish {
+    pub fn new<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Self {
+        publish(topic, qos, payload)
+    }
+
     /// Sets packet identifier
     pub fn set_pkid<P: Into<PacketIdentifier>>(&mut self, pkid: P) -> &mut Self {
         self.pkid = Some(pkid.into());
+        self
+    }
+    pub fn set_retain(&mut self, retain: bool) -> &mut Self {
+        self.retain = retain;
         self
     }
 }
@@ -151,6 +160,7 @@ pub struct Subscribe {
     pub topics: Vec<SubscribeTopic>,
 }
 
+//TODO: maybe this should become private, or just removed and inserted into Subscribe::new()
 /// Creates a new subscription packet
 pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
     let topic = SubscribeTopic {
@@ -173,6 +183,9 @@ pub fn empty_subscribe() -> Subscribe {
 }
 
 impl Subscribe {
+    pub fn new<S: Into<String>>(topic: S, qos: QoS) -> Self {
+        subscribe(topic, qos)
+    }
     pub fn add(&mut self, topic: String, qos: QoS) -> &mut Self {
         let topic = SubscribeTopic { topic_path: topic, qos };
         self.topics.push(topic);
