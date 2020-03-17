@@ -116,7 +116,7 @@ pub(crate) mod eventloop;
 pub(crate) mod network;
 pub(crate) mod state;
 
-pub use eventloop::eventloop;
+pub use eventloop::{create_eventloop, eventloop};
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use state::MqttState;
 
