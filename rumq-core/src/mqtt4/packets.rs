@@ -3,14 +3,17 @@ use derive_more::From;
 use crate::mqtt4::QoS;
 use std::fmt;
 
+/// Packet identifier for packets types that require broker to acknowledge
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]
 pub struct PacketIdentifier(pub u16);
 
+/// Mqtt protocol version
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     MQTT(u8),
 }
 
+/// Mqtt connect packet representation
 #[derive(Clone, PartialEq)]
 pub struct Connect {
     /// Mqtt protocol version
@@ -29,6 +32,7 @@ pub struct Connect {
     pub password: Option<String>,
 }
 
+/// Creates a new mqtt connect packet
 pub fn connect<S: Into<String>>(id: S) -> Connect {
     Connect {
         protocol: Protocol::MQTT(4),
@@ -42,17 +46,19 @@ pub fn connect<S: Into<String>>(id: S) -> Connect {
 }
 
 impl Connect {
+    /// Sets username
     pub fn set_username<S: Into<String>>(&mut self, u: S) -> &mut Connect {
         self.username = Some(u.into());
         self
     }
 
+    /// Sets password
     pub fn set_password<S: Into<String>>(&mut self, p: S) -> &mut Connect {
         self.password = Some(p.into());
         self
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         let mut len = 8 + "MQTT".len() + self.client_id.len();
 
         // lastwill len
@@ -74,6 +80,7 @@ impl Connect {
     }
 }
 
+/// Connection return code sent by the server
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ConnectReturnCode {
@@ -85,16 +92,19 @@ pub enum ConnectReturnCode {
     NotAuthorized,
 }
 
+/// Connack packet
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Connack {
     pub session_present: bool,
     pub code: ConnectReturnCode,
 }
 
+/// Creates a new connack packet
 pub fn connack(code: ConnectReturnCode, session_present: bool) -> Connack {
     Connack { code, session_present }
 }
 
+/// Last will of the connection
 #[derive(Debug, Clone, PartialEq)]
 pub struct LastWill {
     pub topic: String,
@@ -103,6 +113,7 @@ pub struct LastWill {
     pub retain: bool,
 }
 
+/// Publish packet
 #[derive(Clone, PartialEq)]
 pub struct Publish {
     pub dup: bool,
@@ -113,6 +124,7 @@ pub struct Publish {
     pub payload: Vec<u8>,
 }
 
+/// Creates a new publish packet
 pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
     Publish {
         dup: false,
@@ -125,18 +137,21 @@ pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P
 }
 
 impl Publish {
+    /// Sets packet identifier
     pub fn set_pkid<P: Into<PacketIdentifier>>(&mut self, pkid: P) -> &mut Self {
         self.pkid = Some(pkid.into());
         self
     }
 }
 
+/// Subscriber packet
 #[derive(Clone, PartialEq)]
 pub struct Subscribe {
     pub pkid: PacketIdentifier,
     pub topics: Vec<SubscribeTopic>,
 }
 
+/// Creates a new subscription packet
 pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
     let topic = SubscribeTopic {
         topic_path: topic.into(),
@@ -149,6 +164,7 @@ pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
     }
 }
 
+/// Creates an empty subscription packet
 pub fn empty_subscribe() -> Subscribe {
     Subscribe {
         pkid: PacketIdentifier(0),
@@ -164,28 +180,33 @@ impl Subscribe {
     }
 }
 
+/// Subscription topic
 #[derive(Clone, PartialEq)]
 pub struct SubscribeTopic {
     pub topic_path: String,
     pub qos: QoS,
 }
 
+/// Subscription return code sent by the broker
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscribeReturnCodes {
     Success(QoS),
     Failure,
 }
 
+/// Subscription acknowledgement
 #[derive(Debug, Clone, PartialEq)]
 pub struct Suback {
     pub pkid: PacketIdentifier,
     pub return_codes: Vec<SubscribeReturnCodes>,
 }
 
+/// Creates a new subscription acknowledgement packet
 pub fn suback(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -> Suback {
     Suback { pkid, return_codes }
 }
 
+/// Unsubscribe packet
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unsubscribe {
     pub pkid: PacketIdentifier,
