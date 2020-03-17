@@ -1,3 +1,4 @@
+//! This module describes how to serialize and deserialize mqtt 4 packets
 use bytes::buf::Buf;
 use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
@@ -9,6 +10,7 @@ use crate::mqtt4::Packet;
 use crate::mqtt4::{MqttRead, MqttWrite};
 use crate::Error;
 
+/// MqttCodec knows how to serialize and deserialize mqtt packets from a raw stream of bytes
 pub struct MqttCodec {
     max_payload_size: usize,
 }

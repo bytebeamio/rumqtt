@@ -2,6 +2,7 @@ use crate::mqtt4::*;
 
 use byteorder::WriteBytesExt;
 
+/// Mqtt awareness on top of `Write`
 pub trait MqttWrite: WriteBytesExt {
     fn mqtt_write(&mut self, packet: &Packet) -> Result<(), Error> {
         match packet {

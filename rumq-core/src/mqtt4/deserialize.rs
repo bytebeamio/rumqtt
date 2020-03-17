@@ -2,6 +2,7 @@ use crate::mqtt4::*;
 use byteorder::ReadBytesExt;
 use std::io::Read;
 
+/// Mqtt awareness on top of `Read`
 pub trait MqttRead: ReadBytesExt {
     fn mqtt_read(&mut self) -> Result<Packet, Error> {
         let packet_type = self.read_u8()?;

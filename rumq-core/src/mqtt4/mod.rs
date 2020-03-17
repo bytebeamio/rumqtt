@@ -16,6 +16,7 @@ pub use topic::*;
 
 use crate::Error;
 
+/// Quality of service
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum QoS {
@@ -26,7 +27,7 @@ pub enum QoS {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PacketType {
+enum PacketType {
     Connect = 1,
     Connack,
     Publish,
@@ -43,6 +44,7 @@ pub enum PacketType {
     Disconnect,
 }
 
+/// Encapsulates all the possible mqtt packets
 #[derive(Debug, Clone, PartialEq)]
 pub enum Packet {
     Connect(Connect),
@@ -61,16 +63,16 @@ pub enum Packet {
     Disconnect,
 }
 
-///          7                          3                          0
-///          +--------------------------+--------------------------+
-/// byte 1   | MQTT Control Packet Type | Flags for each type      |
-///          +--------------------------+--------------------------+
-///          |         Remaining Bytes Len  (1 - 4 bytes)          |
-///          +-----------------------------------------------------+
-///
-/// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
+//          7                          3                          0
+//          +--------------------------+--------------------------+
+// byte 1   | MQTT Control Packet Type | Flags for each type      |
+//          +--------------------------+--------------------------+
+//          |         Remaining Bytes Len  (1 - 4 bytes)          |
+//          +-----------------------------------------------------+
+//
+// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
 
-pub fn qos(num: u8) -> Result<QoS, Error> {
+fn qos(num: u8) -> Result<QoS, Error> {
     match num {
         0 => Ok(QoS::AtMostOnce),
         1 => Ok(QoS::AtLeastOnce),
@@ -79,7 +81,7 @@ pub fn qos(num: u8) -> Result<QoS, Error> {
     }
 }
 
-pub fn packet_type(num: u8) -> Result<PacketType, Error> {
+fn packet_type(num: u8) -> Result<PacketType, Error> {
     match num {
         1 => Ok(PacketType::Connect),
         2 => Ok(PacketType::Connack),
@@ -99,7 +101,7 @@ pub fn packet_type(num: u8) -> Result<PacketType, Error> {
     }
 }
 
-pub fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
+fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
     match num {
         0 => Ok(ConnectReturnCode::Accepted),
         1 => Ok(ConnectReturnCode::BadUsernamePassword),

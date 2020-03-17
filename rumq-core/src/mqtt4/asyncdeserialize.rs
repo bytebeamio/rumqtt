@@ -2,6 +2,7 @@ use crate::mqtt4::*;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
+/// Mqtt awareness on top of tokio's `AsyncRead`
 #[async_trait]
 pub trait AsyncMqttRead: AsyncReadExt + Unpin {
     async fn async_mqtt_read(&mut self) -> Result<Packet, Error> {

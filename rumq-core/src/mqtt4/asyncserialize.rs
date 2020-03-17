@@ -3,6 +3,7 @@ use crate::mqtt4::*;
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
+/// Mqtt awareness on top of tokio's `AsyncWrite`
 #[async_trait]
 pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
     async fn async_mqtt_write(&mut self, packet: &Packet) -> Result<(), Error> {

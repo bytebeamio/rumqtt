@@ -120,8 +120,7 @@ pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use state::MqttState;
 
-#[doc(hidden)]
-pub use rumq_core::mqtt4::{publish, subscribe, Connect, PacketIdentifier, Publish, QoS, Suback, Subscribe, Unsubscribe};
+pub use rumq_core::mqtt4::*;
 
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
@@ -287,7 +286,7 @@ impl MqttOptions {
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
             notification_channel_capacity: 10,
-            throttle: Duration::from_micros(10),
+            throttle: Duration::from_micros(0),
             inflight: 100,
         }
     }
