@@ -44,10 +44,11 @@ pub enum EventLoopError {
     StreamDone
 }
 
-/// See [eventloop](eventloop)
-pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
-    #[allow(deprecated)]
-    eventloop(options, requests)
+#[doc(hidden)]
+#[deprecated(since="0.1.0-alpha-8", note="use create_eventloop instead")]
+/// See [create_eventloop](create_eventloop)
+pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
+    create_eventloop(options, requests)
 }
 
 /// Returns an object which encompasses state of the connection.
@@ -60,7 +61,7 @@ pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static)
 /// For a similar reason, requests are also initialized as part of this method to reuse same
 /// request stream while retrying after the previous `Stream` has stopped
 /// ```ignore
-/// let mut eventloop = eventloop(options, requests);
+/// let mut eventloop = create_eventloop(options, requests);
 /// loop {
 ///     let mut stream = eventloop.stream(reconnection_options);
 ///     while let Some(notification) = stream.next().await() {}
@@ -70,8 +71,7 @@ pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static)
 /// access and update `options`, `state` and `requests`.
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
-#[deprecated(since="0.1.0-alpha-8", note="use create_eventloop instead")]
-pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
+pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
     let state = MqttState::new();
     let requests = Box::new(requests);
     let pending_pub = VecDeque::new();
@@ -385,7 +385,7 @@ mod test {
 
         time::delay_for(Duration::from_secs(1)).await;
         let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-        let mut eventloop = super::eventloop(options, requests_rx);
+        let mut eventloop = super::create_eventloop(options, requests_rx);
 
         let start = Instant::now();
         let o = eventloop.connect().await;
@@ -416,7 +416,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -451,7 +451,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -491,7 +491,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -538,7 +538,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -577,7 +577,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
             while let Some(_p) = stream.next().await {}
         });
@@ -630,7 +630,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
 
             loop {
                 let mut stream = eventloop.stream();
@@ -680,7 +680,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
 
             loop {
                 let mut stream = eventloop.stream();

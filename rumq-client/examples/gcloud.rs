@@ -3,7 +3,7 @@ use std::ops::Add;
 use std::env;
 use std::fs;
 
-use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, eventloop};
+use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, create_eventloop};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 use futures_util::stream::StreamExt;
@@ -20,7 +20,7 @@ async fn main() {
 
     let (requests_tx, requests_rx) = channel(1);
     let mqttoptions = gcloud();
-    let mut eventloop = eventloop(mqttoptions, requests_rx);
+    let mut eventloop = create_eventloop(mqttoptions, requests_rx);
 
     task::spawn(async move {
         requests(requests_tx).await;
@@ -43,10 +43,10 @@ async fn stream_it(eventloop: &mut MqttEventLoop) {
 async fn requests(mut requests_tx: Sender<Request>) {
     for i in 0..15 {
         requests_tx.send(publish_request(i)).await.unwrap();
-        time::delay_for(Duration::from_secs(1)).await; 
+        time::delay_for(Duration::from_secs(1)).await;
     }
 
-    time::delay_for(Duration::from_secs(100)).await; 
+    time::delay_for(Duration::from_secs(100)).await;
 }
 
 fn gcloud() -> MqttOptions {
@@ -59,7 +59,7 @@ fn gcloud() -> MqttOptions {
         .set_ca(ca)
         .set_credentials("unused", &password);
 
-    mqttoptions 
+    mqttoptions
 }
 
 fn publish_request(i: u8) -> Request {
