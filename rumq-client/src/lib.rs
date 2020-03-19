@@ -302,6 +302,10 @@ impl MqttOptions {
         self
     }
 
+    pub fn last_will(&mut self) -> Option<LastWill> {
+        self.last_will.clone()
+    }
+
     pub fn set_ca(&mut self, ca: Vec<u8>) -> &mut Self {
         self.ca = Some(ca);
         self

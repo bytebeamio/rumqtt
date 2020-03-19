@@ -303,10 +303,12 @@ impl MqttEventLoop {
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
         let clean_session = self.options.clean_session();
+        let last_will = self.options.last_will();
 
         let mut connect = connect(id);
         connect.keep_alive = keep_alive;
         connect.clean_session = clean_session;
+        connect.last_will = last_will;
 
         if let Some((username, password)) = self.options.credentials() {
             connect.set_username(username).set_password(password);
