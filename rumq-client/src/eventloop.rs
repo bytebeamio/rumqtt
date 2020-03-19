@@ -46,6 +46,7 @@ pub enum EventLoopError {
 
 /// See [eventloop](eventloop)
 pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
+    #[allow(deprecated)]
     eventloop(options, requests)
 }
 

@@ -207,7 +207,6 @@ impl From<Vec<u8>> for Request {
     }
 }
 
-#[doc(hidden)]
 /// Commands sent by the client to mqtt event loop. Commands
 /// are of higher priority and will be `select`ed along with
 /// [request]s
