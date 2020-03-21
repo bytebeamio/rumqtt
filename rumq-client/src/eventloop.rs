@@ -9,8 +9,8 @@ use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
 use rumq_core::mqtt4::{connect, Packet, PacketIdentifier, Publish};
 use tokio::stream::iter;
-use tokio::time::{self, Throttle, Instant, Elapsed, Delay};
-use tokio::{pin, select};
+use tokio::time::{self, Instant, Elapsed, Delay};
+use tokio::select;
 use tokio_util::codec::Framed;
 
 use std::collections::VecDeque;
@@ -307,10 +307,9 @@ mod test {
     use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::mpsc::{channel, Sender};
+    use tokio::sync::mpsc::channel;
     use tokio::{task, time};
+    use super::broker::*;
 
     #[tokio::test]
     async fn connection_should_timeout_on_time() {
@@ -341,6 +340,7 @@ mod test {
     // TODO: This tests fails on ci with elapsed time of 955 milliseconds. This drift
     // (less than set delay) isn't observed in other tests
     #[allow(dead_code)]
+    #[tokio::test]
     async fn throttled_requests_works_with_correct_delays_between_requests() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1881);
         options.set_throttle(Duration::from_secs(1));
@@ -378,7 +378,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn no_outgoing_requests_to_broker_should_raise_ping_on_time() {
+    async fn idle_connection_triggers_pings_on_time() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
@@ -399,15 +399,23 @@ mod test {
 
         // check incoming rate at th broker
         let start = Instant::now();
-        let packet = stream.next().await.unwrap();
-        let elapsed = start.elapsed();
+        let mut ping_received = false;
 
-        assert_eq!(packet, Packet::Pingreq);
-        assert_eq!(elapsed.as_secs(), keep_alive.as_secs())
+        for _i in 0..10 {
+            let packet = stream.next().await.unwrap();
+            let elapsed = start.elapsed();
+            if packet == Packet::Pingreq {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs()); 
+                break;
+            }
+        }
+
+        assert!(ping_received);
     }
 
     #[tokio::test]
-    async fn network_future_triggers_pings_on_time() {
+    async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
@@ -451,6 +459,17 @@ mod test {
 
         assert!(ping_received);
     }
+
+    
+    #[tokio::test]
+    async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
+    }
+
+    #[tokio::test]
+    async fn detects_halfopen_connections_in_the_second_ping_request() {
+    }
+
+
 
     #[tokio::test]
     async fn requests_are_blocked_after_max_inflight_queue_size() {
@@ -594,7 +613,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn reconnection_resends_unacked_packets() {
+    async fn reconnection_resends_unacked_packets_from_the_previous_connection_before_sending_current_connection_requests() {
         let options = MqttOptions::new("dummy", "127.0.0.1", 1890);
 
         // start sending qos0 publishes. this makes sure that there is
@@ -611,7 +630,7 @@ mod test {
             time::delay_for(Duration::from_secs(10)).await;
         });
 
-        // start the eventloop
+        // start the client eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::create_eventloop(options, requests_rx);
@@ -622,7 +641,7 @@ mod test {
             }
         });
 
-        // broker connection 1
+        // broker connection 1. receive but don't ack
         {
             let mut broker = broker(1890, true).await;
             for i in 1..=2 {
@@ -631,7 +650,7 @@ mod test {
             }
         }
 
-        // broker connection 2
+        // broker connection 2 receives from scratch
         {
             let mut broker = broker(1890, true).await;
             for i in 1..=6 {
@@ -640,11 +659,22 @@ mod test {
             }
         }
     }
+}
 
+#[cfg(test)]
+mod broker {
     use async_stream::stream;
     use futures_util::stream::Stream;
+    use crate::Request;
+    use rumq_core::mqtt4::*;
+    use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc::Sender;
+    use tokio::time;
 
-    async fn start_requests(mut requests_tx: Sender<Request>) {
+
+    pub async fn start_requests(mut requests_tx: Sender<Request>) {
         for i in 0..10 {
             let topic = "hello/world".to_owned();
             let payload = vec![1, 2, 3, i];
@@ -655,11 +685,11 @@ mod test {
         }
     }
 
-    struct Broker {
+    pub struct Broker {
         stream: TcpStream,
     }
 
-    async fn broker(port: u16, ack: bool) -> Broker {
+    pub async fn broker(port: u16, ack: bool) -> Broker {
         let addr = format!("127.0.0.1:{}", port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
         let (mut stream, _) = listener.accept().await.unwrap();
@@ -677,7 +707,7 @@ mod test {
 
     impl Broker {
         // reads a packet from the stream with 2 second timeout
-        async fn async_mqtt_read(&mut self) -> Option<PacketIdentifier> {
+        pub async fn async_mqtt_read(&mut self) -> Option<PacketIdentifier> {
             let mqtt_read = time::timeout(Duration::from_secs(2), async { self.stream.async_mqtt_read().await.unwrap() });
 
             if let Ok(Packet::Publish(publish)) = mqtt_read.await {
@@ -687,13 +717,13 @@ mod test {
             }
         }
 
-        async fn ack(&mut self, pkid: PacketIdentifier) {
+        pub async fn ack(&mut self, pkid: PacketIdentifier) {
             let packet = Packet::Puback(pkid);
             self.stream.async_mqtt_write(&packet).await.unwrap();
             self.stream.flush().await.unwrap();
         }
 
-        fn stream(mut self) -> impl Stream<Item = Packet> {
+        pub fn stream(mut self) -> impl Stream<Item = Packet> {
             let stream = stream! {
                 loop {
                     let packet = self.stream.async_mqtt_read().await.unwrap();
