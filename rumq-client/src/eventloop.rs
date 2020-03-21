@@ -399,6 +399,7 @@ mod test {
 
     // TODO: This tests fails on ci with elapsed time of 955 milliseconds. This drift
     // (less than set delay) isn't observed in other tests
+    #[allow(dead_code)]
     async fn throttled_requests_works_with_correct_delays_between_requests() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1881);
         options.set_throttle(Duration::from_secs(1));
@@ -414,7 +415,7 @@ mod test {
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::create_eventloop(options, requests_rx);
-            let mut stream = eventloop.stream();
+            let mut stream = eventloop.connect().await.unwrap();
 
             while let Some(_) = stream.next().await {}
         });
@@ -447,7 +448,7 @@ mod test {
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::create_eventloop(options, requests_rx);
-            let mut stream = eventloop.stream();
+            let mut stream = eventloop.connect().await.unwrap();
 
             while let Some(_) = stream.next().await {}
         });
@@ -486,7 +487,7 @@ mod test {
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::create_eventloop(options, requests_rx);
-            let mut stream = eventloop.stream();
+            let mut stream = eventloop.connect().await.unwrap();
 
             while let Some(_) = stream.next().await {}
         });
@@ -532,7 +533,7 @@ mod test {
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::create_eventloop(options, requests_rx);
-            let mut stream = eventloop.stream();
+            let mut stream = eventloop.connect().await.unwrap();
 
             while let Some(_) = stream.next().await {}
         });
@@ -570,7 +571,7 @@ mod test {
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
             let mut eventloop = super::create_eventloop(options, requests_rx);
-            let mut stream = eventloop.stream();
+            let mut stream = eventloop.connect().await.unwrap();
             while let Some(_p) = stream.next().await {}
         });
 
@@ -625,7 +626,7 @@ mod test {
             let mut eventloop = super::create_eventloop(options, requests_rx);
 
             loop {
-                let mut stream = eventloop.stream();
+                let mut stream = eventloop.connect().await.unwrap();
                 while let Some(_) = stream.next().await {}
             }
         });
@@ -675,7 +676,7 @@ mod test {
             let mut eventloop = super::create_eventloop(options, requests_rx);
 
             loop {
-                let mut stream = eventloop.stream();
+                let mut stream = eventloop.connect().await.unwrap();
                 while let Some(_) = stream.next().await {}
             }
         });

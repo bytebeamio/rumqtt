@@ -13,8 +13,8 @@ async fn main() {
     color_backtrace::install();
 
     let ca = fs::read("certs/tlsfiles/ca-chain.cert.pem").unwrap();
-    let client_cert = fs::read("certs/tlsfiles/device-1.cert.pem").unwrap();
-    let client_key = fs::read("certs/tlsfiles/device-1.key.pem").unwrap();
+    let _client_cert = fs::read("certs/tlsfiles/device-1.cert.pem").unwrap();
+    let _client_key = fs::read("certs/tlsfiles/device-1.key.pem").unwrap();
 
     let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new("device-1", "mqtt.bytebeam.io", 8883);
@@ -35,7 +35,7 @@ async fn main() {
 
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.stream();
+    let mut stream = eventloop.connect().await.unwrap();
 
     while let Some(item) = stream.next().await {
         println!("Received = {:?}", item);

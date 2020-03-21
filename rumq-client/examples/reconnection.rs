@@ -31,7 +31,7 @@ async fn main() {
 }
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.stream();
+    let mut stream = eventloop.connect().await.unwrap();
 
     while let Some(item) = stream.next().await {
         println!("Received = {:?}", item);
