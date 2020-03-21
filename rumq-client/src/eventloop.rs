@@ -33,7 +33,7 @@ pub struct MqttEventLoop {
 }
 
 
-/// Critical errors during eventloop polling 
+/// Critical errors during eventloop polling
 #[derive(From, Debug)]
 pub enum EventLoopError {
     MqttState(StateError),
@@ -44,27 +44,34 @@ pub enum EventLoopError {
     StreamDone
 }
 
+#[doc(hidden)]
+#[deprecated(since="0.1.0-alpha-8", note="use create_eventloop instead")]
+/// See [create_eventloop](create_eventloop)
+pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
+    create_eventloop(options, requests)
+}
+
 /// Returns an object which encompasses state of the connection.
 /// Use this to create a `Stream` with `stream()` method and poll it with tokio.
 ///
 /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
-/// internal state and mqtt options after the work with the `Stream` is done or stopped. 
+/// internal state and mqtt options after the work with the `Stream` is done or stopped.
 /// This is useful in scenarios like shutdown where the current state should be persisted or
 /// during reconnection when the state from last disconnection should be resumed.
-/// For a similar reason, requests are also initialized as part of this method to reuse same 
+/// For a similar reason, requests are also initialized as part of this method to reuse same
 /// request stream while retrying after the previous `Stream` has stopped
 /// ```ignore
-/// let mut eventloop = eventloop(options, requests);
+/// let mut eventloop = create_eventloop(options, requests);
 /// loop {
 ///     let mut stream = eventloop.stream(reconnection_options);
 ///     while let Some(notification) = stream.next().await() {}
 /// }
 /// ```
-/// When mqtt `stream` ends due to critical errors (like auth failure), user has a choice to 
+/// When mqtt `stream` ends due to critical errors (like auth failure), user has a choice to
 /// access and update `options`, `state` and `requests`.
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
-pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
+pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
     let state = MqttState::new();
     let requests = Box::new(requests);
     let pending_pub = VecDeque::new();
@@ -100,7 +107,7 @@ impl MqttEventLoop {
             let mut network_stream = network_stream(self.options.keep_alive, network_rx);
             let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
 
-            pin!(network_stream, request_stream); 
+            pin!(network_stream, request_stream);
 
             // FIXME stream! doesn't allow yield in select! yet and using a variable to store exit
             // status of every branch is resulting in ICE crash
@@ -112,7 +119,7 @@ impl MqttEventLoop {
                         Some(o) => self.state.handle_packet(o),
                         None => {
                             exit = Some(Notification::NetworkClosed);
-                            break 
+                            break
                         }
                     }
                 } else {
@@ -128,7 +135,7 @@ impl MqttEventLoop {
                             Some(o) => self.state.handle_request(o),
                             None => {
                                 exit = Some(Notification::RequestsDone);
-                                break 
+                                break
                             }
                         }
                     }
@@ -152,7 +159,7 @@ impl MqttEventLoop {
                     // network_tx.flush().await?;
                 }
 
-                // yield the notification to the user 
+                // yield the notification to the user
                 if let Some(n) = notification { yield n }
             }
 
@@ -164,7 +171,7 @@ impl MqttEventLoop {
 
         Box::pin(stream)
     }
-    
+
     fn populate_pending(&mut self) {
         let mut pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
         self.pending_pub.append(&mut pending_pub);
@@ -180,7 +187,7 @@ impl MqttEventLoop {
 /// The caveat with generating pingreq on requsts rather than considering outgoing packets
 /// including replys due to incoming packets is that we generate unnecessary pingreqs when there
 /// are no user requests but there is outgoing network activity due to incoming packets like qos1
-/// publish. 
+/// publish.
 /// See desgin notes for understanding this design choice
 fn request_stream<R: Requests, P: Packets>(keep_alive: Duration, throttle: Duration, pending: P, requests: R) -> impl Stream<Item = Packet> {
     stream! {
@@ -201,7 +208,7 @@ fn request_stream<R: Requests, P: Packets>(keep_alive: Duration, throttle: Durat
                 }
             }
         }
-        
+
         let mut requests = time::throttle(throttle, requests);
         loop {
             let timeout_request = time::timeout(keep_alive, async {
@@ -225,9 +232,9 @@ fn request_stream<R: Requests, P: Packets>(keep_alive: Duration, throttle: Durat
 /// Network stream. Generates pingreq when there is no incoming packet for keepalive + 1 time to
 /// find halfopen connections to the broker. keep alive + 1 is necessary so that when the
 /// connection is idle on both incoming and outgoing packets, we trigger pingreq on both requests
-/// and incoming which trigger await_pingresp error. 
-/// 
-/// Maintaing a gap between both allows network stream to receive pingresp and hence not timeout 
+/// and incoming which trigger await_pingresp error.
+///
+/// Maintaing a gap between both allows network stream to receive pingresp and hence not timeout
 /// due to incoming activity because of request ping. pingreq should be received with in one second
 /// or else pingreq due to network timeout will cause await_pingresp erorr. This is ok as
 /// pingpacket round trip size = 4 bytes. If network bandwidth is worse than 4 bytes per second,
@@ -260,7 +267,7 @@ fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl 
 
             match packet {
                 Ok(packet) => yield packet,
-                Err(_) => break 
+                Err(_) => break
             }
         }
     }
@@ -296,10 +303,12 @@ impl MqttEventLoop {
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
         let clean_session = self.options.clean_session();
+        let last_will = self.options.last_will();
 
         let mut connect = connect(id);
         connect.keep_alive = keep_alive;
         connect.clean_session = clean_session;
+        connect.last_will = last_will;
 
         if let Some((username, password)) = self.options.credentials() {
             connect.set_username(username).set_password(password);
@@ -376,15 +385,15 @@ mod test {
 
         time::delay_for(Duration::from_secs(1)).await;
         let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-        let mut eventloop = super::eventloop(options, requests_rx); 
+        let mut eventloop = super::create_eventloop(options, requests_rx);
 
-        let start = Instant::now(); 
+        let start = Instant::now();
         let o = eventloop.connect().await;
         let elapsed = start.elapsed();
 
         match o {
             Ok(_) => assert!(false),
-            Err(super::EventLoopError::Timeout(_)) => assert!(true), 
+            Err(super::EventLoopError::Timeout(_)) => assert!(true),
             Err(_) => assert!(false)
         }
 
@@ -407,7 +416,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -420,10 +429,10 @@ mod test {
         // check incoming rate at th broker
         for i in 0..10 {
             let start = Instant::now();
-            let _ = stream.next().await.unwrap(); 
+            let _ = stream.next().await.unwrap();
             let elapsed = start.elapsed();
 
-            if i > 0 { 
+            if i > 0 {
                 dbg!(elapsed.as_millis());
                 assert_eq!(elapsed.as_secs(), options2.throttle.as_secs())
             }
@@ -442,7 +451,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -454,7 +463,7 @@ mod test {
 
         // check incoming rate at th broker
         let start = Instant::now();
-        let packet = stream.next().await.unwrap(); 
+        let packet = stream.next().await.unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(packet, Packet::Pingreq);
@@ -482,7 +491,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -496,9 +505,9 @@ mod test {
         let mut ping_received = false;
 
         for _i in 0..10 {
-            let packet = stream.next().await.unwrap(); 
+            let packet = stream.next().await.unwrap();
             let elapsed = start.elapsed();
-            if packet == Packet::Pingreq { 
+            if packet == Packet::Pingreq {
                 ping_received = true;
                 assert_eq!(elapsed.as_secs(), keep_alive.as_secs() + 1); // add 1 due to keep alive network implementation
                 break
@@ -529,7 +538,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
 
             while let Some(_) = stream.next().await {}
@@ -538,9 +547,9 @@ mod test {
 
         let mut broker = broker(1887, true).await;
         for i in 1..=10 {
-            let packet = broker.async_mqtt_read().await; 
+            let packet = broker.async_mqtt_read().await;
 
-            if i > inflight { 
+            if i > inflight {
                 assert!(packet.is_none());
             }
         }
@@ -568,7 +577,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
             let mut stream = eventloop.stream();
             while let Some(_p) = stream.next().await {}
         });
@@ -576,27 +585,27 @@ mod test {
         let mut broker = broker(1888, true).await;
 
         // packet 1
-        let packet = broker.async_mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_some());
         // packet 2
-        let packet = broker.async_mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_some());
         // packet 3
-        let packet = broker.async_mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_some());
-        // packet 4 
-        let packet = broker.async_mqtt_read().await; 
+        // packet 4
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_none());
         // ack packet 1 and we should receiver packet 4
         broker.ack(PacketIdentifier(1)).await;
-        let packet = broker.async_mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_some());
-        // packet 5 
-        let packet = broker.async_mqtt_read().await; 
+        // packet 5
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_none());
         // ack packet 2 and we should receiver packet 5
         broker.ack(PacketIdentifier(2)).await;
-        let packet = broker.async_mqtt_read().await; 
+        let packet = broker.async_mqtt_read().await;
         assert!(packet.is_some());
     }
 
@@ -621,7 +630,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
 
             loop {
                 let mut stream = eventloop.stream();
@@ -633,7 +642,7 @@ mod test {
         {
             let mut broker = broker(1889, true).await;
             for i in 1..=2 {
-                let packet = broker.async_mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await;
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
                 broker.ack(packet.unwrap()).await;
             }
@@ -643,7 +652,7 @@ mod test {
         {
             let mut broker = broker(1889, true).await;
             for i in 3..=4 {
-                let packet = broker.async_mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await;
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
                 broker.ack(packet.unwrap()).await;
             }
@@ -671,7 +680,7 @@ mod test {
         // start the eventloop
         task::spawn(async move {
             time::delay_for(Duration::from_secs(1)).await;
-            let mut eventloop = super::eventloop(options, requests_rx); 
+            let mut eventloop = super::create_eventloop(options, requests_rx);
 
             loop {
                 let mut stream = eventloop.stream();
@@ -683,7 +692,7 @@ mod test {
         {
             let mut broker = broker(1890, true).await;
             for i in 1..=2 {
-                let packet = broker.async_mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await;
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
             }
         }
@@ -692,7 +701,7 @@ mod test {
         {
             let mut broker = broker(1890, true).await;
             for i in 1..=6 {
-                let packet = broker.async_mqtt_read().await; 
+                let packet = broker.async_mqtt_read().await;
                 assert_eq!(PacketIdentifier(i), packet.unwrap());
             }
         }
@@ -750,7 +759,7 @@ mod test {
         }
 
         async fn ack(&mut self, pkid: PacketIdentifier) {
-            let packet = Packet::Puback(pkid); 
+            let packet = Packet::Puback(pkid);
             self.stream.async_mqtt_write(&packet).await.unwrap();
             self.stream.flush().await.unwrap();
         }

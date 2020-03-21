@@ -49,7 +49,7 @@
 //!         while let Some(item) = stream.next().await {
 //!             println!("Received = {:?}", item);
 //!         }
-//!         
+//!
 //!         time::delay_for(Duration::from_secs(1)).await;
 //!     }
 //! }
@@ -97,7 +97,7 @@
 //!                 Notification::Connect => requests_tx.send(subscribe).unwrap(),
 //!             }
 //!         }
-//!         
+//!
 //!         time::delay_for(Duration::from_secs(1)).await;
 //!     }
 //! }
@@ -116,7 +116,7 @@ pub(crate) mod eventloop;
 pub(crate) mod network;
 pub(crate) mod state;
 
-pub use eventloop::eventloop;
+pub use eventloop::{create_eventloop, eventloop};
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use state::MqttState;
 
@@ -147,9 +147,8 @@ pub enum Notification {
     NetworkClosed,
 }
 
-#[doc(hidden)]
 /// Requests by the client to mqtt event loop. Request are
-/// handle one by one#[derive(Debug)]
+/// handle one by one
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
@@ -208,7 +207,6 @@ impl From<Vec<u8>> for Request {
     }
 }
 
-#[doc(hidden)]
 /// Commands sent by the client to mqtt event loop. Commands
 /// are of higher priority and will be `select`ed along with
 /// [request]s
@@ -263,6 +261,8 @@ pub struct MqttOptions {
     throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: usize,
+    /// Last will that will be issued on unexpected disconnect
+    last_will: Option<LastWill>,
 }
 
 impl MqttOptions {
@@ -288,12 +288,22 @@ impl MqttOptions {
             notification_channel_capacity: 10,
             throttle: Duration::from_micros(0),
             inflight: 100,
+            last_will: None,
         }
     }
 
     /// Broker address
     pub fn broker_address(&self) -> (String, u16) {
         (self.broker_addr.clone(), self.port)
+    }
+
+    pub fn set_last_will(&mut self, will: LastWill) -> &mut Self {
+        self.last_will = Some(will);
+        self
+    }
+
+    pub fn last_will(&mut self) -> Option<LastWill> {
+        self.last_will.clone()
     }
 
     pub fn set_ca(&mut self, ca: Vec<u8>) -> &mut Self {
