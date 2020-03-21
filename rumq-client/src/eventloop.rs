@@ -1,22 +1,22 @@
-use crate::{Notification, Request, network};
-use crate::state::{StateError, MqttState};
+use crate::state::{MqttState, StateError};
 use crate::MqttOptions;
+use crate::{network, Notification, Request};
 
+use async_stream::stream;
 use derive_more::From;
-use rumq_core::mqtt4::{connect, Packet, Publish, PacketIdentifier};
-use rumq_core::mqtt4::codec::MqttCodec;
-use tokio::time::{self, Elapsed};
-use tokio::stream::iter;
-use tokio_util::codec::Framed;
-use tokio::{select, pin};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
-use async_stream::stream;
+use rumq_core::mqtt4::codec::MqttCodec;
+use rumq_core::mqtt4::{connect, Packet, PacketIdentifier, Publish};
+use tokio::stream::iter;
+use tokio::time::{self, Elapsed};
+use tokio::{pin, select};
+use tokio_util::codec::Framed;
 
-use std::time::Duration;
 use std::collections::VecDeque;
-use std::mem;
 use std::io;
+use std::mem;
+use std::time::Duration;
 
 /// Complete state of the eventloop
 pub struct MqttEventLoop {
@@ -29,9 +29,8 @@ pub struct MqttEventLoop {
     /// Request stream
     pub requests: Box<dyn Requests>,
     pending_pub: VecDeque<Publish>,
-    pending_rel: VecDeque<PacketIdentifier>
+    pending_rel: VecDeque<PacketIdentifier>,
 }
-
 
 /// Critical errors during eventloop polling
 #[derive(From, Debug)]
@@ -41,11 +40,11 @@ pub enum EventLoopError {
     Rumq(rumq_core::Error),
     Network(network::Error),
     Io(io::Error),
-    StreamDone
+    StreamDone,
 }
 
 #[doc(hidden)]
-#[deprecated(since="0.1.0-alpha-8", note="use create_eventloop instead")]
+#[deprecated(since = "0.1.0-alpha-8", note = "use create_eventloop instead")]
 /// See [create_eventloop](create_eventloop)
 pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
     create_eventloop(options, requests)
@@ -77,28 +76,28 @@ pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static)
     let pending_pub = VecDeque::new();
     let pending_rel = VecDeque::new();
 
-    let eventloop = MqttEventLoop { options, state, requests, pending_pub, pending_rel };
+    let eventloop = MqttEventLoop {
+        options,
+        state,
+        requests,
+        pending_pub,
+        pending_rel,
+    };
     eventloop
 }
 
 impl MqttEventLoop {
-    pub fn stream<'eventloop>(&'eventloop mut self) -> impl Stream<Item = Notification> + 'eventloop {
+    /// Connects to the broker and returns a stream that does everything MQTT. 
+    /// This stream internally processes requests from the request stream provided to the eventloop
+    /// while also consuming byte stream from the network and yielding mqtt packets as the output of
+    /// the stream
+    pub async fn connect<'eventloop>(&'eventloop mut self) -> Result<impl Stream<Item = Notification> + 'eventloop, EventLoopError> {
         self.state.await_pingresp = false;
+        let mut network = self.network_connect().await?;
+        self.mqtt_connect(&mut network).await?;
 
         let stream = stream! {
-            let mut network = match self.connect().await {
-                Ok(network) => {
-                    yield Notification::Connected;
-                    network
-                },
-                Err(e) => {
-                    yield Notification::StreamEnd(e);
-                    return
-                }
-            };
-
-            // move pending messages from state to eventloop and create a pending stream of
-            // requests
+            // move pending messages from state to eventloop and create a pending stream of requests
             self.populate_pending();
             let mut pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
             let mut pending = iter(self.pending_pub.drain(..)).map(Packet::Publish).chain(pending_rel);
@@ -169,7 +168,7 @@ impl MqttEventLoop {
             }
         };
 
-        Box::pin(stream)
+        Ok(Box::pin(stream))
     }
 
     fn populate_pending(&mut self) {
@@ -181,7 +180,6 @@ impl MqttEventLoop {
     }
 }
 
-
 /// Request stream. Converts requests from user into outgoing network packet. If there is no
 /// request for keep alive time, generates Pingreq to prevent broker from disconnecting the client.
 /// The caveat with generating pingreq on requsts rather than considering outgoing packets
@@ -189,7 +187,12 @@ impl MqttEventLoop {
 /// are no user requests but there is outgoing network activity due to incoming packets like qos1
 /// publish.
 /// See desgin notes for understanding this design choice
-fn request_stream<R: Requests, P: Packets>(keep_alive: Duration, throttle: Duration, pending: P, requests: R) -> impl Stream<Item = Packet> {
+fn request_stream<R: Requests, P: Packets>(
+    keep_alive: Duration,
+    throttle: Duration,
+    pending: P,
+    requests: R,
+) -> impl Stream<Item = Packet> {
     stream! {
         let mut pending = time::throttle(throttle, pending);
         loop {
@@ -274,15 +277,8 @@ fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl 
 }
 
 impl MqttEventLoop {
-    async fn connect(&mut self) -> Result<Box<dyn Network>, EventLoopError> {
-        let mut network = self.network_connect().await?;
-        self.mqtt_connect(&mut network).await?;
-
-        Ok(network)
-    }
-
     async fn network_connect(&self) -> Result<Box<dyn Network>, EventLoopError> {
-        let network= time::timeout(Duration::from_secs(5), async {
+        let network = time::timeout(Duration::from_secs(5), async {
             if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
                 // TODO: Make maximum payload size part of mqtt options
@@ -293,11 +289,11 @@ impl MqttEventLoop {
                 let o = Box::new(Framed::new(o, MqttCodec::new(10 * 1024)));
                 Ok::<Box<dyn Network>, EventLoopError>(o)
             }
-        }).await??;
+        })
+        .await??;
 
         Ok(network)
     }
-
 
     async fn mqtt_connect(&mut self, mut network: impl Network) -> Result<(), EventLoopError> {
         let id = self.options.client_id();
@@ -319,17 +315,19 @@ impl MqttEventLoop {
             network.send(Packet::Connect(connect)).await?;
             self.state.handle_outgoing_connect()?;
             Ok::<_, EventLoopError>(())
-        }).await??;
+        })
+        .await??;
 
         // wait for 'timeout' time to validate connack
         time::timeout(Duration::from_secs(5), async {
             let packet = match network.next().await {
                 Some(o) => o?,
-                None => return Err(EventLoopError::StreamDone)
+                None => return Err(EventLoopError::StreamDone),
             };
             self.state.handle_incoming_connack(packet)?;
             Ok::<_, EventLoopError>(())
-        }).await??;
+        })
+        .await??;
 
         Ok(())
     }
@@ -350,7 +348,7 @@ impl From<Request> for Packet {
 pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
-trait NetworkRead: Stream<Item = Result<Packet, rumq_core::Error>>+ Unpin + Send {}
+trait NetworkRead: Stream<Item = Result<Packet, rumq_core::Error>> + Unpin + Send {}
 impl<T> NetworkRead for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Unpin + Send {}
 
 trait NetworkWrite: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
@@ -362,17 +360,16 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
 pub trait Packets: Stream<Item = Packet> + Unpin + Send + Sync {}
 impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
 
-
 #[cfg(test)]
 mod test {
-    use rumq_core::mqtt4::*;
-    use tokio::sync::mpsc::{channel, Sender};
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::{time, task};
-    use tokio::io::AsyncWriteExt;
+    use crate::{MqttOptions, Request};
     use futures_util::stream::StreamExt;
-    use std::time::{Instant, Duration};
-    use crate::{Request, MqttOptions};
+    use rumq_core::mqtt4::*;
+    use std::time::{Duration, Instant};
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::mpsc::{channel, Sender};
+    use tokio::{task, time};
 
     #[tokio::test]
     async fn connection_should_timeout_on_time() {
@@ -394,7 +391,7 @@ mod test {
         match o {
             Ok(_) => assert!(false),
             Err(super::EventLoopError::Timeout(_)) => assert!(true),
-            Err(_) => assert!(false)
+            Err(_) => assert!(false),
         }
 
         assert_eq!(elapsed.as_secs(), 5);
@@ -422,7 +419,6 @@ mod test {
             while let Some(_) = stream.next().await {}
         });
 
-
         let broker = broker(1881, true).await;
         let mut stream = broker.stream();
 
@@ -445,7 +441,6 @@ mod test {
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
-
         // start sending requests
         let (_requests_tx, requests_rx) = channel(5);
         // start the eventloop
@@ -456,7 +451,6 @@ mod test {
 
             while let Some(_) = stream.next().await {}
         });
-
 
         let broker = broker(1885, true).await;
         let mut stream = broker.stream();
@@ -471,7 +465,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn  network_future_triggers_pings_on_timenetwork_future_triggers_pings_on_time() {
+    async fn network_future_triggers_pings_on_timenetwork_future_triggers_pings_on_time() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
@@ -497,7 +491,6 @@ mod test {
             while let Some(_) = stream.next().await {}
         });
 
-
         let broker = broker(1886, true).await;
         let mut stream = broker.stream();
 
@@ -510,7 +503,7 @@ mod test {
             if packet == Packet::Pingreq {
                 ping_received = true;
                 assert_eq!(elapsed.as_secs(), keep_alive.as_secs() + 1); // add 1 due to keep alive network implementation
-                break
+                break;
             }
         }
 
@@ -543,7 +536,6 @@ mod test {
 
             while let Some(_) = stream.next().await {}
         });
-
 
         let mut broker = broker(1887, true).await;
         for i in 1..=10 {
@@ -707,7 +699,6 @@ mod test {
         }
     }
 
-
     use async_stream::stream;
     use futures_util::stream::Stream;
 
@@ -723,7 +714,7 @@ mod test {
     }
 
     struct Broker {
-        stream: TcpStream
+        stream: TcpStream,
     }
 
     async fn broker(port: u16, ack: bool) -> Broker {
@@ -739,17 +730,13 @@ mod test {
             }
         }
 
-        Broker {
-            stream
-        }
+        Broker { stream }
     }
 
     impl Broker {
         // reads a packet from the stream with 2 second timeout
         async fn async_mqtt_read(&mut self) -> Option<PacketIdentifier> {
-            let mqtt_read = time::timeout(Duration::from_secs(2), async {
-                self.stream.async_mqtt_read().await.unwrap()
-            });
+            let mqtt_read = time::timeout(Duration::from_secs(2), async { self.stream.async_mqtt_read().await.unwrap() });
 
             if let Ok(Packet::Publish(publish)) = mqtt_read.await {
                 Some(publish.pkid.unwrap())
