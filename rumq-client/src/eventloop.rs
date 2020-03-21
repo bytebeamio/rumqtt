@@ -9,7 +9,7 @@ use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
 use rumq_core::mqtt4::{connect, Packet, PacketIdentifier, Publish};
 use tokio::stream::iter;
-use tokio::time::{self, Elapsed};
+use tokio::time::{self, Throttle, Instant, Elapsed, Delay};
 use tokio::{pin, select};
 use tokio_util::codec::Framed;
 
@@ -41,6 +41,7 @@ pub enum EventLoopError {
     Network(network::Error),
     Io(io::Error),
     StreamDone,
+    RequestsDone
 }
 
 #[doc(hidden)]
@@ -87,84 +88,64 @@ pub fn create_eventloop(options: MqttOptions, requests: impl Requests + 'static)
 }
 
 impl MqttEventLoop {
-    /// Connects to the broker and returns a stream that does everything MQTT. 
+    /// Connects to the broker and returns a stream that does everything MQTT.
     /// This stream internally processes requests from the request stream provided to the eventloop
     /// while also consuming byte stream from the network and yielding mqtt packets as the output of
     /// the stream
     pub async fn connect<'eventloop>(&'eventloop mut self) -> Result<impl Stream<Item = Notification> + 'eventloop, EventLoopError> {
         self.state.await_pingresp = false;
+
+        // connect to the broker
         let mut network = self.network_connect().await?;
         self.mqtt_connect(&mut network).await?;
 
+        // move pending messages from state to eventloop and create a pending stream of requests
+        self.populate_pending();
+
+        // create mqtt stream
         let stream = stream! {
-            // move pending messages from state to eventloop and create a pending stream of requests
-            self.populate_pending();
-            let mut pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
+            let pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
             let mut pending = iter(self.pending_pub.drain(..)).map(Packet::Publish).chain(pending_rel);
+            let mut pending = time::throttle(self.options.throttle, pending);
+            let mut requests = time::throttle(self.options.throttle, &mut self.requests);
 
-            let (mut network_tx, mut network_rx) = network.split();
-            let mut network_stream = network_stream(self.options.keep_alive, network_rx);
-            let mut request_stream = request_stream(self.options.keep_alive, self.options.throttle, &mut pending, &mut self.requests);
-
-            pin!(network_stream, request_stream);
-
-            // FIXME stream! doesn't allow yield in select! yet and using a variable to store exit
-            // status of every branch is resulting in ICE crash
-            // exit = Notification::StreamEnd(e.into()); is causing the crash
-            let mut exit = None;
+            let mut timeout = time::delay_for(self.options.keep_alive);
+            let mut inout_marker = 0;
+            let mut pending_done = false;
+            
             loop {
-                let o = if self.state.outgoing_pub.len() >= self.options.inflight {
-                    match network_stream.next().await {
-                        Some(o) => self.state.handle_packet(o),
-                        None => {
-                            exit = Some(Notification::NetworkClosed);
-                            break
-                        }
-                    }
-                } else {
-                    select! {
-                        o = network_stream.next() => match o {
-                            Some(o) => self.state.handle_packet(o),
-                            None => {
-                                exit = Some(Notification::NetworkClosed);
-                                break
-                            }
-                        },
-                        o = request_stream.next() => match o {
-                            Some(o) => self.state.handle_request(o),
-                            None => {
-                                exit = Some(Notification::RequestsDone);
-                                break
-                            }
-                        }
-                    }
-                };
-
+                let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
+                let o = select(
+                    &mut network, 
+                    &mut pending,
+                    &mut requests, 
+                    &mut self.state, 
+                    self.options.keep_alive, 
+                    &mut inout_marker, 
+                    inflight_full, 
+                    &mut pending_done,
+                    &mut timeout
+                ).await;
+                
                 let (notification, outpacket) = match o {
                     Ok((n, p)) => (n, p),
                     Err(e) => {
-                        yield Notification::StreamEnd(e.into());
+                        yield Notification::Abort(e.into());
                         break
                     }
                 };
 
                 // write the reply back to the network
+                // FIXME flush??
                 if let Some(p) = outpacket {
-                    if let Err(e) = network_tx.send(p).await {
-                        yield Notification::StreamEnd(e.into());
+                    if let Err(e) = network.send(p).await {
+                        yield Notification::Abort(e.into());
                         break
                     }
-
-                    // network_tx.flush().await?;
                 }
 
                 // yield the notification to the user
                 if let Some(n) = notification { yield n }
-            }
-
-            if let Some(e) = exit {
-                yield e;
-                return
             }
         };
 
@@ -180,115 +161,76 @@ impl MqttEventLoop {
     }
 }
 
-/// Request stream. Converts requests from user into outgoing network packet. If there is no
-/// request for keep alive time, generates Pingreq to prevent broker from disconnecting the client.
-/// The caveat with generating pingreq on requsts rather than considering outgoing packets
-/// including replys due to incoming packets is that we generate unnecessary pingreqs when there
-/// are no user requests but there is outgoing network activity due to incoming packets like qos1
-/// publish.
-/// See desgin notes for understanding this design choice
-fn request_stream<R: Requests, P: Packets>(
-    keep_alive: Duration,
-    throttle: Duration,
-    pending: P,
-    requests: R,
-) -> impl Stream<Item = Packet> {
-    stream! {
-        let mut pending = time::throttle(throttle, pending);
-        loop {
-            let timeout_request = time::timeout(keep_alive, async {
-                let request = pending.next().await;
-                request
-            }).await;
 
-
-            match timeout_request {
-                Ok(Some(request)) => yield request,
-                Ok(None) => break,
-                Err(_) => {
-                    let packet = Packet::Pingreq;
-                    yield packet
-                }
+async fn select<R: Requests, P: Packets>(
+    network: &mut Framed<Box<dyn N>, MqttCodec>, 
+    mut pending: P,
+    mut requests: R,
+    state: &mut MqttState,
+    keepalive: Duration,
+    inout_marker: &mut u8,
+    inflight_full: bool,
+    pending_done: &mut bool,
+    mut timeout: &mut Delay,
+) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+    // Select on network and requests and orchestrate keep alive delay timer based on it
+    let ticker= &mut timeout;
+    let o = select! {
+        o = network.next() => match o {
+            Some(packet) => state.handle_packet(packet?)?,
+            None => return Err(EventLoopError::StreamDone)
+        },
+        o = requests.next(), if !inflight_full && *pending_done => match o {
+            Some(request) => state.handle_request(request.into())?,
+            None => return Err(EventLoopError::RequestsDone),
+        },
+        o = pending.next(), if !*pending_done => match o { 
+            Some(packet) => state.handle_request(packet)?,
+            None => {
+                *pending_done = true;
+                (None, None)
             }
+        },
+        _ = ticker => {
+            timeout.reset(Instant::now() + keepalive);
+            *inout_marker = 0;
+            let notification = None;
+            let packet = Some(Packet::Pingreq);
+            return Ok((notification, packet))
         }
+    };
 
-        let mut requests = time::throttle(throttle, requests);
-        loop {
-            let timeout_request = time::timeout(keep_alive, async {
-                let request = requests.next().await;
-                request
-            }).await;
-
-
-            match timeout_request {
-                Ok(Some(request)) => yield request.into(),
-                Ok(None) => break,
-                Err(_) => {
-                    let packet = Packet::Pingreq;
-                    yield packet
-                }
-            }
-        }
+    let (notification, packet) = (o.0.is_some(), o.1.is_some());
+    match (notification, packet) {
+        (true, true) => *inout_marker |= 3,
+        (true, false) => *inout_marker |= 1,
+        (false, true) => *inout_marker |= 2,
+        (false, false) => (),
     }
-}
 
-/// Network stream. Generates pingreq when there is no incoming packet for keepalive + 1 time to
-/// find halfopen connections to the broker. keep alive + 1 is necessary so that when the
-/// connection is idle on both incoming and outgoing packets, we trigger pingreq on both requests
-/// and incoming which trigger await_pingresp error.
-///
-/// Maintaing a gap between both allows network stream to receive pingresp and hence not timeout
-/// due to incoming activity because of request ping. pingreq should be received with in one second
-/// or else pingreq due to network timeout will cause await_pingresp erorr. This is ok as
-/// pingpacket round trip size = 4 bytes. If network bandwidth is worse than 4 bytes per second,
-/// it's anyway a very bad network. We can also increase this delay from 1 to 3 secs as our minimum
-/// required keep alive time is 5 seconds
-///
-/// When there is outgoing activity but no incoming activity, e.g qos0 publishes, this generates
-/// pingreq at keep_alive + 1 making halfopen connection detection at 2*keepalive + 2 secs.
-fn network_stream<S: NetworkRead>(keep_alive: Duration, mut network: S) -> impl Stream<Item = Packet> {
-    let keep_alive = keep_alive + Duration::from_secs(1);
-
-    stream! {
-        loop {
-            let timeout_packet = time::timeout(keep_alive, async {
-                let packet = match network.next().await {
-                    Some(o) => o?,
-                    None => return Err(EventLoopError::StreamDone)
-                };
-
-                Ok::<Packet, EventLoopError>(packet)
-            }).await;
-
-            let packet = match timeout_packet {
-                Ok(p) => p,
-                Err(_) => {
-                    yield Packet::Pingreq;
-                    continue
-                }
-            };
-
-            match packet {
-                Ok(packet) => yield packet,
-                Err(_) => break
-            }
-        }
+    // Extend the keep alive ping window
+    if *inout_marker == 3 {
+       timeout.reset(Instant::now() + keepalive);
+       *inout_marker = 0;
     }
+
+    Ok(o)
 }
 
 impl MqttEventLoop {
-    async fn network_connect(&self) -> Result<Box<dyn Network>, EventLoopError> {
+    async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
         let network = time::timeout(Duration::from_secs(5), async {
-            if self.options.ca.is_some() {
+            let network = if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
-                // TODO: Make maximum payload size part of mqtt options
-                let o = Box::new(Framed::new(o, MqttCodec::new(10 * 1024)));
-                Ok::<Box<dyn Network>, EventLoopError>(o)
+                let o = Box::new(o) as Box<dyn N>;
+                Framed::new(o, MqttCodec::new(10 * 1024))
             } else {
                 let o = network::tcp_connect(&self.options).await?;
-                let o = Box::new(Framed::new(o, MqttCodec::new(10 * 1024)));
-                Ok::<Box<dyn Network>, EventLoopError>(o)
-            }
+                let o = Box::new(o) as Box<dyn N>;
+                Framed::new(o, MqttCodec::new(10 * 1024))
+            };
+
+            Ok::<Framed<Box<dyn N>, MqttCodec>, EventLoopError>(network)
         })
         .await??;
 
@@ -345,14 +287,13 @@ impl From<Request> for Packet {
     }
 }
 
+use tokio::io::{AsyncRead, AsyncWrite};
+
+pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
 pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
-
-trait NetworkRead: Stream<Item = Result<Packet, rumq_core::Error>> + Unpin + Send {}
-impl<T> NetworkRead for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Unpin + Send {}
-
-trait NetworkWrite: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
-impl<T> NetworkWrite for T where T: Sink<Packet, Error = io::Error> + Unpin + Send + Sync {}
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
@@ -466,7 +407,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn network_future_triggers_pings_on_timenetwork_future_triggers_pings_on_time() {
+    async fn network_future_triggers_pings_on_time() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
@@ -503,7 +444,7 @@ mod test {
             let elapsed = start.elapsed();
             if packet == Packet::Pingreq {
                 ping_received = true;
-                assert_eq!(elapsed.as_secs(), keep_alive.as_secs() + 1); // add 1 due to keep alive network implementation
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs()); 
                 break;
             }
         }

@@ -125,8 +125,6 @@ pub use rumq_core::mqtt4::*;
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
 pub enum Notification {
-    /// Successful mqtt connection
-    Connected,
     /// Incoming publish from the broker
     Publish(Publish),
     /// Incoming puback from the broker
@@ -140,11 +138,7 @@ pub enum Notification {
     /// Incoming unsuback from the broker
     Unsuback(PacketIdentifier),
     /// Eventloop error
-    StreamEnd(EventLoopError),
-    /// Request stream done
-    RequestsDone,
-    /// Network closed by the remote
-    NetworkClosed,
+    Abort(EventLoopError),
 }
 
 /// Requests by the client to mqtt event loop. Request are

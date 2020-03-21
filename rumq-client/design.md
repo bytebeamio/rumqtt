@@ -254,6 +254,16 @@ stream to poll. Returning 2 streams might not be intuitive to the users. main ev
 doensn't poll the notification stream (tx.send will block which eventually blocks all incoming packets). Having a second stream also results in more allocations in the hotpath (which might not be a big deal but not ideal) 
 Option2 is also considerable less codebase and hence easy maintainence.
 
+Keep alive take 2
+
+Ok, creating independent timeout streams on network and request streams makes keep alive complicated. Both the streams mutating a common timeout is the solution
+
+* When there is an incoming packet which replys the network with some packet, reset the timer and don't generate `PingReq`
+* When there are no incoming and outgoing packets, timeout, hence generate `PingReq`. Reset the delay
+* In a keep alive window, when there is an incoming packet (which doesn't trigger a reply), mark it
+* When there is an outgoing request in this window with incoming already marked. Reset the timer. 
+* If there is no outgoing request in this window, timeout, hence generate `PingReq`. Reset the delay and markers
+
 
 Timeout for packets which are not acked
 ------------------

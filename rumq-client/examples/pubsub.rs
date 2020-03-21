@@ -46,7 +46,7 @@ async fn requests(mut requests_tx: Sender<Request>) {
         time::delay_for(Duration::from_secs(1)).await;
     }
 
-    time::delay_for(Duration::from_secs(60)).await;
+    time::delay_for(Duration::from_secs(120)).await;
 }
 
 fn publish_request(i: u8) -> Request {
