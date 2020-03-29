@@ -112,9 +112,9 @@ use rumq_core::mqtt4::{MqttRead, MqttWrite, Packet};
 use std::io::Cursor;
 use std::time::Duration;
 
-pub(crate) mod eventloop;
-pub(crate) mod network;
-pub(crate) mod state;
+mod eventloop;
+mod network;
+mod state;
 
 pub use eventloop::create_eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};

@@ -176,15 +176,15 @@ async fn select<R: Requests, P: Packets>(
     let ticker = &mut timeout;
     let o = select! {
         o = network.next() => match o {
-            Some(packet) => state.handle_packet(packet?)?,
+            Some(packet) => state.handle_incoming_packet(packet?)?,
             None => return Err(EventLoopError::StreamDone)
         },
         o = requests.next(), if !inflight_full && *pending_done => match o {
-            Some(request) => state.handle_request(request.into())?,
+            Some(request) => state.handle_outgoing_packet(request.into())?,
             None => return Err(EventLoopError::RequestsDone),
         },
         o = pending.next(), if !*pending_done => match o {
-            Some(packet) => state.handle_request(packet)?,
+            Some(packet) => state.handle_outgoing_packet(packet)?,
             None => {
                 *pending_done = true;
                 (None, None)
@@ -194,6 +194,8 @@ async fn select<R: Requests, P: Packets>(
             timeout.reset(Instant::now() + keepalive);
             *inout_marker = 0;
             let notification = None;
+            let packet = Packet::Pingreq;
+            state.handle_outgoing_packet(packet)?;
             let packet = Some(Packet::Pingreq);
             return Ok((notification, packet))
         }
@@ -303,7 +305,8 @@ impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
 #[cfg(test)]
 mod test {
     use super::broker::*;
-    use crate::{MqttOptions, Request};
+    use crate::{MqttOptions, Request, Notification, EventLoopError};
+    use crate::state::StateError;
     use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
@@ -479,7 +482,27 @@ mod test {
     }
 
     #[tokio::test]
-    async fn detects_halfopen_connections_in_the_second_ping_request() {}
+    async fn detects_halfopen_connections_in_the_second_ping_request() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
+        options.set_keep_alive(5);
+
+        // A broker which consumes packets but doesn't reply
+        task::spawn(async move {
+            let mut broker = super::broker2::Broker::new(2001, true).await;
+            broker.blackhole().await;
+        });
+
+        time::delay_for(Duration::from_secs(1)).await;
+        let (_requests_tx, requests_rx) = channel(5);
+        let mut eventloop = super::create_eventloop(options, requests_rx);
+        let mut stream = eventloop.connect().await.unwrap();
+        
+        let start = Instant::now();
+        match stream.next().await.unwrap() {
+            Notification::Abort(EventLoopError::MqttState(StateError::AwaitPingResp)) => assert_eq!(start.elapsed().as_secs(), 10),
+            _ => panic!("Expecting await pingresp error")
+        }
+    }
 
     #[tokio::test]
     async fn requests_are_blocked_after_max_inflight_queue_size() {
@@ -723,6 +746,14 @@ mod broker2 {
         pub async fn read_packet(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(2), async { self.framed.next().await.unwrap() });
             packet.await.unwrap().unwrap()
+        }
+
+        
+        /// Reads next packet from the stream
+        pub async fn blackhole(&mut self) -> Packet {
+            loop {
+                let _packet = self.framed.next().await.unwrap().unwrap();
+            }
         }
 
         /// Sends an acknowledgement
