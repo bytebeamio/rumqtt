@@ -8,9 +8,9 @@ use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
 use rumq_core::mqtt4::{connect, Packet, PacketIdentifier, Publish};
-use tokio::stream::iter;
-use tokio::time::{self, Instant, Elapsed, Delay};
 use tokio::select;
+use tokio::stream::iter;
+use tokio::time::{self, Delay, Elapsed, Instant};
 use tokio_util::codec::Framed;
 
 use std::collections::VecDeque;
@@ -41,7 +41,7 @@ pub enum EventLoopError {
     Network(network::Error),
     Io(io::Error),
     StreamDone,
-    RequestsDone
+    RequestsDone,
 }
 
 #[doc(hidden)]
@@ -112,21 +112,21 @@ impl MqttEventLoop {
             let mut timeout = time::delay_for(self.options.keep_alive);
             let mut inout_marker = 0;
             let mut pending_done = false;
-            
+
             loop {
                 let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
                 let o = select(
-                    &mut network, 
+                    &mut network,
                     &mut pending,
-                    &mut requests, 
-                    &mut self.state, 
-                    self.options.keep_alive, 
-                    &mut inout_marker, 
-                    inflight_full, 
+                    &mut requests,
+                    &mut self.state,
+                    self.options.keep_alive,
+                    &mut inout_marker,
+                    inflight_full,
                     &mut pending_done,
                     &mut timeout
                 ).await;
-                
+
                 let (notification, outpacket) = match o {
                     Ok((n, p)) => (n, p),
                     Err(e) => {
@@ -161,9 +161,8 @@ impl MqttEventLoop {
     }
 }
 
-
 async fn select<R: Requests, P: Packets>(
-    network: &mut Framed<Box<dyn N>, MqttCodec>, 
+    network: &mut Framed<Box<dyn N>, MqttCodec>,
     mut pending: P,
     mut requests: R,
     state: &mut MqttState,
@@ -174,7 +173,7 @@ async fn select<R: Requests, P: Packets>(
     mut timeout: &mut Delay,
 ) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
     // Select on network and requests and orchestrate keep alive delay timer based on it
-    let ticker= &mut timeout;
+    let ticker = &mut timeout;
     let o = select! {
         o = network.next() => match o {
             Some(packet) => state.handle_packet(packet?)?,
@@ -184,7 +183,7 @@ async fn select<R: Requests, P: Packets>(
             Some(request) => state.handle_request(request.into())?,
             None => return Err(EventLoopError::RequestsDone),
         },
-        o = pending.next(), if !*pending_done => match o { 
+        o = pending.next(), if !*pending_done => match o {
             Some(packet) => state.handle_request(packet)?,
             None => {
                 *pending_done = true;
@@ -210,8 +209,8 @@ async fn select<R: Requests, P: Packets>(
 
     // Extend the keep alive ping window
     if *inout_marker == 3 {
-       timeout.reset(Instant::now() + keepalive);
-       *inout_marker = 0;
+        timeout.reset(Instant::now() + keepalive);
+        *inout_marker = 0;
     }
 
     Ok(o)
@@ -303,13 +302,13 @@ impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
 
 #[cfg(test)]
 mod test {
+    use super::broker::*;
     use crate::{MqttOptions, Request};
     use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
     use tokio::sync::mpsc::channel;
     use tokio::{task, time};
-    use super::broker::*;
 
     #[tokio::test]
     async fn connection_should_timeout_on_time() {
@@ -406,7 +405,7 @@ mod test {
             let elapsed = start.elapsed();
             if packet == Packet::Pingreq {
                 ping_received = true;
-                assert_eq!(elapsed.as_secs(), keep_alive.as_secs()); 
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
                 break;
             }
         }
@@ -452,7 +451,7 @@ mod test {
             let elapsed = start.elapsed();
             if packet == Packet::Pingreq {
                 ping_received = true;
-                assert_eq!(elapsed.as_secs(), keep_alive.as_secs()); 
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
                 break;
             }
         }
@@ -460,16 +459,27 @@ mod test {
         assert!(ping_received);
     }
 
-    
     #[tokio::test]
     async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
+        options.set_keep_alive(5);
+
+        task::spawn(async move {
+            time::delay_for(Duration::from_secs(1)).await;
+            let (_requests_tx, requests_rx) = channel(5);
+            let mut eventloop = super::create_eventloop(options, requests_rx);
+            let mut stream = eventloop.connect().await.unwrap();
+            while let Some(_) = stream.next().await {}
+        });
+
+        let mut broker = super::broker2::Broker::new(2000, true).await;
+        broker.start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1)).await;
+        let packet = broker.read_packet().await;
+        assert_eq!(packet, Packet::Pingreq);
     }
 
     #[tokio::test]
-    async fn detects_halfopen_connections_in_the_second_ping_request() {
-    }
-
-
+    async fn detects_halfopen_connections_in_the_second_ping_request() {}
 
     #[tokio::test]
     async fn requests_are_blocked_after_max_inflight_queue_size() {
@@ -662,17 +672,99 @@ mod test {
 }
 
 #[cfg(test)]
+mod broker2 {
+    use crate::Request;
+    use futures_util::sink::SinkExt;
+    use rumq_core::mqtt4::*;
+    use std::time::Duration;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::select;
+    use tokio::stream::StreamExt;
+    use tokio::sync::mpsc::Sender;
+    use tokio::time;
+    use tokio_util::codec::Framed;
+
+    pub struct Broker {
+        framed: Framed<TcpStream, codec::MqttCodec>,
+    }
+
+    impl Broker {
+        /// Create a new broker which accepts 1 mqtt connection
+        pub async fn new(port: u16, send_connack: bool) -> Broker {
+            let addr = format!("127.0.0.1:{}", port);
+            let mut listener = TcpListener::bind(&addr).await.unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut framed = Framed::new(stream, codec::MqttCodec::new(1024 * 1024));
+
+            let packet = framed.next().await.unwrap().unwrap();
+            if let Packet::Connect(_) = packet {
+                if send_connack {
+                    let connack = connack(ConnectReturnCode::Accepted, false);
+                    let packet = Packet::Connack(connack);
+                    framed.send(packet).await.unwrap();
+                }
+            } else {
+                panic!("Expecting connect packet");
+            }
+
+            Broker { framed }
+        }
+
+        // Reads a publish packet from the stream with 2 second timeout
+        pub async fn read_publish(&mut self) -> Option<PacketIdentifier> {
+            let packet = time::timeout(Duration::from_secs(2), async { self.framed.next().await.unwrap() });
+            match packet.await.unwrap().unwrap() {
+                Packet::Publish(publish) => publish.pkid,
+                _ => panic!("Expecting a publish"),
+            }
+        }
+
+        /// Reads next packet from the stream
+        pub async fn read_packet(&mut self) -> Packet {
+            let packet = time::timeout(Duration::from_secs(2), async { self.framed.next().await.unwrap() });
+            packet.await.unwrap().unwrap()
+        }
+
+        /// Sends an acknowledgement
+        pub async fn ack(&mut self, pkid: PacketIdentifier) {
+            let packet = Packet::Puback(pkid);
+            self.framed.send(packet).await.unwrap();
+            self.framed.flush().await.unwrap();
+        }
+
+        /// Send a bunch of publishes and ping response
+        pub async fn start_publishes(&mut self, count: u8, qos: QoS, delay: Duration) {
+            let mut interval = time::interval(delay);
+            for i in 0..count {
+                select! {
+                    _ = interval.next() => {
+                        let topic = "hello/world".to_owned();
+                        let payload = vec![1, 2, 3, i];
+                        let publish = publish(topic, qos, payload);
+                        let packet = Packet::Publish(publish);
+                        self.framed.send(packet).await.unwrap();
+                    }
+                    packet = self.framed.next() => match packet.unwrap().unwrap() {
+                        Packet::Pingreq => self.framed.send(Packet::Pingresp).await.unwrap(),
+                        _ => ()
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod broker {
+    use crate::Request;
     use async_stream::stream;
     use futures_util::stream::Stream;
-    use crate::Request;
     use rumq_core::mqtt4::*;
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc::Sender;
     use tokio::time;
-
 
     pub async fn start_requests(mut requests_tx: Sender<Request>) {
         for i in 0..10 {
