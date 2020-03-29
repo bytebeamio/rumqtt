@@ -3,7 +3,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
 
-use rumq_client::{self, MqttOptions, QoS, Request, MqttEventLoop, create_eventloop};
+use rumq_client::{self, MqttOptions, QoS, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
 use std::fs;
 
@@ -22,7 +22,7 @@ async fn main() {
     mqttoptions.set_ca(ca);
     // mqttoptions.set_client_auth(client_cert, client_key);
 
-    let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+    let mut eventloop = eventloop(mqttoptions, requests_rx);
     task::spawn(async move {
         requests(requests_tx).await;
         time::delay_for(Duration::from_secs(3)).await;

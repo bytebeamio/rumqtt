@@ -3,7 +3,7 @@ use std::ops::Add;
 use std::env;
 use std::fs;
 
-use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, create_eventloop};
+use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, eventloop};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 use futures_util::stream::StreamExt;
@@ -20,7 +20,7 @@ async fn main() {
 
     let (requests_tx, requests_rx) = channel(1);
     let mqttoptions = gcloud();
-    let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+    let mut eventloop = eventloop(mqttoptions, requests_rx);
 
     task::spawn(async move {
         requests(requests_tx).await;

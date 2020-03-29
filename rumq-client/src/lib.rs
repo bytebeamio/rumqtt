@@ -20,7 +20,7 @@
 //!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
 //!     let requests = Vec::new::<Request>();
 //!
-//!     let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
 //!     let mut stream = eventloop.stream();
 //!     while let Some(item) = stream.next().await {
 //!         println!("Received = {:?}", item);
@@ -41,7 +41,7 @@
 //!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
 //!     let requests = Vec::new::<Request>();
 //!
-//!     let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
 //!
 //!     // loop to reconnect and resume
 //!     loop {
@@ -65,7 +65,7 @@
 //!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
 //!     let requests = Vec::new::<Request>();
 //!
-//!     let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
 //!
 //!     // plug it into tokio ecosystem
 //!     let mut stream = eventloop.stream();
@@ -86,7 +86,7 @@
 //!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
 //!     let (requests_tx, requests_rx) = channel(10);
 //!
-//!     let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
 //!
 //!     // loop to reconnect and resume
 //!     loop {
@@ -116,7 +116,7 @@ mod eventloop;
 mod network;
 mod state;
 
-pub use eventloop::create_eventloop;
+pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use state::MqttState;
 

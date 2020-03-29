@@ -3,7 +3,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
 
-use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, create_eventloop};
+use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -15,7 +15,7 @@ async fn main() {
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
 
     let (requests_tx, requests_rx) = channel(10);
-    let mut eventloop = create_eventloop(mqttoptions, requests_rx);
+    let mut eventloop = eventloop(mqttoptions, requests_rx);
 
     // start sending requests
     task::spawn(async move {
