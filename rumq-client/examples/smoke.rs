@@ -3,7 +3,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
 
-use rumq_client::{self, QoS, MqttOptions, Request, MqttEventLoop, eventloop};
+use rumq_client::{self, QoS, MqttOptions, Publish, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -25,7 +25,7 @@ async fn main() {
 
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
-    let mut stream = eventloop.stream();
+    let mut stream = eventloop.connect().await.unwrap();
 
     while let Some(item) = stream.next().await {
         println!("Received = {:?}", item);
@@ -37,16 +37,16 @@ async fn stream_it(eventloop: &mut MqttEventLoop) {
 async fn requests(mut requests_tx: Sender<Request>) {
     for i in 0..10 {
         requests_tx.send(publish_request(i)).await.unwrap();
-        time::delay_for(Duration::from_secs(1)).await; 
+        time::delay_for(Duration::from_secs(1)).await;
     }
 
-    time::delay_for(Duration::from_secs(600)).await; 
+    time::delay_for(Duration::from_secs(600)).await;
 }
 
 fn publish_request(i: u8) -> Request {
     let topic = "hello/world".to_owned();
     let payload = vec![1, 2, 3, i];
 
-    let publish = rumq_client::publish(&topic, QoS::AtLeastOnce, payload);
+    let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
     Request::Publish(publish)
 }

@@ -67,38 +67,9 @@ impl MqttState {
         }
     }
 
-    pub fn handle_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
-        match packet {
-            Packet::Pingreq => {
-                let packet = self.handle_outgoing_mqtt_packet(packet)?;
-                Ok((None, Some(packet)))
-            }
-            _ => {
-                let (notification, reply) = self.handle_incoming_mqtt_packet(packet)?;
-                Ok((notification, reply))
-            }
-        }
-    }
-
-    pub fn handle_request(&mut self, request: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
-        /*
-        let request = match request {
-            Some(request) => request,
-            None => return Err(EventLoopError::RequestStreamClosed)
-        };
-
-        */
-        // outgoing packet handle is only user for requests, not replys. this ensures
-        // ping debug print show last request time, not reply time
-        let request = self.handle_outgoing_mqtt_packet(request)?;
-        let request = Some(request);
-        let notification = None;
-        Ok((notification, request))
-    }
-
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_mqtt_packet(&mut self, packet: Packet) -> Result<Packet, StateError> {
+    pub(crate) fn handle_outgoing_packet(&mut self, packet: Packet) ->  Result<(Option<Notification>, Option<Packet>), StateError> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_outgoing_publish(publish)?,
             Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
@@ -107,14 +78,16 @@ impl MqttState {
         };
 
         self.last_outgoing = Instant::now();
-        Ok(out)
+        let request = Some(out);
+        let notification = None;
+        Ok((notification, request))
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Notification` which for the
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_mqtt_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+    pub(crate) fn handle_incoming_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
@@ -136,7 +109,7 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    pub fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Packet, StateError> {
+    fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Packet, StateError> {
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
@@ -156,7 +129,7 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    pub fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -172,13 +145,13 @@ impl MqttState {
         }
     }
 
-    pub fn handle_incoming_suback(&mut self, suback: Suback) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+    fn handle_incoming_suback(&mut self, suback: Suback) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         let request = None;
         let notification = Some(Notification::Suback(suback));
         Ok((notification, request))
     }
 
-    pub fn handle_incoming_unsuback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+    fn handle_incoming_unsuback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         let request = None;
         let notification = Some(Notification::Unsuback(pkid));
         Ok((notification, request))
@@ -188,7 +161,7 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    pub fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+    fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _ = self.outgoing_pub.remove(index);
@@ -207,7 +180,7 @@ impl MqttState {
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    pub fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Notification>, Option<Packet>), StateError> {
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         let qos = publish.qos;
 
         match qos {
@@ -264,7 +237,7 @@ impl MqttState {
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    pub fn handle_outgoing_ping(&mut self) -> Result<Packet, StateError> {
+    fn handle_outgoing_ping(&mut self) -> Result<Packet, StateError> {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
@@ -377,7 +350,7 @@ mod test {
         let topic = "hello/world".to_owned();
         let payload = vec![1, 2, 3];
 
-        let mut publish = publish(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.qos = qos;
         publish
     }
@@ -386,7 +359,7 @@ mod test {
         let topic = "hello/world".to_owned();
         let payload = vec![1, 2, 3];
 
-        let mut publish = publish(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.pkid = Some(PacketIdentifier(pkid));
         publish.qos = qos;
         publish
@@ -606,8 +579,8 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_mqtt_packet(Packet::Publish(publish)).unwrap();
-        mqtt.handle_incoming_mqtt_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
+        mqtt.handle_outgoing_packet(Packet::Publish(publish)).unwrap();
+        mqtt.handle_incoming_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
 
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {
@@ -628,7 +601,7 @@ mod test {
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();
-        mqtt.handle_incoming_mqtt_packet(Packet::Pingresp).unwrap();
+        mqtt.handle_incoming_packet(Packet::Pingresp).unwrap();
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();

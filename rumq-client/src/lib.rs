@@ -21,7 +21,7 @@
 //!     let requests = Vec::new::<Request>();
 //!
 //!     let mut eventloop = eventloop(mqttoptions, requests_rx);
-//!     let mut stream = eventloop.stream();
+//!     let mut stream = eventloop.connect().await.unwrap();
 //!     while let Some(item) = stream.next().await {
 //!         println!("Received = {:?}", item);
 //!     }
@@ -45,11 +45,11 @@
 //!
 //!     // loop to reconnect and resume
 //!     loop {
-//!         let mut stream = eventloop.stream();
+//!         let mut stream = eventloop.connect().await.unwrap();
 //!         while let Some(item) = stream.next().await {
 //!             println!("Received = {:?}", item);
 //!         }
-//!         
+//!
 //!         time::delay_for(Duration::from_secs(1)).await;
 //!     }
 //! }
@@ -68,7 +68,7 @@
 //!     let mut eventloop = eventloop(mqttoptions, requests_rx);
 //!
 //!     // plug it into tokio ecosystem
-//!     let mut stream = eventloop.stream();
+//!     let mut stream = eventloop.connect().await.unwrap();
 //! }
 //! ```
 //!
@@ -90,14 +90,14 @@
 //!
 //!     // loop to reconnect and resume
 //!     loop {
-//!         let mut stream = eventloop.stream();
+//!         let mut stream = eventloop.connect().await.unwrap();
 //!         while let Some(notification) = stream.next().await {
 //!             println!("Received = {:?}", item);
 //!             match notification {
 //!                 Notification::Connect => requests_tx.send(subscribe).unwrap(),
 //!             }
 //!         }
-//!         
+//!
 //!         time::delay_for(Duration::from_secs(1)).await;
 //!     }
 //! }
@@ -112,9 +112,9 @@ use rumq_core::mqtt4::{MqttRead, MqttWrite, Packet};
 use std::io::Cursor;
 use std::time::Duration;
 
-pub(crate) mod eventloop;
-pub(crate) mod network;
-pub(crate) mod state;
+mod eventloop;
+mod network;
+mod state;
 
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
@@ -125,8 +125,6 @@ pub use rumq_core::mqtt4::*;
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
 pub enum Notification {
-    /// Successful mqtt connection
-    Connected,
     /// Incoming publish from the broker
     Publish(Publish),
     /// Incoming puback from the broker
@@ -140,16 +138,11 @@ pub enum Notification {
     /// Incoming unsuback from the broker
     Unsuback(PacketIdentifier),
     /// Eventloop error
-    StreamEnd(EventLoopError),
-    /// Request stream done
-    RequestsDone,
-    /// Network closed by the remote
-    NetworkClosed,
+    Abort(EventLoopError),
 }
 
-#[doc(hidden)]
 /// Requests by the client to mqtt event loop. Request are
-/// handle one by one#[derive(Debug)]
+/// handle one by one
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
@@ -208,7 +201,6 @@ impl From<Vec<u8>> for Request {
     }
 }
 
-#[doc(hidden)]
 /// Commands sent by the client to mqtt event loop. Commands
 /// are of higher priority and will be `select`ed along with
 /// [request]s
@@ -263,6 +255,8 @@ pub struct MqttOptions {
     throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: usize,
+    /// Last will that will be issued on unexpected disconnect
+    last_will: Option<LastWill>,
 }
 
 impl MqttOptions {
@@ -288,12 +282,22 @@ impl MqttOptions {
             notification_channel_capacity: 10,
             throttle: Duration::from_micros(0),
             inflight: 100,
+            last_will: None,
         }
     }
 
     /// Broker address
     pub fn broker_address(&self) -> (String, u16) {
         (self.broker_addr.clone(), self.port)
+    }
+
+    pub fn set_last_will(&mut self, will: LastWill) -> &mut Self {
+        self.last_will = Some(will);
+        self
+    }
+
+    pub fn last_will(&mut self) -> Option<LastWill> {
+        self.last_will.clone()
     }
 
     pub fn set_ca(&mut self, ca: Vec<u8>) -> &mut Self {

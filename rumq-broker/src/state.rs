@@ -2,8 +2,8 @@ use std::{collections::VecDeque, result::Result, time::Instant};
 
 use crate::router::RouterMessage;
 use rumq_core::mqtt4::{
-    empty_subscribe, suback, valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS,
-    Subscribe, SubscribeReturnCodes, Unsubscribe,
+    valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS,
+    Subscribe, SubscribeReturnCodes, Suback, Unsubscribe,
 };
 
 #[derive(Debug)]
@@ -149,7 +149,7 @@ impl MqttState {
 
         let pkid = subscription.pkid;
 
-        let mut router_subscription = empty_subscribe();
+        let mut router_subscription = Subscribe::empty_subscribe();
         let mut subscription_return_codes = Vec::new();
         for topic in subscription.topics.iter_mut() {
             let qos = topic.qos;
@@ -173,7 +173,7 @@ impl MqttState {
             subscription_return_codes.push(code);
         }
 
-        let packet = Packet::Suback(suback(pkid, subscription_return_codes));
+        let packet = Packet::Suback(Suback::new(pkid, subscription_return_codes));
         let routermessage = RouterMessage::Packet(packet);
         Ok(Some(routermessage))
     }

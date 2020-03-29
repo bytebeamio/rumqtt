@@ -1,5 +1,5 @@
 use tokio_rustls::{client::TlsStream, TlsConnector};
-use tokio_rustls::rustls::ClientConfig;
+use tokio_rustls::rustls::{ClientConfig, TLSError};
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_rustls::rustls::internal::pemfile::{ certs, rsa_private_keys };
 use tokio::net::TcpStream;
@@ -18,6 +18,7 @@ pub enum Error {
     Io(io::Error),
     WebPki(webpki::Error),
     DNSName(InvalidDNSNameError),
+    TLS(TLSError),
     NoValidCertInChain
 }
 
@@ -40,7 +41,7 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     if let Some(client) = options.client_auth.as_ref() {
         let certs = certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
         let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone())))?;
-        config.set_single_client_cert(certs, keys.remove(0));
+        config.set_single_client_cert(certs, keys.remove(0))?;
     }
 
     // Set ALPN

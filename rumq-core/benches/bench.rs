@@ -2,19 +2,19 @@ use tokio::{
     runtime::{Builder, Runtime},
 };
 
-use rumq_core::{publish, QoS, Packet, AsyncMqttRead, AsyncMqttWrite};
+use rumq_core::mqtt4::{QoS, Packet, Publish, MqttRead, MqttWrite};
 
 use bencher::{Bencher, black_box, benchmark_group, benchmark_main};
 
 fn publish_serialize_perf(bench: &mut Bencher) {
     let mut runtime = rt();
-    let publish = publish("hello/world", QoS::AtLeastOnce, payload(100));
+    let publish = Publish::new("hello/world", QoS::AtLeastOnce, payload(100));
     let publish = Packet::Publish(publish);
     let mut stream = Vec::new();
 
     bench.iter(|| {
         black_box(runtime.block_on(async {
-            stream.mqtt_write(&publish).await.unwrap();
+            stream.mqtt_write(&publish).unwrap();
         }))
     });
 }
@@ -25,7 +25,7 @@ fn publish_deserialize_perf(bench: &mut Bencher) {
     
     bench.iter(|| {
         runtime.block_on(async {
-            let _packet = stream.mqtt_read().await.unwrap();
+            let _packet = stream.mqtt_read().unwrap();
             stream.set_position(0);
         })
     });

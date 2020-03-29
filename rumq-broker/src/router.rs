@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::mqtt4::{has_wildcards, matches, publish, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
+use rumq_core::mqtt4::{has_wildcards, matches, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::select;
@@ -472,7 +472,7 @@ impl Router {
                 let message = mem::replace(&mut will.message, "".to_owned());
                 let qos = will.qos;
 
-                let publish = publish(topic, qos, message);
+                let publish = Publish::new(topic, qos, message);
                 self.match_subscriptions(&id, publish);
             }
 
