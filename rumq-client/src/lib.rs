@@ -21,7 +21,7 @@
 //!     let requests = Vec::new::<Request>();
 //!
 //!     let mut eventloop = eventloop(mqttoptions, requests_rx);
-//!     let mut stream = eventloop.stream();
+//!     let mut stream = eventloop.connect().await.unwrap();
 //!     while let Some(item) = stream.next().await {
 //!         println!("Received = {:?}", item);
 //!     }
@@ -45,7 +45,7 @@
 //!
 //!     // loop to reconnect and resume
 //!     loop {
-//!         let mut stream = eventloop.stream();
+//!         let mut stream = eventloop.connect().await.unwrap();
 //!         while let Some(item) = stream.next().await {
 //!             println!("Received = {:?}", item);
 //!         }
@@ -68,7 +68,7 @@
 //!     let mut eventloop = eventloop(mqttoptions, requests_rx);
 //!
 //!     // plug it into tokio ecosystem
-//!     let mut stream = eventloop.stream();
+//!     let mut stream = eventloop.connect().await.unwrap();
 //! }
 //! ```
 //!
@@ -90,7 +90,7 @@
 //!
 //!     // loop to reconnect and resume
 //!     loop {
-//!         let mut stream = eventloop.stream();
+//!         let mut stream = eventloop.connect().await.unwrap();
 //!         while let Some(notification) = stream.next().await {
 //!             println!("Received = {:?}", item);
 //!             match notification {

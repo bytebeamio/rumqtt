@@ -56,7 +56,7 @@ pub enum EventLoopError {
 /// ```ignore
 /// let mut eventloop = eventloop(options, requests);
 /// loop {
-///     let mut stream = eventloop.stream(reconnection_options);
+///     let mut stream = eventloop.connect(reconnection_options).await.unwrap();
 ///     while let Some(notification) = stream.next().await() {}
 /// }
 /// ```
