@@ -1,5 +1,5 @@
 use derive_more::From;
-use rumq_core::mqtt4::{connack, Packet, Connect, ConnectReturnCode};
+use rumq_core::mqtt4::{Connack, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::SendError;
 use tokio::stream::iter;
@@ -97,7 +97,7 @@ impl<S: Network> Connection<S> {
 
         // eventloop which pending packets from the last session 
         if pending.len() > 0 {
-            let connack = connack(ConnectReturnCode::Accepted, true);
+            let connack = Connack::new(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
             let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
 
@@ -118,7 +118,7 @@ impl<S: Network> Connection<S> {
                 }
             }
         } else {
-            let connack = connack(ConnectReturnCode::Accepted, false);
+            let connack = Connack::new(ConnectReturnCode::Accepted, false);
             let packet = Packet::Connack(connack);
             self.stream.send(packet).await?;
         }

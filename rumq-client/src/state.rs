@@ -350,7 +350,7 @@ mod test {
         let topic = "hello/world".to_owned();
         let payload = vec![1, 2, 3];
 
-        let mut publish = publish(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.qos = qos;
         publish
     }
@@ -359,7 +359,7 @@ mod test {
         let topic = "hello/world".to_owned();
         let payload = vec![1, 2, 3];
 
-        let mut publish = publish(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.pkid = Some(PacketIdentifier(pkid));
         publish.qos = qos;
         publish

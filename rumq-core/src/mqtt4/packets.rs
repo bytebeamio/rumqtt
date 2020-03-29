@@ -32,20 +32,20 @@ pub struct Connect {
     pub password: Option<String>,
 }
 
-/// Creates a new mqtt connect packet
-pub fn connect<S: Into<String>>(id: S) -> Connect {
-    Connect {
-        protocol: Protocol::MQTT(4),
-        keep_alive: 10,
-        client_id: id.into(),
-        clean_session: true,
-        last_will: None,
-        username: None,
-        password: None,
-    }
-}
-
 impl Connect {
+    /// Creates a new mqtt connect packet
+    pub fn new<S: Into<String>>(id: S) -> Connect {
+        Connect {
+            protocol: Protocol::MQTT(4),
+            keep_alive: 10,
+            client_id: id.into(),
+            clean_session: true,
+            last_will: None,
+            username: None,
+            password: None,
+        }
+    }
+
     /// Sets username
     pub fn set_username<S: Into<String>>(&mut self, u: S) -> &mut Connect {
         self.username = Some(u.into());
@@ -99,9 +99,11 @@ pub struct Connack {
     pub code: ConnectReturnCode,
 }
 
-/// Creates a new connack packet
-pub fn connack(code: ConnectReturnCode, session_present: bool) -> Connack {
-    Connack { code, session_present }
+impl Connack {
+    /// Creates a new connack packet
+    pub fn new(code: ConnectReturnCode, session_present: bool) -> Connack {
+        Connack { code, session_present }
+    }
 }
 
 /// Last will of the connection
@@ -124,22 +126,18 @@ pub struct Publish {
     pub payload: Vec<u8>,
 }
 
-/// Creates a new publish packet
-//TODO: maybe this should become private, or just removed and inserted into Publish::new()
-pub fn publish<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
-    Publish {
-        dup: false,
-        qos,
-        retain: false,
-        pkid: None,
-        topic_name: topic.into(),
-        payload: payload.into(),
-    }
-}
-
 impl Publish {
-    pub fn new<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Self {
-        publish(topic, qos, payload)
+    /// Creates a new publish packet
+    //TODO: maybe this should become private, or just removed and inserted into Publish::new()
+    pub fn new<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
+        Publish {
+            dup: false,
+            qos,
+            retain: false,
+            pkid: None,
+            topic_name: topic.into(),
+            payload: payload.into(),
+        }
     }
 
     /// Sets packet identifier
@@ -160,32 +158,29 @@ pub struct Subscribe {
     pub topics: Vec<SubscribeTopic>,
 }
 
-//TODO: maybe this should become private, or just removed and inserted into Subscribe::new()
-/// Creates a new subscription packet
-pub fn subscribe<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
-    let topic = SubscribeTopic {
-        topic_path: topic.into(),
-        qos,
-    };
-
-    Subscribe {
-        pkid: PacketIdentifier(0),
-        topics: vec![topic],
-    }
-}
-
-/// Creates an empty subscription packet
-pub fn empty_subscribe() -> Subscribe {
-    Subscribe {
-        pkid: PacketIdentifier(0),
-        topics: Vec::new(),
-    }
-}
-
 impl Subscribe {
-    pub fn new<S: Into<String>>(topic: S, qos: QoS) -> Self {
-        subscribe(topic, qos)
+    //TODO: maybe this should become private, or just removed and inserted into Subscribe::new()
+    /// Creates a new subscription packet
+    pub fn new<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
+        let topic = SubscribeTopic {
+            topic_path: topic.into(),
+            qos,
+        };
+
+        Subscribe {
+            pkid: PacketIdentifier(0),
+            topics: vec![topic],
+        }
     }
+
+    /// Creates an empty subscription packet
+    pub fn empty_subscribe() -> Subscribe {
+        Subscribe {
+            pkid: PacketIdentifier(0),
+            topics: Vec::new(),
+        }
+    }
+
     pub fn add(&mut self, topic: String, qos: QoS) -> &mut Self {
         let topic = SubscribeTopic { topic_path: topic, qos };
         self.topics.push(topic);
@@ -214,9 +209,11 @@ pub struct Suback {
     pub return_codes: Vec<SubscribeReturnCodes>,
 }
 
-/// Creates a new subscription acknowledgement packet
-pub fn suback(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -> Suback {
-    Suback { pkid, return_codes }
+impl Suback {
+    /// Creates a new subscription acknowledgement packet
+    pub fn new(pkid: PacketIdentifier, return_codes: Vec<SubscribeReturnCodes>) -> Suback {
+        Suback { pkid, return_codes }
+    }
 }
 
 /// Unsubscribe packet

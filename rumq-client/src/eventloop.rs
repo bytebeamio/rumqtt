@@ -7,7 +7,7 @@ use derive_more::From;
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
-use rumq_core::mqtt4::{connect, Packet, PacketIdentifier, Publish};
+use rumq_core::mqtt4::{Connect, Packet, PacketIdentifier, Publish};
 use tokio::select;
 use tokio::stream::iter;
 use tokio::time::{self, Delay, Elapsed, Instant};
@@ -237,7 +237,7 @@ impl MqttEventLoop {
         let clean_session = self.options.clean_session();
         let last_will = self.options.last_will();
 
-        let mut connect = connect(id);
+        let mut connect = Connect::new(id);
         connect.keep_alive = keep_alive;
         connect.clean_session = clean_session;
         connect.last_will = last_will;
@@ -311,7 +311,7 @@ mod test {
             let topic = "hello/world".to_owned();
             let payload = vec![i, 1, 2, 3];
 
-            let publish = publish(topic, qos, payload);
+            let publish = Publish::new(topic, qos, payload);
             let request = Request::Publish(publish);
             let _ = requests_tx.send(request).await;
             time::delay_for(Duration::from_secs(delay)).await;
@@ -691,7 +691,7 @@ mod broker {
             let packet = framed.next().await.unwrap().unwrap();
             if let Packet::Connect(_) = packet {
                 if send_connack {
-                    let connack = connack(ConnectReturnCode::Accepted, false);
+                    let connack = Connack::new(ConnectReturnCode::Accepted, false);
                     let packet = Packet::Connack(connack);
                     framed.send(packet).await.unwrap();
                 }
@@ -757,7 +757,7 @@ mod broker {
                     _ = interval.next() => {
                         let topic = "hello/world".to_owned();
                         let payload = vec![1, 2, 3, i];
-                        let publish = publish(topic, qos, payload);
+                        let publish = Publish::new(topic, qos, payload);
                         let packet = Packet::Publish(publish);
                         self.framed.send(packet).await.unwrap();
                     }

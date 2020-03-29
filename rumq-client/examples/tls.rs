@@ -3,7 +3,7 @@ use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
 
-use rumq_client::{self, MqttOptions, QoS, Request, MqttEventLoop, eventloop};
+use rumq_client::{self, MqttOptions, QoS, Publish, Subscribe, Request, MqttEventLoop, eventloop};
 use std::time::Duration;
 use std::fs;
 
@@ -46,7 +46,7 @@ async fn stream_it(eventloop: &mut MqttEventLoop) {
 
 
 async fn requests(mut requests_tx: Sender<Request>) {
-    let subscription = rumq_client::subscribe("hello/world", QoS::AtLeastOnce);
+    let subscription = Subscribe::new("hello/world", QoS::AtLeastOnce);
     let _ = requests_tx.send(Request::Subscribe(subscription)).await;
 
     for i in 0..10 {
@@ -61,6 +61,6 @@ fn publish_request(i: u8) -> Request {
     let topic = "hello/world".to_owned();
     let payload = vec![1, 2, 3, i];
 
-    let publish = rumq_client::publish(&topic, QoS::AtLeastOnce, payload);
+    let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
     Request::Publish(publish)
 }
