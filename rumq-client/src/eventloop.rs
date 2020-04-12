@@ -65,19 +65,13 @@ pub enum EventLoopError {
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
 pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
-    let state = MqttState::new();
-    let requests = Box::new(requests);
-    let pending_pub = VecDeque::new();
-    let pending_rel = VecDeque::new();
-
-    let eventloop = MqttEventLoop {
-        options,
-        state,
-        requests,
-        pending_pub,
-        pending_rel,
-    };
-    eventloop
+    MqttEventLoop {
+        options: options,
+        state: MqttState::new(),
+        requests: Box::new(requests),
+        pending_pub: VecDeque::new(),
+        pending_rel: VecDeque::new(),
+    }
 }
 
 impl MqttEventLoop {
@@ -405,7 +399,7 @@ mod test {
         let start = Instant::now();
         let mut ping_received = false;
 
-        for _i in 0..10 {
+        for _ in 0..10 {
             let packet = broker.read_packet().await;
             let elapsed = start.elapsed();
             if packet == Packet::Pingreq {
@@ -445,7 +439,7 @@ mod test {
         let start = Instant::now();
         let mut ping_received = false;
 
-        for _i in 0..10 {
+        for _ in 0..10 {
             let packet = broker.read_packet_and_respond().await;
             let elapsed = start.elapsed();
             if packet == Packet::Pingreq {
