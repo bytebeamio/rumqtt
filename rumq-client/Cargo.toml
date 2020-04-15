@@ -1,6 +1,6 @@
 [package]
 name = "rumq-client"
-version = "0.1.0-alpha.9"
+version = "0.1.0-alpha.10"
 description = "An efficeint and robust mqtt client for your connected devices"
 license = "MIT"
 repository = "https://github.com/tekjar/rumq"
@@ -16,7 +16,7 @@ futures-util = { version =  "0.3", features = ["sink"] }
 async-stream = "0.2"
 webpki = "0.21"
 tokio-rustls = "0.13"
-rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.8" }
+rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.10" }
 log = "0.4"
 thiserror = "1.0.15"
 
