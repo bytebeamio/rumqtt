@@ -1,11 +1,15 @@
-use derive_more::From;
-
 use crate::mqtt4::QoS;
 use std::fmt;
 
 /// Packet identifier for packets types that require broker to acknowledge
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, From)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PacketIdentifier(pub u16);
+
+impl From<u16> for PacketIdentifier {
+    fn from(value: u16) -> Self {
+        PacketIdentifier(value)
+    }
+}
 
 /// Mqtt protocol version
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

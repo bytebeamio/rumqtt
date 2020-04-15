@@ -3,7 +3,6 @@ use crate::MqttOptions;
 use crate::{network, Notification, Request};
 
 use async_stream::stream;
-use derive_more::From;
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
@@ -33,14 +32,21 @@ pub struct MqttEventLoop {
 }
 
 /// Critical errors during eventloop polling
-#[derive(From, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EventLoopError {
-    MqttState(StateError),
-    Timeout(Elapsed),
-    Rumq(rumq_core::Error),
-    Network(network::Error),
-    Io(io::Error),
+    #[error("Mqtt state")]
+    MqttState(#[from] StateError),
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
+    #[error("Rumq")]
+    Rumq(#[from] rumq_core::Error),
+    #[error("Network")]
+    Network(#[from] network::Error),
+    #[error("I/O")]
+    Io(#[from] io::Error),
+    #[error("Stream done")]
     StreamDone,
+    #[error("Requests done")]
     RequestsDone,
 }
 

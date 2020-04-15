@@ -12,17 +12,22 @@ pub enum MqttConnectionStatus {
     Disconnected,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum StateError {
     /// Broker's error reply to client's connect packet
+    #[error("Connect return code `{0:?}`")]
     Connect(ConnectReturnCode),
     /// Invalid state for a given operation
+    #[error("Invalid state for a given operation")]
     InvalidState,
     /// Received a packet (ack) which isn't asked for
+    #[error("Received a packet (ack) which isn't asked for")]
     Unsolicited,
     /// Last pingreq isn't acked
+    #[error("Last pingreq isn't acked")]
     AwaitPingResp,
     /// Received a wrong packet while waiting for another packet
+    #[error("Received a wrong packet while waiting for another packet")]
     WrongPacket,
 }
 

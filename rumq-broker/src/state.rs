@@ -6,27 +6,37 @@ use rumq_core::mqtt4::{
     Subscribe, SubscribeReturnCodes, Suback, Unsubscribe,
 };
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Broker's error reply to client's connect packet
+    #[error("Connect return code: `{0:?}`")]
     Connect(ConnectReturnCode),
     /// Invalid state for a given operation
+    #[error("Invalid state")]
     InvalidState,
     /// Invalid topic
+    #[error("Invalid topic")]
     InvalidTopic,
     /// Received a packet (ack) which isn't asked for
+    #[error("Received a packet (ack) which isn't asked for")]
     Unsolicited(Packet),
     /// Last pingreq isn't acked
+    #[error("Await ping resp")]
     AwaitPingResp,
     /// Received a wrong packet while waiting for another packet
+    #[error("Wrong packet received while waiting for another packet")]
     WrongPacket,
     /// Unsupported packet
+    #[error("Unsupported packet `{0:?}`")]
     UnsupportedPacket(Packet),
     /// Unsupported qos
+    #[error("Unsupported QoS")]
     UnsupportedQoS,
     /// Invalid client ID
+    #[error("Invalid client ID")]
     InvalidClientId,
     /// Disconnect received
+    #[error("Disconnect received: {0}")]
     Disconnect(String),
 }
 

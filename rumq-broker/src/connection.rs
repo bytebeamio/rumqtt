@@ -1,4 +1,3 @@
-use derive_more::From;
 use rumq_core::mqtt4::{Connack, Packet, Connect, ConnectReturnCode};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::mpsc::error::SendError;
@@ -19,18 +18,27 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::io;
 
-#[derive(Debug, From)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Io(io::Error),
-    Core(rumq_core::Error),
-    Timeout(Elapsed),
+    #[error("Io")]
+    Io(#[from] io::Error),
+    #[error("rumq core error")]
+    Core(#[from] rumq_core::Error),
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
+    #[error("Keep alive")]
     KeepAlive,
-    Send(SendError<(String, RouterMessage)>),
+    #[error("Failed to send router message")]
+    Send(#[from] SendError<(String, RouterMessage)>),
     /// Received a wrong packet while waiting for another packet
+    #[error("Wrong packet received while waiting for another packet")]
     WrongPacket,
     /// Invalid client ID
+    #[error("Invalid client id")]
     InvalidClientId,
+    #[error("Not connack")]
     NotConnack,
+    #[error("Stream don")]
     StreamDone
 }
 

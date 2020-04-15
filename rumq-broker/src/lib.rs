@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate log;
 
-use derive_more::From;
 use futures_util::future::join_all;
 use tokio_util::codec::Framed;
 use tokio::net::TcpListener;
@@ -32,18 +31,29 @@ mod router;
 pub use rumq_core as core;
 pub use router::{RouterMessage, Connection};
 
-#[derive(From, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Io(io::Error),
-    Mqtt(rumq_core::Error),
-    Timeout(Elapsed),
-    State(state::Error),
-    Tls(TLSError),
+    #[error("I/O")]
+    Io(#[from] io::Error),
+    #[error("MQTT protocol error")]
+    Mqtt(#[from] rumq_core::Error),
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
+    #[error("Broker State")]
+    State(#[from] state::Error),
+    #[error("TLS")]
+    Tls(#[from] TLSError),
+    #[error("No server cert")]
     NoServerCert,
+    #[error("No server private key")]
     NoServerPrivateKey,
+    #[error("No ca file")]
     NoCAFile,
+    #[error("No server cert file")]
     NoServerCertFile,
+    #[error("No server key file")]
     NoServerKeyFile,
+    #[error("Disconnected")]
     Disconnected,
 }
 
