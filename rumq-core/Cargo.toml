@@ -10,11 +10,10 @@ edition = "2018"
 [dependencies]
 bytes = "0.5"
 tokio-util = { version = "0.3", features = ["codec"] }
-derive_more = { version = "0.99", default-features = false, features = ["from"] }
 tokio = { version = "0.2", features = ["io-util"] }
 async-trait = "0.1"
 byteorder = "1"
-
+thiserror = "1.0.15"
 
 [dev-dependencies]
 tokio = {version = "0.2", features = ["full", "macros"]}

@@ -3,7 +3,6 @@ use tokio_rustls::rustls::{ClientConfig, TLSError};
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_rustls::rustls::internal::pemfile::{ certs, rsa_private_keys };
 use tokio::net::TcpStream;
-use derive_more::From;
 
 use crate::MqttOptions;
 
@@ -12,14 +11,27 @@ use std::io;
 use std::sync::Arc;
 use std::io::{Cursor, BufReader};
 
-#[derive(From, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Addr(AddrParseError),
-    Io(io::Error),
-    WebPki(webpki::Error),
-    DNSName(InvalidDNSNameError),
-    TLS(TLSError),
+    #[error("Addr")]
+    Addr(#[from] AddrParseError),
+    #[error("I/O")]
+    Io(#[from] io::Error),
+    #[error("Web Pki")]
+    WebPki(#[from] webpki::Error),
+    #[error("DNS name")]
+    DNSName(#[from] InvalidDNSNameError),
+    #[error("TLS error")]
+    TLS(#[from] TLSError),
+    #[error("No valid cert in chain")]
     NoValidCertInChain
+}
+
+// The cert handling functions return unit right now, this is a shortcut
+impl From<()> for Error {
+    fn from(_: ()) -> Self {
+        Error::NoValidCertInChain
+    }
 }
 
 pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, Error> {

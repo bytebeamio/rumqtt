@@ -1,4 +1,3 @@
-use derive_more::From;
 use rumq_core::mqtt4::{has_wildcards, matches, QoS, Packet, Connect, Publish, Subscribe, Unsubscribe};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::mpsc::error::TrySendError;
@@ -12,11 +11,14 @@ use std::fmt;
 
 use crate::state::{self, MqttState};
 
-#[derive(Debug, From)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    State(state::Error),
+    #[error("State")]
+    State(#[from] state::Error),
+    #[error("All senders down")]
     AllSendersDown,
-    Mpsc(TrySendError<RouterMessage>),
+    #[error("Error sending message on internal bus")]
+    Mpsc(#[from] TrySendError<RouterMessage>),
 }
 
 /// Router message to orchestrate data between connections. We can also
