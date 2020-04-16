@@ -1,12 +1,12 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::ops::Add;
 use std::env;
 use std::fs;
+use std::ops::Add;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rumq_client::{self, QoS, MqttOptions, Publish, Request, MqttEventLoop, eventloop};
-use serde::{Serialize, Deserialize};
-use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 use futures_util::stream::StreamExt;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use rumq_client::{self, eventloop, MqttEventLoop, MqttOptions, Publish, QoS, Request};
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 use tokio::time;
@@ -55,15 +55,13 @@ fn gcloud() -> MqttOptions {
     let password = gen_iotcore_password();
     let ca = fs::read("certs/bike-1/roots.pem").unwrap();
 
-    mqttoptions
-        .set_ca(ca)
-        .set_credentials("unused", &password);
+    mqttoptions.set_ca(ca).set_credentials("unused", &password);
 
     mqttoptions
 }
 
 fn publish_request(i: u8) -> Request {
-    let topic = "/devices/".to_owned() +  "bike-1/events/imu";
+    let topic = "/devices/".to_owned() + "bike-1/events/imu";
     let payload = vec![1, 2, 3, i];
 
     let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
@@ -91,7 +89,11 @@ fn gen_iotcore_password() -> String {
 
     let jwt_header = Header::new(Algorithm::RS256);
     let iat = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let exp = SystemTime::now().add(Duration::from_secs(300)).duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let exp = SystemTime::now()
+        .add(Duration::from_secs(300))
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     let claims = Claims { iat, exp, aud: project };
     encode(&jwt_header, &claims, &key).unwrap()

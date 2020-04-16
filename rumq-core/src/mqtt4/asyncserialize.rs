@@ -22,7 +22,7 @@ pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
                 match &connect.last_will {
                     Some(w) if w.retain => connect_flags |= 0x04 | (w.qos as u8) << 3 | 0x20,
                     Some(w) => connect_flags |= 0x04 | (w.qos as u8) << 3,
-                    None => ()
+                    None => (),
                 }
 
                 if let Some(_) = connect.password {
@@ -56,7 +56,8 @@ pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
                 Ok(())
             }
             Packet::Publish(publish) => {
-                self.write_u8(0b00110000 | publish.retain as u8 | ((publish.qos as u8) << 1) | ((publish.dup as u8) << 3)).await?;
+                self.write_u8(0b00110000 | publish.retain as u8 | ((publish.qos as u8) << 1) | ((publish.dup as u8) << 3))
+                    .await?;
                 let mut len = publish.topic_name.len() + 2 + publish.payload.len();
 
                 if publish.qos != QoS::AtMostOnce && None != publish.pkid {
@@ -96,7 +97,7 @@ pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
             Packet::Subscribe(subscribe) => {
                 self.write_all(&[0x82]).await?;
                 let len = 2 + subscribe.topics.iter().fold(0, |s, ref t| s + t.topic_path.len() + 3);
-                
+
                 self.write_remaining_length(len).await?;
                 self.write_u16(subscribe.pkid.0).await?;
                 for topic in subscribe.topics.as_ref() as &Vec<SubscribeTopic> {
@@ -109,12 +110,16 @@ pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
                 self.write_all(&[0x90]).await?;
                 self.write_remaining_length(suback.return_codes.len() + 2).await?;
                 self.write_u16(suback.pkid.0).await?;
-                
-                let payload: Vec<u8> = suback.return_codes.iter().map(|&code| match code {
-                    SubscribeReturnCodes::Success(qos) => qos as u8,
-                    SubscribeReturnCodes::Failure => 0x80,
-                }).collect();
-                
+
+                let payload: Vec<u8> = suback
+                    .return_codes
+                    .iter()
+                    .map(|&code| match code {
+                        SubscribeReturnCodes::Success(qos) => qos as u8,
+                        SubscribeReturnCodes::Failure => 0x80,
+                    })
+                    .collect();
+
                 self.write_all(&payload).await?;
                 Ok(())
             }
@@ -123,7 +128,7 @@ pub trait AsyncMqttWrite: AsyncWriteExt + Unpin {
                 let len = 2 + unsubscribe.topics.iter().fold(0, |s, ref topic| s + topic.len() + 2);
                 self.write_remaining_length(len).await?;
                 self.write_u16(unsubscribe.pkid.0).await?;
-                
+
                 for topic in unsubscribe.topics.as_ref() as &Vec<String> {
                     self.write_mqtt_string(topic.as_str()).await?;
                 }
@@ -241,7 +246,7 @@ mod test {
             retain: false,
             topic_name: "a/b".to_owned(),
             pkid: Some(PacketIdentifier(10)),
-            payload: vec![0xF1, 0xF2, 0xF3, 0xF4]
+            payload: vec![0xF1, 0xF2, 0xF3, 0xF4],
         });
 
         let mut stream = Vec::new();

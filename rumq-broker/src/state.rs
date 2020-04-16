@@ -2,8 +2,8 @@ use std::{collections::VecDeque, result::Result, time::Instant};
 
 use crate::router::RouterMessage;
 use rumq_core::mqtt4::{
-    valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS,
-    Subscribe, SubscribeReturnCodes, Suback, Unsubscribe,
+    valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS, Suback, Subscribe,
+    SubscribeReturnCodes, Unsubscribe,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -49,17 +49,17 @@ pub enum Error {
 #[derive(Debug)]
 pub struct MqttState {
     /// Last incoming packet time
-    last_incoming: Instant,
+    last_incoming:          Instant,
     /// Last outgoing packet time
-    last_outgoing: Instant,
+    last_outgoing:          Instant,
     /// Packet id of the last outgoing packet
-    last_pkid: PacketIdentifier,
+    last_pkid:              PacketIdentifier,
     /// Outgoing QoS 1 publishes which aren't acked yet
     pub outgoing_publishes: VecDeque<Publish>,
     /// Clean session
-    pub clean_session: bool,
+    pub clean_session:      bool,
     /// Lastwill
-    pub will: Option<LastWill>,
+    pub will:               Option<LastWill>,
 }
 
 impl MqttState {
