@@ -1,0 +1,11 @@
+[package]
+name = "mqtt5bytes"
+version = "0.1.0"
+authors = ["tekjar <raviteja@bytebeam.io>"]
+edition = "2018"
+license = "MIT"
+description = "MQTT 5 core serialization and deserialization"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
