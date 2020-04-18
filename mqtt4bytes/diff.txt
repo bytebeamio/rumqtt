@@ -1,0 +1,10 @@
+ impl PublishBytes {
+@@ -252,7 +252,7 @@ impl PublishBytes {
+             byte1,
+             remaining_len,
+             variable_header_index,
+-            bytes,
++            bytes: bytes.freeze(),
+         }
+     }
+ 
