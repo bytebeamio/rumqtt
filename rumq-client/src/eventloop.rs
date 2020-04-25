@@ -217,11 +217,11 @@ impl MqttEventLoop {
             let network = if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
                 let o = Box::new(o) as Box<dyn N>;
-                Framed::new(o, MqttCodec::new(10 * 1024))
+                Framed::new(o, MqttCodec::new(self.options.max_packet_size))
             } else {
                 let o = network::tcp_connect(&self.options).await?;
                 let o = Box::new(o) as Box<dyn N>;
-                Framed::new(o, MqttCodec::new(10 * 1024))
+                Framed::new(o, MqttCodec::new(self.options.max_packet_size))
             };
 
             Ok::<Framed<Box<dyn N>, MqttCodec>, EventLoopError>(network)
