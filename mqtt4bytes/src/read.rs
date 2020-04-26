@@ -179,7 +179,7 @@ mod test {
 
         assert_eq!(packet.bytes.len(), packetstream.len() - 4);
         // remove extra packets from source packet stream and compare
-        packetstream.split_off(packetstream.len() - 4);
+        packetstream.truncate(packetstream.len() - 4);
         assert_eq!(&packet.bytes[..], &packetstream[..]);
     }
 
@@ -204,7 +204,7 @@ mod test {
 
         assert_eq!(packet.bytes.len(), packetstream.len() - 4);
         // remove extra packets from source packet stream and compare
-        packetstream.split_off(packetstream.len() - 4);
+        packetstream.truncate(packetstream.len() - 4);
         assert_eq!(&packet.bytes[..], &packetstream[..]);
     }
 

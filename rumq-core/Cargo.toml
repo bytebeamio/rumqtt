@@ -17,8 +17,3 @@ thiserror = "1.0.15"
 
 [dev-dependencies]
 tokio = {version = "0.2", features = ["full", "macros"]}
-bencher = "0.1"
-
-[[bench]]
-name = "bench"
-harness = false

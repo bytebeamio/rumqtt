@@ -18,8 +18,3 @@ cfg-if = "0.1"
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
-bencher = "0.1"
-
-[[bench]]
-name = "bench"
-harness = false

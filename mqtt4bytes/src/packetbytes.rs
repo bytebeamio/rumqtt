@@ -536,7 +536,7 @@ mod test {
         let bytes = &[
             0b0011_0000, 7, // packet type, flags and remaining len
             0x00, 0x03, b'a', b'/', b'b', // variable header. topic name = 'a/b'
-            0x01, 0x02 // payload
+            0x01, 0x02 // payloa/home/tekjar/.local/share/JetBrains/Toolbox/bin/cliond
         ];
         let mut stream = BytesMut::from(&stream[..]);
         let bytes = Bytes::from(&bytes[..]);
