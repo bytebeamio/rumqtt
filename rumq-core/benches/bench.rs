@@ -16,35 +16,26 @@ fn publish_serialize_perf(bench: &mut Bencher) {
 
 #[bench]
 fn publish_deserialize_perf(bench: &mut Bencher) {
-    let mut stream = stream(100);
+    let mut stream = stream(1024);
 
     bench.iter(|| {
         let _packet = stream.mqtt_read().unwrap();
         stream.set_position(0);
     });
+    bench.bytes = 1024;
 }
 
 use std::io::Cursor;
 fn stream(len: usize) -> Cursor<Vec<u8>> {
-    let mut packets = vec![
-        0b00110010,
-        7 + len as u8, // packet type, flags and remaining len
-        0x00,
-        0x03,
-        'a' as u8,
-        '/' as u8,
-        'b' as u8, // variable header. topic name = 'a/b'
-        0x00,
-        0x0a, // variable header. pkid = 10
-    ];
-
-    let mut payload = payload(len); // publish payload
+    let publish = Publish::new("hello/world", QoS::AtLeastOnce, payload(len));
+    let publish = Packet::Publish(publish);
+    let mut payload = Vec::new();
+    payload.mqtt_write(&publish).unwrap();
     let mut extra = vec![0xDE, 0xAD, 0xBE, 0xEF]; // extra packets in the stream
 
-    packets.append(&mut payload);
-    packets.append(&mut extra);
+    payload.append(&mut extra);
 
-    let stream = Cursor::new(packets);
+    let stream = Cursor::new(payload);
     stream
 }
 

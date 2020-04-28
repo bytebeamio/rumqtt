@@ -1,5 +1,5 @@
 use crate::packetbytes::*;
-use crate::{packet_type, PacketType, Error};
+use crate::{packet_type, PacketType, Error, FixedHeader};
 use bytes::BytesMut;
 
 pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packet, Error> {
@@ -35,7 +35,11 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
         };
     }
 
-    let variable_header_index = header_len;
+    let fixed_header = FixedHeader {
+        byte1,
+        header_len,
+        remaining_len
+    };
 
     // Always reserve size for next max possible payload
     if stream.len() < 2 {
@@ -44,17 +48,17 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
 
     let packet = packet.freeze();
     let packet = match control_type {
-        PacketType::Connect => Packet::Connect(Connect::assemble(variable_header_index, packet)?),
-        PacketType::ConnAck => Packet::ConnAck(ConnAck::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::Publish => Packet::Publish(Publish::assemble(byte1, variable_header_index, packet)?),
-        PacketType::PubAck => Packet::PubAck(PubAck::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::PubRec => Packet::PubRec(PubRec::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::PubRel => Packet::PubRel(PubRel::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::PubComp => Packet::PubComp(PubComp::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::Subscribe => Packet::Subscribe(Subscribe::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::SubAck => Packet::SubAck(SubAck::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::Unsubscribe => Packet::Unsubscribe(Unsubscribe::assemble(remaining_len, variable_header_index, packet)?),
-        PacketType::UnsubAck => Packet::UnsubAck(UnsubAck::assemble(remaining_len, variable_header_index, packet)?),
+        PacketType::Connect => Packet::Connect(Connect::assemble(fixed_header, packet)?),
+        PacketType::ConnAck => Packet::ConnAck(ConnAck::assemble(fixed_header, packet)?),
+        PacketType::Publish => Packet::Publish(Publish::assemble(fixed_header, packet)?),
+        PacketType::PubAck => Packet::PubAck(PubAck::assemble(fixed_header, packet)?),
+        PacketType::PubRec => Packet::PubRec(PubRec::assemble(fixed_header, packet)?),
+        PacketType::PubRel => Packet::PubRel(PubRel::assemble(fixed_header, packet)?),
+        PacketType::PubComp => Packet::PubComp(PubComp::assemble(fixed_header, packet)?),
+        PacketType::Subscribe => Packet::Subscribe(Subscribe::assemble(fixed_header, packet)?),
+        PacketType::SubAck => Packet::SubAck(SubAck::assemble(fixed_header, packet)?),
+        PacketType::Unsubscribe => Packet::Unsubscribe(Unsubscribe::assemble(fixed_header, packet)?),
+        PacketType::UnsubAck => Packet::UnsubAck(UnsubAck::assemble(fixed_header, packet)?),
         PacketType::PingReq => Packet::PingReq,
         PacketType::PingResp => Packet::PingResp,
         PacketType::Disconnect=> Packet::Disconnect

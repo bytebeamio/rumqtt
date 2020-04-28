@@ -1,5 +1,5 @@
 use crate::packets::*;
-use crate::Error;
+use crate::{Error, FixedHeader};
 use bytes::buf::Buf;
 use bytes::Bytes;
 use core::fmt::Debug;
@@ -81,7 +81,8 @@ fn extract_username_password(connect_flags: u8, mut bytes: &mut Bytes) -> Result
 }
 
 impl Connect {
-    pub fn assemble(variable_header_index: usize, mut bytes: Bytes) -> Result<Connect, Error> {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let protocol_name = read_mqtt_string(&mut bytes)?;
         let protocol_level = bytes.get_u8();
@@ -122,10 +123,11 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
 
-        if remaining_len != 2 {
+        if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect)
         }
 
@@ -155,12 +157,13 @@ pub struct Publish {
 }
 
 impl Publish {
-    pub fn assemble(byte1: u8, variable_header_index: usize, bytes: Bytes) -> Result<Self, Error> {
+    pub(crate) fn assemble(fixed_header: FixedHeader, bytes: Bytes) -> Result<Self, Error> {
         let mut payload = bytes.clone();
-        let qos = qos((byte1 & 0b0110) >> 1)?;
-        let dup = (byte1 & 0b1000) != 0;
-        let retain = (byte1 & 0b0001) != 0;
+        let qos = qos((fixed_header.byte1 & 0b0110) >> 1)?;
+        let dup = (fixed_header.byte1 & 0b1000) != 0;
+        let retain = (fixed_header.byte1 & 0b0001) != 0;
 
+        let variable_header_index = fixed_header.header_len;
         payload.advance(variable_header_index);
         let topic = read_mqtt_string(&mut payload)?;
 
@@ -194,11 +197,12 @@ pub struct PubAck {
 }
 
 impl PubAck {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
-        if remaining_len != 2 {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect)
         }
 
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let puback = PubAck {
@@ -215,11 +219,12 @@ pub struct PubRec {
 }
 
 impl PubRec {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
-        if remaining_len != 2 {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        if fixed_header.remaining_len  != 2 {
             return Err(Error::PayloadSizeIncorrect)
         }
 
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let pubrec = PubRec {
@@ -236,11 +241,12 @@ pub struct PubRel {
 }
 
 impl PubRel {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
-        if remaining_len != 2 {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect)
         }
 
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let pubrel = PubRel {
@@ -257,11 +263,12 @@ pub struct PubComp {
 }
 
 impl PubComp {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
-        if remaining_len != 2 {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect)
         }
 
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let pubcomp = PubComp {
@@ -279,12 +286,13 @@ pub struct Subscribe {
 }
 
 impl Subscribe {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
 
         // variable header size = 2 (packet identifier)
-        let mut payload_bytes = remaining_len - 2;
+        let mut payload_bytes = fixed_header.remaining_len - 2;
         let mut topics = Vec::new();
 
         while payload_bytes > 0 {
@@ -313,11 +321,12 @@ pub struct SubAck {
 }
 
 impl SubAck {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
 
         let pkid = bytes.get_u16();
-        let mut payload_bytes = remaining_len - 2;
+        let mut payload_bytes = fixed_header.remaining_len - 2;
         let mut return_codes = Vec::with_capacity(payload_bytes);
 
         while payload_bytes > 0 {
@@ -345,10 +354,11 @@ pub struct Unsubscribe {
 }
 
 impl Unsubscribe {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
-        let mut payload_bytes = remaining_len - 2;
+        let mut payload_bytes = fixed_header.remaining_len - 2;
         let mut topics = Vec::with_capacity(1);
 
         while payload_bytes > 0 {
@@ -372,11 +382,12 @@ pub struct UnsubAck {
 }
 
 impl UnsubAck {
-    pub fn assemble(remaining_len: usize, variable_header_index: usize, mut bytes: Bytes) -> Result<Self, Error> {
-        if remaining_len != 2 {
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect)
         }
 
+        let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let unsuback = UnsubAck {
@@ -389,6 +400,12 @@ impl UnsubAck {
 
 fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     let len = stream.get_u16() as usize;
+    // Invalid packets which reached this point (simulated invalid packets actually triggered this)
+    // should not cause the split to cross boundaries
+    if len > stream.len() {
+        return Err(Error::BoundaryCrossed)
+    }
+
     let s = stream.split_to(len);
     match String::from_utf8(s.to_vec()) {
         Ok(v) => Ok(v),
