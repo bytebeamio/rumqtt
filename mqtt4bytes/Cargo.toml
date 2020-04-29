@@ -14,6 +14,7 @@ default = ["std"]
 bytes = { version = "0.5", default-features = false }
 tokio-util = { version = "0.3", features = ["codec"], optional = true }
 thiserror = { version = "1", optional = true }
+rand = "0.7"
 cfg-if = "0.1"
 
 [dev-dependencies]
