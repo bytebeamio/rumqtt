@@ -113,10 +113,30 @@ fn header_len(remaining_len: usize) -> usize {
 
 #[cfg(test)]
 mod test {
-    use super::mqtt_read;
+    use super::{mqtt_read, parse_fixed_header};
     use crate::{Packet, Error};
     use pretty_assertions::assert_eq;
     use alloc::vec;
+
+    #[test]
+    fn fixed_header_is_parsed_as_expected() {
+        let (_, remaining_len) = parse_fixed_header(b"\x10\x00").unwrap();
+        assert_eq!(remaining_len, 0);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\x7f").unwrap();
+        assert_eq!(remaining_len, 127);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\x80\x01").unwrap();
+        assert_eq!(remaining_len, 128);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\xff\x7f").unwrap();
+        assert_eq!(remaining_len, 16383);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x01").unwrap();
+        assert_eq!(remaining_len, 16384);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\xff\xff\x7f").unwrap();
+        assert_eq!(remaining_len, 2_097_151);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x80\x01").unwrap();
+        assert_eq!(remaining_len, 2_097_152);
+        let (_, remaining_len) = parse_fixed_header(b"\x10\xff\xff\xff\x7f").unwrap();
+        assert_eq!(remaining_len, 268_435_455);
+    }
 
     #[test]
     fn read_packet_connect_mqtt_protocol() {
