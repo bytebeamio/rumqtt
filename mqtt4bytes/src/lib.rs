@@ -22,7 +22,7 @@ pub use read::*;
 pub use topic::*;
 pub use write::*;
 
-
+// NOTE: Std is an exclusive or features. Won't work with all features enabled
 cfg_if! {
     if #[cfg(feature = "std")] {
         #[derive(Debug, thiserror::Error)]
