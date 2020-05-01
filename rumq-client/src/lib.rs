@@ -74,7 +74,7 @@
 //!
 //! Powerful notification system to control the runtime
 //! ----------------------
-//! Eventloop stream yields all the interesting event ranging for data on the network to
+//! Eventloop stream yields all the interesting events ranging from data on the network to
 //! disconnections and reconnections. Use it the way you see fit
 //!
 //! - Resubscribe after reconnection
@@ -115,12 +115,15 @@ use std::time::Duration;
 mod eventloop;
 mod network;
 mod state;
+mod client;
 
+pub use client::channel;
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use state::MqttState;
 
 pub use rumq_core::mqtt4::*;
+pub use flume::{Sender, Receiver};
 
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]

@@ -89,7 +89,7 @@ impl MqttEventLoop {
         self.state.await_pingresp = false;
 
         // connect to the broker
-        let mut network = self.network_connect().await?;
+        let mut network = network_connect(&self.options).await?;
         self.mqtt_connect(&mut network).await?;
 
         // move pending messages from state to eventloop and create a pending stream of requests
@@ -212,25 +212,6 @@ async fn select<R: Requests, P: Packets>(
 }
 
 impl MqttEventLoop {
-    async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
-        let network = time::timeout(Duration::from_secs(5), async {
-            let network = if self.options.ca.is_some() {
-                let o = network::tls_connect(&self.options).await?;
-                let o = Box::new(o) as Box<dyn N>;
-                Framed::new(o, MqttCodec::new(self.options.max_packet_size))
-            } else {
-                let o = network::tcp_connect(&self.options).await?;
-                let o = Box::new(o) as Box<dyn N>;
-                Framed::new(o, MqttCodec::new(self.options.max_packet_size))
-            };
-
-            Ok::<Framed<Box<dyn N>, MqttCodec>, EventLoopError>(network)
-        })
-        .await??;
-
-        Ok(network)
-    }
-
     async fn mqtt_connect(&mut self, mut network: impl Network) -> Result<(), EventLoopError> {
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
@@ -269,6 +250,24 @@ impl MqttEventLoop {
     }
 }
 
+async fn network_connect(options: &MqttOptions) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
+    let network = time::timeout(Duration::from_secs(5), async {
+        let network = if options.ca.is_some() {
+            let o = network::tls_connect(options).await?;
+            let o = Box::new(o) as Box<dyn N>;
+            Framed::new(o, MqttCodec::new(options.max_packet_size))
+        } else {
+            let o = network::tcp_connect(options).await?;
+            let o = Box::new(o) as Box<dyn N>;
+            Framed::new(o, MqttCodec::new(options.max_packet_size))
+        };
+
+        Ok::<Framed<Box<dyn N>, MqttCodec>, EventLoopError>(network)
+    }).await??;
+
+    Ok(network)
+}
+
 impl From<Request> for Packet {
     fn from(item: Request) -> Self {
         match item {
@@ -289,8 +288,8 @@ impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
-pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
-impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
+pub trait Requests: Stream<Item = Request> + Unpin + Send {}
+impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 
 pub trait Packets: Stream<Item = Packet> + Unpin + Send + Sync {}
 impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
