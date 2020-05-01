@@ -2,8 +2,8 @@ use std::{collections::VecDeque, result::Result, time::Instant};
 
 use crate::router::RouterMessage;
 use rumq_core::mqtt4::{
-    valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS,
-    Subscribe, SubscribeReturnCodes, Suback, Unsubscribe,
+    valid_filter, valid_topic, ConnectReturnCode, LastWill, Packet, PacketIdentifier, Publish, QoS, Suback, Subscribe,
+    SubscribeReturnCodes, Unsubscribe,
 };
 
 #[derive(Debug, thiserror::Error)]

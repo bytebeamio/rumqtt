@@ -2,18 +2,18 @@
 extern crate log;
 
 use futures_util::future::join_all;
-use tokio_util::codec::Framed;
+use futures_util::sink::Sink;
+use futures_util::stream::Stream;
+use rumq_core::mqtt4::{codec, Packet};
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::{channel, Sender, Receiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time::{self, Elapsed};
 use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::TLSError;
 use tokio_rustls::rustls::{AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig};
 use tokio_rustls::TlsAcceptor;
-use futures_util::sink::Sink;
-use futures_util::stream::Stream;
-use rumq_core::mqtt4::{codec, Packet};
+use tokio_util::codec::Framed;
 
 use serde::Deserialize;
 
@@ -21,15 +21,15 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 mod connection;
-mod state;
 mod router;
+mod state;
 
+pub use router::{Connection, RouterMessage};
 pub use rumq_core as core;
-pub use router::{RouterMessage, Connection};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -59,7 +59,7 @@ pub enum Error {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
-    servers:    Vec<ServerSettings>,
+    servers: Vec<ServerSettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -140,7 +140,7 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
             };
 
             let framed = Framed::new(stream, codec::MqttCodec::new(config.max_payload_size));
-            task::spawn( async {
+            task::spawn(async {
                 match connection::eventloop(config, framed, router_tx).await {
                     Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
                     Err(e) => error!("Connection eventloop error = {:?}", e),
@@ -148,7 +148,7 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
             });
         } else {
             let framed = Framed::new(stream, codec::MqttCodec::new(config.max_payload_size));
-            task::spawn( async {
+            task::spawn(async {
                 match connection::eventloop(config, framed, router_tx).await {
                     Ok(id) => info!("Connection eventloop done!!. Id = {:?}", id),
                     Err(e) => error!("Connection eventloop error = {:?}", e),
@@ -159,7 +159,6 @@ async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(String, rou
         time::delay_for(accept_loop_delay).await;
     }
 }
-
 
 pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
@@ -180,14 +179,9 @@ pub struct Broker {
 pub fn new(config: Config) -> Broker {
     let (router_tx, router_rx) = channel(100);
 
-    thread::spawn(move || {
-        router(router_rx)
-    });
+    thread::spawn(move || router(router_rx));
 
-    Broker {
-        config,
-        router_handle: router_tx
-    }
+    Broker { config, router_handle: router_tx }
 }
 
 impl Broker {

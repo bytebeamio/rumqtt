@@ -1,22 +1,22 @@
-use rumq_core::mqtt4::{Connack, Packet, Connect, ConnectReturnCode};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::mpsc::error::SendError;
+use futures_util::sink::SinkExt;
+use futures_util::stream::Stream;
+use rumq_core::mqtt4::{Connack, Connect, ConnectReturnCode, Packet};
+use tokio::select;
 use tokio::stream::iter;
 use tokio::stream::StreamExt;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time;
 use tokio::time::Elapsed;
 use tokio::time::Instant;
-use tokio::select;
-use futures_util::sink::SinkExt;
-use futures_util::stream::Stream;
 
 use crate::router::{self, RouterMessage};
-use crate::ServerSettings;
 use crate::Network;
+use crate::ServerSettings;
 
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
-use std::io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -39,10 +39,14 @@ pub enum Error {
     #[error("Not connack")]
     NotConnack,
     #[error("Stream don")]
-    StreamDone
+    StreamDone,
 }
 
-pub async fn eventloop<S: Network>(config: Arc<ServerSettings>, stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<String, Error> {
+pub async fn eventloop<S: Network>(
+    config: Arc<ServerSettings>,
+    stream: S,
+    mut router_tx: Sender<(String, RouterMessage)>,
+) -> Result<String, Error> {
     let mut connection = Connection::new(config, stream, router_tx.clone()).await?;
     let id = connection.id.clone();
 
@@ -56,15 +60,19 @@ pub async fn eventloop<S: Network>(config: Arc<ServerSettings>, stream: S, mut r
 
 pub struct Connection<S> {
     config: Arc<ServerSettings>,
-    id:         String,
+    id: String,
     keep_alive: Duration,
-    stream:     S,
-    this_rx:    Receiver<RouterMessage>,
-    router_tx:  Sender<(String, RouterMessage)>,
+    stream: S,
+    this_rx: Receiver<RouterMessage>,
+    router_tx: Sender<(String, RouterMessage)>,
 }
 
 impl<S: Network> Connection<S> {
-    async fn new(config: Arc<ServerSettings>, mut stream: S, mut router_tx: Sender<(String, RouterMessage)>) -> Result<Connection<S>, Error> {
+    async fn new(
+        config: Arc<ServerSettings>,
+        mut stream: S,
+        mut router_tx: Sender<(String, RouterMessage)>,
+    ) -> Result<Connection<S>, Error> {
         let (this_tx, this_rx) = channel(100);
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let connect = time::timeout(timeout, async {
@@ -73,7 +81,6 @@ impl<S: Network> Connection<S> {
             Ok::<_, Error>(o)
         })
         .await??;
-
 
         let id = connect.client_id.clone();
         let keep_alive = Duration::from_secs(connect.keep_alive as u64);
@@ -85,7 +92,6 @@ impl<S: Network> Connection<S> {
         Ok(connection)
     }
 
-
     async fn run(&mut self) -> Result<(), Error> {
         let keep_alive = self.keep_alive + self.keep_alive.mul_f32(0.5);
         let id = self.id.clone();
@@ -94,16 +100,16 @@ impl<S: Network> Connection<S> {
             Some(m) => m,
             None => {
                 info!("Tx closed!! Stopping the connection");
-                return Ok(()) 
+                return Ok(());
             }
         };
 
         let mut pending = match message {
             RouterMessage::Pending(connack) => connack,
-            _ => return Err(Error::NotConnack)
+            _ => return Err(Error::NotConnack),
         };
 
-        // eventloop which pending packets from the last session 
+        // eventloop which pending packets from the last session
         if pending.len() > 0 {
             let connack = Connack::new(ConnectReturnCode::Accepted, true);
             let packet = Packet::Connack(connack);
@@ -122,7 +128,7 @@ impl<S: Network> Connection<S> {
                 }
 
                 if done {
-                    break
+                    break;
                 }
             }
         } else {
@@ -137,13 +143,13 @@ impl<S: Network> Connection<S> {
 
         loop {
             let mut timeout = time::delay_for(keep_alive);
-            let (done, routermessage) = select(&mut incoming, &mut self.this_rx, keep_alive, &mut timeout).await?; 
+            let (done, routermessage) = select(&mut incoming, &mut self.this_rx, keep_alive, &mut timeout).await?;
             if let Some(message) = routermessage {
                 self.router_tx.send((id.clone(), message)).await?;
             }
 
             if done {
-                break
+                break;
             }
         }
 
@@ -151,18 +157,18 @@ impl<S: Network> Connection<S> {
     }
 }
 
-use tokio::time::Throttle;
 use tokio::time::Delay;
+use tokio::time::Throttle;
 
 /// selects incoming packets from the network stream and router message stream
 /// Forwards router messages to network
 /// bool field can be used to instruct outer loop to stop processing messages
 async fn select<S: Network>(
-    stream: &mut Throttle<S>, 
+    stream: &mut Throttle<S>,
     mut outgoing: impl Stream<Item = RouterMessage> + Unpin,
     keep_alive: Duration,
-    mut timeout: &mut Delay) -> Result<(bool, Option<RouterMessage>), Error> {
-
+    mut timeout: &mut Delay,
+) -> Result<(bool, Option<RouterMessage>), Error> {
     let keepalive = &mut timeout;
     select! {
         _ = keepalive => return Err(Error::KeepAlive),

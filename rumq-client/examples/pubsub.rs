@@ -1,8 +1,8 @@
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::{time, task};
 use tokio::stream::StreamExt;
+use tokio::sync::mpsc::{channel, Sender};
+use tokio::{task, time};
 
-use rumq_client::{self, MqttOptions, QoS, Publish, Subscribe, Request, MqttEventLoop, eventloop};
+use rumq_client::{self, eventloop, MqttEventLoop, MqttOptions, Publish, QoS, Request, Subscribe};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -20,11 +20,9 @@ async fn main() {
         time::delay_for(Duration::from_secs(3)).await;
     });
 
-
     stream_it(&mut eventloop).await;
     // println!("State = {:?}", eventloop.state);
 }
-
 
 async fn stream_it(eventloop: &mut MqttEventLoop) {
     let mut stream = eventloop.connect().await.unwrap();
@@ -35,7 +33,6 @@ async fn stream_it(eventloop: &mut MqttEventLoop) {
 
     println!("Stream done");
 }
-
 
 async fn requests(mut requests_tx: Sender<Request>) {
     let subscription = Subscribe::new("hello/world", QoS::AtLeastOnce);

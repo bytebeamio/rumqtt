@@ -428,7 +428,7 @@ mod test {
         // outgoing activity but no incomin activity
         let (requests_tx, requests_rx) = channel(5);
         task::spawn(async move {
-            start_requests(10, QoS::AtMostOnce,1,  requests_tx).await;
+            start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
         });
 
         // start the eventloop
@@ -710,7 +710,7 @@ mod broker {
                 Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
                 Ok(Err(e)) => panic!("Error = {:?}", e),
                 // timedout
-                Err(_)  => None,
+                Err(_) => None,
             }
         }
 
@@ -720,14 +720,15 @@ mod broker {
             packet.await.unwrap().unwrap()
         }
 
-        
         pub async fn read_packet_and_respond(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(30), async { self.framed.next().await.unwrap() });
             let packet = packet.await.unwrap().unwrap();
 
             match packet.clone() {
-                Packet::Publish(publish) => if let Some(pkid) = publish.pkid {
-                    self.framed.send(Packet::Puback(pkid)).await.unwrap();
+                Packet::Publish(publish) => {
+                    if let Some(pkid) = publish.pkid {
+                        self.framed.send(Packet::Puback(pkid)).await.unwrap();
+                    }
                 }
                 _ => (),
             }

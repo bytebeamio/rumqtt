@@ -1,4 +1,4 @@
-use crate::{QoS, SubscribeReturnCodes, Packet, Error};
+use crate::{Error, Packet, QoS, SubscribeReturnCodes};
 use bytes::buf::BufMut;
 use bytes::BytesMut;
 
@@ -74,7 +74,7 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
             if packet.qos != QoS::AtMostOnce {
                 let pkid = packet.pkid;
                 if pkid == 0 {
-                    return Err(Error::PacketIdZero)
+                    return Err(Error::PacketIdZero);
                 }
 
                 payload.put_u16(pkid);
@@ -128,10 +128,14 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
             payload.put_u8(0x90);
             write_remaining_length(payload, packet.return_codes.len() + 2)?;
             payload.put_u16(packet.pkid);
-            let p: Vec<u8> = packet.return_codes.iter().map(|&code| match code {
-                SubscribeReturnCodes::Success(qos) => qos as u8,
-                SubscribeReturnCodes::Failure => 0x80,
-            }).collect();
+            let p: Vec<u8> = packet
+                .return_codes
+                .iter()
+                .map(|&code| match code {
+                    SubscribeReturnCodes::Success(qos) => qos as u8,
+                    SubscribeReturnCodes::Failure => 0x80,
+                })
+                .collect();
 
             payload.extend_from_slice(&p);
             Ok(())
@@ -184,7 +188,7 @@ fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
 
 fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<(), Error> {
     if len > 268_435_455 {
-        return Err(Error::PayloadTooLong)
+        return Err(Error::PayloadTooLong);
     }
 
     let mut done = false;
@@ -208,9 +212,9 @@ mod test {
     use super::mqtt_write;
     use crate::{ConnAck, Connect, Packet, Publish, Subscribe};
     use crate::{ConnectReturnCode, LastWill, Protocol, QoS, SubscribeTopic};
-    use bytes::{Bytes, BytesMut};
     use alloc::borrow::ToOwned;
     use alloc::vec;
+    use bytes::{Bytes, BytesMut};
 
     #[test]
     fn write_packet_connect_mqtt_protocol_works() {
@@ -235,14 +239,47 @@ mod test {
         assert_eq!(
             buf,
             vec![
-                0x10, 39, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,
+                0x10,
+                39,
+                0x00,
+                0x04,
+                b'M',
+                b'Q',
+                b'T',
+                b'T',
+                0x04,
                 0b1100_1110, // +username, +password, -will retain, will qos=1, +last_will, +clean_session
-                0x00, 0x0a, // 10 sec
-                0x00, 0x04, b't', b'e', b's', b't', // client_id
-                0x00, 0x02, b'/', b'a', // will topic = '/a'
-                0x00, 0x07, b'o', b'f', b'f', b'l', b'i', b'n', b'e', // will msg = 'offline'
-                0x00, 0x04, b'r', b'u', b's', b't', // username = 'rust'
-                0x00, 0x02, b'm', b'q' // password = 'mq'
+                0x00,
+                0x0a, // 10 sec
+                0x00,
+                0x04,
+                b't',
+                b'e',
+                b's',
+                b't', // client_id
+                0x00,
+                0x02,
+                b'/',
+                b'a', // will topic = '/a'
+                0x00,
+                0x07,
+                b'o',
+                b'f',
+                b'f',
+                b'l',
+                b'i',
+                b'n',
+                b'e', // will msg = 'offline'
+                0x00,
+                0x04,
+                b'r',
+                b'u',
+                b's',
+                b't', // username = 'rust'
+                0x00,
+                0x02,
+                b'm',
+                b'q' // password = 'mq'
             ]
         );
     }
@@ -268,7 +305,7 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 10,
             payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
-            bytes: Bytes::new()
+            bytes: Bytes::new(),
         });
 
         let mut buf = BytesMut::new();
@@ -289,16 +326,13 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 0,
             payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
-            bytes: Bytes::new()
+            bytes: Bytes::new(),
         });
 
         let mut buf = BytesMut::new();
         mqtt_write(publish, &mut buf).unwrap();
 
-        assert_eq!(
-            buf,
-            vec![0b0011_0000, 9, 0x00, 0x03, b'a', b'/', b'b', 0xE1, 0xE2, 0xE3, 0xE4]
-        );
+        assert_eq!(buf, vec![0b0011_0000, 9, 0x00, 0x03, b'a', b'/', b'b', 0xE1, 0xE2, 0xE3, 0xE4]);
     }
 
     #[test]
@@ -326,13 +360,28 @@ mod test {
         assert_eq!(
             buf,
             vec![
-                0b1000_0010, 20, 0x01, 0x04, // pkid = 260
-                0x00, 0x03, b'a', b'/', b'+', // topic filter = 'a/+'
-                0x00,      // qos = 0
-                0x00, 0x01, b'#', // topic filter = '#'
-                0x01,      // qos = 1
-                0x00, 0x05, b'a', b'/', b'b', b'/', b'c', // topic filter = 'a/b/c'
-                0x02       // qos = 2
+                0b1000_0010,
+                20,
+                0x01,
+                0x04, // pkid = 260
+                0x00,
+                0x03,
+                b'a',
+                b'/',
+                b'+', // topic filter = 'a/+'
+                0x00, // qos = 0
+                0x00,
+                0x01,
+                b'#', // topic filter = '#'
+                0x01, // qos = 1
+                0x00,
+                0x05,
+                b'a',
+                b'/',
+                b'b',
+                b'/',
+                b'c', // topic filter = 'a/b/c'
+                0x02  // qos = 2
             ]
         );
     }

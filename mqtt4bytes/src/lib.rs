@@ -2,9 +2,9 @@
 
 use cfg_if::cfg_if;
 
+extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
-extern crate alloc;
 
 #[cfg(feature = "std")]
 mod codec;
@@ -81,8 +81,6 @@ cfg_if! {
     }
 }
 
-
-
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketType {
@@ -127,7 +125,7 @@ pub fn packet_type(num: u8) -> Result<PacketType, Error> {
         12 => Ok(PacketType::PingReq),
         13 => Ok(PacketType::PingResp),
         14 => Ok(PacketType::Disconnect),
-        _ => Err(Error::InvalidPacketType(num))
+        _ => Err(Error::InvalidPacketType(num)),
     }
 }
 
@@ -147,7 +145,7 @@ pub enum QoS {
 struct FixedHeader {
     byte1: u8,
     header_len: usize,
-    remaining_len: usize
+    remaining_len: usize,
 }
 
 pub fn qos(num: u8) -> Result<QoS, Error> {
@@ -155,6 +153,6 @@ pub fn qos(num: u8) -> Result<QoS, Error> {
         0 => Ok(QoS::AtMostOnce),
         1 => Ok(QoS::AtLeastOnce),
         2 => Ok(QoS::ExactlyOnce),
-        qos => Err(Error::InvalidQoS(qos))
+        qos => Err(Error::InvalidQoS(qos)),
     }
 }

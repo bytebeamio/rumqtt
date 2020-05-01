@@ -1,5 +1,5 @@
-use mqtt4bytes::{Packet, Publish, PubAck, QoS, mqtt_write, mqtt_read};
-use bytes::{BytesMut, BufMut};
+use bytes::{BufMut, BytesMut};
+use mqtt4bytes::{mqtt_read, mqtt_write, Packet, PubAck, Publish, QoS};
 use rand::Rng;
 
 #[test]
@@ -14,7 +14,7 @@ fn publish_encode_and_decode_works_as_expected() {
         let fill_size = rand::thread_rng().gen_range(0, 1024);
         let len = stream.len();
         let split_len = if len == 0 {
-            break
+            break;
         } else if len > fill_size {
             fill_size
         } else {
@@ -33,11 +33,10 @@ fn publish_encode_and_decode_works_as_expected() {
             Packet::Publish(publish) => {
                 assert_eq!(publish.pkid, (pkid % 65000) + 1);
                 pkid = (pkid % 65000) as u16 + 1;
-            },
-            _ => panic!("Expecting a publish")
+            }
+            _ => panic!("Expecting a publish"),
         }
     }
-
 }
 
 pub fn publishes(size: usize, count: usize) -> BytesMut {
@@ -66,7 +65,7 @@ fn pubacks_encode_and_decode_works_as_expected() {
         let fill_size = rand::thread_rng().gen_range(0, 10);
         let len = stream.len();
         let split_len = if len == 0 {
-            break
+            break;
         } else if len > fill_size {
             fill_size
         } else {
@@ -76,9 +75,7 @@ fn pubacks_encode_and_decode_works_as_expected() {
         let bytes = stream.split_to(split_len);
         read_stream.put(bytes);
         let packet = match mqtt_read(&mut read_stream, 10 * 1024) {
-            Err(mqtt4bytes::Error::UnexpectedEof) => {
-                continue
-            },
+            Err(mqtt4bytes::Error::UnexpectedEof) => continue,
             Err(e) => panic!(e),
             Ok(packet) => packet,
         };
@@ -87,11 +84,10 @@ fn pubacks_encode_and_decode_works_as_expected() {
             Packet::PubAck(ack) => {
                 assert_eq!(ack.pkid, (pkid % 65000) + 1);
                 pkid = (pkid % 65000) as u16 + 1;
-            },
-            _ => panic!("Expecting a publish")
+            }
+            _ => panic!("Expecting a publish"),
         }
     }
-
 }
 
 pub fn pubacks(count: usize) -> BytesMut {

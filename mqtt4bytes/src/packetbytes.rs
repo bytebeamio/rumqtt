@@ -5,8 +5,8 @@ use bytes::Bytes;
 use core::fmt::Debug;
 
 use crate::{qos, Protocol, QoS};
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 #[derive(Debug, Clone)]
 pub enum Packet {
@@ -87,7 +87,7 @@ impl Connect {
         let protocol_name = read_mqtt_string(&mut bytes)?;
         let protocol_level = bytes.get_u8();
         if protocol_name != "MQTT" {
-            return Err(Error::InvalidProtocol)
+            return Err(Error::InvalidProtocol);
         }
 
         let protocol = match protocol_level {
@@ -109,7 +109,7 @@ impl Connect {
             clean_session,
             last_will,
             username,
-            password
+            password,
         };
 
         Ok(connect)
@@ -128,7 +128,7 @@ impl ConnAck {
         bytes.advance(variable_header_index);
 
         if fixed_header.remaining_len != 2 {
-            return Err(Error::PayloadSizeIncorrect)
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let flags = bytes.get_u8();
@@ -136,10 +136,7 @@ impl ConnAck {
 
         let session_present = (flags & 0x01) == 1;
         let code = connect_return(return_code)?;
-        let connack = ConnAck {
-            session_present,
-            code,
-        };
+        let connack = ConnAck { session_present, code };
 
         Ok(connack)
     }
@@ -170,11 +167,11 @@ impl Publish {
         // Packet identifier exists where QoS > 0
         let pkid = match qos {
             QoS::AtMostOnce => 0,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => payload.get_u16()
+            QoS::AtLeastOnce | QoS::ExactlyOnce => payload.get_u16(),
         };
 
         if qos != QoS::AtMostOnce && pkid == 0 {
-            return Err(Error::PacketIdZero)
+            return Err(Error::PacketIdZero);
         }
 
         let publish = Publish {
@@ -199,15 +196,13 @@ pub struct PubAck {
 impl PubAck {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
-            return Err(Error::PayloadSizeIncorrect)
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
-        let puback = PubAck {
-            pkid,
-        };
+        let puback = PubAck { pkid };
 
         Ok(puback)
     }
@@ -220,16 +215,14 @@ pub struct PubRec {
 
 impl PubRec {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
-        if fixed_header.remaining_len  != 2 {
-            return Err(Error::PayloadSizeIncorrect)
+        if fixed_header.remaining_len != 2 {
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
-        let pubrec = PubRec {
-            pkid,
-        };
+        let pubrec = PubRec { pkid };
 
         Ok(pubrec)
     }
@@ -243,15 +236,13 @@ pub struct PubRel {
 impl PubRel {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
-            return Err(Error::PayloadSizeIncorrect)
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
-        let pubrel = PubRel {
-            pkid,
-        };
+        let pubrel = PubRel { pkid };
 
         Ok(pubrel)
     }
@@ -265,15 +256,13 @@ pub struct PubComp {
 impl PubComp {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
-            return Err(Error::PayloadSizeIncorrect)
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
-        let pubcomp = PubComp {
-            pkid,
-        };
+        let pubcomp = PubComp { pkid };
 
         Ok(pubcomp)
     }
@@ -305,10 +294,7 @@ impl Subscribe {
             });
         }
 
-        let subscribe = Subscribe {
-            pkid,
-            topics,
-        };
+        let subscribe = Subscribe { pkid, topics };
 
         Ok(subscribe)
     }
@@ -338,10 +324,7 @@ impl SubAck {
             }
             payload_bytes -= 1
         }
-        let suback = SubAck {
-            pkid,
-            return_codes,
-        };
+        let suback = SubAck { pkid, return_codes };
 
         Ok(suback)
     }
@@ -367,10 +350,7 @@ impl Unsubscribe {
             topics.push(topic_filter);
         }
 
-        let unsubscribe = Unsubscribe {
-            pkid,
-            topics,
-        };
+        let unsubscribe = Unsubscribe { pkid, topics };
 
         Ok(unsubscribe)
     }
@@ -384,15 +364,13 @@ pub struct UnsubAck {
 impl UnsubAck {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
-            return Err(Error::PayloadSizeIncorrect)
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let variable_header_index = fixed_header.header_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
-        let unsuback = UnsubAck {
-            pkid,
-        };
+        let unsuback = UnsubAck { pkid };
 
         Ok(unsuback)
     }
@@ -403,13 +381,13 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     // Invalid packets which reached this point (simulated invalid packets actually triggered this)
     // should not cause the split to cross boundaries
     if len > stream.len() {
-        return Err(Error::BoundaryCrossed)
+        return Err(Error::BoundaryCrossed);
     }
 
     let s = stream.split_to(len);
     match String::from_utf8(s.to_vec()) {
         Ok(v) => Ok(v),
-        Err(_e) => Err(Error::TopicNotUtf8)
+        Err(_e) => Err(Error::TopicNotUtf8),
     }
 }
 
@@ -421,33 +399,67 @@ fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
         3 => Ok(ConnectReturnCode::RefusedIdentifierRejected),
         4 => Ok(ConnectReturnCode::RefusedProtocolVersion),
         5 => Ok(ConnectReturnCode::ServerUnavailable),
-        num => Err(Error::InvalidConnectReturnCode(num))
+        num => Err(Error::InvalidConnectReturnCode(num)),
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::*;
-    use bytes::{Bytes, BytesMut};
-    use pretty_assertions::assert_eq;
     use alloc::borrow::ToOwned;
     use alloc::vec;
+    use bytes::{Bytes, BytesMut};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn connect_stitching_works_correctlyl() {
         let mut stream = bytes::BytesMut::new();
         let packetstream = &[
-            0x10, 39, // packet type, flags and remaining len
-            0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04,       // variable header
+            0x10,
+            39, // packet type, flags and remaining len
+            0x00,
+            0x04,
+            b'M',
+            b'Q',
+            b'T',
+            b'T',
+            0x04,        // variable header
             0b1100_1110, // variable header. +username, +password, -will retain, will qos=1, +last_will, +clean_session
-            0x00, 0x0a, // variable header. keep alive = 10 sec
-            0x00, 0x04, b't', b'e', b's', b't', // payload. client_id
-            0x00, 0x02, b'/', b'a', // payload. will topic = '/a'
-            0x00, 0x07, b'o', b'f', b'f', b'l', b'i', b'n',
+            0x00,
+            0x0a, // variable header. keep alive = 10 sec
+            0x00,
+            0x04,
+            b't',
+            b'e',
+            b's',
+            b't', // payload. client_id
+            0x00,
+            0x02,
+            b'/',
+            b'a', // payload. will topic = '/a'
+            0x00,
+            0x07,
+            b'o',
+            b'f',
+            b'f',
+            b'l',
+            b'i',
+            b'n',
             b'e', // payload. variable header. will msg = 'offline'
-            0x00, 0x04, b'r', b'u', b'm', b'q', // payload. username = 'rumq'
-            0x00, 0x02, b'm', b'q', // payload. password = 'mq'
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
+            0x00,
+            0x04,
+            b'r',
+            b'u',
+            b'm',
+            b'q', // payload. username = 'rumq'
+            0x00,
+            0x02,
+            b'm',
+            b'q', // payload. password = 'mq'
+            0xDE,
+            0xAD,
+            0xBE,
+            0xEF, // extra packets in the stream
         ];
 
         stream.extend_from_slice(&packetstream[..]);
@@ -480,9 +492,14 @@ mod test {
     fn connack_stitching_works_correctly() {
         let mut stream = bytes::BytesMut::new();
         let packetstream = &[
-            0b0010_0000, 0x02, // packet type, flags and remaining len
-            0x01, 0x00, // variable header. connack flags, connect return code
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
+            0b0010_0000,
+            0x02, // packet type, flags and remaining len
+            0x01,
+            0x00, // variable header. connack flags, connect return code
+            0xDE,
+            0xAD,
+            0xBE,
+            0xEF, // extra packets in the stream
         ];
 
         stream.extend_from_slice(&packetstream[..]);
@@ -504,18 +521,39 @@ mod test {
     #[test]
     fn qos1_publish_stitching_works_correctly() {
         let stream = &[
-            0b0011_0010, 11, // packet type, flags and remaining len
-            0x00, 0x03, b'a', b'/', b'b', // variable header. topic name = 'a/b'
-            0x00, 0x0a, // variable header. pkid = 10
-            0xF1, 0xF2, 0xF3, 0xF4, // publish payload
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
+            0b0011_0010,
+            11, // packet type, flags and remaining len
+            0x00,
+            0x03,
+            b'a',
+            b'/',
+            b'b', // variable header. topic name = 'a/b'
+            0x00,
+            0x0a, // variable header. pkid = 10
+            0xF1,
+            0xF2,
+            0xF3,
+            0xF4, // publish payload
+            0xDE,
+            0xAD,
+            0xBE,
+            0xEF, // extra packets in the stream
         ];
 
         let bytes = &[
-            0b0011_0010, 11, // packet type, flags and remaining len
-            0x00, 0x03, b'a', b'/', b'b', // variable header. topic name = 'a/b'
-            0x00, 0x0a, // variable header. pkid = 10
-            0xF1, 0xF2, 0xF3, 0xF4, // publish payload
+            0b0011_0010,
+            11, // packet type, flags and remaining len
+            0x00,
+            0x03,
+            b'a',
+            b'/',
+            b'b', // variable header. topic name = 'a/b'
+            0x00,
+            0x0a, // variable header. pkid = 10
+            0xF1,
+            0xF2,
+            0xF3,
+            0xF4, // publish payload
         ];
 
         let mut stream = BytesMut::from(&stream[..]);
@@ -545,15 +583,30 @@ mod test {
     #[test]
     fn qos0_publish_stitching_works_correctly() {
         let stream = &[
-            0b0011_0000, 7, // packet type, flags and remaining len
-            0x00, 0x03, b'a', b'/', b'b', // variable header. topic name = 'a/b'
-            0x01, 0x02, // payload
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
+            0b0011_0000,
+            7, // packet type, flags and remaining len
+            0x00,
+            0x03,
+            b'a',
+            b'/',
+            b'b', // variable header. topic name = 'a/b'
+            0x01,
+            0x02, // payload
+            0xDE,
+            0xAD,
+            0xBE,
+            0xEF, // extra packets in the stream
         ];
         let bytes = &[
-            0b0011_0000, 7, // packet type, flags and remaining len
-            0x00, 0x03, b'a', b'/', b'b', // variable header. topic name = 'a/b'
-            0x01, 0x02 // payloa/home/tekjar/.local/share/JetBrains/Toolbox/bin/cliond
+            0b0011_0000,
+            7, // packet type, flags and remaining len
+            0x00,
+            0x03,
+            b'a',
+            b'/',
+            b'b', // variable header. topic name = 'a/b'
+            0x01,
+            0x02, // payloa/home/tekjar/.local/share/JetBrains/Toolbox/bin/cliond
         ];
         let mut stream = BytesMut::from(&stream[..]);
         let bytes = Bytes::from(&bytes[..]);
@@ -581,9 +634,14 @@ mod test {
     #[test]
     fn puback_stitching_works_correctly() {
         let stream = &[
-            0b0100_0000, 0x02, // packet type, flags and remaining len
-            0x00, 0x0A, // fixed header. packet identifier = 10
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
+            0b0100_0000,
+            0x02, // packet type, flags and remaining len
+            0x00,
+            0x0A, // fixed header. packet identifier = 10
+            0xDE,
+            0xAD,
+            0xBE,
+            0xEF, // extra packets in the stream
         ];
         let mut stream = BytesMut::from(&stream[..]);
 
@@ -593,26 +651,38 @@ mod test {
             packet => panic!("Invalid packet = {:?}", packet),
         };
 
-        assert_eq!(
-            packet,
-            PubAck {
-                pkid: 10
-            }
-        );
+        assert_eq!(packet, PubAck { pkid: 10 });
     }
 
     #[test]
     fn subscribe_stitching_works_correctly() {
         let stream = &[
-            0b1000_0010, 20, // packet type, flags and remaining len
-            0x01, 0x04, // variable header. pkid = 260
-            0x00, 0x03, b'a', b'/', b'+', // payload. topic filter = 'a/+'
-            0x00,      // payload. qos = 0
-            0x00, 0x01, b'#', // payload. topic filter = '#'
-            0x01,      // payload. qos = 1
-            0x00, 0x05, b'a', b'/', b'b', b'/', b'c', // payload. topic filter = 'a/b/c'
-            0x02,      // payload. qos = 2
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
+            0b1000_0010,
+            20, // packet type, flags and remaining len
+            0x01,
+            0x04, // variable header. pkid = 260
+            0x00,
+            0x03,
+            b'a',
+            b'/',
+            b'+', // payload. topic filter = 'a/+'
+            0x00, // payload. qos = 0
+            0x00,
+            0x01,
+            b'#', // payload. topic filter = '#'
+            0x01, // payload. qos = 1
+            0x00,
+            0x05,
+            b'a',
+            b'/',
+            b'b',
+            b'/',
+            b'c', // payload. topic filter = 'a/b/c'
+            0x02, // payload. qos = 2
+            0xDE,
+            0xAD,
+            0xBE,
+            0xEF, // extra packets in the stream
         ];
         let mut stream = BytesMut::from(&stream[..]);
 
@@ -659,7 +729,6 @@ mod test {
             Packet::SubAck(packet) => packet,
             packet => panic!("Invalid packet = {:?}", packet),
         };
-
 
         assert_eq!(
             packet,

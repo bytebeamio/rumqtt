@@ -74,7 +74,7 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub(crate) fn handle_outgoing_packet(&mut self, packet: Packet) ->  Result<(Option<Notification>, Option<Packet>), StateError> {
+    pub(crate) fn handle_outgoing_packet(&mut self, packet: Packet) -> Result<(Option<Notification>, Option<Packet>), StateError> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_outgoing_publish(publish)?,
             Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,

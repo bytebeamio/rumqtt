@@ -1,9 +1,9 @@
+use crate::Error;
 use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
-use crate::Error;
 
 use crate::read::mqtt_read;
-use crate::{Packet, mqtt_write};
+use crate::{mqtt_write, Packet};
 
 pub struct MqttCodec {
     max_payload_size: usize,
@@ -11,9 +11,7 @@ pub struct MqttCodec {
 
 impl MqttCodec {
     pub fn new(max_payload_size: usize) -> Self {
-        MqttCodec {
-            max_payload_size,
-        }
+        MqttCodec { max_payload_size }
     }
 }
 
@@ -30,7 +28,7 @@ impl Decoder for MqttCodec {
         // Find ways to reserve `buf` better to optimize allocations
         let packet = match mqtt_read(buf, self.max_payload_size) {
             Ok(len) => len,
-            Err(Error::UnexpectedEof)  => return Ok(None),
+            Err(Error::UnexpectedEof) => return Ok(None),
             Err(e) => return Err(e),
         };
 

@@ -1,8 +1,8 @@
-use crate::{QoS, Protocol, Connect, ConnAck, Publish, PubAck, PubRec, PubRel, Subscribe, SubAck, PubComp};
-use bytes::Bytes;
+use crate::{ConnAck, Connect, Protocol, PubAck, PubComp, PubRec, PubRel, Publish, QoS, SubAck, Subscribe};
 use alloc::string::String;
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
+use bytes::Bytes;
 use core::fmt;
 
 impl Connect {
@@ -63,13 +63,9 @@ pub enum ConnectReturnCode {
 
 impl ConnAck {
     pub fn new(code: ConnectReturnCode, session_present: bool) -> ConnAck {
-        ConnAck {
-            code,
-            session_present,
-        }
+        ConnAck { code, session_present }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LastWill {
@@ -101,33 +97,25 @@ impl Publish {
 
 impl PubAck {
     pub fn new(pkid: u16) -> PubAck {
-        PubAck {
-            pkid,
-        }
+        PubAck { pkid }
     }
 }
 
 impl PubRec {
     pub fn new(pkid: u16) -> PubRec {
-        PubRec {
-            pkid,
-        }
+        PubRec { pkid }
     }
 }
 
 impl PubRel {
     pub fn new(pkid: u16) -> PubRel {
-        PubRel {
-            pkid,
-        }
+        PubRel { pkid }
     }
 }
 
 impl PubComp {
     pub fn new(pkid: u16) -> PubComp {
-        PubComp {
-            pkid,
-        }
+        PubComp { pkid }
     }
 }
 
@@ -152,10 +140,7 @@ impl Subscribe {
     }
 
     pub fn add(&mut self, topic: String, qos: QoS) -> &mut Self {
-        let topic = SubscribeTopic {
-            topic_path: topic,
-            qos,
-        };
+        let topic = SubscribeTopic { topic_path: topic, qos };
         self.topics.push(topic);
         self
     }
@@ -175,14 +160,9 @@ pub enum SubscribeReturnCodes {
 
 impl SubAck {
     pub fn new(pkid: u16, return_codes: Vec<SubscribeReturnCodes>) -> SubAck {
-        SubAck {
-            pkid,
-            return_codes,
-        }
+        SubAck { pkid, return_codes }
     }
 }
-
-
 
 impl fmt::Debug for Publish {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

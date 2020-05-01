@@ -11,7 +11,6 @@ pub struct CommandLine {
     config_path: PathBuf,
 }
 
-
 #[tokio::main(core_threads = 1)]
 async fn main() {
     pretty_env_logger::init();
