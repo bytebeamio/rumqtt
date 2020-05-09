@@ -1,0 +1,70 @@
+   Compiling timestone v0.1.0 (/home/tekjar/Workspace/venom/timestone)
+warning: function is never used: `read_records`
+  --> timestone/examples/segmentthroughput.rs:52:4
+   |
+52 | fn read_records(segment: &mut Segment, count: u64) -> Result<(), io::Error> {
+   |    ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+    Finished release [optimized] target(s) in 1.31s
+     Running `/home/tekjar/Workspace/venom/target/release/examples/segmentthroughput`
+Append. File size = 1023, Throughput = 1266 MB/s
+Read. Records = 1048576, File size = 1024, Throughput = 4145 MB/s
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 56.13    0.543835         461      1179           write
+ 14.49    0.140399         115      1218           read
+ 13.99    0.135529       27105         5           unlink
+ 13.26    0.128500        4431        29         1 futex
+  0.49    0.004794        4794         1           msync
+  0.39    0.003735           3      1205       416 openat
+  0.38    0.003717           2      1831       221 statx
+  0.17    0.001682           2       794           close
+  0.11    0.001096          14        78           munmap
+  0.10    0.000966           5       190           mmap
+  0.10    0.000946           2       377           brk
+  0.07    0.000722           5       131           lseek
+  0.05    0.000457           4        96           prctl
+  0.04    0.000388           4        96           rt_sigreturn
+  0.03    0.000313           1       162           getdents64
+  0.03    0.000307           3        89        58 stat
+  0.03    0.000277           2       117       116 mkdir
+  0.02    0.000210           1       109           fstat
+  0.02    0.000196           2        88           mremap
+  0.02    0.000190           7        27           mprotect
+  0.01    0.000103           7        14           getpid
+  0.01    0.000067           3        22           rt_sigaction
+  0.01    0.000067          33         2           ftruncate
+  0.01    0.000061          10         6           getrandom
+  0.00    0.000046          15         3           readlink
+  0.00    0.000042          21         2           clone
+  0.00    0.000038          38         1           rmdir
+  0.00    0.000026           4         6         3 arch_prctl
+  0.00    0.000022           1        12         7 access
+  0.00    0.000016           5         3           execve
+  0.00    0.000015           2         7           sigaltstack
+  0.00    0.000014           2         5           rt_sigprocmask
+  0.00    0.000014           3         4           setitimer
+  0.00    0.000014           4         3           set_robust_list
+  0.00    0.000013           3         4         4 ioctl
+  0.00    0.000013           1         9           fcntl
+  0.00    0.000013           4         3           set_tid_address
+  0.00    0.000012           2         6           getuid
+  0.00    0.000011           0        38           lstat
+  0.00    0.000011           2         4           getgid
+  0.00    0.000011           1         6           geteuid
+  0.00    0.000011           2         4           getegid
+  0.00    0.000011           1         6           prlimit64
+  0.00    0.000008           0        14           flock
+  0.00    0.000006           1         4           sched_getaffinity
+  0.00    0.000005           0         7           getcwd
+  0.00    0.000002           2         1           chdir
+  0.00    0.000000           0         1           poll
+  0.00    0.000000           0         1           socket
+  0.00    0.000000           0         1           socketpair
+  0.00    0.000000           0         1           sysinfo
+  0.00    0.000000           0         7           statfs
+  0.00    0.000000           0         1           pipe2
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.968931                  8030       826 total

@@ -1,0 +1,32 @@
+[package]
+name = "rumqttlog"
+version = "0.1.0"
+authors = ["tekjar <raviteja@bytebeam.io>"]
+edition = "2018"
+license = "Apache-2.0"
+description = "kafka inspired rumqtt's mqtt commitlog"
+
+[dependencies]
+byteorder = "1"
+memmap = "0.7"
+bytes = "0.5"
+confy = "0.4"
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.1" }
+tokio = { version = "=0.2.20", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+log = "0.4"
+fnv = "1"
+
+[dev-dependencies]
+argh = "0.1"
+prost = "0.6"
+pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
+tempfile = "3"
+pretty_assertions = "0.6"
+rand = "0.7"
+bencher = "0.1"
+
+[[bench]]
+name = "bench"
+harness = false
