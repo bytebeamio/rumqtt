@@ -5,7 +5,6 @@ use mqtt4bytes::*;
 mod commitlog;
 mod router;
 
-pub use commitlog::CommitLog;
 pub use router::Router;
 
 use self::bytes::Bytes;
@@ -87,6 +86,7 @@ pub struct TopicsReply {
     /// list of new topics
     pub topics: Vec<String>,
 }
+
 /// Connection messages encompasses mqtt connect packet and handle to the connection
 /// for router to send messages to the connection
 pub struct Connection {

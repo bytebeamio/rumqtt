@@ -12,6 +12,7 @@ Cargo.lock
 .vscode
 *.pem
 *.der
+*.pb
 perf.data*
 utils/benchmark/benchmark
 cachegrind.out

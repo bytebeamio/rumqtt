@@ -191,6 +191,10 @@ a buffer of packets to commitlog with correct index?
 
 We'll start with method 1 for ease of implementation
 
+12/May/2020
+-------------------------
+
+
 References
 -----------------
 

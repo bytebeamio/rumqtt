@@ -125,6 +125,11 @@ impl Router {
                     ..
                 } = publish;
 
+                if bytes.len() == 0 {
+                    error!("Empty publish. Ignoring");
+                    return
+                }
+
                 self.append_to_commitlog(id, &topic, pkid, bytes);
 
                 // If there is a new unique append, send it to connection/linker waiting
@@ -279,6 +284,7 @@ impl Router {
             reply.offset,
             reply.payload.len(),
         );
+
         let connection = self.connections.get_mut(id).unwrap();
         let reply = RouterOutMessage::DataReply(reply);
         if let Err(e) = connection.handle.try_send(reply) {

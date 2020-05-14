@@ -6,30 +6,7 @@ use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
 
-mod logbench;
-mod logsbench;
-
 use bytes::Bytes;
-pub use logbench::*;
-pub use logsbench::*;
-
-// 1M records. 1K per record. 1GB in total
-pub const RECORD_COUNT: u64 = 1 * 1024 * 1024;
-pub const RECORD_SIZE: u64 = 1 * 1024;
-
-// 100MB per segment. 100K records per segment. 10 segments
-const MAX_SEGMENT_SIZE: u64 = 100 * 1024 * 1024;
-const MAX_SEGMENT_RECORDS: u64 = 1_000_000;
-const MAX_SEGMENT_COUNT: usize = 1000;
-
-// Bulk read size
-const BATCH_SIZE: u64 = 10 * 1024 * 1024;
-
-// Number of topics
-pub const TOPICS_COUNT: u64 = 100;
-
-// Backup directory
-pub const DIR: &str = "/tmp/timestone/storage";
 
 pub fn generate_payload(payload_size: u64) -> Vec<u8> {
     let mut rng = rand::thread_rng();

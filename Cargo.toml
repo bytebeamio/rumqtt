@@ -3,6 +3,7 @@
 members = [
   "mqtt4bytes",
   "mqtt5bytes",
+  "rumqttlog",
   "rumq-core",
   "rumq-client",
   "rumq-broker",

@@ -6,7 +6,7 @@ use crate::volatile::Log;
 use crate::Config;
 
 // TODO change config to Arc
-pub struct CommitLog {
+pub(crate) struct CommitLog {
     config: Config,
     logs: HashMap<String, Log>,
 }

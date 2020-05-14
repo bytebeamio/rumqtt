@@ -26,6 +26,11 @@ tempfile = "3"
 pretty_assertions = "0.6"
 rand = "0.7"
 bencher = "0.1"
+pretty_env_logger = "0.4"
+futures-util = "0.3.5"
+
+[profile.release]
+debug = true
 
 [[bench]]
 name = "bench"
