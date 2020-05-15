@@ -20,7 +20,6 @@ pub enum Error {
 }
 
 pub struct Router {
-    config: Config,
     /// Commit log by topic. Commit log stores all the of given topic. The
     /// details are very similar to what kafka does. Who know, we might
     /// even make the broker kafka compatible and directly feed it to databases
@@ -55,7 +54,6 @@ impl Router {
         let topiclog = TopicLog::new();
 
         let router = Router {
-            config,
             commitlog,
             replicatedlog,
             topiclog,
@@ -111,7 +109,9 @@ impl Router {
     fn handle_new_connection(&mut self, connection: Connection) {
         let id = connection.connect.client_id.clone();
         info!("Connect. Id = {:?}", id);
-        self.connections.insert(id.clone(), connection);
+        if let Some(_) = self.connections.insert(id.clone(), connection) {
+            error!("Replacing an existing connection with same ID");
+        }
     }
 
     /// Handles
