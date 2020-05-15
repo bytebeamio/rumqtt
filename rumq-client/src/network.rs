@@ -25,6 +25,8 @@ pub enum Error {
     TLS(#[from] TLSError),
     #[error("No valid cert in chain")]
     NoValidCertInChain,
+    #[error("Invalid key type")]
+    InvalidKeyType,
 }
 
 // The cert handling functions return unit right now, this is a shortcut
@@ -52,6 +54,8 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     // Add der encoded client cert and key
     if let Some(client) = options.client_auth.as_ref() {
         let certs = certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
+        // TODO: READ ECC KEY TYPE AS WELL
+       
         let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone())))?;
         config.set_single_client_cert(certs, keys.remove(0))?;
     }

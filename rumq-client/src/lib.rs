@@ -257,6 +257,8 @@ pub struct MqttOptions {
     inflight: usize,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
+    /// Key type for TLS 
+    key_type: Option<String>,
 }
 
 impl MqttOptions {
@@ -283,6 +285,7 @@ impl MqttOptions {
             throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
+            key_type: None,
         }
     }
 
@@ -433,6 +436,18 @@ impl MqttOptions {
     pub fn inflight(&self) -> usize {
         self.inflight
     }
+
+    /// Set key type
+    pub fn set_key_type(&mut self, key_type: String) -> &mut Self {
+        self.key_type = Some(key_type);
+        self
+    }
+
+    /// get key type
+    pub fn get_key_type(&self) -> Option<String>{
+        self.key_type.clone()
+    }
+
 }
 
 #[cfg(test)]
