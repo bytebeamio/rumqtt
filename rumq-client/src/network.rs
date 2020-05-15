@@ -1,5 +1,5 @@
 use tokio::net::TcpStream;
-use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
+use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
 use tokio_rustls::rustls::{ClientConfig, TLSError};
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_rustls::{client::TlsStream, TlsConnector};
@@ -54,9 +54,22 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     // Add der encoded client cert and key
     if let Some(client) = options.client_auth.as_ref() {
         let certs = certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
-        // TODO: READ ECC KEY TYPE AS WELL
-       
-        let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone())))?;
+        let read_keys = match options.get_key_type() {
+            Some(v) => {
+                match v.as_str() {
+                    "RSA" => rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone()))),
+                    "ECC" => pkcs8_private_keys(&mut BufReader::new(Cursor::new(client.1.clone()))),
+                    // Invalid Key Type.
+                    _ => return Err(Error::InvalidKeyType),
+                }
+            },
+            // Assume RSA key type by default.
+            None => rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone()))),
+        };
+        let mut keys = match read_keys {
+            Ok(v) => v,
+            Err(_e) => return Err(Error::NoValidCertInChain),
+        };
         config.set_single_client_cert(certs, keys.remove(0))?;
     }
 
