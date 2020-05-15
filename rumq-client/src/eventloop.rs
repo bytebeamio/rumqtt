@@ -51,7 +51,7 @@ pub enum EventLoopError {
 }
 
 /// Returns an object which encompasses state of the connection.
-/// Use this to create a `Stream` with `stream()` method and poll it with tokio.
+/// Use this to create a `Stream` with `connect().await?` method and poll it with tokio.
 ///
 /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
 /// internal state and mqtt options after the work with the `Stream` is done or stopped.
