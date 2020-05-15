@@ -15,8 +15,6 @@ use crate::state::{self, MqttState};
 pub enum Error {
     #[error("State")]
     State(#[from] state::Error),
-    #[error("All senders down")]
-    AllSendersDown,
     #[error("Error sending message on internal bus")]
     Mpsc(#[from] TrySendError<RouterMessage>),
 }
