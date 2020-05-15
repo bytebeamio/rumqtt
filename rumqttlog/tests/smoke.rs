@@ -1,7 +1,7 @@
-use timestone::storage::Log;
 
 use std::fs;
 use std::io;
+use rumqttlog::Log;
 
 //use pretty_assertions::assert_eq;
 // 10MB per segmet => 100000 records per segment

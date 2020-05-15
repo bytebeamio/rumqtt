@@ -8,7 +8,7 @@ use bytes::BytesMut;
 use futures_util::future::join_all;
 use tokio::task;
 
-mod common;
+pub mod common;
 
 #[derive(Clone, FromArgs)]
 /// Reach new heights.

@@ -1,12 +1,12 @@
 use std::time::Instant;
-use mqttlog::volatile::Log;
+use rumqttlog::volatile::Log;
 
-mod benchmarks;
+mod common;
 
 fn main() {
     let payload_size = 1024;
     let count = 5_000_000;
-    let mut payloads = benchmarks::payloads(payload_size, count).into_iter();
+    let mut payloads =  common::payloads(payload_size, count).into_iter();
     let total_size = payload_size as u64 * count;
 
     let pkid = 0;
@@ -17,5 +17,5 @@ fn main() {
         log.append(pkid, payloads.next().unwrap()).unwrap();
     }
 
-    benchmarks::report("inmemorywrite.pb", total_size as u64, start, guard);
+    common::report("inmemorywrite.pb", total_size as u64, start, guard);
 }

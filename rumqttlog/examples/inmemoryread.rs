@@ -1,18 +1,13 @@
 use std::time::Instant;
-use mqttlog::volatile::Log;
+mod common;
 
-mod benchmarks;
-
-use mimalloc::MiMalloc;
-
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+use rumqttlog::volatile::Log;
 
 fn main() {
     let payload_size = 1024;
     let count = 5_000_000;
     let total_size = payload_size as u64 * count;
-    let mut payloads = benchmarks::payloads(payload_size, count).into_iter();
+    let mut payloads = common::payloads(payload_size, count).into_iter();
     let mut log = Log::new(500 * 1024, 10000).unwrap();
     for pkid in 0..count {
         let pkid = pkid % 65000;
@@ -30,5 +25,5 @@ fn main() {
         offset = o + 1;
     }
 
-    benchmarks::report("inmemoryread.pb", total_size as u64, start, guard);
+    common::report("inmemoryread.pb", total_size as u64, start, guard);
 }

@@ -1,3 +1,4 @@
+/*
 //! This example is used to test read and write throughput of the core of storage
 //! NOTE write perf is only increasing till a certain buffer size. bigger sizes after that is causing a degrade
 
@@ -75,4 +76,9 @@ fn vread_records(segment: &mut Segment, batch_size: u64, total_size: u64) -> Res
 
     benchmarks::report("vread.pb", current_size, start, guard);
     Ok(())
+}
+ */
+
+fn main() {
+
 }
