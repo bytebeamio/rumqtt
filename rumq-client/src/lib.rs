@@ -469,4 +469,10 @@ mod test {
     fn no_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
+
+    #[test]
+    #[should_panic]
+    fn set_key_type_illegal_panics() {
+        let _mqtt_opts = MqttOptions::new("test_ops", "localhost", 8883).set_key_type("ABC".to_string());
+    }
 }
