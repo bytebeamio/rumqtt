@@ -439,7 +439,11 @@ impl MqttOptions {
 
     /// Set key type
     pub fn set_key_type(&mut self, key_type: String) -> &mut Self {
-        self.key_type = Some(key_type);
+        match key_type.as_str() {
+            "RSA" => self.key_type = Some(key_type),
+            "ECC" => self.key_type = Some(key_type),
+            _ => panic!("Key type should be either ECC or RSA"),
+        };
         self
     }
 
