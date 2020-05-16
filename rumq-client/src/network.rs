@@ -63,7 +63,7 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
                     _ => return Err(Error::InvalidKeyType),
                 }
             },
-            // Assume RSA key type by default.
+            // Assume RSA key type by default?
             None => rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone()))),
         };
         let mut keys = match read_keys {
