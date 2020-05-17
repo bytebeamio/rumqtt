@@ -11,3 +11,8 @@ edition = "2018"
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.1"}
 tokio = { version = "0.2", features = ["full"]}
+futures-util = { version = "0.3", features = ["sink"]}
+tokio-util = { version = "0.3", features = ["codec"]}
+indexmap = "1"
+log = "0.4"
+thiserror = "1"
