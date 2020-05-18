@@ -63,9 +63,9 @@ pub struct DataReply {
     /// Current offset. For requests, this is where sweeps
     /// start from. For reply, this is the last offset
     pub offset: u64,
-    /// Number of messages. only relevant during reply
-    pub count: u64,
-    /// Request Size / Reply size
+    /// Packet ids of replys
+    pkids: Vec<u64>,
+    /// Reply data chain
     pub payload: Vec<Bytes>,
 }
 

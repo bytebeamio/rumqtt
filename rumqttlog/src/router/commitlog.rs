@@ -19,15 +19,15 @@ impl CommitLog {
         }
     }
 
-    pub fn append(&mut self, topic: &str, id: u16, record: Bytes) -> io::Result<()> {
+    pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<()> {
         // Entry instead of if/else?
         if let Some(log) = self.logs.get_mut(topic) {
-            log.append(id, record)?;
+            log.append(record)?;
         } else {
             let max_segment_size = self.config.max_segment_size;
             let max_segment_count = self.config.max_segment_count;
             let mut log = Log::new(max_segment_size, max_segment_count)?;
-            log.append(id, record)?;
+            log.append(record)?;
             self.logs.insert(topic.to_owned(), log);
         }
 
@@ -40,7 +40,7 @@ impl CommitLog {
         segment: u64,
         offset: u64,
         size: u64,
-    ) -> io::Result<Option<(bool, u64, u64, u64, Vec<u16>, Vec<Bytes>)>> {
+    ) -> io::Result<Option<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)>> {
         let log = match self.logs.get_mut(topic) {
             Some(l) => l,
             None => {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{VecDeque, HashMap};
 use std::{io, mem};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -37,6 +37,10 @@ pub struct Router {
     data_waiters: HashMap<String, Vec<(String, DataRequest)>>,
     /// Waiters on new topics
     topics_waiters: Vec<(String, TopicsRequest)>,
+    /// Acks to release to connections sending publishes. When to release these acks
+    /// to the connecition depends on how topic acks are confiured. Topics can be
+    /// configured to reply only after they acheive the replication count
+    _acks: HashMap<String, VecDeque<Vec<u16>>>,
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
@@ -60,6 +64,7 @@ impl Router {
             connections: HashMap::new(),
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
+            _acks: HashMap::new(),
             router_rx,
         };
 
@@ -119,7 +124,6 @@ impl Router {
         match packet {
             Packet::Publish(publish) => {
                 let Publish {
-                    pkid,
                     topic,
                     bytes,
                     ..
@@ -130,7 +134,7 @@ impl Router {
                     return
                 }
 
-                self.append_to_commitlog(id, &topic, pkid, bytes);
+                self.append_to_commitlog(id, &topic, bytes);
 
                 // If there is a new unique append, send it to connection/linker waiting
                 // on it. This is equivalent to hybrid of block and poll and we don't need
@@ -202,18 +206,18 @@ impl Router {
     /// Separate logs due to replication and logs from connections. Connections pull
     /// logs from both replication and connections where as linker only pull logs
     /// from connections
-    fn append_to_commitlog(&mut self, id: &str, topic: &str, pkid: u16, bytes: Bytes) {
+    fn append_to_commitlog(&mut self, id: &str, topic: &str, bytes: Bytes) {
         let replication_data = id.starts_with("router-");
 
         if replication_data {
             debug!("Receiving data from {}, topic = {}", id, topic);
-            if let Err(e) = self.replicatedlog.append(&topic, pkid, bytes) {
+            if let Err(e) = self.replicatedlog.append(&topic, bytes) {
                 error!("Commitlog append failed. Error = {:?}", e);
             }
 
             // don't trigger pending requests for replicate
         } else {
-            if let Err(e) = self.commitlog.append(&topic, pkid, bytes) {
+            if let Err(e) = self.commitlog.append(&topic, bytes) {
                 error!("Commitlog append failed. Error = {:?}", e);
             }
         }
@@ -269,7 +273,7 @@ impl Router {
             payload: o.5,
             segment: o.1,
             offset: o.2,
-            count: o.4.len() as u64,
+            pkids: o.4,
         };
 
         Some(reply)
