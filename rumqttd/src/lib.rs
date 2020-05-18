@@ -16,12 +16,13 @@ use tokio::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 
 use rumqttlog::{Router, RouterInMessage, Connection};
-use rumqttlog::mqtt4bytes::{self, MqttCodec, Packet};
+use rumqttlog::mqtt4bytes::{self, MqttCodec, Packet, ConnAck, ConnectReturnCode};
 use tokio::time::Elapsed;
 use crate::link::Link;
 use tokio::stream::StreamExt;
 
 pub use rumqttlog::Config as RouterConfig;
+use futures_util::SinkExt;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -171,6 +172,11 @@ impl Connector {
         let message = RouterInMessage::Connect(connection);
         let mut router_tx = self.router_tx.clone();
         router_tx.send((client_id.clone(), message)).await.unwrap();
+
+        // Send connection acknowledgement back to the client
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+        let packet = Packet::ConnAck(connack);
+        framed.send(packet).await?;
 
         // Start the link
         let mut link = Link::new(&client_id, self.router_tx.clone(), link_rx);
