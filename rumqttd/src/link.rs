@@ -7,11 +7,11 @@ use tokio::sync::mpsc::error::SendError;
 use std::io;
 
 use futures_util::StreamExt;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::codec::Framed;
 use crate::IO;
 use crate::tracker::Tracker;
-use rumqttlog::router::{TopicsRequest, Connection};
+use rumqttlog::router::TopicsRequest;
 use rumqttlog::{RouterInMessage, RouterOutMessage, DataRequest};
 
 #[derive(Error, Debug)]
@@ -40,13 +40,15 @@ pub struct Link {
 }
 
 impl Link {
-    pub async fn new(id: &str, mut router_tx: Sender<(String, RouterInMessage)>) -> Link {
+    /// Creates a new link with a remote client. Takes in handle to send data to router (router_tx)
+    /// and another handle to receive data from router
+    pub fn new(
+        id: &str,
+        router_tx: Sender<(String, RouterInMessage)>,
+        link_rx: Receiver<RouterOutMessage>
+    ) -> Link {
         info!("Creating link {} with router", id);
-        let link_rx = register_with_router(&id, &mut router_tx).await;
-        let topics_offset = TopicsRequest {
-            offset: 0,
-            count: 100,
-        };
+        let topics_offset = TopicsRequest { offset: 0, count: 100 };
         let mut wild_subscriptions = Vec::new();
         wild_subscriptions.push("#".to_owned());
         Link {
@@ -173,17 +175,6 @@ impl Link {
     }
 }
 
-async fn register_with_router(id: &str, router_tx: &mut Sender<(String, RouterInMessage)>) -> Receiver<RouterOutMessage> {
-    let (link_tx, link_rx) = channel(4);
-    let connect = Connect::new(id.clone());
-    let connection = Connection {
-        connect,
-        handle: link_tx,
-    };
-    let message = RouterInMessage::Connect(connection);
-    router_tx.send((id.to_string(), message)).await.unwrap();
-    link_rx
-}
 
 #[cfg(test)]
 mod test {

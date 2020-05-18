@@ -6,7 +6,7 @@ pub mod storage;
 pub mod volatile;
 
 pub use mqtt4bytes;
-pub use router::{Router, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
+pub use router::{Router, RouterInMessage, RouterOutMessage, DataRequest, DataReply, Connection};
 pub use storage::segment::Segment;
 pub use storage::Log;
 pub use tokio::sync::mpsc::{channel, Sender, Receiver};
@@ -36,8 +36,8 @@ impl Default for Config {
         Config {
             id: 255,
             dir: PathBuf::from("/tmp/timestone"),
-            max_segment_size: 100 * 1024 * 1024,
-            max_segment_count: 100,
+            max_segment_size: 5 * 1024 * 1024,
+            max_segment_count: 1024,
             routers: None,
         }
     }
