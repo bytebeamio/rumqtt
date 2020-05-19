@@ -117,13 +117,14 @@ mod network;
 mod state;
 mod client;
 
-pub use client::channel;
+pub use client::Client;
 pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, MqttEventLoop};
 pub use state::MqttState;
 
 pub use rumq_core::mqtt4::*;
-pub use flume::{Sender, Receiver};
+pub use flume::Sender;
+pub use crossbeam_channel::Receiver;
 
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
