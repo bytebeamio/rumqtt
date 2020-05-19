@@ -186,13 +186,34 @@ There are multiple replication strategies
 the other router (which is inefficient). The router receiving individual acks doesn't have to do any
 other handling
 - Multiple message buffer wrapped in a publish. This will return one ack for all the packets. But the
-payload has to be split into publishes for commitlo to create correct index. Is there a way to write 
+payload has to be split into publishes for commitlog to create correct index. Is there a way to write 
 a buffer of packets to commitlog with correct index?
 
 We'll start with method 1 for ease of implementation
 
-12/May/2020
+18/May/2020
 -------------------------
+
+- Multiple clients can publish data on same topic and router merges them. With replication in picture where
+acks should only happen after acheiving a repication factor, router should have a way to tell connections
+about acks. E.g Connection A sends 1, 2, 3 and Connection B sends 4, 5 on same topic. After replication, router
+should should notify Connection A with 1, 2, 3 and Connection B with 4, 5.
+
+- One way to achieve this is to separate topic by publishing client id as well. This adds more tracking in router and
+replicator and gets in the way of topic & client separation 
+
+- Option 2 is to have router maintain a global id for a given topic. This id is intrinsic to commitlog and appended a
+a new record is added. Router replies connection with with id for every publish. Connection maintains a map of couter id 
+and actual id. While pulling data, it knows the id till replication has happened and replys with actual acks
+
+We'll go with opition 2
+
+19/May/2020
+-------------------------
+
+- Replication and connection link are drastically different interms of functionality. For example,
+replicator can write a batch of publishes as 1 message. Other replicator reading this a bunch of publishes 
+is only going to unnecessarily flood the mesh with acks.
 
 
 References

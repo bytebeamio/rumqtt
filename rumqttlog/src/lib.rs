@@ -4,6 +4,7 @@ extern crate log;
 pub mod router;
 pub mod storage;
 pub mod volatile;
+pub mod mesh;
 
 pub use mqtt4bytes;
 pub use router::{Router, RouterInMessage, RouterOutMessage, DataRequest, DataReply, Connection};
