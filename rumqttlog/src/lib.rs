@@ -15,6 +15,7 @@ pub use tokio::sync::mpsc::{channel, Sender, Receiver};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterConfig {
@@ -43,3 +44,6 @@ impl Default for Config {
         }
     }
 }
+
+pub trait IO: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> IO for T {}

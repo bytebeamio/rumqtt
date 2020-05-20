@@ -2,6 +2,7 @@ use crate::router::RouterInMessage;
 use crate::{Config, RouterConfig};
 
 mod link;
+mod tracker;
 
 use mqtt4bytes::*;
 use tokio::net::{TcpListener, TcpStream};
@@ -77,11 +78,7 @@ impl Mesh {
                     let (stream, addr) = o.unwrap();
                     debug!("Received a tcp connection from {}", addr);
                     let mut framed = Framed::new(stream, MqttCodec::new(1024 * 1024 * 10));
-                    let id = await_connect(&mut framed).await.unwrap();
-                    let handle = self.links.get_mut(&id).unwrap();
-                    if let Err(_e) = handle.connections_tx.send(framed).await {
-                        error!("Failed to send the connection to link");
-                    }
+                    // TODO Receive connect and send this 'framed' to correct link
                 },
                 o = self.supervisor_rx.recv() => {
                     let remote_id = o.unwrap();
@@ -102,18 +99,7 @@ impl Mesh {
                             };
 
                             let mut framed = Framed::new(stream, MqttCodec::new(1024 * 1024 * 10));
-                            if let Err(e) = connect(this_id, &mut framed).await {
-                                error!("Failed to connect to router. Error = {:?}. Reconnecting", e);
-                                time::delay_for(Duration::from_secs(1)).await;
-                                continue
-                            }
-
-                            if let Err(_) = handle.connections_tx.send(framed).await {
-                                error!("Failed to handover connection to link");
-                                time::delay_for(Duration::from_secs(1)).await;
-                                continue
-                            }
-                            break
+                            // TODO connect and hand this to link
                         }
                     });
                 }
