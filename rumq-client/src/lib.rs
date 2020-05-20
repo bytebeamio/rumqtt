@@ -438,7 +438,8 @@ impl MqttOptions {
     }
 
     /// Set key type
-    pub fn set_key_type(&mut self, key_type: String) -> &mut Self {
+    pub fn set_key_type<S: Into<String>>(&mut self, key_type: S) -> &mut Self {
+        let key_type = key_type.into();
         match key_type.as_str() {
             "RSA" => self.key_type = Some(key_type),
             "ECC" => self.key_type = Some(key_type),
@@ -473,6 +474,6 @@ mod test {
     #[test]
     #[should_panic]
     fn set_key_type_illegal_panics() {
-        let _mqtt_opts = MqttOptions::new("test_ops", "localhost", 8883).set_key_type("ABC".to_string());
+        let _mqtt_opts = MqttOptions::new("test_ops", "localhost", 8883).set_key_type("ABC");
     }
 }
