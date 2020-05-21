@@ -1,8 +1,9 @@
 use crate::router::RouterInMessage;
-use crate::{Config, RouterConfig};
+use crate::{Config, MeshConfig};
 
 mod link;
 mod tracker;
+mod codec;
 
 use mqtt4bytes::*;
 use tokio::net::{TcpListener, TcpStream};
@@ -17,6 +18,7 @@ use std::collections::HashMap;
 use tokio::time::Duration;
 use std::io;
 use tokio::sync::mpsc::error::SendError;
+use crate::mesh::codec::MeshCodec;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
@@ -77,7 +79,7 @@ impl Mesh {
                 o = listener.accept() => {
                     let (stream, addr) = o.unwrap();
                     debug!("Received a tcp connection from {}", addr);
-                    let mut framed = Framed::new(stream, MqttCodec::new(1024 * 1024 * 10));
+                    let mut framed = Framed::new(stream, MeshCodec::new());
                     // TODO Receive connect and send this 'framed' to correct link
                 },
                 o = self.supervisor_rx.recv() => {
@@ -98,7 +100,7 @@ impl Mesh {
                                 }
                             };
 
-                            let mut framed = Framed::new(stream, MqttCodec::new(1024 * 1024 * 10));
+                            let mut framed = Framed::new(stream, MeshCodec::new());
                             // TODO connect and hand this to link
                         }
                     });
@@ -107,7 +109,7 @@ impl Mesh {
         }
     }
 
-    async fn start_router_links(&mut self, config: Vec<RouterConfig>, is_client: bool) {
+    async fn start_router_links(&mut self, config: Vec<MeshConfig>, is_client: bool) {
         // launch the client links. We'll connect later
         for server in config.iter() {
             let id = format!("router-{}", server.id);
@@ -137,7 +139,7 @@ impl Mesh {
     /// - Incoming connections that this router is expecting
     /// - Config of this router
     /// - Outgoing connections that this router should make
-    fn extract_servers(&self) -> (Vec<RouterConfig>, RouterConfig, Vec<RouterConfig>) {
+    fn extract_servers(&self) -> (Vec<MeshConfig>, MeshConfig, Vec<MeshConfig>) {
         let id = self.config.id.clone();
         let mut routers = self.config.routers.clone().unwrap();
         let position = routers.iter().position(|v| v.id == id);

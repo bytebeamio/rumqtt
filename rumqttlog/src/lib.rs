@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RouterConfig {
+pub struct MeshConfig {
     id: u8,
     host: String,
     port: u16,
@@ -30,7 +30,7 @@ pub struct Config {
     pub dir: PathBuf,
     pub max_segment_size: u64,
     pub max_segment_count: usize,
-    pub routers: Option<Vec<RouterConfig>>,
+    pub routers: Option<Vec<MeshConfig>>,
 }
 
 impl Default for Config {

@@ -215,6 +215,16 @@ We'll go with opition 2
 replicator can write a batch of publishes as 1 message. Other replicator reading this a bunch of publishes 
 is only going to unnecessarily flood the mesh with acks.
 
+20/May/2020
+-------------------------
+
+- Write only publish payload to commitlog
+- Full publish is written to commitlog with the hope that we can achieve zero copy transmission to subscribers.
+But this is little complicated than expected. With zero copy, router don't have access to modify packet id per  
+subscribing connection. If this is BytesMut, then copy advantage is gone
+- Commitlog merges same topic publishes from different connections. Forwarding full payload without any modifications
+is not feasible as these merged publishes can have same packet ids
+
 
 References
 -----------------

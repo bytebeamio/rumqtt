@@ -1,5 +1,5 @@
 use std::collections::{VecDeque, HashMap};
-use std::{io, mem};
+use std::{io, mem, thread};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use super::commitlog::CommitLog;
@@ -11,6 +11,7 @@ use mqtt4bytes::{Packet, Publish};
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
 use super::bytes::Bytes;
+use crate::mesh::Mesh;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -20,6 +21,7 @@ pub enum Error {
 }
 
 pub struct Router {
+    config: Config,
     /// Commit log by topic. Commit log stores all the of given topic. The
     /// details are very similar to what kafka does. Who know, we might
     /// even make the broker kafka compatible and directly feed it to databases
@@ -45,6 +47,8 @@ pub struct Router {
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
     router_rx: Receiver<(String, RouterInMessage)>,
+    /// A sender to the router. This is handed to `Mesh`
+    router_tx: Sender<(String, RouterInMessage)>,
 }
 
 /// Router is the central node where most of the state is held. Connections and
@@ -58,6 +62,7 @@ impl Router {
         let topiclog = TopicLog::new();
 
         let router = Router {
+            config: config.clone(),
             commitlog,
             replicatedlog,
             topiclog,
@@ -66,12 +71,25 @@ impl Router {
             topics_waiters: Vec::new(),
             _acks: HashMap::new(),
             router_rx,
+            router_tx: router_tx.clone(),
         };
 
         (router, router_tx)
     }
 
+    fn enable_replication(&mut self) {
+        debug!("Enabling replication");
+        let mut replicator = Mesh::new(self.config.clone(), self.router_tx.clone());
+        thread::spawn(move || {
+            replicator.start();
+        });
+    }
+
     pub async fn start(&mut self) {
+        if self.config.routers.is_some() {
+            self.enable_replication();
+        }
+
         // All these methods will handle state and errors
         while let Some((id, data)) = self.router_rx.recv().await {
             match data {
