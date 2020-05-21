@@ -5,9 +5,8 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::router::commitlog::TopicLog;
-use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest};
+use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, Data};
 use crate::Config;
-use mqtt4bytes::{Packet, Publish};
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
 use super::bytes::Bytes;
@@ -94,7 +93,7 @@ impl Router {
         while let Some((id, data)) = self.router_rx.recv().await {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
-                RouterInMessage::Packet(packet) => self.handle_incoming_packet(&id, packet),
+                RouterInMessage::Data(data) => self.handle_incoming_data(&id, data),
                 RouterInMessage::DataRequest(request) => {
                     let reply = self.extract_data(&request);
                     let reply = match reply {
@@ -130,7 +129,7 @@ impl Router {
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {
-        let id = connection.connect.client_id.clone();
+        let id = connection.id.clone();
         info!("Connect. Id = {:?}", id);
         if let Some(_) = self.connections.insert(id.clone(), connection) {
             error!("Replacing an existing connection with same ID");
@@ -138,36 +137,30 @@ impl Router {
     }
 
     /// Handles
-    fn handle_incoming_packet(&mut self, id: &str, packet: Packet) {
-        match packet {
-            Packet::Publish(publish) => {
-                let Publish {
-                    topic,
-                    bytes,
-                    ..
-                } = publish;
+    fn handle_incoming_data(&mut self, id: &str, data: Data) {
+        let Data {
+            topic,
+            payload,
+        } = data;
 
-                if bytes.len() == 0 {
-                    error!("Empty publish. Ignoring");
-                    return
-                }
-
-                self.append_to_commitlog(id, &topic, bytes);
-
-                // If there is a new unique append, send it to connection/linker waiting
-                // on it. This is equivalent to hybrid of block and poll and we don't need
-                // timers. Connections/Replicator will make a request and request fails as
-                // there is no new data. Router caches the failed request on the topic.
-                // If there is new data on this topic, router fulfills the last failed request.
-                // This completely eliminates the need of polling
-                if self.topiclog.unique_append(&topic) {
-                    self.fresh_topics_notification(&id);
-                }
-
-                self.fresh_data_notification(&id, &topic);
-            }
-            _ => todo!(),
+        if payload.len() == 0 {
+            error!("Empty publish. Ignoring");
+            return
         }
+
+        self.append_to_commitlog(id, &topic, payload);
+
+        // If there is a new unique append, send it to connection/linker waiting
+        // on it. This is equivalent to hybrid of block and poll and we don't need
+        // timers. Connections/Replicator will make a request and request fails as
+        // there is no new data. Router caches the failed request on the topic.
+        // If there is new data on this topic, router fulfills the last failed request.
+        // This completely eliminates the need of polling
+        if self.topiclog.unique_append(&topic) {
+            self.fresh_topics_notification(&id);
+        }
+
+        self.fresh_data_notification(&id, &topic);
     }
 
     /// Send notifications to links which registered them

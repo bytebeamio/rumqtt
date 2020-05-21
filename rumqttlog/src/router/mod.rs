@@ -1,6 +1,7 @@
 extern crate bytes;
 
-use mqtt4bytes::*;
+/// NOTE: Don't let mqtt4bytes creep in here. By keeping MQTT specifics outside,
+/// supporting mqtt4 and 5 with the same router becomes easy
 
 mod commitlog;
 mod router;
@@ -18,8 +19,8 @@ use tokio::sync::mpsc::Sender;
 pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
-    /// Packet
-    Packet(Packet),
+    /// Data which is written to commitlog
+    Data(Data),
     /// Data request
     DataRequest(DataRequest),
     /// Topics request
@@ -33,6 +34,14 @@ pub enum RouterOutMessage {
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
+}
+
+
+/// Data which is sent router to be written to commitlog
+#[derive(Debug)]
+pub struct Data {
+    pub topic: String,
+    pub payload: Bytes
 }
 
 /// Request that connection/linker makes to extract data from commitlog
@@ -90,12 +99,12 @@ pub struct TopicsReply {
 /// Connection messages encompasses mqtt connect packet and handle to the connection
 /// for router to send messages to the connection
 pub struct Connection {
-    pub connect: Connect,
+    pub id: String,
     pub handle: Sender<RouterOutMessage>,
 }
 
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.connect)
+        write!(f, "{:?}", self.id)
     }
 }

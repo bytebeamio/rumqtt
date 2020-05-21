@@ -1,5 +1,4 @@
 use futures_util::sink::SinkExt;
-use mqtt4bytes::*;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::select;
@@ -13,18 +12,16 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time;
 use tokio_util::codec::Framed;
 use crate::{IO, RouterInMessage, RouterOutMessage, DataRequest, Connection};
-use crate::router::TopicsRequest;
+use crate::router::{TopicsRequest, Data};
 use crate::mesh::tracker::Tracker;
+use crate::mesh::codec::{MeshCodec, Packet};
 
 #[derive(Error, Debug)]
 #[error("...")]
 pub enum LinkError {
     Io(#[from] io::Error),
-    Mqtt4(#[from] mqtt4bytes::Error),
     Send(#[from] SendError<(String, RouterInMessage)>),
     StreamDone,
-    ConnectionHandover,
-    WrongPacket(Packet),
 }
 
 macro_rules! try_loop {
@@ -44,6 +41,8 @@ macro_rules! try_loop {
 pub struct Link {
     /// Id of the link. Id of the router this connection is with
     id: String,
+    /// Integer id. String id to be removed in future
+    uid: u8,
     /// Tracks the offsets and status of all the topic offsets
     tracker: Tracker,
     /// Current position in topics log
@@ -54,29 +53,45 @@ pub struct Link {
     link_rx: Option<Receiver<RouterOutMessage>>,
     /// Connection handle which supervisor uses to pass new connection handles
     /// Handle to supervisor
-    supervisor_tx: Sender<String>,
+    supervisor_tx: Sender<u8>,
     /// Client or server link
     is_client: bool,
 }
 
 impl Link {
-    pub async fn new(mut handles: LinkConfig) -> Link {
-        info!("Creating link {} with router. Client mode = {}", handles.id, handles.is_client);
-        let link_rx = register_with_router(&handles.id, &mut handles.router_tx).await;
+    /// New mesh link. This task is always alive unlike a connection task event though the connection
+    /// might have been down. When the connection is broken, this task informs supervisor about it
+    /// which establishes a new connection on behalf of the link and forwards the connection to this
+    /// task. If this link is a server, it waits for the other end to initiate the connection
+    pub async fn new(
+        uid: u8,
+        mut router_tx: Sender<(String, RouterInMessage)>,
+        supervisor_tx: Sender<u8>,
+        is_client: bool
+    ) -> Link {
+        // Register this link with router even though there is no network connection with other router yet.
+        // Actual connection will be requested in `start`
+        info!("Creating link {} with router. Client mode = {}", uid, is_client);
+        let id = format!("router-{}", uid);
+        let link_rx = register_with_router(&id, &mut router_tx).await;
         let topics_offset = TopicsRequest {
             offset: 0,
             count: 100,
         };
+
+        // Subscribe to all the data as we want to replicate everything.
+        // TODO this will be taken from config in future
         let mut wild_subscriptions = Vec::new();
         wild_subscriptions.push("#".to_owned());
         Link {
-            id: handles.id,
+            id,
+            uid,
             tracker: Tracker::new(),
             topics_offset,
-            router_tx: handles.router_tx,
+            router_tx,
             link_rx: Some(link_rx),
-            supervisor_tx: handles.supervisor_tx,
-            is_client: handles.is_client,
+            supervisor_tx,
+            is_client,
         }
     }
 
@@ -105,12 +120,12 @@ impl Link {
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
-    async fn connect<S: IO>(&mut self, connections_rx: &mut Receiver<Framed<S, MqttCodec>>) -> Framed<S, MqttCodec> {
+    async fn connect<S: IO>(&mut self, connections_rx: &mut Receiver<Framed<S, MeshCodec>>) -> Framed<S, MeshCodec> {
         info!("Link with {} broken!!", self.id);
         if self.is_client {
             info!("About to make a new connection ...");
             time::delay_for(Duration::from_secs(2)).await;
-            self.supervisor_tx.send(self.id.clone()).await.unwrap();
+            self.supervisor_tx.send(self.uid).await.unwrap();
         }
 
         let framed = connections_rx.next().await.unwrap();
@@ -121,7 +136,7 @@ impl Link {
     /// Start handling the connection
     /// Links and connections communicate with router with a pull. This allows router to just reply.
     /// This ensured router never fills links/connections channel and take care of error handling
-    pub async fn start<S: IO>(&mut self, mut connections_rx: Receiver<Framed<S, MqttCodec>>) -> Result<(), LinkError> {
+    pub async fn start<S: IO>(&mut self, mut connections_rx: Receiver<Framed<S, MeshCodec>>) -> Result<(), LinkError> {
         let (mut router_tx, mut link_rx) = self.extract_handles();
         let mut framed = self.connect(&mut connections_rx).await;
 
@@ -163,13 +178,13 @@ impl Link {
                     };
 
                     match o {
-                        Packet::Publish(publish) => {
-                            let ack = Packet::PubAck(PubAck::new(publish.pkid));
+                        Packet::Data(pkid, topic, payload) => {
+                            let ack = Packet::DataAck(pkid);
                             try_loop!(framed.send(ack).await, broken, continue 'start);
-                            let publish = RouterInMessage::Packet(Packet::Publish(publish));
-                            router_tx.send((self.id.to_owned(), publish)).await?;
+                            let data = RouterInMessage::Data(Data { topic, payload });
+                            router_tx.send((self.id.to_owned(), data)).await?;
                         }
-                        Packet::PubAck(_ack) => {
+                        Packet::DataAck(_ack) => {
                             // TODO use this to inform router to release the ack to connection
                             // TODO Router will wait for enough number of replicated acks before
                             // TODO actually acking to the connection
@@ -244,13 +259,12 @@ impl Link {
 
 async fn register_with_router(id: &str, router_tx: &mut Sender<(String, RouterInMessage)>) -> Receiver<RouterOutMessage> {
     let (link_tx, link_rx) = channel(4);
-    let connect = Connect::new(id.clone());
     let connection = Connection {
-        connect,
+        id: id.to_owned(),
         handle: link_tx,
     };
     let message = RouterInMessage::Connect(connection);
-    router_tx.send((id.to_string(), message)).await.unwrap();
+    router_tx.send((id.to_owned(), message)).await.unwrap();
     link_rx
 }
 
@@ -265,26 +279,55 @@ pub struct LinkConfig {
     pub is_client: bool,
 }
 
+#[derive(Error, Debug)]
+#[error("...")]
+pub enum Error {
+    Io(#[from] io::Error),
+    ConnectionHandover,
+    WrongPacket(Packet),
+    StreamDone,
+}
+
 pub struct LinkHandle<S> {
-    pub id: String,
+    pub id: u8,
     pub addr: String,
-    pub connections_tx: Sender<Framed<S, MqttCodec>>,
+    pub connections_tx: Sender<Framed<S, MeshCodec>>,
 }
 
 impl<S: IO> LinkHandle<S> {
-    pub fn new(id: String, addr: String, connections_tx: Sender<Framed<S, MqttCodec>>) -> LinkHandle<S> {
+    pub fn new(id: u8, addr: String, connections_tx: Sender<Framed<S, MeshCodec>>) -> LinkHandle<S> {
         LinkHandle {
             id,
             addr,
             connections_tx,
         }
     }
+
+
+    pub async fn connect(&mut self, this_id: u8, mut framed: Framed<S, MeshCodec>) -> Result<(), Error> {
+        framed.send(Packet::Connect(this_id)).await?;
+        let packet = match framed.next().await {
+            Some(packet) => packet,
+            None => return Err(Error::StreamDone),
+        };
+
+        match packet? {
+            Packet::ConnAck => (),
+            packet => return Err(Error::WrongPacket(packet)),
+        };
+
+        if let Err(_) = self.connections_tx.send(framed).await {
+            return Err(Error::ConnectionHandover);
+        }
+
+        Ok(())
+    }
 }
 
 impl<H> Clone for LinkHandle<H> {
     fn clone(&self) -> Self {
         LinkHandle {
-            id: self.id.to_string(),
+            id: self.id,
             addr: self.addr.to_string(),
             connections_tx: self.connections_tx.clone()
         }

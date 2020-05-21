@@ -1,32 +1,32 @@
 use crate::router::RouterInMessage;
-use crate::{Config, MeshConfig};
+use crate::{Config, MeshConfig, IO};
 
 mod link;
 mod tracker;
 mod codec;
 
-use mqtt4bytes::*;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time;
 use tokio_util::codec::Framed;
+use tokio::stream::StreamExt;
 
-use link::{LinkConfig, LinkHandle, Link};
+use link::{LinkHandle, Link};
 use std::collections::HashMap;
 use tokio::time::Duration;
 use std::io;
 use tokio::sync::mpsc::error::SendError;
-use crate::mesh::codec::MeshCodec;
+use crate::mesh::codec::{MeshCodec, Packet};
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
 pub enum Error {
     Io(#[from] io::Error),
-    Mqtt4(#[from] mqtt4bytes::Error),
     Send(#[from] SendError<(String, RouterInMessage)>),
     StreamDone,
+    WrongPacket(Packet)
 }
 
 /// Each router maintains a task to communicate with every other broker. Which router initiates the
@@ -37,11 +37,11 @@ pub struct Mesh {
     /// Router handle to pass to links
     router_tx: Sender<(String, RouterInMessage)>,
     /// Handles to all the links
-    links: HashMap<String, LinkHandle<TcpStream>>,
+    links: HashMap<u8, LinkHandle<TcpStream>>,
     /// Supervisor receiver
-    supervisor_rx: Receiver<String>,
+    supervisor_rx: Receiver<u8>,
     /// Supervisor sender to handle to links
-    supervisor_tx: Sender<String>,
+    supervisor_tx: Sender<u8>,
 }
 
 impl Mesh {
@@ -63,7 +63,7 @@ impl Mesh {
     #[tokio::main(core_threads = 1)]
     pub(crate) async fn start(&mut self) {
         let (head, this, tail) = self.extract_servers();
-        let this_id = format!("router-{}", this.id);
+        let this_id = this.id;
 
         // start outgoing (client) links and then incoming (server) links
         self.start_router_links(tail, true).await;
@@ -80,17 +80,19 @@ impl Mesh {
                     let (stream, addr) = o.unwrap();
                     debug!("Received a tcp connection from {}", addr);
                     let mut framed = Framed::new(stream, MeshCodec::new());
-                    // TODO Receive connect and send this 'framed' to correct link
+                    let id = await_connect(&mut framed).await.unwrap();
+                    let handle = self.links.get_mut(&id).unwrap();
+                    if let Err(_e) = handle.connections_tx.send(framed).await {
+                        error!("Failed to send the connection to link");
+                    }
                 },
                 o = self.supervisor_rx.recv() => {
                     let remote_id = o.unwrap();
-                    let this_id = this_id.clone();
                     let handle: LinkHandle<_> = self.links.get(&remote_id).unwrap().clone();
                     debug!("New connection request remote = {}", remote_id);
                     task::spawn(async move {
                         let mut handle = handle;
                         loop {
-                            let this_id = this_id.clone();
                             let stream = match TcpStream::connect(&handle.addr).await {
                                 Ok(s) => s,
                                 Err(e) => {
@@ -100,8 +102,14 @@ impl Mesh {
                                 }
                             };
 
-                            let mut framed = Framed::new(stream, MeshCodec::new());
-                            // TODO connect and hand this to link
+                            let framed = Framed::new(stream, MeshCodec::new());
+                            if let Err(e) = handle.connect(this_id, framed).await {
+                                error!("Failed to connect to router. Error = {:?}. Reconnecting", e);
+                                time::delay_for(Duration::from_secs(1)).await;
+                                continue
+                            }
+
+                            break
                         }
                     });
                 }
@@ -112,22 +120,20 @@ impl Mesh {
     async fn start_router_links(&mut self, config: Vec<MeshConfig>, is_client: bool) {
         // launch the client links. We'll connect later
         for server in config.iter() {
-            let id = format!("router-{}", server.id);
-            self.start_link(is_client, id, &server.host, server.port).await;
+            self.start_link(is_client, server.id, &server.host, server.port).await;
         }
     }
 
-    async fn start_link(&mut self, is_client: bool, id: String, host: &str, port: u16) {
+    async fn start_link(&mut self, is_client: bool, id: u8, host: &str, port: u16) {
         let (connections_tx, connections_rx) = channel(100);
         let router_tx = self.router_tx.clone();
         let supervisor_tx = self.supervisor_tx.clone();
         let addr = format!("{}:{}", host, port);
-        let link_handle = LinkHandle::new(id.clone(), addr, connections_tx);
-        self.links.insert(id.clone(), link_handle);
+        let link_handle = LinkHandle::new(id, addr, connections_tx);
+        self.links.insert(id, link_handle);
 
         task::spawn(async move {
-            let handles = LinkConfig { id: id.clone(), router_tx, supervisor_tx, is_client };
-            let mut link = Link::new(handles).await;
+            let mut link = Link::new(id, router_tx, supervisor_tx, is_client).await;
             match link.start(connections_rx).await {
                 Ok(_) => error!("Link with {} down", id),
                 Err(e) => error!("Link with {} down with error = {:?}", id, e),
@@ -150,5 +156,23 @@ impl Mesh {
 
         (head.into(), this.clone(), tail)
     }
+}
+
+
+/// Await mqtt connect packet for incoming connections from a router
+async fn await_connect<S: IO>(framed: &mut Framed<S, MeshCodec>) -> Result<u8, Error> {
+    // wait for mesh connect packet with id
+    let packet = match framed.next().await {
+        Some(packet) => packet,
+        None => return Err(Error::StreamDone),
+    };
+
+    let id = match packet? {
+        Packet::Connect(id) => id,
+        packet => return Err(Error::WrongPacket(packet)),
+    };
+
+
+    Ok(id)
 }
 
