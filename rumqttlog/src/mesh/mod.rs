@@ -13,7 +13,7 @@ use tokio::time;
 use tokio_util::codec::Framed;
 use tokio::stream::StreamExt;
 
-use link::{LinkHandle, Link};
+use link::Link;
 use std::collections::HashMap;
 use tokio::time::Duration;
 use std::io;
@@ -27,6 +27,7 @@ pub enum Error {
     Io(#[from] io::Error),
     Send(#[from] SendError<(String, RouterInMessage)>),
     StreamDone,
+    ConnectionHandover,
     WrongPacket(Packet)
 }
 
@@ -160,7 +161,6 @@ impl Mesh {
     }
 }
 
-
 /// Await mqtt connect packet for incoming connections from a router
 async fn await_connect<S: IO>(framed: &mut Framed<S, MeshCodec>) -> Result<u8, Error> {
     // wait for mesh connect packet with id
@@ -178,3 +178,48 @@ async fn await_connect<S: IO>(framed: &mut Framed<S, MeshCodec>) -> Result<u8, E
     Ok(id)
 }
 
+pub struct LinkHandle<S> {
+    pub id: u8,
+    pub addr: String,
+    pub connections_tx: Sender<Framed<S, MeshCodec>>,
+}
+
+impl<S: IO> LinkHandle<S> {
+    pub fn new(id: u8, addr: String, connections_tx: Sender<Framed<S, MeshCodec>>) -> LinkHandle<S> {
+        LinkHandle {
+            id,
+            addr,
+            connections_tx,
+        }
+    }
+
+
+    pub async fn connect(&mut self, this_id: u8, mut framed: Framed<S, MeshCodec>) -> Result<(), Error> {
+        framed.send(Packet::Connect(this_id)).await?;
+        let packet = match framed.next().await {
+            Some(packet) => packet,
+            None => return Err(Error::StreamDone),
+        };
+
+        match packet? {
+            Packet::ConnAck => (),
+            packet => return Err(Error::WrongPacket(packet)),
+        };
+
+        if let Err(_) = self.connections_tx.send(framed).await {
+            return Err(Error::ConnectionHandover);
+        }
+
+        Ok(())
+    }
+}
+
+impl<H> Clone for LinkHandle<H> {
+    fn clone(&self) -> Self {
+        LinkHandle {
+            id: self.id,
+            addr: self.addr.to_string(),
+            connections_tx: self.connections_tx.clone()
+        }
+    }
+}

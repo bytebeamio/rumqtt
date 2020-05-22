@@ -228,9 +228,7 @@ impl Link {
 
                             // New topics. Use this to make a request to wake up request-reply loop
                             match self.tracker.next() {
-                                Some(request) => {
-                                    self.ask_for_more_data(request).await?;
-                                }
+                                Some(request) => self.ask_for_more_data(request).await?,
                                 None => {
                                     all_topics_idle = true;
                                     continue
@@ -267,61 +265,6 @@ async fn register_with_router(id: &str, router_tx: &mut Sender<(String, RouterIn
     let message = RouterInMessage::Connect(connection);
     router_tx.send((id.to_owned(), message)).await.unwrap();
     link_rx
-}
-
-#[derive(Error, Debug)]
-#[error("...")]
-pub enum Error {
-    Io(#[from] io::Error),
-    ConnectionHandover,
-    WrongPacket(Packet),
-    StreamDone,
-}
-
-pub struct LinkHandle<S> {
-    pub id: u8,
-    pub addr: String,
-    pub connections_tx: Sender<Framed<S, MeshCodec>>,
-}
-
-impl<S: IO> LinkHandle<S> {
-    pub fn new(id: u8, addr: String, connections_tx: Sender<Framed<S, MeshCodec>>) -> LinkHandle<S> {
-        LinkHandle {
-            id,
-            addr,
-            connections_tx,
-        }
-    }
-
-
-    pub async fn connect(&mut self, this_id: u8, mut framed: Framed<S, MeshCodec>) -> Result<(), Error> {
-        framed.send(Packet::Connect(this_id)).await?;
-        let packet = match framed.next().await {
-            Some(packet) => packet,
-            None => return Err(Error::StreamDone),
-        };
-
-        match packet? {
-            Packet::ConnAck => (),
-            packet => return Err(Error::WrongPacket(packet)),
-        };
-
-        if let Err(_) = self.connections_tx.send(framed).await {
-            return Err(Error::ConnectionHandover);
-        }
-
-        Ok(())
-    }
-}
-
-impl<H> Clone for LinkHandle<H> {
-    fn clone(&self) -> Self {
-        LinkHandle {
-            id: self.id,
-            addr: self.addr.to_string(),
-            connections_tx: self.connections_tx.clone()
-        }
-    }
 }
 
 #[cfg(test)]
