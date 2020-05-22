@@ -1,6 +1,5 @@
 use futures_util::sink::SinkExt;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 use tokio::select;
 use tokio::sync::mpsc::error::SendError;
 
@@ -199,13 +198,15 @@ impl Link {
                         // We use this to mark this topic as 'caught up' and move it from 'active'
                         // to 'pending'. This ensures that next topics iterator ignores this topic
                         RouterOutMessage::DataReply(reply) => {
-                            // FIXME this writes corrupted packets to the n/w directly
-                            for payload in reply.payload.iter() {
-                                try_loop!(framed.get_mut().write_all(&payload[..]).await, broken, continue 'start);
+                            let topic = reply.topic;
+                            let payload_len = reply.payload.len();
+                            for payload in reply.payload.into_iter() {
+                                let packet = Packet::Data(1, topic.clone(), payload);
+                                try_loop!(framed.send(packet).await, broken, continue 'start);
                             }
 
                             data_reply_count += 1;
-                            self.tracker.update(&reply.topic, reply.segment, reply.offset, reply.payload.len());
+                            self.tracker.update(&topic, reply.segment, reply.offset, payload_len);
                             match self.tracker.next() {
                                 Some(request) => self.ask_for_more_data(request).await?,
                                 None => {

@@ -16,10 +16,10 @@ struct CommandLine {
     #[argh(option, short = 'd', default = "PathBuf::from(\"examples/mesh.toml\")")]
     config: PathBuf,
     /// number of records to write
-    #[argh(option, short = 'x', default = "1")]
+    #[argh(option, short = 'x', default = "100")]
     record_count: usize,
     /// size of each record
-    #[argh(option, short = 'y', default = "100")]
+    #[argh(option, short = 'y', default = "10")]
     record_size: usize,
 }
 

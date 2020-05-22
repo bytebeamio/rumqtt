@@ -16,37 +16,8 @@ pub struct MeshCodec {
 
 impl MeshCodec {
     pub fn new() -> MeshCodec {
-        let c = LengthDelimitedCodec::builder().num_skip(4).new_codec();
+        let c = LengthDelimitedCodec::new();
         MeshCodec { c }
-    }
-
-    fn packet(&self, b: &mut BytesMut) -> io::Result<Packet> {
-        let typ = b.get_u8();
-        match typ {
-            1 => {
-                let id = b.get_u8();
-                Ok(Packet::Connect(id))
-            }
-            2 => {
-                Ok(Packet::ConnAck)
-            }
-            3 => {
-                let pkid = b.get_u8();
-                let topic_len = b.get_u32();
-                let topic = b.split_to(topic_len as usize);
-                let topic = String::from_utf8(topic.to_vec()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Non UTF8 topic"))?;
-                let payload_len = b.get_u32();
-                let payload = b.split_to(payload_len as usize);
-                Ok(Packet::Data(pkid, topic, payload.freeze()))
-            }
-            4 => {
-                let pkid = b.get_u8();
-                Ok(Packet::DataAck(pkid))
-            }
-            _ => {
-                Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected packet type"))
-            }
-        }
     }
 }
 
@@ -56,7 +27,26 @@ impl Decoder for MeshCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.c.decode(src)? {
-            Some(mut b)  => Ok(Some(self.packet(&mut b)?)),
+            Some(mut b)  => {
+                let typ = b.get_u8();
+                match typ {
+                    1 => Ok(Some(Packet::Connect(b.get_u8()))),
+                    2 => Ok(Some(Packet::ConnAck)),
+                    3 => {
+                        let pkid = b.get_u8();
+                        let topic_len = b.get_u32();
+                        let topic = b.split_to(topic_len as usize);
+                        // We are assuming topics are already utf8 checked by commitlog/connection
+                        let topic = unsafe { String::from_utf8_unchecked(topic.to_vec()) };
+                        let payload_len = b.get_u32();
+                        let payload = b.split_to(payload_len as usize);
+                        let data = Packet::Data(pkid, topic, payload.freeze());
+                        Ok(Some(data))
+                    }
+                    4 => Ok(Some(Packet::DataAck(b.get_u8()))),
+                    _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Unrecognized")),
+                }
+            },
             None => Ok(None),
         }
     }
@@ -67,15 +57,9 @@ impl Encoder<Packet> for MeshCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: Packet, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        match item {
-            Packet::Connect(id) => {
-                let header = Bytes::from(vec![1, id]);
-                self.c.encode(header, dst)
-            }
-            Packet::ConnAck => {
-                let header = Bytes::from(vec![2]);
-                self.c.encode(header, dst)
-            }
+        let out = match item {
+            Packet::Connect(id) => Bytes::from(vec![1, id]),
+            Packet::ConnAck => Bytes::from(vec![2]),
             Packet::Data(pkid, topic, payload) => {
                 // TODO Preallocate based on topic and payload size
                 let mut out = BytesMut::from(&[3, pkid][..]);
@@ -84,13 +68,12 @@ impl Encoder<Packet> for MeshCodec {
                 out.put_u32(payload.len() as u32);
                 // TODO prevent this copy
                 out.put_slice(&payload[..]);
-                self.c.encode(out.freeze(), dst)
                 // TODO or probably write to dst directly without using length encoder? Prevents 'out'
+                out.freeze()
             }
-            Packet::DataAck(pkid) => {
-                let header = Bytes::from(vec![4, pkid]);
-                self.c.encode(header, dst)
-            }
-        }
+            Packet::DataAck(pkid) => Bytes::from(vec![4, pkid]),
+        };
+
+        self.c.encode(out, dst)
     }
 }
