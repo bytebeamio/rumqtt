@@ -87,7 +87,7 @@ async fn write(commandline: &CommandLine, mut tx: Sender<(String, RouterInMessag
 async fn read(commandline: &CommandLine, id: &str, mut tx: Sender<(String, RouterInMessage)>) -> usize {
     let (this_tx, mut this_rx) = channel(100);
     let connection = Connection {
-        connect: rumqttlog::mqtt4bytes::Connect::new(id),
+        id: id.to_owned(),
         handle: this_tx,
     };
 

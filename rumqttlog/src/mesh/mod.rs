@@ -19,6 +19,7 @@ use tokio::time::Duration;
 use std::io;
 use tokio::sync::mpsc::error::SendError;
 use crate::mesh::codec::{MeshCodec, Packet};
+use futures_util::SinkExt;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
@@ -88,6 +89,7 @@ impl Mesh {
                 },
                 o = self.supervisor_rx.recv() => {
                     let remote_id = o.unwrap();
+                    // TODO bring LinkHandle to this file
                     let handle: LinkHandle<_> = self.links.get(&remote_id).unwrap().clone();
                     debug!("New connection request remote = {}", remote_id);
                     task::spawn(async move {
@@ -172,7 +174,7 @@ async fn await_connect<S: IO>(framed: &mut Framed<S, MeshCodec>) -> Result<u8, E
         packet => return Err(Error::WrongPacket(packet)),
     };
 
-
+    framed.send(Packet::ConnAck).await?;
     Ok(id)
 }
 

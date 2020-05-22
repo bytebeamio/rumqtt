@@ -268,17 +268,6 @@ async fn register_with_router(id: &str, router_tx: &mut Sender<(String, RouterIn
     link_rx
 }
 
-pub struct LinkConfig {
-    /// ID of the connection (which is ID of the remote router)
-    pub id: String,
-    /// Handle to send data to router
-    pub router_tx: Sender<(String, RouterInMessage)>,
-    /// Handle to supervisor
-    pub supervisor_tx: Sender<String>,
-    /// Marker to represent that this link is a client
-    pub is_client: bool,
-}
-
 #[derive(Error, Debug)]
 #[error("...")]
 pub enum Error {

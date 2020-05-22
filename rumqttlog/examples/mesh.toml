@@ -1,0 +1,22 @@
+# id of the current router
+id = 0
+# commitlog path
+dir = "/tmp/timestone"
+# maximum size of a segment in a partition
+max_segment_size = 104857600
+# maximum number of records in a segment
+max_record_count = 1000000
+# maximum number of segments in a given partition
+max_segment_count = 100
+
+# configuration for distributed router network
+[[routers]]
+topics = ["#"]
+id = 0
+host = "localhost"
+port = 9090
+
+[[routers]]
+id = 1
+host = "localhost"
+port = 9091
