@@ -73,7 +73,7 @@ pub struct DataReply {
     /// start from. For reply, this is the last offset
     pub offset: u64,
     /// Packet ids of replys
-    pkids: Vec<u64>,
+    pub pkids: Vec<u64>,
     /// Reply data chain
     pub payload: Vec<Bytes>,
 }

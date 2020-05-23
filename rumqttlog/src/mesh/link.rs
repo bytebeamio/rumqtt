@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time;
 use tokio_util::codec::Framed;
+use bytes::BytesMut;
 use crate::{IO, RouterInMessage, RouterOutMessage, DataRequest, Connection};
 use crate::router::{TopicsRequest, Data};
 use crate::mesh::tracker::Tracker;
@@ -160,6 +161,7 @@ impl Link {
                 topics_reply_pending = true;
             }
 
+            // TODO Handle case when connection has failed current publish batch has to be retransmitted
             select! {
                 o = framed.next() => {
                     let o = match o {
@@ -183,10 +185,15 @@ impl Link {
                             let data = RouterInMessage::Data(Data { topic, payload });
                             router_tx.send((self.id.to_owned(), data)).await?;
                         }
-                        Packet::DataAck(_ack) => {
-                            // TODO use this to inform router to release the ack to connection
-                            // TODO Router will wait for enough number of replicated acks before
-                            // TODO actually acking to the connection
+                        Packet::DataAck(ack) => {
+                            debug!("Replicated till offset = {:?}", ack);
+                            match self.tracker.next() {
+                                Some(request) => self.ask_for_more_data(request).await?,
+                                None => {
+                                    all_topics_idle = true;
+                                    continue
+                                }
+                            };
                         }
                         packet => warn!("Received unsupported packet = {:?}", packet),
                     }
@@ -200,20 +207,19 @@ impl Link {
                         RouterOutMessage::DataReply(reply) => {
                             let topic = reply.topic;
                             let payload_len = reply.payload.len();
+                            // TODO Inefficient. Find a better way to convert Vec<Bytes> -> Bytes
+                            let mut out = BytesMut::new();
                             for payload in reply.payload.into_iter() {
-                                let packet = Packet::Data(1, topic.clone(), payload);
-                                try_loop!(framed.send(packet).await, broken, continue 'start);
+                                out.extend_from_slice(&payload[..]);
                             }
+
+                            if out.len() == 0 { continue }
+                            let packet = Packet::Data(reply.offset, topic.clone(), out.freeze());
+                            try_loop!(framed.send(packet).await, broken, continue 'start);
 
                             data_reply_count += 1;
                             self.tracker.update(&topic, reply.segment, reply.offset, payload_len);
-                            match self.tracker.next() {
-                                Some(request) => self.ask_for_more_data(request).await?,
-                                None => {
-                                    all_topics_idle = true;
-                                    continue
-                                }
-                            };
+
                         }
                         // Refresh the list of interested topics. Router doesn't reply empty responses.
                         // Router registers this link to notify whenever there are new topics. This

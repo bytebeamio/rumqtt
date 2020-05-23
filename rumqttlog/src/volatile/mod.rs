@@ -69,6 +69,7 @@ impl Log {
     }
 
     pub fn append(&mut self, record: Bytes) -> Result<u64, io::Error> {
+        // TODO last_record_id and offset are same. Remove last_record_id
         let active_chunk = if let Some(v) = self.chunks.get_mut(&self.active_chunk) {
             v
         } else {
@@ -189,6 +190,7 @@ impl Log {
         offset: u64,
         size: u64,
     ) -> io::Result<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)> {
+        // TODO We don't need Vec<u64>. Remove that from return
         let (done, chunks) = self.indexv(segment, offset, size)?;
         let mut out = Vec::new();
 

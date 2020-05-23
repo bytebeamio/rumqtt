@@ -6,8 +6,8 @@ use std::io;
 pub enum Packet {
     Connect(u8),
     ConnAck,
-    Data(u8, String, Bytes),
-    DataAck(u8)
+    Data(u64, String, Bytes),
+    DataAck(u64)
 }
 
 pub struct MeshCodec {
@@ -28,12 +28,13 @@ impl Decoder for MeshCodec {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.c.decode(src)? {
             Some(mut b)  => {
+                // dbg!(&b);
                 let typ = b.get_u8();
                 match typ {
                     1 => Ok(Some(Packet::Connect(b.get_u8()))),
                     2 => Ok(Some(Packet::ConnAck)),
                     3 => {
-                        let pkid = b.get_u8();
+                        let pkid = b.get_u64();
                         let topic_len = b.get_u32();
                         let topic = b.split_to(topic_len as usize);
                         // We are assuming topics are already utf8 checked by commitlog/connection
@@ -43,7 +44,7 @@ impl Decoder for MeshCodec {
                         let data = Packet::Data(pkid, topic, payload.freeze());
                         Ok(Some(data))
                     }
-                    4 => Ok(Some(Packet::DataAck(b.get_u8()))),
+                    4 => Ok(Some(Packet::DataAck(b.get_u64()))),
                     _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Unrecognized")),
                 }
             },
@@ -62,7 +63,8 @@ impl Encoder<Packet> for MeshCodec {
             Packet::ConnAck => Bytes::from(vec![2]),
             Packet::Data(pkid, topic, payload) => {
                 // TODO Preallocate based on topic and payload size
-                let mut out = BytesMut::from(&[3, pkid][..]);
+                let mut out = BytesMut::from(&[3][..]);
+                out.put_u64(pkid);
                 out.put_u32(topic.len() as u32);
                 out.put_slice(topic.as_bytes());
                 out.put_u32(payload.len() as u32);
@@ -71,7 +73,11 @@ impl Encoder<Packet> for MeshCodec {
                 // TODO or probably write to dst directly without using length encoder? Prevents 'out'
                 out.freeze()
             }
-            Packet::DataAck(pkid) => Bytes::from(vec![4, pkid]),
+            Packet::DataAck(pkid) => {
+                let mut out = BytesMut::from(&[4][..]);
+                out.put_u64(pkid);
+                out.freeze()
+            },
         };
 
         self.c.encode(out, dst)
