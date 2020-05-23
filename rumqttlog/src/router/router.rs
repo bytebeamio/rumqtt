@@ -1,4 +1,4 @@
-use std::collections::{VecDeque, HashMap};
+use std::collections::HashMap;
 use std::{io, mem, thread};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -19,6 +19,9 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
+type ConnectionId = usize;
+type Topic = String;
+
 pub struct Router {
     config: Config,
     /// Commit log by topic. Commit log stores all the of given topic. The
@@ -31,30 +34,32 @@ pub struct Router {
     replicatedlog: CommitLog,
     /// Captures new topic just like commitlog
     topiclog: TopicLog,
-    /// Client id -> Active connection map. Used to route data
-    connections: HashMap<String, Connection>,
+    /// Array of all the connections. Preinitialized to a fixed set of connections. `Connection`
+    /// struct is initialized when there is an actual network connection
+    /// Index of this array represents `ConnectionId`
+    /// TODO Replace this with [Option<Connection>, 10000] when `Connection` support `Copy` and bench
+    connections: Vec<Option<Connection>>,
     /// Waiter on a topic. These are used to wake connections/replicators
     /// which are caught up all the data on a topic. Map[topic]List[Connections Ids]
-    data_waiters: HashMap<String, Vec<(String, DataRequest)>>,
+    data_waiters: HashMap<Topic, Vec<(ConnectionId, DataRequest)>>,
     /// Waiters on new topics
-    topics_waiters: Vec<(String, TopicsRequest)>,
-    /// Acks to release to connections sending publishes. When to release these acks
-    /// to the connecition depends on how topic acks are confiured. Topics can be
-    /// configured to reply only after they acheive the replication count
-    _acks: HashMap<String, VecDeque<Vec<u16>>>,
+    topics_waiters: Vec<(ConnectionId, TopicsRequest)>,
+    /// Watermarks of all the replicas. Map[topic]List[u64]. Each index represents a router in the mesh
+    /// TODO Rename u64 to Offset
+    watermarks: HashMap<Topic, Vec<u64>>,
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
-    router_rx: Receiver<(String, RouterInMessage)>,
+    router_rx: Receiver<(ConnectionId, RouterInMessage)>,
     /// A sender to the router. This is handed to `Mesh`
-    router_tx: Sender<(String, RouterInMessage)>,
+    router_tx: Sender<(ConnectionId, RouterInMessage)>,
 }
 
 /// Router is the central node where most of the state is held. Connections and
 /// replicators ask router for data and router responds by putting data into
 /// relevant connection handle
 impl Router {
-    pub fn new(config: Config) -> (Self, Sender<(String, RouterInMessage)>) {
+    pub fn new(config: Config) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
         let (router_tx, router_rx) = channel(1000);
         let commitlog = CommitLog::new(config.clone());
         let replicatedlog = CommitLog::new(config.clone());
@@ -65,10 +70,10 @@ impl Router {
             commitlog,
             replicatedlog,
             topiclog,
-            connections: HashMap::new(),
+            connections: vec![None; 1000],
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
-            _acks: HashMap::new(),
+            watermarks: HashMap::new(),
             router_rx,
             router_tx: router_tx.clone(),
         };
@@ -93,7 +98,7 @@ impl Router {
         while let Some((id, data)) = self.router_rx.recv().await {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
-                RouterInMessage::Data(data) => self.handle_incoming_data(&id, data),
+                RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
                 RouterInMessage::DataRequest(request) => {
                     let reply = self.extract_data(&request);
                     let reply = match reply {
@@ -108,19 +113,19 @@ impl Router {
                     // through its list of topics. Not sending an empty response will block
                     // the 'link' from polling next topic
                     if reply.payload.is_empty() {
-                        self.register_data_waiter(&id, request, &reply);
+                        self.register_data_waiter(id, request, &reply);
                     }
-                    self.reply_data(&id, reply);
+                    self.reply_data(id, reply);
                 }
                 RouterInMessage::TopicsRequest(request) => {
                     let reply = self.extract_topics(&request);
                     // register this id to wake up when there are new topics.
                     // don't send a reply of empty topics
                     if reply.topics.is_empty() {
-                        self.register_topics_waiter(&id, request);
+                        self.register_topics_waiter(id, request);
                         continue;
                     }
-                    self.reply_topics(&id, reply);
+                    self.reply_topics(id, reply);
                 },
             }
         }
@@ -131,13 +136,13 @@ impl Router {
     fn handle_new_connection(&mut self, connection: Connection) {
         let id = connection.id.clone();
         info!("Connect. Id = {:?}", id);
-        if let Some(_) = self.connections.insert(id.clone(), connection) {
+        if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             error!("Replacing an existing connection with same ID");
         }
     }
 
     /// Handles
-    fn handle_incoming_data(&mut self, id: &str, data: Data) {
+    fn handle_incoming_data(&mut self, id: ConnectionId, data: Data) {
         let Data {
             topic,
             payload,
@@ -157,27 +162,28 @@ impl Router {
         // If there is new data on this topic, router fulfills the last failed request.
         // This completely eliminates the need of polling
         if self.topiclog.unique_append(&topic) {
-            self.fresh_topics_notification(&id);
+            self.fresh_topics_notification(id);
         }
 
-        self.fresh_data_notification(&id, &topic);
+        self.fresh_data_notification(id, &topic);
     }
 
     /// Send notifications to links which registered them
-    fn fresh_topics_notification(&mut self, id: &str) {
+    fn fresh_topics_notification(&mut self, id: ConnectionId) {
         // TODO too many indirection to get a link to the handle, probably directly
         // TODO clone a handle to the link and save it instead of saving ids?
         let waiters = mem::replace(&mut self.topics_waiters, Vec::new());
         for (link_id, request) in waiters {
             // don't send replicated topic notifications to linker
-            let replication_data = id.starts_with("router-");
+            // id 0-10 are reserved for replications which are linked to other routers in the mesh
+            let replication_data = id < 10;
             if replication_data {
                 continue;
             }
 
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request);
-            self.reply_topics(&link_id, reply);
+            self.reply_topics(link_id, reply);
 
             // NOTE:
             // ----------------------
@@ -188,14 +194,14 @@ impl Router {
     }
 
     /// Send data to links which registered them
-    fn fresh_data_notification(&mut self, id: &str, topic: &str) {
+    fn fresh_data_notification(&mut self, id: ConnectionId, topic: &str) {
         let waiters = match self.data_waiters.remove(topic) {
             Some(w) => w,
             None => return
         };
 
         for (link_id, request) in waiters {
-            let replication_data = id.starts_with("router-");
+            let replication_data = id < 10;
             // don't send replicated data notifications to linker
             if replication_data {
                 continue;
@@ -203,7 +209,7 @@ impl Router {
 
             // Send reply to the link which registered this notification
             if let Some(reply) = self.extract_data(&request) {
-                self.reply_data(&link_id, reply);
+                self.reply_data(link_id, reply);
             }
 
             // NOTE:
@@ -217,8 +223,9 @@ impl Router {
     /// Separate logs due to replication and logs from connections. Connections pull
     /// logs from both replication and connections where as linker only pull logs
     /// from connections
-    fn append_to_commitlog(&mut self, id: &str, topic: &str, bytes: Bytes) {
-        let replication_data = id.starts_with("router-");
+    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) {
+        // id 0-10 are reserved for replications which are linked to other routers in the mesh
+        let replication_data =  id < 10;
 
         if replication_data {
             debug!("Receiving data from {}, topic = {}", id, topic);
@@ -246,15 +253,22 @@ impl Router {
     }
 
     /// Sends topics to link
-    fn reply_topics(&mut self, id: &str, reply: TopicsReply) {
-        let connection = self.connections.get_mut(id).unwrap();
+    fn reply_topics(&mut self, id: ConnectionId, reply: TopicsReply) {
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("Invalid id = {:?}", id);
+                return
+            }
+        };
+
         let reply = RouterOutMessage::TopicsReply(reply);
         if let Err(e) = connection.handle.try_send(reply) {
             error!("Failed to topics refresh reply. Error = {:?}", e);
         }
     }
 
-    fn register_topics_waiter(&mut self, id: &str, request: TopicsRequest) {
+    fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
         let request = (id.to_owned(), request);
         self.topics_waiters.push(request);
     }
@@ -291,7 +305,7 @@ impl Router {
     }
 
     /// Sends data to the link
-    fn reply_data(&mut self, id: &str, reply: DataReply) {
+    fn reply_data(&mut self, id: ConnectionId, reply: DataReply) {
         debug!(
             "Data reply.   Topic = {}, Segment = {}, offset = {}, size = {}",
             reply.topic,
@@ -300,7 +314,14 @@ impl Router {
             reply.payload.len(),
         );
 
-        let connection = self.connections.get_mut(id).unwrap();
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("Invalid id = {:?}", id);
+                return
+            }
+        };
+
         let reply = RouterOutMessage::DataReply(reply);
         if let Err(e) = connection.handle.try_send(reply) {
             error!("Failed to data reply. Error = {:?}", e.to_string());
@@ -308,10 +329,10 @@ impl Router {
     }
 
     /// Register data waiter
-    fn register_data_waiter(&mut self, id: &str, mut request: DataRequest, reply: &DataReply) {
+    fn register_data_waiter(&mut self, id: ConnectionId, mut request: DataRequest, reply: &DataReply) {
         request.segment = reply.segment;
         request.offset = reply.offset + 1;
-        let request = (id.to_owned(), request);
+        let request = (id, request);
         if let Some(waiters) = self.data_waiters.get_mut(&reply.topic) {
             waiters.push(request);
         } else {

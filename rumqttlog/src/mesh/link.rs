@@ -15,12 +15,13 @@ use crate::{IO, RouterInMessage, RouterOutMessage, DataRequest, Connection};
 use crate::router::{TopicsRequest, Data};
 use crate::mesh::tracker::Tracker;
 use crate::mesh::codec::{MeshCodec, Packet};
+use crate::mesh::ConnectionId;
 
 #[derive(Error, Debug)]
 #[error("...")]
 pub enum LinkError {
     Io(#[from] io::Error),
-    Send(#[from] SendError<(String, RouterInMessage)>),
+    Send(#[from] SendError<(usize, RouterInMessage)>),
     StreamDone,
 }
 
@@ -40,15 +41,13 @@ macro_rules! try_loop {
 /// A link is a connection to another router
 pub struct Link {
     /// Id of the link. Id of the router this connection is with
-    id: String,
-    /// Integer id. String id to be removed in future
-    uid: u8,
+    id: u8,
     /// Tracks the offsets and status of all the topic offsets
     tracker: Tracker,
     /// Current position in topics log
     topics_offset: TopicsRequest,
     /// Handle to send data to router
-    router_tx: Sender<(String, RouterInMessage)>,
+    router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handle to this link which router uses
     link_rx: Option<Receiver<RouterOutMessage>>,
     /// Connection handle which supervisor uses to pass new connection handles
@@ -64,16 +63,15 @@ impl Link {
     /// which establishes a new connection on behalf of the link and forwards the connection to this
     /// task. If this link is a server, it waits for the other end to initiate the connection
     pub async fn new(
-        uid: u8,
-        mut router_tx: Sender<(String, RouterInMessage)>,
+        id: u8,
+        mut router_tx: Sender<(ConnectionId, RouterInMessage)>,
         supervisor_tx: Sender<u8>,
         is_client: bool
     ) -> Link {
         // Register this link with router even though there is no network connection with other router yet.
         // Actual connection will be requested in `start`
-        info!("Creating link {} with router. Client mode = {}", uid, is_client);
-        let id = format!("router-{}", uid);
-        let link_rx = register_with_router(&id, &mut router_tx).await;
+        info!("Creating link {} with router. Client mode = {}", id, is_client);
+        let link_rx = register_with_router(id, &mut router_tx).await;
         let topics_offset = TopicsRequest {
             offset: 0,
             count: 100,
@@ -85,7 +83,6 @@ impl Link {
         wild_subscriptions.push("#".to_owned());
         Link {
             id,
-            uid,
             tracker: Tracker::new(),
             topics_offset,
             router_tx,
@@ -106,7 +103,7 @@ impl Link {
         );
         let request = request.clone();
         let message = RouterInMessage::DataRequest(request);
-        self.router_tx.send((self.id.to_owned(), message)).await?;
+        self.router_tx.send((self.id as usize, message)).await?;
         Ok(())
     }
 
@@ -114,7 +111,7 @@ impl Link {
     async fn ask_for_more_topics(&mut self) -> Result<(), LinkError> {
         debug!("Topics request. Offset = {}, Count = {}", self.topics_offset.offset, self.topics_offset.count);
         let message = RouterInMessage::TopicsRequest(self.topics_offset.clone());
-        self.router_tx.send((self.id.to_owned(), message)).await?;
+        self.router_tx.send((self.id as usize, message)).await?;
         Ok(())
     }
 
@@ -125,7 +122,7 @@ impl Link {
         if self.is_client {
             info!("About to make a new connection ...");
             time::delay_for(Duration::from_secs(2)).await;
-            self.supervisor_tx.send(self.uid).await.unwrap();
+            self.supervisor_tx.send(self.id).await.unwrap();
         }
 
         let framed = connections_rx.next().await.unwrap();
@@ -183,7 +180,7 @@ impl Link {
                             let ack = Packet::DataAck(pkid);
                             try_loop!(framed.send(ack).await, broken, continue 'start);
                             let data = RouterInMessage::Data(Data { topic, payload });
-                            router_tx.send((self.id.to_owned(), data)).await?;
+                            router_tx.send((self.id as usize, data)).await?;
                         }
                         Packet::DataAck(ack) => {
                             debug!("Replicated till offset = {:?}", ack);
@@ -255,21 +252,21 @@ impl Link {
         }
     }
 
-    fn extract_handles(&mut self) -> (Sender<(String, RouterInMessage)>, Receiver<RouterOutMessage>) {
+    fn extract_handles(&mut self) -> (Sender<(ConnectionId, RouterInMessage)>, Receiver<RouterOutMessage>) {
         let router_tx = self.router_tx.clone();
         let link_rx = self.link_rx.take().unwrap();
         (router_tx, link_rx)
     }
 }
 
-async fn register_with_router(id: &str, router_tx: &mut Sender<(String, RouterInMessage)>) -> Receiver<RouterOutMessage> {
+async fn register_with_router(id: u8, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) -> Receiver<RouterOutMessage> {
     let (link_tx, link_rx) = channel(4);
     let connection = Connection {
-        id: id.to_owned(),
+        id: id as usize,
         handle: link_tx,
     };
     let message = RouterInMessage::Connect(connection);
-    router_tx.send((id.to_owned(), message)).await.unwrap();
+    router_tx.send((id as usize, message)).await.unwrap();
     link_rx
 }
 

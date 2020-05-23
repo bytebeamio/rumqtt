@@ -31,13 +31,15 @@ pub enum Error {
     WrongPacket(Packet)
 }
 
+type ConnectionId = usize;
+
 /// Each router maintains a task to communicate with every other broker. Which router initiates the
 /// connection is implemented using handehake combination by sequentially following routers in config
 pub struct Mesh {
     /// Config which holds details of all the routers for distributed mesh
     config: Config,
     /// Router handle to pass to links
-    router_tx: Sender<(String, RouterInMessage)>,
+    router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handles to all the links
     links: HashMap<u8, LinkHandle<TcpStream>>,
     /// Supervisor receiver
@@ -47,7 +49,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub(crate) fn new(config: Config, router_tx: Sender<(String, RouterInMessage)>) -> Mesh {
+    pub(crate) fn new(config: Config, router_tx: Sender<(ConnectionId, RouterInMessage)>) -> Mesh {
         let (supervisor_tx, supervisor_rx) = channel(100);
         Mesh {
             config,

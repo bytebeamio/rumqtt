@@ -1,10 +1,9 @@
 use std::time::Instant;
 use rumqttlog::{channel, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
 use argh::FromArgs;
-use mqtt4bytes::*;
 use std::thread;
-use rumqttlog::router::Connection;
-use bytes::BytesMut;
+use rumqttlog::router::{Connection, Data};
+use bytes::Bytes;
 use futures_util::future::join_all;
 use tokio::task;
 
@@ -48,11 +47,11 @@ async fn main() {
     write(&commandline, tx.clone()).await;
 
     let mut reads = Vec::new();
-    for i in 0..commandline.subscriber_count {
+    for i in 100..commandline.subscriber_count + 100 {
         let commandline = commandline.clone();
         let tx = tx.clone();
         let f = task::spawn(async move {
-            read(&commandline, &format!("device-{}", i), tx).await;
+            read(&commandline, i, tx).await;
         });
 
         reads.push(f);
@@ -71,27 +70,28 @@ async fn start_router(mut router: Router) {
     router.start().await;
 }
 
-async fn write(commandline: &CommandLine, mut tx: Sender<(String, RouterInMessage)>) {
+async fn write(commandline: &CommandLine, mut tx: Sender<(usize, RouterInMessage)>) {
     // 10K packets of 1K size each. 10M total data
-    let data = vec![publish(commandline.payload_size); commandline.count];
+    let data = vec![Bytes::from(vec![1u8; commandline.payload_size]); commandline.count];
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
-    for packet in data.into_iter() {
-        let message = ("device-0".to_owned(), RouterInMessage::Packet(packet));
+    for payload in data.into_iter() {
+        let data = Data { topic: "hello/world".to_owned(), payload };
+        let message = (100, RouterInMessage::Data(data));
         tx.send(message).await.unwrap();
     }
 
     common::report("write.pb", (commandline.count * commandline.payload_size) as u64, start, guard);
 }
 
-async fn read(commandline: &CommandLine, id: &str, mut tx: Sender<(String, RouterInMessage)>) -> usize {
+async fn read(commandline: &CommandLine, id: usize, mut tx: Sender<(usize, RouterInMessage)>) -> usize {
     let (this_tx, mut this_rx) = channel(100);
     let connection = Connection {
-        id: id.to_owned(),
+        id,
         handle: this_tx,
     };
 
-    let message = (id.to_owned(), RouterInMessage::Connect(connection));
+    let message = (id, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();
     let mut offset = 0;
     let mut segment = 0;
@@ -116,16 +116,5 @@ async fn read(commandline: &CommandLine, id: &str, mut tx: Sender<(String, Route
     }
 
     total_size
-}
-
-pub fn publish(len: usize) -> Packet {
-    let mut publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; len]);
-    publish.set_pkid(1);
-    // serialize bytes
-    let mut payload = BytesMut::new();
-    let packet = Packet::Publish(publish.clone());
-    mqtt_write(packet, &mut payload).unwrap();
-    publish.bytes = payload.freeze();
-    Packet::Publish(publish)
 }
 

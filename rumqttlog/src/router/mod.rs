@@ -98,8 +98,9 @@ pub struct TopicsReply {
 
 /// Connection messages encompasses mqtt connect packet and handle to the connection
 /// for router to send messages to the connection
+#[derive(Clone)]
 pub struct Connection {
-    pub id: String,
+    pub id: usize,
     pub handle: Sender<RouterOutMessage>,
 }
 

@@ -50,9 +50,8 @@ async fn main() {
 
         let payload = vec![i as u8 % 255; commandline.record_size];
         let payload = Bytes::from(payload);
-        let id = "timestone-main".to_owned();
         let message = RouterInMessage::Data(Data { topic: topic.to_owned(), payload });
-        router_tx.send((id, message)).await.unwrap();
+        router_tx.send((100, message)).await.unwrap();
     }
 
     tokio::time::delay_for(Duration::from_secs(60)).await;
