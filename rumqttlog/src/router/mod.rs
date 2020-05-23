@@ -30,6 +30,8 @@ pub enum RouterInMessage {
 /// Outgoing message from the router.
 #[derive(Debug)]
 pub enum RouterOutMessage {
+    /// Connection reply
+    ConnectionAck(ConnectionAck),
     /// Data reply
     DataReply(DataReply),
     /// Topics reply
@@ -96,16 +98,46 @@ pub struct TopicsReply {
     pub topics: Vec<String>,
 }
 
-/// Connection messages encompasses mqtt connect packet and handle to the connection
-/// for router to send messages to the connection
+#[derive(Debug, Clone)]
+pub(crate) enum ConnectionType {
+    Device(String),
+    Replicator(usize)
+}
+
+/// Used to register a new connection with the router
+/// Connection messages encompasses a handle for router to
+/// communicate with this connection
 #[derive(Clone)]
 pub struct Connection {
-    pub id: usize,
+    /// Kind of connection. A replicator connection or a device connection
+    /// Replicator connection are only created from inside this library.
+    /// All the external connections are of 'device' type
+    pub(crate) conn: ConnectionType,
+    /// Handle which is given to router to allow router to comminicate with
+    /// this connection
     pub handle: Sender<RouterOutMessage>,
+}
+
+impl Connection {
+    pub fn new(id: &str, handle: Sender<RouterOutMessage>) -> Connection {
+        Connection {
+            conn: ConnectionType::Device(id.to_owned()),
+            handle
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ConnectionAck {
+    /// Id assigned by the router for this connection
+    Success(usize),
+    /// Failure and reason for failure string
+    Failure(String)
 }
 
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.id)
+        write!(f, "{:?}", self.conn)
     }
 }
+

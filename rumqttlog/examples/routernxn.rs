@@ -2,7 +2,7 @@ use std::time::Instant;
 use rumqttlog::{channel, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
 use argh::FromArgs;
 use std::thread;
-use rumqttlog::router::{Connection, Data};
+use rumqttlog::router::{Connection, Data, ConnectionAck};
 use bytes::Bytes;
 use futures_util::future::join_all;
 use tokio::task;
@@ -86,13 +86,15 @@ async fn write(commandline: &CommandLine, mut tx: Sender<(usize, RouterInMessage
 
 async fn read(commandline: &CommandLine, id: usize, mut tx: Sender<(usize, RouterInMessage)>) -> usize {
     let (this_tx, mut this_rx) = channel(100);
-    let connection = Connection {
-        id,
-        handle: this_tx,
-    };
-
+    let connection = Connection::new(&format!("{}", id), this_tx);
     let message = (id, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();
+    let id = match this_rx.recv().await.unwrap() {
+        RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
+        message => panic!("Not connection ack = {:?}", message)
+    };
+
     let mut offset = 0;
     let mut segment = 0;
     let count = commandline.payload_size * commandline.count / commandline.sweep_size;

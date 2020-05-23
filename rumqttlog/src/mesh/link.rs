@@ -12,7 +12,7 @@ use tokio::time;
 use tokio_util::codec::Framed;
 use bytes::BytesMut;
 use crate::{IO, RouterInMessage, RouterOutMessage, DataRequest, Connection};
-use crate::router::{TopicsRequest, Data};
+use crate::router::{TopicsRequest, Data, ConnectionType};
 use crate::mesh::tracker::Tracker;
 use crate::mesh::codec::{MeshCodec, Packet};
 use crate::mesh::ConnectionId;
@@ -198,6 +198,9 @@ impl Link {
                 o = link_rx.recv() => {
                     let o = o.ok_or(LinkError::StreamDone)?;
                     match o {
+                        RouterOutMessage::ConnectionAck(ack) => {
+                            info!("Connection status = {:?}", ack);
+                        }
                         // Response to previous data request. Router also returns empty responses.
                         // We use this to mark this topic as 'caught up' and move it from 'active'
                         // to 'pending'. This ensures that next topics iterator ignores this topic
@@ -262,7 +265,7 @@ impl Link {
 async fn register_with_router(id: u8, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) -> Receiver<RouterOutMessage> {
     let (link_tx, link_rx) = channel(4);
     let connection = Connection {
-        id: id as usize,
+        conn: ConnectionType::Replicator(id as usize),
         handle: link_tx,
     };
     let message = RouterInMessage::Connect(connection);

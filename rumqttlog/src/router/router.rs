@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::router::commitlog::TopicLog;
-use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, Data};
+use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, Data, ConnectionType, ConnectionAck};
 use crate::Config;
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
@@ -133,11 +133,37 @@ impl Router {
         error!("Router stopped!!");
     }
 
-    fn handle_new_connection(&mut self, connection: Connection) {
-        let id = connection.id.clone();
-        info!("Connect. Id = {:?}", id);
+    fn handle_new_connection(&mut self, mut connection: Connection) {
+        let id = match &connection.conn {
+            ConnectionType::Replicator(id)  => *id,
+            ConnectionType::Device(did) => {
+                let mut id = 0;
+                for (i, connection) in self.connections.iter_mut().enumerate() {
+                    // positions 0..9 are reserved for replicators
+                    if connection.is_none() && i >= 10 {
+                        id = i;
+                        break
+                    }
+                }
+
+                if id == 0 {
+                    error!("No empty slots found for incoming connection = {:?}", did);
+                    // TODO ack connection with failure as there are no empty slots
+                    return
+                }
+
+                id
+            }
+        };
+
+        let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
+        if let Err(e) = connection.handle.try_send(message) {
+            error!("Failed to send connection ack. Error = {:?}", e.to_string());
+        }
+
+        info!("New Connection. Incoming ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
-            error!("Replacing an existing connection with same ID");
+            warn!("Replacing an existing connection with same ID");
         }
     }
 
@@ -257,7 +283,7 @@ impl Router {
         let connection = match self.connections.get_mut(id).unwrap() {
             Some(c) => c,
             None => {
-                error!("Invalid id = {:?}", id);
+                error!("2. Invalid id = {:?}", id);
                 return
             }
         };
@@ -317,7 +343,7 @@ impl Router {
         let connection = match self.connections.get_mut(id).unwrap() {
             Some(c) => c,
             None => {
-                error!("Invalid id = {:?}", id);
+                error!("1. Invalid id = {:?}", id);
                 return
             }
         };
