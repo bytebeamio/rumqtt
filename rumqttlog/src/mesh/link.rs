@@ -179,7 +179,9 @@ impl Link {
                         Packet::Data(pkid, topic, payload) => {
                             let ack = Packet::DataAck(pkid);
                             try_loop!(framed.send(ack).await, broken, continue 'start);
-                            let data = RouterInMessage::Data(Data { topic, payload });
+                            // This is a dummy in replication context
+                            let pkid = 0;
+                            let data = RouterInMessage::Data(Data { pkid, topic, payload });
                             router_tx.send((self.id as usize, data)).await?;
                         }
                         Packet::DataAck(ack) => {

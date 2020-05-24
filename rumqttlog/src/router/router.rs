@@ -170,6 +170,7 @@ impl Router {
     /// Handles
     fn handle_incoming_data(&mut self, id: ConnectionId, data: Data) {
         let Data {
+            pkid,
             topic,
             payload,
         } = data;
@@ -200,7 +201,7 @@ impl Router {
         // TODO clone a handle to the link and save it instead of saving ids?
         let waiters = mem::replace(&mut self.topics_waiters, Vec::new());
         for (link_id, request) in waiters {
-            // don't send replicated topic notifications to linker
+            // don't send replicated topic notifications to replication link
             // id 0-10 are reserved for replications which are linked to other routers in the mesh
             let replication_data = id < 10;
             if replication_data {
@@ -228,7 +229,7 @@ impl Router {
 
         for (link_id, request) in waiters {
             let replication_data = id < 10;
-            // don't send replicated data notifications to linker
+            // don't send replicated data notifications to replication link
             if replication_data {
                 continue;
             }
@@ -249,20 +250,22 @@ impl Router {
     /// Separate logs due to replication and logs from connections. Connections pull
     /// logs from both replication and connections where as linker only pull logs
     /// from connections
-    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) {
+    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<u64> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data =  id < 10;
-
         if replication_data {
-            debug!("Receiving data from {}, topic = {}", id, topic);
+            debug!("Receiving replication data from {}, topic = {}", id, topic);
             if let Err(e) = self.replicatedlog.append(&topic, bytes) {
                 error!("Commitlog append failed. Error = {:?}", e);
             }
-
-            // don't trigger pending requests for replicate
+            None
         } else {
-            if let Err(e) = self.commitlog.append(&topic, bytes) {
-                error!("Commitlog append failed. Error = {:?}", e);
+            match self.commitlog.append(&topic, bytes) {
+                Ok(offset) => Some(offset),
+                Err(e) => {
+                    error!("Commitlog append failed. Error = {:?}", e);
+                    None
+                }
             }
         }
     }

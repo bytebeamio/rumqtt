@@ -42,8 +42,20 @@ pub enum RouterOutMessage {
 /// Data which is sent router to be written to commitlog
 #[derive(Debug)]
 pub struct Data {
+    /// Id of the packet that connection received
+    pub pkid: u16,
+    /// Topic of publish
     pub topic: String,
+    /// Publish payload
     pub payload: Bytes
+}
+
+#[derive(Debug)]
+pub struct DataAck {
+    /// Packet id that connection received
+    pub pkid: u16,
+    /// Packet id that router assigned
+    pub rpkid: u64
 }
 
 /// Request that connection/linker makes to extract data from commitlog
