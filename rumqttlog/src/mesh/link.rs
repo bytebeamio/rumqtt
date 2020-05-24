@@ -247,6 +247,7 @@ impl Link {
                             self.topics_offset.offset += reply.offset + 1;
                             topics_reply_pending = false;
                         }
+                        message => error!("Invalid message = {:?}", message)
                     }
                 }
                 Some(f) = connections_rx.next() => {

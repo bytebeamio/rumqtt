@@ -12,9 +12,7 @@ use self::bytes::Bytes;
 use std::fmt;
 use tokio::sync::mpsc::Sender;
 
-/// Router message to orchestrate data between connections. We can also
-/// use this to send control signals to connections to modify their behavior
-/// dynamically from the console
+/// Messages going into router
 #[derive(Debug)]
 pub enum RouterInMessage {
     /// Client id and connection handle
@@ -27,11 +25,13 @@ pub enum RouterInMessage {
     TopicsRequest(TopicsRequest),
 }
 
-/// Outgoing message from the router.
+/// Messages coming from router
 #[derive(Debug)]
 pub enum RouterOutMessage {
     /// Connection reply
     ConnectionAck(ConnectionAck),
+    /// Data ack
+    DataAck(DataAck),
     /// Data reply
     DataReply(DataReply),
     /// Topics reply
@@ -39,23 +39,26 @@ pub enum RouterOutMessage {
 }
 
 
-/// Data which is sent router to be written to commitlog
+/// Data sent router to be written to commitlog
 #[derive(Debug)]
 pub struct Data {
     /// Id of the packet that connection received
-    pub pkid: u16,
+    pub pkid: u64,
     /// Topic of publish
     pub topic: String,
     /// Publish payload
     pub payload: Bytes
 }
 
+/// Acknowledgement after data is written to commitlog
+/// Router sends this to connection for connection to maintain
+/// mapping between packet id and router assigned id
 #[derive(Debug)]
 pub struct DataAck {
     /// Packet id that connection received
-    pub pkid: u16,
+    pub pkid: u64,
     /// Packet id that router assigned
-    pub rpkid: u64
+    pub offset: u64
 }
 
 /// Request that connection/linker makes to extract data from commitlog

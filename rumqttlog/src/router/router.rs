@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::router::commitlog::TopicLog;
-use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, Data, ConnectionType, ConnectionAck};
+use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, Data, ConnectionType, ConnectionAck, DataAck};
 use crate::Config;
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
@@ -21,6 +21,7 @@ pub enum Error {
 
 type ConnectionId = usize;
 type Topic = String;
+type Offset = u64;
 
 pub struct Router {
     config: Config,
@@ -28,25 +29,25 @@ pub struct Router {
     /// details are very similar to what kafka does. Who know, we might
     /// even make the broker kafka compatible and directly feed it to databases
     commitlog: CommitLog,
-    /// Messages directly received from conecitons should be separed from messages
+    /// Messages directly received from connections should be separated from messages
     /// received by the router replication to make sure that linker of the current
     /// instance doesn't pull these again
     replicatedlog: CommitLog,
     /// Captures new topic just like commitlog
     topiclog: TopicLog,
-    /// Array of all the connections. Preinitialized to a fixed set of connections. `Connection`
-    /// struct is initialized when there is an actual network connection
+    /// Array of all the connections. Preinitialized to a fixed set of connections.
+    /// `Connection` struct is initialized when there is an actual network connection
     /// Index of this array represents `ConnectionId`
-    /// TODO Replace this with [Option<Connection>, 10000] when `Connection` support `Copy` and bench
+    /// Replace this with [Option<Connection>, 10000] when `Connection` support `Copy`?
     connections: Vec<Option<Connection>>,
     /// Waiter on a topic. These are used to wake connections/replicators
     /// which are caught up all the data on a topic. Map[topic]List[Connections Ids]
     data_waiters: HashMap<Topic, Vec<(ConnectionId, DataRequest)>>,
     /// Waiters on new topics
     topics_waiters: Vec<(ConnectionId, TopicsRequest)>,
-    /// Watermarks of all the replicas. Map[topic]List[u64]. Each index represents a router in the mesh
-    /// TODO Rename u64 to Offset
-    watermarks: HashMap<Topic, Vec<u64>>,
+    /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
+    /// represents a router in the mesh
+    watermarks: HashMap<Topic, Vec<Offset>>,
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
@@ -180,7 +181,10 @@ impl Router {
             return
         }
 
-        self.append_to_commitlog(id, &topic, payload);
+        // Acknowledge the connection after writing data to commitlog
+        if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
+            self.ack_data(id, pkid, offset)
+        }
 
         // If there is a new unique append, send it to connection/linker waiting
         // on it. This is equivalent to hybrid of block and poll and we don't need
@@ -258,6 +262,8 @@ impl Router {
             if let Err(e) = self.replicatedlog.append(&topic, bytes) {
                 error!("Commitlog append failed. Error = {:?}", e);
             }
+
+            // No need to ack the replicator
             None
         } else {
             match self.commitlog.append(&topic, bytes) {
@@ -333,7 +339,7 @@ impl Router {
         Some(reply)
     }
 
-    /// Sends data to the link
+    /// Sends data that connection/replicator asked for
     fn reply_data(&mut self, id: ConnectionId, reply: DataReply) {
         debug!(
             "Data reply.   Topic = {}, Segment = {}, offset = {}, size = {}",
@@ -368,6 +374,22 @@ impl Router {
             let mut waiters = Vec::new();
             waiters.push(request);
             self.data_waiters.insert(reply.topic.to_owned(), waiters);
+        }
+    }
+
+    /// Acknowledge connection after the data is written to commitlog
+    fn ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("2. Invalid id = {:?}", id);
+                return
+            }
+        };
+
+        let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
+        if let Err(e) = connection.handle.try_send(ack) {
+            error!("Failed to topics refresh reply. Error = {:?}", e);
         }
     }
 }
