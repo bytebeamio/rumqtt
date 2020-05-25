@@ -396,15 +396,72 @@ impl Router {
 
 #[cfg(test)]
 mod test {
-    #[test]
-    fn new_data_on_existing_topic_should_to_reply_to_waiting_links() {}
+    use super::{Router, ConnectionId};
+    use crate::{Config, RouterInMessage, Connection, RouterOutMessage};
+    use tokio::sync::mpsc::{Sender, channel, Receiver};
+    use bytes::Bytes;
+    use crate::router::{ConnectionType, ConnectionAck, TopicsRequest, Data};
+    use std::thread;
+    use std::time::Duration;
+
+    #[tokio::test(core_threads = 1)]
+    async fn new_data_on_existing_topic_should_to_reply_to_waiting_links() {
+        // start router in background
+        let mut router_tx = new_router().await;
+        let conn = ConnectionType::Device("test".to_string());
+        let (connection_id, connection_rx) = new_link(conn, &mut router_tx).await;
+        let conn = ConnectionType::Replicator(0);
+        let (replicator_id, mut replicator_rx) = new_link(conn, &mut router_tx).await;
+
+        dbg!(connection_id, replicator_id);
+        let message = (replicator_id, RouterInMessage::TopicsRequest(TopicsRequest { offset: 0, count: 10 }));
+        router_tx.try_send(message).unwrap();
+
+        let data = Data {
+            pkid: 0,
+            topic: "hello/world".to_string(),
+            payload: Bytes::from(vec![1, 2, 3])
+        };
+
+        let message = (connection_id, RouterInMessage::Data(data));
+        router_tx.try_send(message).unwrap();
+
+        let o = replicator_rx.recv().await.unwrap();
+        dbg!(o);
+    }
 
     #[test]
     fn new_topic_should_to_reply_to_waiting_links() {}
 
-    #[test]
-    fn caught_up_topic_should_not_stop_other_topics_from_pollin() {}
 
     #[test]
-    fn new_replicated_data_and_topics_should_not_notfiy_replicator() {}
+    fn new_replicated_data_and_topics_should_not_notifiy_replicator() {}
+
+    async fn new_router() -> Sender<(ConnectionId, RouterInMessage)> {
+        let (router, router_tx) = Router::new(Config::default());
+        tokio::task::spawn(async move {
+            let mut router = router;
+            router.start().await;
+        });
+
+        router_tx
+    }
+
+    async fn new_link(conn: ConnectionType, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) -> (ConnectionId,  Receiver<RouterOutMessage>) {
+        let (link_tx, mut link_rx) = channel(4);
+        let connection = Connection {
+            conn,
+            handle: link_tx,
+        };
+
+        let message = RouterInMessage::Connect(connection);
+        router_tx.send((0, message)).await.unwrap();
+        let id = match link_rx.recv().await.unwrap() {
+            RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+            o => panic!("Unexpected connection ack = {:?}", o)
+        };
+
+
+        (id, link_rx)
+    }
 }
