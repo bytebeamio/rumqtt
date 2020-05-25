@@ -1,5 +1,5 @@
-//! This module offers a high level synchronous abstraction to async eventloop. Uses flume channels
-//! to get `Requests` and send `Notifications`
+//! This module offers a high level synchronous abstraction to async eventloop.
+//! Uses channels internally to get `Requests` and send `Notifications`
 
 use crate::{eventloop, MqttEventLoop, MqttOptions, Notification, Request};
 
@@ -7,53 +7,88 @@ use crossbeam_channel::TrySendError;
 use std::time::Duration;
 use tokio::stream::StreamExt;
 use tokio::time;
+use tokio::sync::mpsc::{channel, Sender, Receiver};
+use tokio::sync::mpsc::error::SendError;
+use rumq_core::mqtt4::{Publish, Subscribe, QoS};
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Failed to send cancel request to eventloop")]
+    CancelError(#[from] SendError<()>),
+    #[error("Failed to send mqtt requests to eventloop")]
+    RequestError(#[from] SendError<Request>),
+}
+
+#[derive(Clone)]
 pub struct Client {
-    request_tx: flume::Sender<Request>,
+    request_tx: Sender<Request>,
     notification_rx: crossbeam_channel::Receiver<Notification>,
-    notification_tx: Option<crossbeam_channel::Sender<Notification>>,
-    cancel_tx: flume::Sender<()>,
-    cancel_rx: Option<flume::Receiver<()>>,
-    eventloop: MqttEventLoop,
+    cancel_tx: Sender<()>,
 }
 
 impl Client {
-    pub fn new(options: MqttOptions, cap: usize) -> Client {
-        let (request_tx, request_rx) = flume::bounded(cap);
+    pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
+        let (request_tx, request_rx) = channel(cap);
         let (notification_tx, notification_rx) = crossbeam_channel::bounded(cap);
-        let (cancel_tx, cancel_rx) = flume::bounded(cap);
+        let (cancel_tx, cancel_rx) = channel(cap);
         let eventloop = eventloop(options, request_rx);
-        Client {
+        let client = Client {
             request_tx,
             notification_rx,
-            notification_tx: Some(notification_tx),
             cancel_tx,
-            cancel_rx: Some(cancel_rx),
-            eventloop,
-        }
+        };
+
+        let connection = Connection { eventloop, notification_tx, cancel_rx };
+        (client, connection)
     }
 
-    /// Builds a channel like abstraction to send `Requests` to eventloop and receive `Notification`s
-    /// from the eventloop
-    pub fn channel(&self) -> (flume::Sender<Request>, crossbeam_channel::Receiver<Notification>) {
-        (self.request_tx.clone(), self.notification_rx.clone())
+    pub fn notifications(&self) -> crossbeam_channel::Receiver<Notification> {
+        self.notification_rx.clone()
     }
 
-    pub fn cancel_handle(&self) -> flume::Sender<()> {
-        self.cancel_tx.clone()
+    /// Requests the eventloop for mqtt publish
+    pub fn publish<S, V>(&mut self, topic: S, qos: QoS, retain: bool, payload: V) -> Result<(), Error>
+        where
+            S: Into<String>,
+            V: Into<Vec<u8>>,
+    {
+        let mut publish = Publish::new(topic, qos, payload.into());
+        publish.retain = retain;
+        let request = Request::Publish(publish);
+        futures_executor::block_on(self.request_tx.send(request))?;
+        Ok(())
     }
 
+    pub fn subscribe<S>(&mut self, topic: S, qos: QoS) -> Result<(), Error>
+        where
+            S: Into<String>,
+    {
+        let subscribe = Subscribe::new(topic.into(), qos);
+        let request = Request::Subscribe(subscribe);
+        futures_executor::block_on(self.request_tx.send(request))?;
+        Ok(())
+    }
+
+    pub fn cancel(&mut self) -> Result<(), Error> {
+        futures_executor::block_on(self.cancel_tx.send(()))?;
+        Ok(())
+    }
+}
+
+pub struct Connection {
+    notification_tx: crossbeam_channel::Sender<Notification>,
+    cancel_rx: Receiver<()>,
+    eventloop: MqttEventLoop
+}
+
+impl Connection {
     #[tokio::main(core_threads = 1)]
     pub async fn start(&mut self) {
         let mut last_failed = None;
-        let notification_tx = self.notification_tx.take().unwrap();
-        let cancel_rx = self.cancel_rx.take().unwrap();
-
         'reconnection: loop {
             let mut stream = self.eventloop.connect().await.unwrap();
-
             if let Some(item) = last_failed.take() {
-                match notification_tx.try_send(item) {
+                match self.notification_tx.try_send(item) {
                     Err(TrySendError::Full(failed)) => last_failed = Some(failed),
                     Err(TrySendError::Disconnected(failed)) => last_failed = Some(failed),
                     Ok(_) => (),
@@ -61,12 +96,11 @@ impl Client {
             }
 
             while let Some(item) = stream.next().await {
-                if cancel_rx.try_recv().is_ok() {
+                if self.cancel_rx.try_recv().is_ok() {
                     break 'reconnection
                 }
 
-
-                match notification_tx.try_send(item) {
+                match self.notification_tx.try_send(item) {
                     Err(TrySendError::Full(failed)) => {
                         last_failed = Some(failed);
                         break;

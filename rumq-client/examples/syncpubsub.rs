@@ -1,4 +1,4 @@
-use rumq_client::{self, MqttOptions, Publish, QoS, Request, Subscribe};
+use rumq_client::{self, MqttOptions, QoS};
 use std::time::Duration;
 use std::thread;
 
@@ -11,43 +11,34 @@ fn main() {
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
 
     // Create a new client and extract handles to communicate with it
-    let client = rumq_client::Client::new(mqttoptions, 10);
-    let (tx, rx) = client.channel();
-    let cancel = client.cancel_handle();
+    let (mut client, connection) = rumq_client::Client::new(mqttoptions, 10);
+    let notifications = client.notifications();
 
     // Start the client in a separate thread to unblock the current one. You might as well have
     // sent handles to a different thread and start client in this thread
     thread::spawn(move || {
-        let mut client = client;
-        client.start();
+        let mut connection = connection;
+        connection.start();
     });
 
-    // Start a new thread to parallely send requests
+    // Start a new thread to send requests
+    let mut publish_client = client.clone();
     thread::spawn(move || {
-        let subscription = Subscribe::new("hello/world", QoS::AtLeastOnce);
-        let _ = tx.send(Request::Subscribe(subscription));
+        publish_client.subscribe("hello/world", QoS::AtLeastOnce).unwrap();
         for i in 0..100 {
-            tx.send(publish_request(i)).unwrap();
+            publish_client.publish("hello/world", QoS::AtLeastOnce, false, vec![1, 2, 3, i]).unwrap();
             thread::sleep(Duration::from_secs(1));
         }
-
-        thread::sleep(Duration::from_secs(3));
     });
 
-    for (i, notification) in rx.iter().enumerate() {
+    // Receive incoming notifications
+    for (i, notification) in notifications.iter().enumerate() {
         // use the cancel handle to stop the client eventloop
         if i == 10 {
-            cancel.send(());
+            client.cancel().unwrap();
         }
 
         println!("Received = {:?}", notification);
     }
 }
 
-fn publish_request(i: u8) -> Request {
-    let topic = "hello/world".to_owned();
-    let payload = vec![1, 2, 3, i];
-
-    let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
-    Request::Publish(publish)
-}

@@ -13,6 +13,7 @@ edition = "2018"
 tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "stream", "sync", "time", "macros"] }
 tokio-util = { version = "0.3", features = ["codec"] }
 futures-util = { version =  "0.3", features = ["sink"] }
+futures-executor = "0.3"
 async-stream = "0.2"
 webpki = "0.21"
 tokio-rustls = "0.13"
