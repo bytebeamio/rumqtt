@@ -13,6 +13,9 @@ use crate::DataRequest;
 /// TODO HashMap iterations are not always very efficient. Check indexmap crate
 pub struct Tracker {
     /// List of topics that we are tracking
+    /// TODO Probably just a vector with swap remove will be more efficient
+    /// TODO Swap inactive topics to the end of the list so that vec is divided to improve iteration efficiency
+    /// TODO This can probably be an array in future by supporting a fixed number of topics
     tracks: IndexMap<String, Track>,
     /// List of concrete subscriptions
     concrete_subscriptions: HashSet<String>,
@@ -256,4 +259,7 @@ mod test {
         tracker.add("1".to_owned());
         assert!(tracker.next().is_some());
     }
+
+
+    // TODO Add unsubscription test
 }

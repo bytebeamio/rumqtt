@@ -2,15 +2,18 @@ use std::collections::HashMap;
 use std::{io, mem, thread};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+use super::bytes::Bytes;
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
+use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, Data, ConnectionType, ConnectionAck, DataAck};
+use crate::router::{
+    ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
+    TopicsRequest,
+};
 use crate::Config;
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
-use super::bytes::Bytes;
-use crate::mesh::Mesh;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -104,7 +107,7 @@ impl Router {
                     let reply = self.extract_data(&request);
                     let reply = match reply {
                         Some(r) => r,
-                        None => continue
+                        None => continue,
                     };
 
                     // This connection/linker is completely caught up with this topic.
@@ -127,7 +130,7 @@ impl Router {
                         continue;
                     }
                     self.reply_topics(id, reply);
-                },
+                }
             }
         }
 
@@ -136,21 +139,21 @@ impl Router {
 
     fn handle_new_connection(&mut self, mut connection: Connection) {
         let id = match &connection.conn {
-            ConnectionType::Replicator(id)  => *id,
+            ConnectionType::Replicator(id) => *id,
             ConnectionType::Device(did) => {
                 let mut id = 0;
                 for (i, connection) in self.connections.iter_mut().enumerate() {
                     // positions 0..9 are reserved for replicators
                     if connection.is_none() && i >= 10 {
                         id = i;
-                        break
+                        break;
                     }
                 }
 
                 if id == 0 {
                     error!("No empty slots found for incoming connection = {:?}", did);
                     // TODO ack connection with failure as there are no empty slots
-                    return
+                    return;
                 }
 
                 id
@@ -162,7 +165,10 @@ impl Router {
             error!("Failed to send connection ack. Error = {:?}", e.to_string());
         }
 
-        info!("New Connection. Incoming ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
+        info!(
+            "New Connection. Incoming ID = {:?}, Router assigned ID = {:?}",
+            connection.conn, id
+        );
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             warn!("Replacing an existing connection with same ID");
         }
@@ -177,8 +183,9 @@ impl Router {
         } = data;
 
         if payload.len() == 0 {
+            // TODO More debug info. Id etc
             error!("Empty publish. Ignoring");
-            return
+            return;
         }
 
         // Acknowledge the connection after writing data to commitlog
@@ -228,7 +235,7 @@ impl Router {
     fn fresh_data_notification(&mut self, id: ConnectionId, topic: &str) {
         let waiters = match self.data_waiters.remove(topic) {
             Some(w) => w,
-            None => return
+            None => return,
         };
 
         for (link_id, request) in waiters {
@@ -256,7 +263,7 @@ impl Router {
     /// from connections
     fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<u64> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
-        let replication_data =  id < 10;
+        let replication_data = id < 10;
         if replication_data {
             debug!("Receiving replication data from {}, topic = {}", id, topic);
             if let Err(e) = self.replicatedlog.append(&topic, bytes) {
@@ -276,7 +283,7 @@ impl Router {
         }
     }
 
-    fn extract_topics(&mut self,  request: &TopicsRequest) -> TopicsReply {
+    fn extract_topics(&mut self, request: &TopicsRequest) -> TopicsReply {
         let o = self.topiclog.read(request.offset, request.count);
         let reply = TopicsReply {
             done: o.0,
@@ -293,7 +300,7 @@ impl Router {
             Some(c) => c,
             None => {
                 error!("2. Invalid id = {:?}", id);
-                return
+                return;
             }
         };
 
@@ -310,8 +317,16 @@ impl Router {
 
     /// extracts data from correct commitlog's segment and sends it
     fn extract_data(&mut self, request: &DataRequest) -> Option<DataReply> {
-        debug!("Data request. Topic = {}, Segment = {}, offset = {}", request.topic, request.segment, request.offset);
-        let o = match self.commitlog.readv(&request.topic, request.segment, request.offset, request.size) {
+        debug!(
+            "Data request. Topic = {}, Segment = {}, offset = {}",
+            request.topic, request.segment, request.offset
+        );
+        let o = match self.commitlog.readv(
+            &request.topic,
+            request.segment,
+            request.offset,
+            request.size,
+        ) {
             Ok(v) => v,
             Err(e) => {
                 error!("Failed to extract data from commitlog. Error = {:?}", e);
@@ -321,9 +336,7 @@ impl Router {
 
         let o = match o {
             Some(o) => o,
-            None => {
-                return None
-            },
+            None => return None,
         };
 
         // TODO handle acks
@@ -353,7 +366,7 @@ impl Router {
             Some(c) => c,
             None => {
                 error!("1. Invalid id = {:?}", id);
-                return
+                return;
             }
         };
 
@@ -364,7 +377,12 @@ impl Router {
     }
 
     /// Register data waiter
-    fn register_data_waiter(&mut self, id: ConnectionId, mut request: DataRequest, reply: &DataReply) {
+    fn register_data_waiter(
+        &mut self,
+        id: ConnectionId,
+        mut request: DataRequest,
+        reply: &DataReply,
+    ) {
         request.segment = reply.segment;
         request.offset = reply.offset + 1;
         let request = (id, request);
@@ -383,7 +401,7 @@ impl Router {
             Some(c) => c,
             None => {
                 error!("2. Invalid id = {:?}", id);
-                return
+                return;
             }
         };
 
@@ -396,72 +414,168 @@ impl Router {
 
 #[cfg(test)]
 mod test {
-    use super::{Router, ConnectionId};
-    use crate::{Config, RouterInMessage, Connection, RouterOutMessage};
-    use tokio::sync::mpsc::{Sender, channel, Receiver};
+    use super::{ConnectionId, Router};
+    use crate::router::{ConnectionAck, ConnectionType, Data, TopicsRequest, TopicsReply};
+    use crate::{Config, Connection, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
     use bytes::Bytes;
-    use crate::router::{ConnectionType, ConnectionAck, TopicsRequest, Data};
     use std::thread;
     use std::time::Duration;
+    use tokio::sync::mpsc::error::TryRecvError;
+    use tokio::sync::mpsc::{channel, Receiver, Sender};
 
     #[tokio::test(core_threads = 1)]
-    async fn new_data_on_existing_topic_should_to_reply_to_waiting_links() {
-        // start router in background
-        let mut router_tx = new_router().await;
-        let conn = ConnectionType::Device("test".to_string());
-        let (connection_id, connection_rx) = new_link(conn, &mut router_tx).await;
-        let conn = ConnectionType::Replicator(0);
-        let (replicator_id, mut replicator_rx) = new_link(conn, &mut router_tx).await;
+    async fn new_topic_from_connection_should_notify_replicator_and_connection() {
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
-        dbg!(connection_id, replicator_id);
-        let message = (replicator_id, RouterInMessage::TopicsRequest(TopicsRequest { offset: 0, count: 10 }));
-        router_tx.try_send(message).unwrap();
+        // Send request for new topics. Router should reply with new topics when there are any
+        new_topics_request(replicator_id, &mut router_tx);
+        new_topics_request(connection_id, &mut router_tx);
 
-        let data = Data {
-            pkid: 0,
-            topic: "hello/world".to_string(),
-            payload: Bytes::from(vec![1, 2, 3])
-        };
+        // see if routers replys with topics
+        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
 
-        let message = (connection_id, RouterInMessage::Data(data));
-        router_tx.try_send(message).unwrap();
+        // Send new data to router to be written to commitlog
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
 
-        let o = replicator_rx.recv().await.unwrap();
-        dbg!(o);
+        // see if routers replys with topics
+        assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics[0], "hello/world");
+        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics[0], "hello/world");
     }
 
-    #[test]
-    fn new_topic_should_to_reply_to_waiting_links() {}
+
+    #[tokio::test(core_threads = 1)]
+    async fn new_topic_from_replicator_should_notify_only_connection() {
+    }
+
+
+    #[tokio::test(core_threads = 1)]
+    async fn new_data_from_connection_should_notify_replicator_and_connection() {
+
+    }
+
+
+    #[tokio::test(core_threads = 1)]
+    async fn new_data_from_replicator_should_notify_only_connection() {
+
+    }
 
 
     #[test]
     fn new_replicated_data_and_topics_should_not_notifiy_replicator() {}
 
-    async fn new_router() -> Sender<(ConnectionId, RouterInMessage)> {
-        let (router, router_tx) = Router::new(Config::default());
+    // -------------------- All helper methods to make tests clean and readable --------------------------------------
+
+    /// Creates a router, a connection link, a replicator link and returns them along with IDs
+    async fn setup() -> (
+        Sender<(ConnectionId, RouterInMessage)>,
+        ConnectionId,
+        Receiver<RouterOutMessage>,
+        ConnectionId,
+        Receiver<RouterOutMessage>,
+    ) {
+        let (router, mut router_tx) = Router::new(Config::default());
         tokio::task::spawn(async move {
             let mut router = router;
             router.start().await;
         });
 
-        router_tx
-    }
-
-    async fn new_link(conn: ConnectionType, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) -> (ConnectionId,  Receiver<RouterOutMessage>) {
-        let (link_tx, mut link_rx) = channel(4);
+        let (link_tx, mut replicator_rx) = channel(4);
         let connection = Connection {
-            conn,
+            conn: ConnectionType::Replicator(0),
             handle: link_tx,
         };
 
         let message = RouterInMessage::Connect(connection);
         router_tx.send((0, message)).await.unwrap();
-        let id = match link_rx.recv().await.unwrap() {
+
+        let replicator_id = match replicator_rx.recv().await.unwrap() {
             RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-            o => panic!("Unexpected connection ack = {:?}", o)
+            o => panic!("Unexpected connection ack = {:?}", o),
         };
 
+        let (link_tx, mut connection_rx) = channel(4);
+        let connection = Connection {
+            conn: ConnectionType::Device("blah".to_string()),
+            handle: link_tx,
+        };
 
-        (id, link_rx)
+        let message = RouterInMessage::Connect(connection);
+        router_tx.send((0, message)).await.unwrap();
+
+        let connection_id = match connection_rx.recv().await.unwrap() {
+            RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+            o => panic!("Unexpected connection ack = {:?}", o),
+        };
+
+        (
+            router_tx,
+            replicator_id,
+            replicator_rx,
+            connection_id,
+            connection_rx,
+        )
+    }
+
+    fn write_to_commitlog(
+        id: usize,
+        router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
+        topic: &str,
+        payload: Vec<u8>,
+    ) {
+        let message = (
+            id,
+            RouterInMessage::Data(Data {
+                pkid: 0,
+                topic: topic.to_string(),
+                payload: Bytes::from(payload),
+            }),
+        );
+
+        router_tx.try_send(message).unwrap();
+    }
+
+    fn new_topics_request(id: usize, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) {
+        let message = (
+            id,
+            RouterInMessage::TopicsRequest(TopicsRequest {
+                offset: 0,
+                count: 10,
+            }),
+        );
+        router_tx.try_send(message).unwrap();
+    }
+
+    async fn wait_for_new_topics(rx: &mut Receiver<RouterOutMessage>) -> Option<TopicsReply> {
+        tokio::time::delay_for(Duration::from_secs(1)).await;
+        match rx.try_recv() {
+            Ok(RouterOutMessage::TopicsReply(reply)) => Some(reply),
+            _ => None
+        }
+    }
+
+    fn new_data_request(
+        id: usize,
+        router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
+        topic: &str,
+        offset: u64
+    ) {
+        let message = (
+            id,
+            RouterInMessage::DataRequest(DataRequest {
+                topic: topic.to_string(),
+                segment: 0,
+                offset,
+                size: 100 * 1024
+            }),
+        );
+        router_tx.try_send(message).unwrap();
+    }
+
+    async fn wait_for_new_data(rx: &mut Receiver<RouterOutMessage>) -> Option<DataReply> {
+        tokio::time::delay_for(Duration::from_secs(1)).await;
+        match rx.try_recv() {
+            Ok(RouterOutMessage::DataReply(reply)) => Some(reply),
+            _ => None
+        }
     }
 }
