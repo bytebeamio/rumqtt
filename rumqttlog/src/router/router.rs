@@ -415,10 +415,9 @@ impl Router {
 #[cfg(test)]
 mod test {
     use super::{ConnectionId, Router};
-    use crate::router::{ConnectionAck, ConnectionType, Data, TopicsRequest, TopicsReply};
+    use crate::router::{ConnectionAck, ConnectionType, Data, TopicsRequest, TopicsReply, DataAck};
     use crate::{Config, Connection, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
     use bytes::Bytes;
-    use std::thread;
     use std::time::Duration;
     use tokio::sync::mpsc::error::TryRecvError;
     use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -436,6 +435,7 @@ mod test {
 
         // Send new data to router to be written to commitlog
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // see if routers replys with topics
         assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics[0], "hello/world");
@@ -445,6 +445,7 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_replicator_should_notify_only_connection() {
+        // let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
     }
 
 
@@ -545,14 +546,6 @@ mod test {
         router_tx.try_send(message).unwrap();
     }
 
-    async fn wait_for_new_topics(rx: &mut Receiver<RouterOutMessage>) -> Option<TopicsReply> {
-        tokio::time::delay_for(Duration::from_secs(1)).await;
-        match rx.try_recv() {
-            Ok(RouterOutMessage::TopicsReply(reply)) => Some(reply),
-            _ => None
-        }
-    }
-
     fn new_data_request(
         id: usize,
         router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
@@ -570,6 +563,29 @@ mod test {
         );
         router_tx.try_send(message).unwrap();
     }
+
+    async fn wait_for_new_topics(rx: &mut Receiver<RouterOutMessage>) -> Option<TopicsReply> {
+        tokio::time::delay_for(Duration::from_secs(1)).await;
+        match rx.try_recv() {
+            Ok(RouterOutMessage::TopicsReply(reply)) => Some(reply),
+            v => {
+                error!("{:?}", v);
+                None
+            }
+        }
+    }
+
+    async fn wait_for_ack(rx: &mut Receiver<RouterOutMessage>) -> Option<DataAck> {
+        tokio::time::delay_for(Duration::from_secs(1)).await;
+        match rx.try_recv() {
+            Ok(RouterOutMessage::DataAck(ack)) => Some(ack),
+            v => {
+                error!("{:?}", v);
+                None
+            }
+        }
+    }
+
 
     async fn wait_for_new_data(rx: &mut Receiver<RouterOutMessage>) -> Option<DataReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
