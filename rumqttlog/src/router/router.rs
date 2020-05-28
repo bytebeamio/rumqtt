@@ -189,7 +189,7 @@ impl Router {
         }
 
         // Acknowledge the connection after writing data to commitlog
-        if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
+        if let Some(offset) = self.append_to_commitlog(id, pkid, &topic, payload) {
             self.ack_data(id, pkid, offset)
         }
 
@@ -211,11 +211,11 @@ impl Router {
         // TODO too many indirection to get a link to the handle, probably directly
         // TODO clone a handle to the link and save it instead of saving ids?
         let waiters = mem::replace(&mut self.topics_waiters, Vec::new());
+        let replication_data = id < 10;
         for (link_id, request) in waiters {
             // don't send replicated topic notifications to replication link
-            // id 0-10 are reserved for replications which are linked to other routers in the mesh
-            let replication_data = id < 10;
-            if replication_data {
+            // id 0-10 are reserved for replicatiors which are linked to other routers in the mesh
+            if replication_data && link_id < 10 {
                 continue;
             }
 
@@ -261,17 +261,18 @@ impl Router {
     /// Separate logs due to replication and logs from connections. Connections pull
     /// logs from both replication and connections where as linker only pull logs
     /// from connections
-    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<u64> {
+    fn append_to_commitlog(&mut self, id: ConnectionId, pkid: u64, topic: &str, bytes: Bytes) -> Option<u64> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
             debug!("Receiving replication data from {}, topic = {}", id, topic);
-            if let Err(e) = self.replicatedlog.append(&topic, bytes) {
-                error!("Commitlog append failed. Error = {:?}", e);
+            match self.replicatedlog.append(&topic, bytes) {
+                Ok(_) => Some(pkid),
+                Err(e) => {
+                    error!("Commitlog append failed. Error = {:?}", e);
+                    None
+                }
             }
-
-            // No need to ack the replicator
-            None
         } else {
             match self.commitlog.append(&topic, bytes) {
                 Ok(offset) => Some(offset),
@@ -445,7 +446,21 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_replicator_should_notify_only_connection() {
-        // let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        // Send request for new topics. Router should reply with new topics when there are any
+        new_topics_request(replicator_id, &mut router_tx);
+        new_topics_request(connection_id, &mut router_tx);
+
+        // see if routers replys with topics
+        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
+
+        // Send new data to router to be written to commitlog
+        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
+
+        // see if routers replys with topics
+        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics[0], "hello/world");
+        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
     }
 
 
