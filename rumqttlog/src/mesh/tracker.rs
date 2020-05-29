@@ -114,7 +114,7 @@ impl Tracker {
         // to active tracks to poll this in the next iteration
         if let Some(track) = self.tracks.get_mut(topic) {
             track.request.segment = segment;
-            track.request.offset = offset + 1;
+            track.request.native_offset = offset + 1;
 
             // Mark the caught up topic as inactive to allow link iterator to ignore this
             if len == 0 {
@@ -145,7 +145,8 @@ impl Track {
         let request = DataRequest {
             topic: topic.to_string(),
             segment: 0,
-            offset: 0,
+            native_offset: 0,
+            replica_offset: 0,
             size: 1024 * 1024,
         };
 

@@ -99,7 +99,7 @@ impl Link {
         // next topic's sweep request
         debug!(
             "Data request. Topic = {}, segment = {}, offset = {}, size = {}",
-            request.topic, request.segment, request.offset, request.size
+            request.topic, request.segment, request.native_offset, request.size
         );
         let request = request.clone();
         let message = RouterInMessage::DataRequest(request);
@@ -216,11 +216,11 @@ impl Link {
                             }
 
                             if out.len() == 0 { continue }
-                            let packet = Packet::Data(reply.offset, topic.clone(), out.freeze());
+                            let packet = Packet::Data(reply.native_offset, topic.clone(), out.freeze());
                             try_loop!(framed.send(packet).await, broken, continue 'start);
 
                             data_reply_count += 1;
-                            self.tracker.update(&topic, reply.segment, reply.offset, payload_len);
+                            self.tracker.update(&topic, reply.native_segment, reply.native_offset, payload_len);
 
                         }
                         // Refresh the list of interested topics. Router doesn't reply empty responses.

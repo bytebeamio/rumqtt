@@ -104,15 +104,15 @@ async fn read(commandline: &CommandLine, id: usize, mut tx: Sender<(usize, Route
         let request = DataRequest {
             topic: "hello/world".to_owned(),
             segment,
-            offset,
+            native_offset: offset,
             size: commandline.sweep_size as u64
         };
 
         let message = (id.to_owned(), RouterInMessage::DataRequest(request));
         tx.send(message).await.unwrap();
         if let RouterOutMessage::DataReply(data_reply) = this_rx.recv().await.unwrap() {
-            segment = data_reply.segment;
-            offset = data_reply.offset + 1;
+            segment = data_reply.native_segment;
+            offset = data_reply.native_offset + 1;
             total_size += data_reply.payload.len() * commandline.payload_size;
         }
     }

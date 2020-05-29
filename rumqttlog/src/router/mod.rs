@@ -71,9 +71,10 @@ pub struct DataRequest {
     pub topic: String,
     /// Segment id of the log.
     pub segment: u64,
-    /// Current offset. For requests, this is where sweeps
-    /// start from. For reply, this is the last offset
-    pub offset: u64,
+    /// This is where sweeps start from for data native to this node
+    pub native_offset: u64,
+    /// This is where sweeps start from for replication data
+    pub replica_offset: u64,
     /// Request Size / Reply size
     pub size: u64,
 }
@@ -84,11 +85,18 @@ pub struct DataReply {
     pub done: bool,
     /// Log to sweep
     pub topic: String,
-    /// Segment id of the log.
-    pub segment: u64,
-    /// Current offset. For requests, this is where sweeps
-    /// start from. For reply, this is the last offset
-    pub offset: u64,
+    /// Segment id of native log of this topic.
+    pub native_segment: u64,
+    /// Offset of the last element of payload from this node
+    pub native_offset: u64,
+    /// Count of native data in payload
+    pub native_count: usize,
+    /// Segment id of replicated log of this topic.
+    pub replica_segment: u64,
+    /// Offset of the last element of paylaod due to replication
+    pub replica_offset: u64,
+    /// Count of replicated data in payload
+    pub replica_count: usize,
     /// Packet ids of replys
     pub pkids: Vec<u64>,
     /// Reply data chain

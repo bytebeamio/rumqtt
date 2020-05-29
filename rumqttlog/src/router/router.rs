@@ -324,12 +324,12 @@ impl Router {
     fn extract_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         debug!(
             "Data request. Topic = {}, Segment = {}, offset = {}",
-            request.topic, request.segment, request.offset
+            request.topic, request.segment, request.native_offset
         );
         let o = match self.commitlog.readv(
             &request.topic,
             request.segment,
-            request.offset,
+            request.native_offset,
             request.size,
         ) {
             Ok(v) => v,
@@ -350,8 +350,12 @@ impl Router {
             done: o.0,
             topic: request.topic.clone(),
             payload: o.5,
-            segment: o.1,
-            offset: o.2,
+            native_segment: o.1,
+            native_offset: o.2,
+            native_count: 0,
+            replica_segment: 0,
+            replica_offset: 0,
+            replica_count: 0,
             pkids: o.4,
         };
 
@@ -363,8 +367,8 @@ impl Router {
         debug!(
             "Data reply.   Topic = {}, Segment = {}, offset = {}, size = {}",
             reply.topic,
-            reply.segment,
-            reply.offset,
+            reply.native_segment,
+            reply.native_offset,
             reply.payload.len(),
         );
 
@@ -389,8 +393,8 @@ impl Router {
         mut request: DataRequest,
         reply: &DataReply,
     ) {
-        request.segment = reply.segment;
-        request.offset = reply.offset + 1;
+        request.segment = reply.native_segment;
+        request.native_offset = reply.native_offset + 1;
         let request = (id, request);
         if let Some(waiters) = self.data_waiters.get_mut(&reply.topic) {
             waiters.push(request);
@@ -616,7 +620,7 @@ mod test {
             RouterInMessage::DataRequest(DataRequest {
                 topic: topic.to_string(),
                 segment: 0,
-                offset,
+                native_offset: offset,
                 size: 100 * 1024
             }),
         );
