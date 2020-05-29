@@ -238,10 +238,10 @@ impl Router {
             None => return,
         };
 
+        let replication_data = id < 10;
         for (link_id, request) in waiters {
-            let replication_data = id < 10;
             // don't send replicated data notifications to replication link
-            if replication_data {
+            if replication_data && link_id < 10 {
                 continue;
             }
 
@@ -466,7 +466,39 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_connection_should_notify_replicator_and_connection() {
+        pretty_env_logger::init();
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
+        // Send new data from connection to router to be written to commitlog
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
+
+        // Send request for new topics. Router should reply with new topics when there are any
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
+
+        // first wait on connection_rx should return some data and next wait none
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
+        assert!(wait_for_new_data(&mut connection_rx).await.is_none());
+
+        // first wait on replicator_rx should return some data and next wait none
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
+        assert!(wait_for_new_data(&mut replicator_rx).await.is_none());
+
+        // Send request for new topics. Router should reply with new topics when there are any
+        new_data_request(connection_id, &mut router_tx, "hello/world", 1);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 1);
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
+
+        // write new data at offset 1
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
+
+        new_data_request(connection_id, &mut router_tx, "hello/world", 1);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 1);
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
     }
 
 
@@ -606,7 +638,10 @@ mod test {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::DataReply(reply)) => Some(reply),
-            _ => None
+            v => {
+                error!("{:?}", v);
+                None
+            }
         }
     }
 }
