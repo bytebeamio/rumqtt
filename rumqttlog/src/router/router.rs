@@ -238,6 +238,8 @@ impl Router {
             None => return,
         };
 
+        dbg!(&waiters);
+
         let replication_data = id < 10;
         for (link_id, request) in waiters {
             // don't send replicated data notifications to replication link
@@ -245,8 +247,10 @@ impl Router {
                 continue;
             }
 
+            dbg!(&request);
             // Send reply to the link which registered this notification
             if let Some(reply) = self.extract_data(&request) {
+                dbg!(&reply);
                 self.reply_data(link_id, reply);
             }
 
@@ -335,6 +339,7 @@ impl Router {
             }
         };
 
+        dbg!(&o);
         let o = match o {
             Some(o) => o,
             None => return None,
@@ -466,7 +471,6 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_connection_should_notify_replicator_and_connection() {
-        pretty_env_logger::init();
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // Send new data from connection to router to be written to commitlog
@@ -504,14 +508,22 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_replicator_should_notify_only_connection() {
+        pretty_env_logger::init();
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+
+        // Send new data from connection to router to be written to commitlog
+        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
+
+        // Send request for new topics. Router should reply with new topics when there are any
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
+
+        // first wait on connection_rx should return some data and next wait none
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
 
     }
 
-
-    #[test]
-    fn new_replicated_data_and_topics_should_not_notifiy_replicator() {}
-
-    // -------------------- All helper methods to make tests clean and readable --------------------------------------
+    // ---------------- All helper methods to make tests clean and readable ------------------
 
     /// Creates a router, a connection link, a replicator link and returns them along with IDs
     async fn setup() -> (
