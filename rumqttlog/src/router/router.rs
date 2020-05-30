@@ -104,30 +104,29 @@ impl Router {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
-                RouterInMessage::TopicsRequest(request) => {
-                    let reply = self.extract_topics(&request);
-                    // register this id to wake up when there are new topics.
-                    // don't send a reply of empty topics
-                    if reply.topics.is_empty() {
-                        self.register_topics_waiter(id, request);
-                        continue;
-                    }
-                    self.reply_topics(id, reply);
-                }
+                RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request)
             }
         }
 
         error!("Router stopped!!");
     }
 
+    fn handle_topics_request(&mut self, id: usize, request: TopicsRequest) {
+        let reply = self.extract_topics(&request);
+        // register this id to wake up when there are new topics.
+        // don't send a reply of empty topics
+        if reply.topics.is_empty() {
+            self.register_topics_waiter(id, request);
+            return
+        }
+        self.reply_topics(id, reply);
+    }
+
     fn handle_data_request(&mut self, id: usize, request: DataRequest) {
         let reply = self.extract_data(&request);
         let reply = match reply {
             Some(r) => r,
-            None => {
-                error!("No data extracted!!");
-                return
-            },
+            None => return
         };
 
         // This connection/linker is completely caught up with this topic.
