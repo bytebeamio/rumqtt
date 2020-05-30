@@ -50,7 +50,7 @@ async fn main() {
 
         let payload = vec![i as u8 % 255; commandline.record_size];
         let payload = Bytes::from(payload);
-        let message = RouterInMessage::Data(Data { topic: topic.to_owned(), payload });
+        let message = RouterInMessage::Data(Data { topic: topic.to_owned(), pkid: 0, payload });
         router_tx.send((100, message)).await.unwrap();
     }
 

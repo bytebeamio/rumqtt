@@ -99,7 +99,7 @@ impl Link {
         // next topic's sweep request
         debug!(
             "Data request. Topic = {}, segment = {}, offset = {}, size = {}",
-            request.topic, request.segment, request.native_offset, request.size
+            request.topic, request.native_segment, request.native_offset, request.size
         );
         let request = request.clone();
         let message = RouterInMessage::DataRequest(request);

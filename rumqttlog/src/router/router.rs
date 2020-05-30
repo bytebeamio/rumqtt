@@ -165,10 +165,7 @@ impl Router {
             error!("Failed to send connection ack. Error = {:?}", e.to_string());
         }
 
-        info!(
-            "New Connection. Incoming ID = {:?}, Router assigned ID = {:?}",
-            connection.conn, id
-        );
+        info!("New Connection. Incoming ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             warn!("Replacing an existing connection with same ID");
         }
@@ -176,17 +173,16 @@ impl Router {
 
     /// Handles
     fn handle_incoming_data(&mut self, id: ConnectionId, data: Data) {
+        if data.payload.len() == 0 {
+            error!("Empty publish. Ignoring. ID = {:?}, topic = {:?}", id, data.topic);
+            return;
+        }
+
         let Data {
             pkid,
             topic,
             payload,
         } = data;
-
-        if payload.len() == 0 {
-            // TODO More debug info. Id etc
-            error!("Empty publish. Ignoring");
-            return;
-        }
 
         // Acknowledge the connection after writing data to commitlog
         if let Some(offset) = self.append_to_commitlog(id, pkid, &topic, payload) {
@@ -324,11 +320,12 @@ impl Router {
     fn extract_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         debug!(
             "Data request. Topic = {}, Segment = {}, offset = {}",
-            request.topic, request.segment, request.native_offset
+            request.topic, request.native_segment, request.native_offset
         );
-        let o = match self.commitlog.readv(
+
+        let connection_data = match self.commitlog.readv(
             &request.topic,
-            request.segment,
+            request.native_segment,
             request.native_offset,
             request.size,
         ) {
@@ -339,24 +336,62 @@ impl Router {
             }
         };
 
-        dbg!(&o);
-        let o = match o {
-            Some(o) => o,
-            None => return None,
+        let replicated_data = match self.replicatedlog.readv(
+            &request.topic,
+            request.replica_segment,
+            request.replica_offset,
+            request.size,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Failed to extract data from commitlog. Error = {:?}", e);
+                return None;
+            }
         };
 
-        // TODO handle acks
-        let reply = DataReply {
-            done: o.0,
-            topic: request.topic.clone(),
-            payload: o.5,
-            native_segment: o.1,
-            native_offset: o.2,
-            native_count: 0,
-            replica_segment: 0,
-            replica_offset: 0,
-            replica_count: 0,
-            pkids: o.4,
+        let reply = if let Some(connection_data) = connection_data {
+            let native_count = connection_data.5.len();
+            let mut reply = DataReply {
+                done: connection_data.0,
+                topic: request.topic.clone(),
+                payload: connection_data.5,
+                native_segment: connection_data.1,
+                native_offset: connection_data.2,
+                native_count,
+                replica_segment: request.replica_segment,
+                replica_offset: request.replica_offset,
+                replica_count: 0,
+                pkids: connection_data.4,
+            };
+
+            if let Some(mut replicated_data) = replicated_data {
+                let replica_count = replicated_data.5.len();
+                reply.replica_segment = replicated_data.1;
+                reply.replica_offset = replicated_data.2;
+                reply.replica_count = replica_count;
+                reply.payload.append(&mut replicated_data.5);
+                // TODO This copies data from one queue to another. Find if there is a way
+                // TODO to reduce cost here. The best option here is probably send Vec<Vec<Bytes>>
+            }
+
+            reply
+        } else if let Some(replicated_data) =  replicated_data {
+            let replica_count = replicated_data.5.len();
+            DataReply {
+                done: replicated_data.0,
+                topic: request.topic.clone(),
+                payload: replicated_data.5,
+                native_segment: request.native_segment,
+                native_offset: request.native_offset,
+                native_count: 0,
+                replica_segment: replicated_data.1,
+                replica_offset: replicated_data.2,
+                replica_count,
+                pkids: replicated_data.4,
+            }
+        } else {
+            error!("Empty connection and replication data!!");
+            return None
         };
 
         Some(reply)
@@ -393,7 +428,7 @@ impl Router {
         mut request: DataRequest,
         reply: &DataReply,
     ) {
-        request.segment = reply.native_segment;
+        request.native_segment = reply.native_segment;
         request.native_offset = reply.native_offset + 1;
         let request = (id, request);
         if let Some(waiters) = self.data_waiters.get_mut(&reply.topic) {
@@ -512,7 +547,7 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_replicator_should_notify_only_connection() {
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // Send new data from connection to router to be written to commitlog
@@ -619,8 +654,10 @@ mod test {
             id,
             RouterInMessage::DataRequest(DataRequest {
                 topic: topic.to_string(),
-                segment: 0,
+                native_segment: 0,
+                replica_segment: 0,
                 native_offset: offset,
+                replica_offset: 0,
                 size: 100 * 1024
             }),
         );

@@ -76,7 +76,7 @@ async fn write(commandline: &CommandLine, mut tx: Sender<(usize, RouterInMessage
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
     for payload in data.into_iter() {
-        let data = Data { topic: "hello/world".to_owned(), payload };
+        let data = Data { topic: "hello/world".to_owned(), pkid: 0, payload };
         let message = (100, RouterInMessage::Data(data));
         tx.send(message).await.unwrap();
     }
@@ -103,8 +103,10 @@ async fn read(commandline: &CommandLine, id: usize, mut tx: Sender<(usize, Route
     for _ in 0..count {
         let request = DataRequest {
             topic: "hello/world".to_owned(),
-            segment,
+            native_segment: segment,
             native_offset: offset,
+            replica_segment: 0,
+            replica_offset: 0,
             size: commandline.sweep_size as u64
         };
 

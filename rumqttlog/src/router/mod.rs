@@ -69,8 +69,10 @@ pub struct DataAck {
 pub struct DataRequest {
     /// Log to sweep
     pub topic: String,
-    /// Segment id of the log.
-    pub segment: u64,
+    /// Segment id of native log.
+    pub native_segment: u64,
+    /// Segment id of replicated log.
+    pub replica_segment: u64,
     /// This is where sweeps start from for data native to this node
     pub native_offset: u64,
     /// This is where sweeps start from for replication data

@@ -113,7 +113,7 @@ impl Tracker {
         // if the reply is not in active tracks, this is a woken up paused track. Add it
         // to active tracks to poll this in the next iteration
         if let Some(track) = self.tracks.get_mut(topic) {
-            track.request.segment = segment;
+            track.request.native_segment = segment;
             track.request.native_offset = offset + 1;
 
             // Mark the caught up topic as inactive to allow link iterator to ignore this
@@ -144,7 +144,8 @@ impl Track {
     pub fn new(topic: &str) -> Track {
         let request = DataRequest {
             topic: topic.to_string(),
-            segment: 0,
+            native_segment: 0,
+            replica_segment: 0,
             native_offset: 0,
             replica_offset: 0,
             size: 1024 * 1024,
