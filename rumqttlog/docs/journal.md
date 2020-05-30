@@ -223,8 +223,32 @@ is only going to unnecessarily flood the mesh with acks.
 But this is little complicated than expected. With zero copy, router don't have access to modify packet id per  
 subscribing connection. If this is BytesMut, then copy advantage is gone
 - Commitlog merges same topic publishes from different connections. Forwarding full payload without any modifications
-is not feasible as these merged publishes can have same packet ids
+is not feasible as these merged publisLatest YouTube posts
+hes can have same packet ids
 
+30/May/2020
+--------------------------
+
+- Does writing the packet with modified packet id help achieve zero copy distribution (assuming we only support 
+  QoS 1 subscriptions)??
+  
+- If the broker only supports QoS 1, We can write the publish packet with modified packet id. If we can separate
+ router and connection data packet ids, we can be sure that packet ids won't collide while publishing. Since connection's 
+ next pull only happens while all the data is acked back, we don't have to worry about inflight collisions
+ 
+- To support all the QoS with (almost) zero copy, We can probably exploit the idea of framing batched publishes while
+  pulling data from commitlog. Commitlog while extracting data could return a Vec of Bytes(meta data header, pkid, qos 
+  etc) and Bytes (payload). Meta data is assembled based on DataRequest type (QoS 0, 1, 2 and dup) [experiment]
+  
+- The most approachable 1st step is to probably achieve zero copy for QoS 1 and don't bother too much about optimizing 
+  QoS 0 and 2 as they step into eachother's legs. Also QoS 1 is the most used one
+  
+  
+TODO
+---------------------------
+
+- Subscriber should pull again from correct offset after reconnecting to a different broker
+ 
 
 References
 -----------------
