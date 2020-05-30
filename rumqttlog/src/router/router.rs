@@ -103,24 +103,7 @@ impl Router {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
-                RouterInMessage::DataRequest(request) => {
-                    let reply = self.extract_data(&request);
-                    let reply = match reply {
-                        Some(r) => r,
-                        None => continue,
-                    };
-
-                    // This connection/linker is completely caught up with this topic.
-                    // Add this connection/linker into waiters list of this topic.
-                    // Note that we also send empty reply to the link with uses this to mark
-                    // this topic as a caught up to not make a request again while iterating
-                    // through its list of topics. Not sending an empty response will block
-                    // the 'link' from polling next topic
-                    if reply.payload.is_empty() {
-                        self.register_data_waiter(id, request, &reply);
-                    }
-                    self.reply_data(id, reply);
-                }
+                RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::TopicsRequest(request) => {
                     let reply = self.extract_topics(&request);
                     // register this id to wake up when there are new topics.
@@ -135,6 +118,28 @@ impl Router {
         }
 
         error!("Router stopped!!");
+    }
+
+    fn handle_data_request(&mut self, id: usize, request: DataRequest) {
+        let reply = self.extract_data(&request);
+        let reply = match reply {
+            Some(r) => r,
+            None => {
+                error!("No data extracted!!");
+                return
+            },
+        };
+
+        // This connection/linker is completely caught up with this topic.
+        // Add this connection/linker into waiters list of this topic.
+        // Note that we also send empty reply to the link with uses this to mark
+        // this topic as a caught up to not make a request again while iterating
+        // through its list of topics. Not sending an empty response will block
+        // the 'link' from polling next topic
+        if reply.payload.is_empty() {
+            self.register_data_waiter(id, request, &reply);
+        }
+        self.reply_data(id, reply);
     }
 
     fn handle_new_connection(&mut self, mut connection: Connection) {
@@ -234,8 +239,6 @@ impl Router {
             None => return,
         };
 
-        dbg!(&waiters);
-
         let replication_data = id < 10;
         for (link_id, request) in waiters {
             // don't send replicated data notifications to replication link
@@ -243,10 +246,8 @@ impl Router {
                 continue;
             }
 
-            dbg!(&request);
             // Send reply to the link which registered this notification
             if let Some(reply) = self.extract_data(&request) {
-                dbg!(&reply);
                 self.reply_data(link_id, reply);
             }
 
@@ -316,85 +317,90 @@ impl Router {
         self.topics_waiters.push(request);
     }
 
+    fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply>{
+        let topic = &request.topic;
+        let segment = request.native_segment;
+        let offset = request.native_offset;
+        let size = request.size;
+
+        debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        match self.commitlog.readv(topic, segment, offset, size) {
+            Ok(Some(v)) => {
+                let native_count = v.5.len();
+                let reply = DataReply {
+                    done: v.0,
+                    topic: request.topic.clone(),
+                    payload: v.5,
+                    native_segment: v.1,
+                    native_offset: v.2,
+                    native_count,
+                    replica_segment: request.replica_segment,
+                    replica_offset: request.replica_offset,
+                    replica_count: 0,
+                    pkids: v.4,
+                };
+
+                Some(reply)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                error!("Failed to extract data from commitlog. Error = {:?}", e);
+                None
+            }
+        }
+    }
+
+    fn extract_replicated_data(&mut self, request: &DataRequest) -> Option<DataReply>{
+        let topic = &request.topic;
+        let segment = request.replica_segment;
+        let offset = request.replica_offset;
+        let size = request.size;
+
+        debug!("Pull replicated data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        match self.replicatedlog.readv(topic, segment, offset, size) {
+            Ok(Some(v)) => {
+                let replica_count = v.5.len();
+                let reply = DataReply {
+                    done: v.0,
+                    topic: request.topic.clone(),
+                    payload: v.5,
+                    native_segment: request.native_segment,
+                    native_offset: request.native_offset,
+                    native_count: 0,
+                    replica_segment: v.1,
+                    replica_offset: v.2,
+                    replica_count,
+                    pkids: v.4,
+                };
+                Some(reply)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                error!("Failed to extract data from commitlog. Error = {:?}", e);
+                None
+            }
+        }
+    }
+
     /// extracts data from correct commitlog's segment and sends it
     fn extract_data(&mut self, request: &DataRequest) -> Option<DataReply> {
-        debug!(
-            "Data request. Topic = {}, Segment = {}, offset = {}",
-            request.topic, request.native_segment, request.native_offset
-        );
-
-        let connection_data = match self.commitlog.readv(
-            &request.topic,
-            request.native_segment,
-            request.native_offset,
-            request.size,
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Failed to extract data from commitlog. Error = {:?}", e);
-                return None;
-            }
-        };
-
-        let replicated_data = match self.replicatedlog.readv(
-            &request.topic,
-            request.replica_segment,
-            request.replica_offset,
-            request.size,
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Failed to extract data from commitlog. Error = {:?}", e);
-                return None;
-            }
-        };
-
-        let reply = if let Some(connection_data) = connection_data {
-            let native_count = connection_data.5.len();
-            let mut reply = DataReply {
-                done: connection_data.0,
-                topic: request.topic.clone(),
-                payload: connection_data.5,
-                native_segment: connection_data.1,
-                native_offset: connection_data.2,
-                native_count,
-                replica_segment: request.replica_segment,
-                replica_offset: request.replica_offset,
-                replica_count: 0,
-                pkids: connection_data.4,
-            };
-
-            if let Some(mut replicated_data) = replicated_data {
-                let replica_count = replicated_data.5.len();
-                reply.replica_segment = replicated_data.1;
-                reply.replica_offset = replicated_data.2;
-                reply.replica_count = replica_count;
-                reply.payload.append(&mut replicated_data.5);
+        if let Some(mut reply) = self.extract_connection_data(&request) {
+            if let Some(mut replicated_data) = self.extract_replicated_data(&request) {
+                reply.replica_segment = replicated_data.replica_segment;
+                reply.replica_offset = replicated_data.replica_offset;
+                reply.replica_count = replicated_data.replica_count;
                 // TODO This copies data from one queue to another. Find if there is a way
                 // TODO to reduce cost here. The best option here is probably send Vec<Vec<Bytes>>
+                reply.payload.append(&mut replicated_data.payload);
             }
 
-            reply
-        } else if let Some(replicated_data) =  replicated_data {
-            let replica_count = replicated_data.5.len();
-            DataReply {
-                done: replicated_data.0,
-                topic: request.topic.clone(),
-                payload: replicated_data.5,
-                native_segment: request.native_segment,
-                native_offset: request.native_offset,
-                native_count: 0,
-                replica_segment: replicated_data.1,
-                replica_offset: replicated_data.2,
-                replica_count,
-                pkids: replicated_data.4,
-            }
+            Some(reply)
+        } else if let Some(reply) =  self.extract_replicated_data(&request) {
+            Some(reply)
         } else {
             error!("Empty connection and replication data!!");
-            return None
-        };
-
-        Some(reply)
+            None
+        }
     }
 
     /// Sends data that connection/replicator asked for
@@ -422,12 +428,7 @@ impl Router {
     }
 
     /// Register data waiter
-    fn register_data_waiter(
-        &mut self,
-        id: ConnectionId,
-        mut request: DataRequest,
-        reply: &DataReply,
-    ) {
+    fn register_data_waiter(&mut self, id: ConnectionId, mut request: DataRequest, reply: &DataReply) {
         request.native_segment = reply.native_segment;
         request.native_offset = reply.native_offset + 1;
         let request = (id, request);
@@ -466,6 +467,7 @@ mod test {
     use std::time::Duration;
     use tokio::sync::mpsc::error::TryRecvError;
     use tokio::sync::mpsc::{channel, Receiver, Sender};
+
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_connection_should_notify_replicator_and_connection() {
@@ -556,9 +558,11 @@ mod test {
 
         // Send request for new topics. Router should reply with new topics when there are any
         new_data_request(connection_id, &mut router_tx, "hello/world", 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
 
         // first wait on connection_rx should return some data and next wait none
         assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
 
     }
 

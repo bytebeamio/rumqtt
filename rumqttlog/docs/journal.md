@@ -241,7 +241,7 @@ hes can have same packet ids
   etc) and Bytes (payload). Meta data is assembled based on DataRequest type (QoS 0, 1, 2 and dup) [experiment]
   
 - The most approachable 1st step is to probably achieve zero copy for QoS 1 and don't bother too much about optimizing 
-  QoS 0 and 2 as they step into eachother's legs. Also QoS 1 is the most used one
+  QoS 0 and 2 as they step into each other's legs. Also QoS 1 is the most used one
   
   
 TODO
