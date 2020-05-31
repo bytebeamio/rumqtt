@@ -159,7 +159,7 @@ impl Router {
         // through its list of topics. Not sending an empty response will block
         // the 'link' from polling next topic
         if reply.payload.is_empty() {
-            self.register_data_waiter(id, request, &reply);
+            self.register_data_waiter(id, request);
         }
         self.reply_data(id, reply);
     }
@@ -198,7 +198,7 @@ impl Router {
         }
     }
 
-    /// Handles
+    /// Handles new incoming data on a topic
     fn handle_incoming_data(&mut self, id: ConnectionId, data: Data) {
         if data.payload.len() == 0 {
             error!("Empty publish. Ignoring. ID = {:?}, topic = {:?}", id, data.topic);
@@ -462,16 +462,16 @@ impl Router {
     }
 
     /// Register data waiter
-    fn register_data_waiter(&mut self, id: ConnectionId, mut request: DataRequest, reply: &DataReply) {
-        request.native_segment = reply.native_segment;
-        request.native_offset = reply.native_offset + 1;
+    fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
+        let topic = request.topic.clone();
         let request = (id, request);
-        if let Some(waiters) = self.data_waiters.get_mut(&reply.topic) {
+
+        if let Some(waiters) = self.data_waiters.get_mut(&topic) {
             waiters.push(request);
         } else {
             let mut waiters = Vec::new();
             waiters.push(request);
-            self.data_waiters.insert(reply.topic.to_owned(), waiters);
+            self.data_waiters.insert(topic, waiters);
         }
     }
 
@@ -616,17 +616,11 @@ mod test {
     async fn new_data_from_connection_should_notify_replicator_and_connection() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
-        // Send new data from connection to router to be written to commitlog
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-
-        // Send request for new topics. Router should reply with new topics when there are any
-        new_data_request(connection_id, &mut router_tx, "hello/world", 1, 0);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 1, 0);
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.payload.len(), 0);
-        let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
-        assert_eq!(reply.payload.len(), 0);
+        // Request data on non existent topic. Router will reply when there is data on this topic (new/old)
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
 
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
@@ -640,27 +634,18 @@ mod test {
     async fn new_data_from_replicator_should_notify_only_connection() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
-        // Send new data from connection to router to be written to commitlog
-        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
-
         // Send request for new topics. Router should reply with new topics when there are any
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 1);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 1);
-
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
 
         // first wait on connection_rx should return some data and next wait none
         // for replicated receiver, router only checks native data. replicator receives nothing back
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.payload.len(), 0);
-        let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
-        assert_eq!(reply.payload.len(), 0);
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
 
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.payload[0].as_ref(), &[4, 5, 6]);
-        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
+        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
