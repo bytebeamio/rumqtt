@@ -1,3 +1,7 @@
+//! 3 node cluster for correctness and chaos testing
+//!
+//!
+
 use argh::FromArgs;
 use bytes::Bytes;
 use std::path::PathBuf;

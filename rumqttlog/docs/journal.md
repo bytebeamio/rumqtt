@@ -253,9 +253,12 @@ hes can have same packet ids
 TODO
 ---------------------------
 
-- Subscriber should pull again from correct offset after reconnecting to a different broker
-- When a connection/replicator requests data from invalid topic, router doesn't return anything. Links perform next poll
+-[ ] Subscriber should pull again from correct offset after reconnecting to a different broker
+-[X] When a connection/replicator requests data from invalid topic, router doesn't return anything. Links perform next poll
   only after receiving reply on previous request. Not replying anything might be a footgun
+-[ ] Limit number of connections
+-[ ] Limit connection rate
+-[ ] Limit number of topics in connection and router
  
 
 References

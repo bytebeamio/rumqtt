@@ -51,6 +51,7 @@ pub struct Router {
     topics_waiters: Vec<(ConnectionId, TopicsRequest)>,
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
+    /// Watermark 'n' implies data till n-1 is synced with the other node
     watermarks: HashMap<Topic, Vec<Offset>>,
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
@@ -112,18 +113,20 @@ impl Router {
         error!("Router stopped!!");
     }
 
-    fn handle_topics_request(&mut self, id: usize, request: TopicsRequest) {
+    fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
         let reply = self.extract_topics(&request);
         // register this id to wake up when there are new topics. Don't send a reply of empty topics
         if reply.topics.is_empty() {
             self.register_topics_waiter(id, request);
             return
         }
+
         self.reply_topics(id, reply);
     }
 
-    fn handle_data_request(&mut self, id: usize, request: DataRequest) {
+    fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
         let reply = if id < 10 {
+            self.update_watermarks(id, &request);
             self.extract_connection_data(&request)
         } else {
             self.extract_data(&request)
@@ -227,6 +230,17 @@ impl Router {
         }
 
         self.fresh_data_notification(id, &topic);
+    }
+
+    /// Updates replication watermarks
+    fn update_watermarks(&mut self, id: ConnectionId, request: &DataRequest) {
+        if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
+            watermarks.insert(id as usize, request.native_offset);
+        } else {
+            // Fresh topic only initialize with 0 offset. Updates during the next request
+            // Watermark 'n' implies data till n-1 is synced with the other node
+            self.watermarks.insert(request.topic.clone(), vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        }
     }
 
     /// Send notifications to links which registered them
@@ -646,6 +660,20 @@ mod test {
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
         assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
+    }
+
+    #[tokio::test(core_threads = 1)]
+    async fn replicated_data_updates_watermark_as_expected() {
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![7, 8, 9]);
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
+
+
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
