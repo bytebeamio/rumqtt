@@ -131,7 +131,20 @@ impl Router {
 
         let reply = match reply {
             Some(r) => r,
-            None => return
+            None => {
+                DataReply {
+                    done: true,
+                    topic: request.topic.clone(),
+                    native_segment: request.native_segment,
+                    native_offset: request.native_offset,
+                    native_count: 0,
+                    replica_segment: request.replica_segment,
+                    replica_offset: request.replica_offset,
+                    replica_count: 0,
+                    pkids: vec![],
+                    payload: vec![]
+                }
+            }
         };
 
         // This connection/linker is completely caught up with this topic.
@@ -252,16 +265,46 @@ impl Router {
 
             // Send reply to the link which registered this notification
             if link_id < 10 {
-                // routers should only extract connection data
-                if let Some(reply) = self.extract_connection_data(&request) {
-                    self.reply_data(link_id, reply);
-                }
-            } else {
-                if let Some(reply) = self.extract_data(&request) {
-                    self.reply_data(link_id, reply);
-                }
-            }
+                let reply = match self.extract_connection_data(&request) {
+                    Some(r) => r,
+                    None => {
+                        DataReply {
+                            done: true,
+                            topic: request.topic.clone(),
+                            native_segment: request.native_segment,
+                            native_offset: request.native_offset,
+                            native_count: 0,
+                            replica_segment: request.replica_segment,
+                            replica_offset: request.replica_offset,
+                            replica_count: 0,
+                            pkids: vec![],
+                            payload: vec![]
+                        }
+                    }
+                };
 
+                self.reply_data(link_id, reply);
+            } else {
+                let reply = match self.extract_data(&request) {
+                    Some(r) => r,
+                    None => {
+                        DataReply {
+                            done: true,
+                            topic: request.topic.clone(),
+                            native_segment: request.native_segment,
+                            native_offset: request.native_offset,
+                            native_count: 0,
+                            replica_segment: request.replica_segment,
+                            replica_offset: request.replica_offset,
+                            replica_count: 0,
+                            pkids: vec![],
+                            payload: vec![]
+                        }
+                    }
+                };
+
+                self.reply_data(link_id, reply);
+            }
 
             // NOTE:
             // ----------------------
@@ -477,13 +520,12 @@ mod test {
     use crate::{Config, Connection, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
     use bytes::Bytes;
     use std::time::Duration;
-    use tokio::sync::mpsc::error::TryRecvError;
     use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 
     #[tokio::test(core_threads = 1)]
     async fn router_doesnt_give_data_when_not_asked() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, _, _, connection_id, mut connection_rx) = setup().await;
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
@@ -494,7 +536,7 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn router_responds_with_empty_message_when_a_topic_is_caught_up() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, _, _, connection_id, mut connection_rx) = setup().await;
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
@@ -632,8 +674,8 @@ mod test {
         // for replicated receiver, router only checks native data. replicator receives nothing back
         let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
         assert_eq!(reply.payload.len(), 0);
-        let reply = wait_for_new_data(&mut replicator_rx).await;
-        assert!(reply.is_none());
+        let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
+        assert_eq!(reply.payload.len(), 0);
 
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
