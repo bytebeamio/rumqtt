@@ -129,6 +129,11 @@ impl Router {
             self.extract_data(&request)
         };
 
+        // If extraction fails due to some error/topic doesn't exist yet, reply with empty response.
+        // This ensures that links continue their polling of next topic during new subscriptions
+        // which doesn't have publishes yet
+        // The same logic doesn't exists while notifying new data because topic should always
+        // exists while sending notification due to new data
         let reply = match reply {
             Some(r) => r,
             None => {
@@ -258,53 +263,27 @@ impl Router {
 
         let replication_data = id < 10;
         for (link_id, request) in waiters {
-            // don't send replicated data notifications to replication link
-            if replication_data && link_id < 10 {
-                continue;
-            }
+            let reply = match link_id {
+                // don't extract new replicated data for replication links
+                0..=9 if replication_data => continue,
+                // extract new native connection data to be sent to replication link
+                0..=9 => match self.extract_connection_data(&request) {
+                    Some(reply) => reply,
+                    None => continue
+                }
+                // extract new replication data to be sent to connection link
+                _ if replication_data => match self.extract_replicated_data(&request) {
+                    Some(reply) => reply,
+                    None => continue
+                }
+                // extract new native connection data to be sent to connection link
+                _ => match self.extract_connection_data(&request){
+                    Some(reply) => reply,
+                    None => continue
+                }
+            };
 
-            // Send reply to the link which registered this notification
-            if link_id < 10 {
-                let reply = match self.extract_connection_data(&request) {
-                    Some(r) => r,
-                    None => {
-                        DataReply {
-                            done: true,
-                            topic: request.topic.clone(),
-                            native_segment: request.native_segment,
-                            native_offset: request.native_offset,
-                            native_count: 0,
-                            replica_segment: request.replica_segment,
-                            replica_offset: request.replica_offset,
-                            replica_count: 0,
-                            pkids: vec![],
-                            payload: vec![]
-                        }
-                    }
-                };
-
-                self.reply_data(link_id, reply);
-            } else {
-                let reply = match self.extract_data(&request) {
-                    Some(r) => r,
-                    None => {
-                        DataReply {
-                            done: true,
-                            topic: request.topic.clone(),
-                            native_segment: request.native_segment,
-                            native_offset: request.native_offset,
-                            native_count: 0,
-                            replica_segment: request.replica_segment,
-                            replica_offset: request.replica_offset,
-                            replica_count: 0,
-                            pkids: vec![],
-                            payload: vec![]
-                        }
-                    }
-                };
-
-                self.reply_data(link_id, reply);
-            }
+            self.reply_data(link_id, reply);
 
             // NOTE:
             // ----------------------
