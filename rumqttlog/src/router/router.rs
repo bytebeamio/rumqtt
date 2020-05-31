@@ -600,29 +600,16 @@ mod test {
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // Send request for new topics. Router should reply with new topics when there are any
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
-
-        // first wait on connection_rx should return some data and next wait none
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
-        assert!(wait_for_new_data(&mut connection_rx).await.is_none());
-
-        // first wait on replicator_rx should return some data and next wait none
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
-        assert!(wait_for_new_data(&mut replicator_rx).await.is_none());
-
-        // Send request for new topics. Router should reply with new topics when there are any
         new_data_request(connection_id, &mut router_tx, "hello/world", 1, 0);
         new_data_request(replicator_id, &mut router_tx, "hello/world", 1, 0);
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
+        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
+        assert_eq!(reply.payload.len(), 0);
+        let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
+        assert_eq!(reply.payload.len(), 0);
 
-        // write new data at offset 1
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
-        new_data_request(connection_id, &mut router_tx, "hello/world", 1, 0);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 1, 0);
         assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
         assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
     }
@@ -639,15 +626,17 @@ mod test {
         // Send request for new topics. Router should reply with new topics when there are any
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 1);
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 1);
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.payload.len(), 0);
-        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
 
-        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
 
         // first wait on connection_rx should return some data and next wait none
         // for replicated receiver, router only checks native data. replicator receives nothing back
+        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
+        assert_eq!(reply.payload.len(), 0);
+        let reply = wait_for_new_data(&mut replicator_rx).await;
+        assert!(reply.is_none());
+
+        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
+        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
         let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
         assert_eq!(reply.payload[0].as_ref(), &[4, 5, 6]);
         assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
