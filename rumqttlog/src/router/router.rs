@@ -123,7 +123,12 @@ impl Router {
     }
 
     fn handle_data_request(&mut self, id: usize, request: DataRequest) {
-        let reply = self.extract_data(&request);
+        let reply = if id < 10 {
+            self.extract_connection_data(&request)
+        } else {
+            self.extract_data(&request)
+        };
+
         let reply = match reply {
             Some(r) => r,
             None => return
@@ -501,7 +506,7 @@ mod test {
     }
 
     #[tokio::test(core_threads = 1)]
-    async fn connection_reads_existing_native_data_as_expected() {
+    async fn connection_reads_existing_native_data() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // write data from a native connection and read from connection
@@ -517,7 +522,7 @@ mod test {
     }
 
     #[tokio::test(core_threads = 1)]
-    async fn connection_reads_existing_replicated_data_as_expected() {
+    async fn connection_reads_existing_replicated_data() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // write data from a native connection and read from connection
@@ -533,7 +538,7 @@ mod test {
     }
 
     #[tokio::test(core_threads = 1)]
-    async fn replicator_reads_existing_native_data_as_expected() {
+    async fn replicator_reads_existing_native_data() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // write data from a native connection and read from connection
@@ -549,19 +554,21 @@ mod test {
     }
 
     #[tokio::test(core_threads = 1)]
-    async fn replicator_reads_existing_replicated_data_as_expected() {
+    async fn replicator_doesnt_read_existing_replicated_data() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // write data from a native connection and read from connection
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // new data request from the replicator
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
         let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
-        assert_eq!(reply.native_count, 0);
-        assert_eq!(reply.replica_count, 1);
-        assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
+        assert_eq!(reply.native_count, 1);
+        assert_eq!(reply.replica_count, 0);
+        assert_eq!(reply.payload[0].as_ref(), &[4, 5, 6]);
     }
 
     #[tokio::test(core_threads = 1)]
