@@ -10,7 +10,7 @@ pub use mqtt4bytes;
 pub use router::{Router, RouterInMessage, RouterOutMessage, DataRequest, DataReply, Connection};
 pub use storage::segment::Segment;
 pub use storage::Log;
-pub use tokio::sync::mpsc::{channel, Sender, Receiver};
+pub use async_channel::{bounded, Receiver, Sender};
 
 use std::path::PathBuf;
 

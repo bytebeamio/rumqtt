@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::{io, mem, thread};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use async_channel::{bounded, Sender, Receiver};
 
 use super::bytes::Bytes;
 use super::commitlog::CommitLog;
@@ -14,6 +14,7 @@ use crate::router::{
 use crate::Config;
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
+use futures_util::StreamExt;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -64,7 +65,7 @@ pub struct Router {
 /// relevant connection handle
 impl Router {
     pub fn new(config: Config) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
-        let (router_tx, router_rx) = channel(1000);
+        let (router_tx, router_rx) = bounded(1000);
         let commitlog = CommitLog::new(config.clone());
         let replicatedlog = CommitLog::new(config.clone());
         let topiclog = TopicLog::new();
@@ -99,7 +100,7 @@ impl Router {
         }
 
         // All these methods will handle state and errors
-        while let Some((id, data)) = self.router_rx.recv().await {
+        while let Some((id, data)) = self.router_rx.next().await {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
@@ -163,7 +164,7 @@ impl Router {
         self.reply_data(id, reply);
     }
 
-    fn handle_new_connection(&mut self, mut connection: Connection) {
+    fn handle_new_connection(&mut self, connection: Connection) {
         let id = match &connection.conn {
             ConnectionType::Replicator(id) => *id,
             ConnectionType::Device(did) => {
@@ -498,7 +499,7 @@ mod test {
     use crate::{Config, Connection, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
     use bytes::Bytes;
     use std::time::Duration;
-    use tokio::sync::mpsc::{channel, Receiver, Sender};
+    use async_channel::{bounded, Receiver, Sender};
 
 
     #[tokio::test(core_threads = 1)]
@@ -657,13 +658,13 @@ mod test {
         ConnectionId,
         Receiver<RouterOutMessage>,
     ) {
-        let (router, mut router_tx) = Router::new(Config::default());
+        let (router, router_tx) = Router::new(Config::default());
         tokio::task::spawn(async move {
             let mut router = router;
             router.start().await;
         });
 
-        let (link_tx, mut replicator_rx) = channel(4);
+        let (link_tx, replicator_rx) = bounded(4);
         let connection = Connection {
             conn: ConnectionType::Replicator(0),
             handle: link_tx,
@@ -677,7 +678,7 @@ mod test {
             o => panic!("Unexpected connection ack = {:?}", o),
         };
 
-        let (link_tx, mut connection_rx) = channel(4);
+        let (link_tx, connection_rx) = bounded(4);
         let connection = Connection {
             conn: ConnectionType::Device("blah".to_string()),
             handle: link_tx,

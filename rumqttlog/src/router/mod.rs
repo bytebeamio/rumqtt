@@ -10,7 +10,7 @@ pub use router::Router;
 
 use self::bytes::Bytes;
 use std::fmt;
-use tokio::sync::mpsc::Sender;
+use async_channel::Sender;
 
 /// Messages going into router
 #[derive(Debug)]

@@ -7,11 +7,11 @@ mod codec;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time;
 use tokio_util::codec::Framed;
 use tokio::stream::StreamExt;
+use async_channel::{bounded, Sender, Receiver};
 
 use link::Link;
 use std::collections::HashMap;
@@ -50,7 +50,7 @@ pub struct Mesh {
 
 impl Mesh {
     pub(crate) fn new(config: Config, router_tx: Sender<(ConnectionId, RouterInMessage)>) -> Mesh {
-        let (supervisor_tx, supervisor_rx) = channel(100);
+        let (supervisor_tx, supervisor_rx) = bounded(100);
         Mesh {
             config,
             router_tx,
@@ -130,7 +130,7 @@ impl Mesh {
     }
 
     async fn start_link(&mut self, is_client: bool, id: u8, host: &str, port: u16) {
-        let (connections_tx, connections_rx) = channel(100);
+        let (connections_tx, connections_rx) = bounded(100);
         let router_tx = self.router_tx.clone();
         let supervisor_tx = self.supervisor_tx.clone();
         let addr = format!("{}:{}", host, port);

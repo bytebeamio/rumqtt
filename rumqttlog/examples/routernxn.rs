@@ -1,5 +1,5 @@
 use std::time::Instant;
-use rumqttlog::{channel, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
+use rumqttlog::{bounded, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
 use argh::FromArgs;
 use std::thread;
 use rumqttlog::router::{Connection, Data, ConnectionAck};
@@ -70,13 +70,13 @@ async fn start_router(mut router: Router) {
     router.start().await;
 }
 
-async fn write(commandline: &CommandLine, mut tx: Sender<(usize, RouterInMessage)>) {
+async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) {
     // 10K packets of 1K size each. 10M total data
     let data = vec![Bytes::from(vec![1u8; commandline.payload_size]); commandline.count];
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
 
-    let (this_tx, mut this_rx) = channel(1000);
+    let (this_tx, this_rx) = bounded(1000);
     let connection = Connection::new("writer-1", this_tx);
     let message = (0, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();
@@ -108,8 +108,8 @@ async fn write(commandline: &CommandLine, mut tx: Sender<(usize, RouterInMessage
     common::report("write.pb", (commandline.count * commandline.payload_size) as u64, start, guard);
 }
 
-async fn read(commandline: &CommandLine, id: usize, mut tx: Sender<(usize, RouterInMessage)>) -> usize {
-    let (this_tx, mut this_rx) = channel(100);
+async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInMessage)>) -> usize {
+    let (this_tx, this_rx) = bounded(100);
     let connection = Connection::new(&format!("{}", id), this_tx);
     let message = (id, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();

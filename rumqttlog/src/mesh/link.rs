@@ -1,13 +1,12 @@
 use futures_util::sink::SinkExt;
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::mpsc::error::SendError;
 
 use std::io;
 use std::time::Duration;
 
+use async_channel::{bounded, Sender, Receiver, SendError, RecvError};
 use futures_util::StreamExt;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time;
 use tokio_util::codec::Framed;
 use bytes::BytesMut;
@@ -22,7 +21,7 @@ use crate::mesh::ConnectionId;
 pub enum LinkError {
     Io(#[from] io::Error),
     Send(#[from] SendError<(usize, RouterInMessage)>),
-    StreamDone,
+    Recv(#[from] RecvError),
 }
 
 macro_rules! try_loop {
@@ -134,7 +133,7 @@ impl Link {
     /// Links and connections communicate with router with a pull. This allows router to just reply.
     /// This ensured router never fills links/connections channel and take care of error handling
     pub async fn start<S: IO>(&mut self, mut connections_rx: Receiver<Framed<S, MeshCodec>>) -> Result<(), LinkError> {
-        let (mut router_tx, mut link_rx) = self.extract_handles();
+        let (router_tx, link_rx) = self.extract_handles();
         let mut framed = self.connect(&mut connections_rx).await;
 
         self.ask_for_more_topics().await.unwrap();
@@ -198,8 +197,7 @@ impl Link {
                     }
                 }
                 o = link_rx.recv() => {
-                    let o = o.ok_or(LinkError::StreamDone)?;
-                    match o {
+                    match o? {
                         RouterOutMessage::ConnectionAck(ack) => {
                             info!("Connection status = {:?}", ack);
                         }
@@ -266,7 +264,7 @@ impl Link {
 }
 
 async fn register_with_router(id: u8, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) -> Receiver<RouterOutMessage> {
-    let (link_tx, link_rx) = channel(4);
+    let (link_tx, link_rx) = bounded(4);
     let connection = Connection {
         conn: ConnectionType::Replicator(id as usize),
         handle: link_tx,

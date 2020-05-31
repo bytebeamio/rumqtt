@@ -38,7 +38,7 @@ async fn main() {
     config.dir = config.dir.join(&id);
     let _ = fs::remove_dir_all(&config.dir);
 
-    let (router, mut router_tx) = Router::new(config);
+    let (router, router_tx) = Router::new(config);
 
     // spawn the router in a separate system thread
     thread::spawn(move || run_router(router));
