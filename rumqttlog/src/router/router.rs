@@ -113,8 +113,7 @@ impl Router {
 
     fn handle_topics_request(&mut self, id: usize, request: TopicsRequest) {
         let reply = self.extract_topics(&request);
-        // register this id to wake up when there are new topics.
-        // don't send a reply of empty topics
+        // register this id to wake up when there are new topics. Don't send a reply of empty topics
         if reply.topics.is_empty() {
             self.register_topics_waiter(id, request);
             return
@@ -480,7 +479,7 @@ impl Router {
         let connection = match self.connections.get_mut(id).unwrap() {
             Some(c) => c,
             None => {
-                error!("2. Invalid id = {:?}", id);
+                error!("3. Invalid id = {:?}", id);
                 return;
             }
         };

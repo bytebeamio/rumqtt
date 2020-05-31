@@ -43,10 +43,7 @@ impl CommitLog {
     ) -> io::Result<Option<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)>> {
         let log = match self.logs.get_mut(topic) {
             Some(l) => l,
-            None => {
-                error!("Asking for non existent topic = {}", topic);
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
 
         let (done, segment, offset, total_size, ids, data) = log.readv(segment, offset, size)?;

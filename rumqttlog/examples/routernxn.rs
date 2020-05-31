@@ -16,7 +16,7 @@ struct CommandLine {
     #[argh(option, short = 'p', default = "1024")]
     payload_size: usize,
     /// number of messages
-    #[argh(option, short = 'n', default = "1*1024*1024")]
+    #[argh(option, short = 'n', default = "1*1000*1000")]
     count: usize,
     /// maximum segment size
     #[argh(option, short = 's', default = "1*1024*1024")]
@@ -31,7 +31,7 @@ struct CommandLine {
 
 #[tokio::main(core_threads=1)]
 async fn main() {
-    // pretty_env_logger::init();
+    pretty_env_logger::init();
     let commandline: CommandLine = argh::from_env();
 
     let config = Config {
@@ -75,12 +75,36 @@ async fn write(commandline: &CommandLine, mut tx: Sender<(usize, RouterInMessage
     let data = vec![Bytes::from(vec![1u8; commandline.payload_size]); commandline.count];
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
-    for payload in data.into_iter() {
-        let data = Data { topic: "hello/world".to_owned(), pkid: 0, payload };
-        let message = (100, RouterInMessage::Data(data));
-        tx.send(message).await.unwrap();
-    }
 
+    let (this_tx, mut this_rx) = channel(1000);
+    let connection = Connection::new("writer-1", this_tx);
+    let message = (0, RouterInMessage::Connect(connection));
+    tx.send(message).await.unwrap();
+
+    let id = match this_rx.recv().await.unwrap() {
+        RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
+        message => panic!("Not connection ack = {:?}", message)
+    };
+
+    for (i, payload) in data.into_iter().enumerate() {
+        let data = Data { topic: "hello/world".to_owned(), pkid: 0, payload };
+        let message = (id, RouterInMessage::Data(data));
+        tx.send(message).await.unwrap();
+
+        // Listen for acks in batches to fix send/recv synchronization stalls
+        let count = i + 1;
+        if count % 1000 == 0 {
+            for _ in 0..1000 {
+                if let RouterOutMessage::DataAck(_ack) = this_rx.recv().await.unwrap() {
+                    continue
+                } else {
+                    panic!("Expecting Ack");
+                }
+            }
+        }
+
+    }
     common::report("write.pb", (commandline.count * commandline.payload_size) as u64, start, guard);
 }
 
