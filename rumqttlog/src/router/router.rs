@@ -251,9 +251,17 @@ impl Router {
             }
 
             // Send reply to the link which registered this notification
-            if let Some(reply) = self.extract_data(&request) {
-                self.reply_data(link_id, reply);
+            if link_id < 10 {
+                // routers should only extract connection data
+                if let Some(reply) = self.extract_connection_data(&request) {
+                    self.reply_data(link_id, reply);
+                }
+            } else {
+                if let Some(reply) = self.extract_data(&request) {
+                    self.reply_data(link_id, reply);
+                }
             }
+
 
             // NOTE:
             // ----------------------
@@ -492,69 +500,21 @@ mod test {
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
         let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
         assert_eq!(reply.native_offset, 1);
         assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
         assert_eq!(reply.payload[1].as_ref(), &[4, 5, 6]);
 
 
-        new_data_request(connection_id, &mut router_tx, "hello/world", 2);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 2, 0);
         let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
         assert_eq!(reply.native_count, 0);
         assert_eq!(reply.payload.len(), 0);
     }
 
     #[tokio::test(core_threads = 1)]
-    async fn connection_reads_existing_native_data() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
-
-        // write data from a native connection and read from connection
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-
-        // new data request
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.native_count, 1);
-        assert_eq!(reply.replica_count, 0);
-        assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
-    }
-
-    #[tokio::test(core_threads = 1)]
-    async fn connection_reads_existing_replicated_data() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
-
-        // write data from a native connection and read from connection
-        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
-
-        // new data request from the replicator
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.native_count, 0);
-        assert_eq!(reply.replica_count, 1);
-        assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
-    }
-
-    #[tokio::test(core_threads = 1)]
-    async fn replicator_reads_existing_native_data() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
-
-        // write data from a native connection and read from connection
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-
-        // new data request
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
-        let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
-        assert_eq!(reply.native_count, 1);
-        assert_eq!(reply.replica_count, 0);
-        assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
-    }
-
-    #[tokio::test(core_threads = 1)]
-    async fn replicator_doesnt_read_existing_replicated_data() {
+    async fn connection_reads_existing_native_and_replicated_data() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // write data from a native connection and read from connection
@@ -564,7 +524,26 @@ mod test {
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // new data request from the replicator
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
+        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
+        assert_eq!(reply.native_count, 1);
+        assert_eq!(reply.replica_count, 1);
+        assert_eq!(reply.payload[0].as_ref(), &[4, 5, 6]);
+        assert_eq!(reply.payload[1].as_ref(), &[1, 2, 3]);
+    }
+
+    #[tokio::test(core_threads = 1)]
+    async fn replicator_reads_existing_native_data_but_not_replicated_data() {
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+
+        // write data from a native connection and read from connection
+        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
+        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
+        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
+        assert!(wait_for_ack(&mut connection_rx).await.is_some());
+
+        // new data request from the replicator
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
         let reply = wait_for_new_data(&mut replicator_rx).await.unwrap();
         assert_eq!(reply.native_count, 1);
         assert_eq!(reply.replica_count, 0);
@@ -621,8 +600,8 @@ mod test {
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // Send request for new topics. Router should reply with new topics when there are any
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
 
         // first wait on connection_rx should return some data and next wait none
         assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
@@ -633,8 +612,8 @@ mod test {
         assert!(wait_for_new_data(&mut replicator_rx).await.is_none());
 
         // Send request for new topics. Router should reply with new topics when there are any
-        new_data_request(connection_id, &mut router_tx, "hello/world", 1);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 1);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 1, 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 1, 0);
         assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
         assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
 
@@ -642,8 +621,8 @@ mod test {
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
-        new_data_request(connection_id, &mut router_tx, "hello/world", 1);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 1);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 1, 0);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 1, 0);
         assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
         assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
     }
@@ -651,7 +630,6 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_replicator_should_notify_only_connection() {
-        // pretty_env_logger::init();
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // Send new data from connection to router to be written to commitlog
@@ -659,13 +637,20 @@ mod test {
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
 
         // Send request for new topics. Router should reply with new topics when there are any
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0);
-        new_data_request(replicator_id, &mut router_tx, "hello/world", 0);
+        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 1);
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 1);
+        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
+        assert_eq!(reply.payload.len(), 0);
+        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
+
+        write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
+        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
 
         // first wait on connection_rx should return some data and next wait none
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[1, 2, 3]);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
-
+        // for replicated receiver, router only checks native data. replicator receives nothing back
+        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
+        assert_eq!(reply.payload[0].as_ref(), &[4, 5, 6]);
+        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
@@ -754,7 +739,8 @@ mod test {
         id: usize,
         router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
         topic: &str,
-        offset: u64
+        native_offset: u64,
+        replica_offset: u64,
     ) {
         let message = (
             id,
@@ -762,8 +748,8 @@ mod test {
                 topic: topic.to_string(),
                 native_segment: 0,
                 replica_segment: 0,
-                native_offset: offset,
-                replica_offset: 0,
+                native_offset,
+                replica_offset,
                 size: 100 * 1024
             }),
         );

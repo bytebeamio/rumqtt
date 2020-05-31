@@ -243,11 +243,19 @@ hes can have same packet ids
 - The most approachable 1st step is to probably achieve zero copy for QoS 1 and don't bother too much about optimizing 
   QoS 0 and 2 as they step into each other's legs. Also QoS 1 is the most used one
   
+31/May/2020
+---------------------------
+
+- Link can request data for all the topics in 1 DataRequest. This might cause fairness issues for other connections 
+  it's handle a lot of topics
+  
   
 TODO
 ---------------------------
 
 - Subscriber should pull again from correct offset after reconnecting to a different broker
+- When a connection/replicator requests data from invalid topic, router doesn't return anything. Links perform next poll
+  only after receiving reply on previous request. Not replying anything might be a footgun
  
 
 References
