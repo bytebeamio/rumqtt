@@ -31,7 +31,7 @@ struct CommandLine {
 
 #[tokio::main(core_threads=1)]
 async fn main() {
-    pretty_env_logger::init();
+    // pretty_env_logger::init();
     let commandline: CommandLine = argh::from_env();
 
     let config = Config {
@@ -119,6 +119,7 @@ async fn read(commandline: &CommandLine, id: usize, mut tx: Sender<(usize, Route
         }
     }
 
+    println!("Id = {}, Total size = {}", id, total_size);
     total_size
 }
 
