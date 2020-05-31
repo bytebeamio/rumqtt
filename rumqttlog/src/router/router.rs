@@ -105,66 +105,12 @@ impl Router {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
+                RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
-                RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request)
             }
         }
 
         error!("Router stopped!!");
-    }
-
-    fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
-        let reply = self.extract_topics(&request);
-        // register this id to wake up when there are new topics. Don't send a reply of empty topics
-        if reply.topics.is_empty() {
-            self.register_topics_waiter(id, request);
-            return
-        }
-
-        self.reply_topics(id, reply);
-    }
-
-    fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
-        let reply = if id < 10 {
-            self.update_watermarks(id, &request);
-            self.extract_connection_data(&request)
-        } else {
-            self.extract_data(&request)
-        };
-
-        // If extraction fails due to some error/topic doesn't exist yet, reply with empty response.
-        // This ensures that links continue their polling of next topic during new subscriptions
-        // which doesn't have publishes yet
-        // The same logic doesn't exists while notifying new data because topic should always
-        // exists while sending notification due to new data
-        let reply = match reply {
-            Some(r) => r,
-            None => {
-                DataReply {
-                    done: true,
-                    topic: request.topic.clone(),
-                    native_segment: request.native_segment,
-                    native_offset: request.native_offset,
-                    native_count: 0,
-                    replica_segment: request.replica_segment,
-                    replica_offset: request.replica_offset,
-                    replica_count: 0,
-                    pkids: vec![],
-                    payload: vec![]
-                }
-            }
-        };
-
-        // This connection/linker is completely caught up with this topic.
-        // Add this connection/linker into waiters list of this topic.
-        // Note that we also send empty reply to the link with uses this to mark
-        // this topic as a caught up to not make a request again while iterating
-        // through its list of topics. Not sending an empty response will block
-        // the 'link' from polling next topic
-        if reply.payload.is_empty() {
-            self.register_data_waiter(id, request);
-        }
-        self.reply_data(id, reply);
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {
@@ -230,6 +176,60 @@ impl Router {
         }
 
         self.fresh_data_notification(id, &topic);
+    }
+
+    fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
+        let reply = self.extract_topics(&request);
+        // register this id to wake up when there are new topics. Don't send a reply of empty topics
+        if reply.topics.is_empty() {
+            self.register_topics_waiter(id, request);
+            return
+        }
+
+        self.reply_topics(id, reply);
+    }
+
+    fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
+        let reply = if id < 10 {
+            self.update_watermarks(id, &request);
+            self.extract_connection_data(&request)
+        } else {
+            self.extract_data(&request)
+        };
+
+        // If extraction fails due to some error/topic doesn't exist yet, reply with empty response.
+        // This ensures that links continue their polling of next topic during new subscriptions
+        // which doesn't have publishes yet
+        // The same logic doesn't exists while notifying new data because topic should always
+        // exists while sending notification due to new data
+        let reply = match reply {
+            Some(r) => r,
+            None => {
+                DataReply {
+                    done: true,
+                    topic: request.topic.clone(),
+                    native_segment: request.native_segment,
+                    native_offset: request.native_offset,
+                    native_count: 0,
+                    replica_segment: request.replica_segment,
+                    replica_offset: request.replica_offset,
+                    replica_count: 0,
+                    pkids: vec![],
+                    payload: vec![]
+                }
+            }
+        };
+
+        // This connection/linker is completely caught up with this topic.
+        // Add this connection/linker into waiters list of this topic.
+        // Note that we also send empty reply to the link with uses this to mark
+        // this topic as a caught up to not make a request again while iterating
+        // through its list of topics. Not sending an empty response will block
+        // the 'link' from polling next topic
+        if reply.payload.is_empty() {
+            self.register_data_waiter(id, request);
+        }
+        self.reply_data(id, reply);
     }
 
     /// Updates replication watermarks
@@ -333,6 +333,22 @@ impl Router {
         }
     }
 
+    /// Acknowledge connection after the data is written to commitlog
+    fn ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("3. Invalid id = {:?}", id);
+                return;
+            }
+        };
+
+        let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
+        if let Err(e) = connection.handle.try_send(ack) {
+            error!("Failed to topics refresh reply. Error = {:?}", e);
+        }
+    }
+
     fn extract_topics(&mut self, request: &TopicsRequest) -> TopicsReply {
         let o = self.topiclog.read(request.offset, request.count);
         let reply = TopicsReply {
@@ -344,26 +360,6 @@ impl Router {
         reply
     }
 
-    /// Sends topics to link
-    fn reply_topics(&mut self, id: ConnectionId, reply: TopicsReply) {
-        let connection = match self.connections.get_mut(id).unwrap() {
-            Some(c) => c,
-            None => {
-                error!("2. Invalid id = {:?}", id);
-                return;
-            }
-        };
-
-        let reply = RouterOutMessage::TopicsReply(reply);
-        if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to topics refresh reply. Error = {:?}", e);
-        }
-    }
-
-    fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
-        let request = (id.to_owned(), request);
-        self.topics_waiters.push(request);
-    }
 
     fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply>{
         let topic = &request.topic;
@@ -451,6 +447,22 @@ impl Router {
         }
     }
 
+    /// Sends topics to link
+    fn reply_topics(&mut self, id: ConnectionId, reply: TopicsReply) {
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("2. Invalid id = {:?}", id);
+                return;
+            }
+        };
+
+        let reply = RouterOutMessage::TopicsReply(reply);
+        if let Err(e) = connection.handle.try_send(reply) {
+            error!("Failed to topics refresh reply. Error = {:?}", e);
+        }
+    }
+
     /// Sends data that connection/replicator asked for
     fn reply_data(&mut self, id: ConnectionId, reply: DataReply) {
         debug!(
@@ -475,6 +487,11 @@ impl Router {
         }
     }
 
+    fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
+        let request = (id.to_owned(), request);
+        self.topics_waiters.push(request);
+    }
+
     /// Register data waiter
     fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
         let topic = request.topic.clone();
@@ -486,22 +503,6 @@ impl Router {
             let mut waiters = Vec::new();
             waiters.push(request);
             self.data_waiters.insert(topic, waiters);
-        }
-    }
-
-    /// Acknowledge connection after the data is written to commitlog
-    fn ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
-        let connection = match self.connections.get_mut(id).unwrap() {
-            Some(c) => c,
-            None => {
-                error!("3. Invalid id = {:?}", id);
-                return;
-            }
-        };
-
-        let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
-        if let Err(e) = connection.handle.try_send(ack) {
-            error!("Failed to topics refresh reply. Error = {:?}", e);
         }
     }
 }
@@ -664,7 +665,7 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn replicated_data_updates_watermark_as_expected() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
