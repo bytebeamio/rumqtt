@@ -189,7 +189,8 @@ impl Router {
             return
         }
 
-        self.reply_topics(id, reply);
+        let reply = RouterOutMessage::TopicsReply(reply);
+        self.reply(id, reply);
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
@@ -232,7 +233,10 @@ impl Router {
         if reply.payload.is_empty() {
             self.register_data_waiter(id, request);
         }
-        self.reply_data(id, reply);
+
+
+        let reply = RouterOutMessage::DataReply(reply);
+        self.reply(id, reply);
     }
 
     pub fn handle_watermarks_request(&mut self, id: ConnectionId, request: WatermarksRequest) {
@@ -248,7 +252,8 @@ impl Router {
                 watermarks: watermarks.clone(),
             };
 
-            self.reply_watermarks(id, reply);
+            let reply = RouterOutMessage::WatermarksReply(reply);
+            self.reply(id, reply);
         }
     }
 
@@ -279,7 +284,8 @@ impl Router {
 
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request);
-            self.reply_topics(link_id, reply);
+            let reply = RouterOutMessage::TopicsReply(reply);
+            self.reply(link_id, reply);
 
             // NOTE:
             // ----------------------
@@ -318,7 +324,9 @@ impl Router {
                 }
             };
 
-            self.reply_data(link_id, reply);
+
+            let reply = RouterOutMessage::DataReply(reply);
+            self.reply(link_id, reply);
 
             // NOTE:
             // ----------------------
@@ -340,7 +348,8 @@ impl Router {
                 watermarks: self.watermarks.get(topic).unwrap().clone(),
             };
 
-            self.reply_watermarks(link_id, reply);
+            let reply = RouterOutMessage::WatermarksReply(reply);
+            self.reply(link_id, reply);
         }
     }
 
@@ -484,61 +493,6 @@ impl Router {
         }
     }
 
-    /// Sends topics to link
-    fn reply_topics(&mut self, id: ConnectionId, reply: TopicsReply) {
-        let connection = match self.connections.get_mut(id).unwrap() {
-            Some(c) => c,
-            None => {
-                error!("2. Invalid id = {:?}", id);
-                return;
-            }
-        };
-
-        let reply = RouterOutMessage::TopicsReply(reply);
-        if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to topics refresh reply. Error = {:?}", e);
-        }
-    }
-
-    /// Sends data that connection/replicator asked for
-    fn reply_data(&mut self, id: ConnectionId, reply: DataReply) {
-        debug!(
-            "Data reply.   Topic = {}, Segment = {}, offset = {}, size = {}",
-            reply.topic,
-            reply.native_segment,
-            reply.native_offset,
-            reply.payload.len(),
-        );
-
-        let connection = match self.connections.get_mut(id).unwrap() {
-            Some(c) => c,
-            None => {
-                error!("1. Invalid id = {:?}", id);
-                return;
-            }
-        };
-
-        let reply = RouterOutMessage::DataReply(reply);
-        if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to data reply. Error = {:?}", e.to_string());
-        }
-    }
-
-    fn reply_watermarks(&mut self, id: ConnectionId, reply: WatermarksReply) {
-        let connection = match self.connections.get_mut(id).unwrap() {
-            Some(c) => c,
-            None => {
-                error!("4. Invalid id = {:?}", id);
-                return;
-            }
-        };
-
-        let reply = RouterOutMessage::WatermarksReply(reply);
-        if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to send watermarks reply. Error = {:?}", e.to_string());
-        }
-    }
-
     fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
         let request = (id.to_owned(), request);
         self.topics_waiters.push(request);
@@ -568,6 +522,21 @@ impl Router {
             let mut waiters = Vec::new();
             waiters.push(request);
             self.watermark_waiters.insert(topic, waiters);
+        }
+    }
+
+    /// Send message to link
+    fn reply(&mut self, id: ConnectionId, reply: RouterOutMessage) {
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("Invalid id while replying = {:?}", id);
+                return;
+            }
+        };
+
+        if let Err(e) = connection.handle.try_send(reply) {
+            error!("Failed to topics refresh reply. Error = {:?}", e);
         }
     }
 }
