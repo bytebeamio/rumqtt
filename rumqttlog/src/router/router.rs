@@ -49,7 +49,7 @@ pub struct Router {
     /// Waiters on watermark updates
     /// Whenever a topic is replicated, it's watermark is updated till the offset
     /// that replication has happened
-    watermark_waiters: HashMap<Topic, Vec<(ConnectionId, WatermarksRequest)>>,
+    watermark_waiters: HashMap<Topic, Vec<ConnectionId>>,
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
     /// Watermark 'n' implies data till n-1 is synced with the other node
@@ -337,12 +337,12 @@ impl Router {
     }
 
     fn fresh_watermarks_notification(&mut self, topic: &str) {
-        let waiters = match self.data_waiters.remove(topic) {
+        let waiters = match self.watermark_waiters.remove(topic) {
             Some(w) => w,
             None => return,
         };
 
-        for (link_id, request) in waiters {
+        for link_id in waiters {
             let reply = WatermarksReply {
                 topic: topic.to_owned(),
                 watermarks: self.watermarks.get(topic).unwrap().clone(),
@@ -506,22 +506,17 @@ impl Router {
         if let Some(waiters) = self.data_waiters.get_mut(&topic) {
             waiters.push(request);
         } else {
-            let mut waiters = Vec::new();
-            waiters.push(request);
+            let waiters = vec![request];
             self.data_waiters.insert(topic, waiters);
         }
     }
 
     fn register_watermarks_waiter(&mut self, id: ConnectionId, request: WatermarksRequest) {
-        let topic = request.topic.clone();
-        let request = (id.to_owned(), request);
-
-        if let Some(waiters) = self.watermark_waiters.get_mut(&topic) {
-            waiters.push(request);
+        if let Some(waiters) = self.watermark_waiters.get_mut(&request.topic) {
+            waiters.push(id);
         } else {
-            let mut waiters = Vec::new();
-            waiters.push(request);
-            self.watermark_waiters.insert(topic, waiters);
+            let waiters = vec![id];
+            self.watermark_waiters.insert(request.topic, waiters);
         }
     }
 
