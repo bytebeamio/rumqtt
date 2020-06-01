@@ -7,10 +7,7 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{
-    ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
-    TopicsRequest,
-};
+use crate::router::{ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, WatermarksRequest, WatermarksReply};
 use crate::Config;
 use thiserror::Error;
 use tokio::sync::mpsc::error::TrySendError;
@@ -49,6 +46,10 @@ pub struct Router {
     data_waiters: HashMap<Topic, Vec<(ConnectionId, DataRequest)>>,
     /// Waiters on new topics
     topics_waiters: Vec<(ConnectionId, TopicsRequest)>,
+    /// Waiters on watermark updates
+    /// Whenever a topic is replicated, it's watermark is updated till the offset
+    /// that replication has happened
+    watermark_waiters: HashMap<Topic, Vec<(ConnectionId, WatermarksRequest)>>,
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
     /// Watermark 'n' implies data till n-1 is synced with the other node
@@ -79,6 +80,7 @@ impl Router {
             connections: vec![None; 1000],
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
+            watermark_waiters: HashMap::new(),
             watermarks: HashMap::new(),
             router_rx,
             router_tx: router_tx.clone(),
@@ -107,6 +109,7 @@ impl Router {
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
+                RouterInMessage::WatermarksRequest(request) => self.handle_watermarks_request(id, request),
             }
         }
 
@@ -232,10 +235,28 @@ impl Router {
         self.reply_data(id, reply);
     }
 
+    pub fn handle_watermarks_request(&mut self, id: ConnectionId, request: WatermarksRequest) {
+        if let Some(watermarks) = self.watermarks.get(&request.topic) {
+            let caught_up = watermarks == &request.watermarks;
+            if caught_up {
+                self.register_watermarks_waiter(id, request);
+                return
+            }
+
+            let reply = WatermarksReply {
+                topic: request.topic.clone(),
+                watermarks: watermarks.clone(),
+            };
+
+            self.reply_watermarks(id, reply);
+        }
+    }
+
     /// Updates replication watermarks
     fn update_watermarks(&mut self, id: ConnectionId, request: &DataRequest) {
         if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
             watermarks.insert(id as usize, request.native_offset);
+            self.fresh_watermarks_notification(&request.topic);
         } else {
             // Fresh topic only initialize with 0 offset. Updates during the next request
             // Watermark 'n' implies data till n-1 is synced with the other node
@@ -304,6 +325,22 @@ impl Router {
             // When the reply is empty don't register notification on behalf of the link.
             // This will cause the channel to be full. Register the notification only when
             // link has made the request and reply doesn't contain any data
+        }
+    }
+
+    fn fresh_watermarks_notification(&mut self, topic: &str) {
+        let waiters = match self.data_waiters.remove(topic) {
+            Some(w) => w,
+            None => return,
+        };
+
+        for (link_id, request) in waiters {
+            let reply = WatermarksReply {
+                topic: topic.to_owned(),
+                watermarks: self.watermarks.get(topic).unwrap().clone(),
+            };
+
+            self.reply_watermarks(link_id, reply);
         }
     }
 
@@ -487,6 +524,21 @@ impl Router {
         }
     }
 
+    fn reply_watermarks(&mut self, id: ConnectionId, reply: WatermarksReply) {
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("4. Invalid id = {:?}", id);
+                return;
+            }
+        };
+
+        let reply = RouterOutMessage::WatermarksReply(reply);
+        if let Err(e) = connection.handle.try_send(reply) {
+            error!("Failed to send watermarks reply. Error = {:?}", e.to_string());
+        }
+    }
+
     fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
         let request = (id.to_owned(), request);
         self.topics_waiters.push(request);
@@ -503,6 +555,19 @@ impl Router {
             let mut waiters = Vec::new();
             waiters.push(request);
             self.data_waiters.insert(topic, waiters);
+        }
+    }
+
+    fn register_watermarks_waiter(&mut self, id: ConnectionId, request: WatermarksRequest) {
+        let topic = request.topic.clone();
+        let request = (id.to_owned(), request);
+
+        if let Some(waiters) = self.watermark_waiters.get_mut(&topic) {
+            waiters.push(request);
+        } else {
+            let mut waiters = Vec::new();
+            waiters.push(request);
+            self.watermark_waiters.insert(topic, waiters);
         }
     }
 }

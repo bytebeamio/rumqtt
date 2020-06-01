@@ -23,6 +23,8 @@ pub enum RouterInMessage {
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
+    /// Watermarks request
+    WatermarksRequest(WatermarksRequest),
 }
 
 /// Messages coming from router
@@ -36,6 +38,8 @@ pub enum RouterOutMessage {
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
+    /// Watermarks reply
+    WatermarksReply(WatermarksReply),
 }
 
 
@@ -121,6 +125,18 @@ pub struct TopicsReply {
     pub offset: usize,
     /// list of new topics
     pub topics: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct WatermarksRequest {
+    topic: String,
+    watermarks: Vec<u64>
+}
+
+#[derive(Debug)]
+pub struct WatermarksReply {
+    topic: String,
+    watermarks: Vec<u64>
 }
 
 #[derive(Debug, Clone)]
