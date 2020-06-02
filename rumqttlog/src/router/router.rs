@@ -27,7 +27,7 @@ type Offset = u64;
 pub struct Router {
     config: Config,
     /// Commit log by topic. Commit log stores all the of given topic. The
-    /// details are very similar to what kafka does. Who know, we might
+    /// details are very similar to what kafka does. Who knows, we might
     /// even make the broker kafka compatible and directly feed it to databases
     commitlog: CommitLog,
     /// Messages directly received from connections should be separated from messages
@@ -369,6 +369,7 @@ impl Router {
                 }
             }
         } else {
+            debug!("Receiving connection data from {}, topic = {}", id, topic);
             match self.commitlog.append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {
