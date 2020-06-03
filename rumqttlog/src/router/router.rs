@@ -183,10 +183,10 @@ impl Router {
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
         let reply = self.extract_topics(&request);
-        // register this id to wake up when there are new topics. Don't send a reply of empty topics
+        // register this id to wake up when there are new topics and send an empty reply
+        // for link's tracker to proceed with next poll
         if reply.topics.is_empty() {
             self.register_topics_waiter(id, request);
-            return
         }
 
         let reply = RouterOutMessage::TopicsReply(reply);
@@ -397,11 +397,10 @@ impl Router {
     }
 
     fn extract_topics(&mut self, request: &TopicsRequest) -> TopicsReply {
-        let o = self.topiclog.read(request.offset, request.count);
+        let o = self.topiclog.readv(request.offset, request.count);
         let reply = TopicsReply {
-            done: o.0,
-            offset: o.1,
-            topics: o.2,
+            offset: o.0,
+            topics: o.1,
         };
 
         reply
@@ -618,6 +617,7 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_connection_should_notify_replicator_and_connection() {
+        pretty_env_logger::init();
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // Send request for new topics. Router should reply with new topics when there are any
@@ -625,7 +625,8 @@ mod test {
         new_topics_request(connection_id, &mut router_tx);
 
         // see if routers replys with topics
-        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
+        assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics.len(), 0);
+        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics.len(), 0);
 
         // Send new data to router to be written to commitlog
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
@@ -645,7 +646,8 @@ mod test {
         new_topics_request(connection_id, &mut router_tx);
 
         // see if routers replys with topics
-        assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
+        assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics.len(), 0);
+        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics.len(), 0);
 
         // Send new data to router to be written to commitlog
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);

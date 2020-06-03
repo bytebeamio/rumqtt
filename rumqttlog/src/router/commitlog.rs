@@ -81,21 +81,19 @@ impl TopicLog {
         append
     }
 
-    /// read n topics from a give offset along with offsets of the last read topic
-    pub fn read(&self, offset: usize, count: usize) -> (bool, usize, Vec<String>) {
-        let mut done = false;
+    /// read n topics from a give offset along with offset of the last read topic
+    pub fn readv(&self, offset: usize, count: usize) -> (usize, Vec<String>) {
         let len = self.topics.len();
-        let mut last_offset = offset + count;
         if offset >= len || count == 0 {
-            return (true, offset, Vec::new());
+            return (offset, Vec::new());
         }
 
+        let mut last_offset = offset + count;
         if last_offset >= len {
-            done = true;
             last_offset = len;
         }
 
         let out = self.topics[offset..last_offset].to_vec();
-        (done, last_offset - 1, out)
+        (last_offset - 1, out)
     }
 }

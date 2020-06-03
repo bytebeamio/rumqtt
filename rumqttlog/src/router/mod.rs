@@ -119,8 +119,6 @@ pub struct TopicsRequest {
 
 #[derive(Debug)]
 pub struct TopicsReply {
-    /// Catch up status
-    pub done: bool,
     /// Last topic offset
     pub offset: usize,
     /// list of new topics
