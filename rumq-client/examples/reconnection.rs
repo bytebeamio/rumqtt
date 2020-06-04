@@ -1,5 +1,5 @@
 use futures_util::stream::StreamExt;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time;
 
@@ -29,7 +29,7 @@ async fn main() {
     }
 }
 
-async fn stream_it(eventloop: &mut MqttEventLoop) {
+async fn stream_it(eventloop: &mut MqttEventLoop<Receiver<Request>>) {
     let mut stream = eventloop.connect().await.unwrap();
 
     while let Some(item) = stream.next().await {

@@ -1,5 +1,5 @@
 use tokio::stream::StreamExt;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{task, time};
 
 use rumq_client::{self, eventloop, MqttEventLoop, MqttOptions, Publish, QoS, Request, Subscribe};
@@ -24,7 +24,7 @@ async fn main() {
     // println!("State = {:?}", eventloop.state);
 }
 
-async fn stream_it(eventloop: &mut MqttEventLoop) {
+async fn stream_it(eventloop: &mut MqttEventLoop<Receiver<Request>>) {
     let mut stream = eventloop.connect().await.unwrap();
 
     while let Some(item) = stream.next().await {

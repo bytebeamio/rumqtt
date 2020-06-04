@@ -18,7 +18,7 @@ use std::mem;
 use std::time::Duration;
 
 /// Complete state of the eventloop
-pub struct MqttEventLoop {
+pub struct MqttEventLoop<R: Requests> {
     // intermediate state of the eventloop. this is set
     // by the state machine when the streaming ends
     /// Options of the current mqtt connection
@@ -26,7 +26,7 @@ pub struct MqttEventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    pub requests: Box<dyn Requests>,
+    pub requests: R,
     pending_pub: VecDeque<Publish>,
     pending_rel: VecDeque<PacketIdentifier>,
 }
@@ -70,17 +70,17 @@ pub enum EventLoopError {
 /// access and update `options`, `state` and `requests`.
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
-pub fn eventloop(options: MqttOptions, requests: impl Requests + 'static) -> MqttEventLoop {
+pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> MqttEventLoop<R> {
     MqttEventLoop {
         options: options,
         state: MqttState::new(),
-        requests: Box::new(requests),
+        requests,
         pending_pub: VecDeque::new(),
         pending_rel: VecDeque::new(),
     }
 }
 
-impl MqttEventLoop {
+impl<R: Requests> MqttEventLoop<R> {
     /// Connects to the broker and returns a stream that does everything MQTT.
     /// This stream internally processes requests from the request stream provided to the eventloop
     /// while also consuming byte stream from the network and yielding mqtt packets as the output of
@@ -211,7 +211,7 @@ async fn select<R: Requests, P: Packets>(
     Ok(o)
 }
 
-impl MqttEventLoop {
+impl<R: Requests> MqttEventLoop<R> {
     async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
         let network = time::timeout(Duration::from_secs(5), async {
             let network = if self.options.ca.is_some() {

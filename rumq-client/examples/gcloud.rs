@@ -7,7 +7,7 @@ use futures_util::stream::StreamExt;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use rumq_client::{self, eventloop, MqttEventLoop, MqttOptions, Publish, QoS, Request};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 use tokio::time;
 
@@ -30,7 +30,7 @@ async fn main() {
     stream_it(&mut eventloop).await;
 }
 
-async fn stream_it(eventloop: &mut MqttEventLoop) {
+async fn stream_it(eventloop: &mut MqttEventLoop<Receiver<Request>>) {
     let mut stream = eventloop.connect().await.unwrap();
 
     while let Some(item) = stream.next().await {
