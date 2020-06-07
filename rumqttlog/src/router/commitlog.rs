@@ -82,10 +82,10 @@ impl TopicLog {
     }
 
     /// read n topics from a give offset along with offset of the last read topic
-    pub fn readv(&self, offset: usize, count: usize) -> (usize, Vec<String>) {
+    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
         let len = self.topics.len();
         if offset >= len || count == 0 {
-            return (offset, Vec::new());
+            return None;
         }
 
         let mut last_offset = offset + count;
@@ -94,6 +94,6 @@ impl TopicLog {
         }
 
         let out = self.topics[offset..last_offset].to_vec();
-        (last_offset - 1, out)
+        Some((last_offset - 1, out))
     }
 }

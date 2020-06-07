@@ -183,14 +183,22 @@ impl Router {
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
         let reply = self.extract_topics(&request);
+        let reply = match reply {
+            Some(r) => r,
+            None => {
+                TopicsReply {
+                    offset: request.offset,
+                    topics: Vec::new()
+                }
+            }
+        };
+
         // register this id to wake up when there are new topics and send an empty reply
         // for link's tracker to proceed with next poll
         if reply.topics.is_empty() {
             self.register_topics_waiter(id, request);
         }
-
-        let reply = RouterOutMessage::TopicsReply(reply);
-        self.reply(id, reply);
+        self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
@@ -283,7 +291,7 @@ impl Router {
             }
 
             // Send reply to the link which registered this notification
-            let reply = self.extract_topics(&request);
+            let reply = self.extract_topics(&request).unwrap();
             let reply = RouterOutMessage::TopicsReply(reply);
             self.reply(link_id, reply);
 
@@ -396,14 +404,18 @@ impl Router {
         }
     }
 
-    fn extract_topics(&mut self, request: &TopicsRequest) -> TopicsReply {
-        let o = self.topiclog.readv(request.offset, request.count);
-        let reply = TopicsReply {
-            offset: o.0,
-            topics: o.1,
-        };
+    fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
+        match self.topiclog.readv(request.offset, request.count) {
+            Some(o) => {
+                let reply = TopicsReply {
+                    offset: o.0,
+                    topics: o.1,
+                };
 
-        reply
+                Some(reply)
+            }
+            None => None
+        }
     }
 
 
