@@ -202,6 +202,9 @@ impl Router {
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
+        // Replicator asking data implies that previous data has been replicated
+        // We update replication watermarks at this point
+        // Also, extract only connection data if this request is from a replicator
         let reply = if id < 10 {
             self.update_watermarks(id, &request);
             self.extract_connection_data(&request)
@@ -242,27 +245,40 @@ impl Router {
             self.register_data_waiter(id, request);
         }
 
-
         let reply = RouterOutMessage::DataReply(reply);
         self.reply(id, reply);
     }
 
     pub fn handle_watermarks_request(&mut self, id: ConnectionId, request: WatermarksRequest) {
-        if let Some(watermarks) = self.watermarks.get(&request.topic) {
-            let caught_up = watermarks == &request.watermarks;
-            if caught_up {
-                self.register_watermarks_waiter(id, request);
-                return
+        let reply = match self.watermarks.get(&request.topic) {
+            Some(watermarks) => {
+                let caught_up = watermarks == &request.watermarks;
+                if caught_up {
+                    WatermarksReply {
+                        topic: request.topic.clone(),
+                        watermarks: Vec::new(),
+                    }
+                } else {
+                    WatermarksReply {
+                        topic: request.topic.clone(),
+                        watermarks: watermarks.clone(),
+                    }
+                }
             }
+            None => {
+                WatermarksReply {
+                    topic: request.topic.clone(),
+                    watermarks: Vec::new(),
+                }
+            }
+        };
 
-            let reply = WatermarksReply {
-                topic: request.topic.clone(),
-                watermarks: watermarks.clone(),
-            };
-
-            let reply = RouterOutMessage::WatermarksReply(reply);
-            self.reply(id, reply);
+        if reply.watermarks.is_empty() {
+            self.register_watermarks_waiter(id, request);
         }
+
+        let reply = RouterOutMessage::WatermarksReply(reply);
+        self.reply(id, reply);
     }
 
     /// Updates replication watermarks
@@ -551,7 +567,7 @@ impl Router {
 #[cfg(test)]
 mod test {
     use super::{ConnectionId, Router};
-    use crate::router::{ConnectionAck, ConnectionType, Data, TopicsRequest, TopicsReply, DataAck};
+    use crate::router::{ConnectionAck, ConnectionType, Data, TopicsRequest, TopicsReply, DataAck, WatermarksRequest, WatermarksReply};
     use crate::{Config, Connection, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
     use bytes::Bytes;
     use std::time::Duration;
@@ -629,7 +645,6 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_connection_should_notify_replicator_and_connection() {
-        pretty_env_logger::init();
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
 
         // Send request for new topics. Router should reply with new topics when there are any
@@ -709,7 +724,11 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn replicated_data_updates_watermark_as_expected() {
-        let (mut router_tx, replicator_id, replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+
+        // this registers watermark notification in router as the topic isn't existent yet
+        new_watermarks_request(connection_id, &mut router_tx, "hello/world");
+        assert!(wait_for_new_watermarks(&mut connection_rx).await.is_some());
 
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
@@ -718,7 +737,17 @@ mod test {
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
+        // new data request from the router means previous request is replicated. First request
+        // will only add this topic to watermark list
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 3);
 
+        // Second data request from replicator implies that previous request has been replicated
+        new_data_request(replicator_id, &mut router_tx, "hello/world", 3, 0);
+        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
+
+        let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
+        assert_eq!(reply.watermarks, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
@@ -824,6 +853,21 @@ mod test {
         router_tx.try_send(message).unwrap();
     }
 
+    fn new_watermarks_request(
+        id: usize,
+        router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
+        topic: &str,
+    ) {
+        let message = (
+            id,
+            RouterInMessage::WatermarksRequest(WatermarksRequest {
+                topic: topic.to_owned(),
+                watermarks: vec![]
+            }),
+        );
+        router_tx.try_send(message).unwrap();
+    }
+
     async fn wait_for_new_topics(rx: &mut Receiver<RouterOutMessage>) -> Option<TopicsReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
@@ -851,6 +895,17 @@ mod test {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::DataReply(reply)) => Some(reply),
+            v => {
+                error!("{:?}", v);
+                None
+            }
+        }
+    }
+
+    async fn wait_for_new_watermarks(rx: &mut Receiver<RouterOutMessage>) -> Option<WatermarksReply> {
+        tokio::time::delay_for(Duration::from_secs(1)).await;
+        match rx.try_recv() {
+            Ok(RouterOutMessage::WatermarksReply(reply)) => Some(reply),
             v => {
                 error!("{:?}", v);
                 None
