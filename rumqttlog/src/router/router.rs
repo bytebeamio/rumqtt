@@ -10,13 +10,11 @@ use crate::router::commitlog::TopicLog;
 use crate::router::{ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, WatermarksRequest, WatermarksReply};
 use crate::Config;
 use thiserror::Error;
-use tokio::sync::mpsc::error::TrySendError;
 use futures_util::StreamExt;
 
 #[derive(Error, Debug)]
 #[error("...")]
 pub enum Error {
-    Mpsc(#[from] TrySendError<RouterOutMessage>),
     Io(#[from] io::Error),
 }
 
