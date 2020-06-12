@@ -17,7 +17,10 @@ struct CommandLine {
     payload_size: usize,
     /// number of messages
     #[argh(option, short = 'n', default = "1*1000*1000")]
-    count: usize,
+    message_count: usize,
+    /// number of topics over which messages are distributed over
+    #[argh(option, short = 't', default = "1")]
+    topic_count: usize,
     /// maximum segment size
     #[argh(option, short = 's', default = "1*1024*1024")]
     segment_size: usize,
@@ -60,7 +63,7 @@ async fn main() {
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
     join_all(reads).await;
-    let total_size = commandline.payload_size * commandline.count * commandline.subscriber_count;
+    let total_size = commandline.payload_size * commandline.message_count * commandline.subscriber_count;
     common::report("read.pb", total_size as u64, start, guard);
 }
 
@@ -72,7 +75,7 @@ async fn start_router(mut router: Router) {
 
 async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) {
     // 10K packets of 1K size each. 10M total data
-    let data = vec![Bytes::from(vec![1u8; commandline.payload_size]); commandline.count];
+    let data = vec![Bytes::from(vec![1u8; commandline.payload_size]); commandline.message_count];
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
 
@@ -87,8 +90,10 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
         message => panic!("Not connection ack = {:?}", message)
     };
 
+    let mut topic_count = 0;
+    let mut topic = "hello/world".to_owned() + &topic_count.to_string();
     for (i, payload) in data.into_iter().enumerate() {
-        let data = Data { topic: "hello/world".to_owned(), pkid: 0, payload };
+        let data = Data { topic: topic.clone(), pkid: 0, payload };
         let message = (id, RouterInMessage::Data(data));
         tx.send(message).await.unwrap();
 
@@ -104,8 +109,12 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
             }
         }
 
+        if count == commandline.message_count / commandline.topic_count {
+            topic_count += 1;
+            topic = "hello/world".to_owned() + &topic_count.to_string();
+        }
     }
-    common::report("write.pb", (commandline.count * commandline.payload_size) as u64, start, guard);
+    common::report("write.pb", (commandline.message_count * commandline.payload_size) as u64, start, guard);
 }
 
 async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInMessage)>) -> usize {
@@ -121,12 +130,14 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
 
     let mut offset = 0;
     let mut segment = 0;
-    let count = commandline.payload_size * commandline.count / commandline.sweep_size;
+    let count = commandline.payload_size * commandline.message_count / commandline.sweep_size;
 
+    let mut topic_count = 0;
+    let mut topic = "hello/world".to_owned() + &topic_count.to_string();
     let mut total_size = 0;
     for _ in 0..count {
         let request = DataRequest {
-            topic: "hello/world".to_owned(),
+            topic: topic.clone(),
             native_segment: segment,
             native_offset: offset,
             replica_segment: 0,
@@ -140,6 +151,11 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
             segment = data_reply.native_segment;
             offset = data_reply.native_offset + 1;
             total_size += data_reply.payload.len() * commandline.payload_size;
+        }
+
+        if count == commandline.message_count / commandline.topic_count {
+            topic_count += 1;
+            topic = "hello/world".to_owned() + &topic_count.to_string();
         }
     }
 
