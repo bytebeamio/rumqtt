@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 use mqtt4bytes::*;
 use crate::DataRequest;
+use crate::router::{TopicsRequest, WatermarksRequest};
 
 /// Tracker tracks current offsets of all the subscriptions of a link.
 /// It also updates the iterator list to efficiently iterate over all
@@ -10,13 +11,16 @@ use crate::DataRequest;
 /// host along with the status of the topic (active/inactive) for link
 /// to use while iterating. This helps us prevent maintaining 2 lists
 /// (active, inactive)
-/// TODO HashMap iterations are not always very efficient. Check indexmap crate
 pub struct Tracker {
     /// List of topics that we are tracking
     /// TODO Probably just a vector with swap remove will be more efficient
     /// TODO Swap inactive topics to the end of the list so that vec is divided to improve iteration efficiency
     /// TODO This can probably be an array in future by supporting a fixed number of topics
-    tracks: IndexMap<String, Track>,
+    data_tracker: IndexMap<String, DataTracker>,
+    /// Topic tracker
+    topic_tracker: TopicTracker,
+    /// Watermark tracker
+    watermark_tracker: IndexMap<String, WatermarksTracker>,
     /// List of concrete subscriptions
     concrete_subscriptions: HashSet<String>,
     /// List of wildcard subscriptions
@@ -28,7 +32,9 @@ pub struct Tracker {
 impl Tracker {
     pub fn new() -> Tracker {
         Tracker {
-            tracks: IndexMap::new(),
+            data_tracker: IndexMap::new(),
+            topic_tracker: TopicTracker::new(),
+            watermark_tracker: IndexMap::new(),
             concrete_subscriptions: HashSet::new(),
             wild_subscriptions: vec!["#".to_owned()],
             next_position: 0
@@ -37,14 +43,14 @@ impl Tracker {
 
     /// Adds a new topic to track. Duplicates are already covered by 'match_subscriptions'
     fn add(&mut self, topic: String) {
-        let track = Track::new(&topic);
-        self.tracks.insert(topic, track);
+        let track = DataTracker::new(&topic);
+        self.data_tracker.insert(topic, track);
     }
 
     /// Match the subscriptions this connection is interested in. Matches
     /// only if the topic isn't already tracked.
     pub fn match_subscription_and_add(&mut self, topic: String) {
-        if self.tracks.contains_key(&topic) {
+        if self.data_tracker.contains_key(&topic) {
             return;
         }
 
@@ -74,7 +80,7 @@ impl Tracker {
         // ground where we move inactive topics to a different item when they are inactive for a few
         // iterations?
         loop {
-            match self.tracks.get_index(self.next_position) {
+            match self.data_tracker.get_index(self.next_position) {
                 Some((_key, track)) => {
                     // Increment for next iteration of `next`
                     self.next_position += 1;
@@ -112,7 +118,7 @@ impl Tracker {
         // update topic request parameters for next data request
         // if the reply is not in active tracks, this is a woken up paused track. Add it
         // to active tracks to poll this in the next iteration
-        if let Some(track) = self.tracks.get_mut(topic) {
+        if let Some(track) = self.data_tracker.get_mut(topic) {
             track.request.native_segment = segment;
             track.request.native_offset = offset + 1;
 
@@ -124,24 +130,20 @@ impl Tracker {
                 // debug!("Reactivating a subscription. Topic = {:?}", topic);
                 track.active = true;
             }
-
-            track.acked = true;
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Track {
+pub struct DataTracker {
     /// Next data request
     request: DataRequest,
     /// Topic active or caught up
     active: bool,
-    /// Last data request acked or pending
-    acked: bool
 }
 
-impl Track {
-    pub fn new(topic: &str) -> Track {
+impl DataTracker {
+    pub fn new(topic: &str) -> DataTracker {
         let request = DataRequest {
             topic: topic.to_string(),
             native_segment: 0,
@@ -151,10 +153,49 @@ impl Track {
             size: 1024 * 1024,
         };
 
-        Track {
+        DataTracker {
             request,
             active: true,
-            acked: true
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TopicTracker {
+    request: TopicsRequest,
+    active: bool
+}
+
+impl TopicTracker {
+    pub fn new() -> TopicTracker {
+        let request = TopicsRequest {
+            offset: 0,
+            count: 100
+        };
+
+        TopicTracker {
+            request,
+            active: true
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WatermarksTracker {
+    request: WatermarksRequest,
+    active: bool
+}
+
+impl WatermarksTracker {
+    pub fn new(topic: &str) -> WatermarksTracker {
+        let request = WatermarksRequest {
+            topic: topic.to_owned(),
+            watermarks: vec![]
+        };
+
+        WatermarksTracker {
+            request,
+            active: true
         }
     }
 }

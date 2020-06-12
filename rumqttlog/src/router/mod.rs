@@ -127,8 +127,8 @@ pub struct TopicsReply {
 
 #[derive(Debug)]
 pub struct WatermarksRequest {
-    topic: String,
-    watermarks: Vec<u64>
+    pub(crate) topic: String,
+    pub(crate) watermarks: Vec<u64>
 }
 
 #[derive(Debug)]
