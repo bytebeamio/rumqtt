@@ -140,21 +140,11 @@ impl Link {
         let mut topics_reply_pending = true;
         let mut all_topics_idle = false;
         let mut broken = false;
-        let mut data_reply_count = 0;
         'start: loop {
             if broken {
                 drop(framed);
                 framed = self.connect(&mut connections_rx).await;
                 broken = false;
-            }
-
-            // dbg!(topics_reply_pending, all_topics_idle, data_reply_count);
-            // Ask for new topics every 200 data replys or when refresh results in 0 topics to
-            // to iterate (because all the topics are in pending state) (TODO tune this number later)
-            if !topics_reply_pending && (data_reply_count >= 200 || all_topics_idle) {
-                self.ask_for_more_topics().await?;
-                data_reply_count = 0;
-                topics_reply_pending = true;
             }
 
             // TODO Handle case when connection has failed current publish batch has to be retransmitted
@@ -186,7 +176,9 @@ impl Link {
                         Packet::DataAck(ack) => {
                             debug!("Replicated till offset = {:?}", ack);
                             match self.tracker.next() {
-                                Some(request) => self.ask_for_more_data(request).await?,
+                                Some(request) => {
+                                    self.router_tx.send((self.id as usize, request)).await?;
+                                }
                                 None => {
                                     all_topics_idle = true;
                                     continue
@@ -207,6 +199,7 @@ impl Link {
                         RouterOutMessage::DataReply(reply) => {
                             let topic = reply.topic;
                             let payload_len = reply.payload.len();
+
                             // TODO Inefficient. Find a better way to convert Vec<Bytes> -> Bytes
                             let mut out = BytesMut::new();
                             for payload in reply.payload.into_iter() {
@@ -217,9 +210,7 @@ impl Link {
                             let packet = Packet::Data(reply.native_offset, topic.clone(), out.freeze());
                             try_loop!(framed.send(packet).await, broken, continue 'start);
 
-                            data_reply_count += 1;
-                            self.tracker.update(&topic, reply.native_segment, reply.native_offset, payload_len);
-
+                            self.tracker.update(&reply);
                         }
                         // Refresh the list of interested topics. Router doesn't reply empty responses.
                         // Router registers this link to notify whenever there are new topics. This
@@ -229,12 +220,12 @@ impl Link {
                             // TODO make a debug assert here and bring topics_reply_pending here
                             if reply.topics.len() == 0 { continue }
                             for topic in reply.topics {
-                                self.tracker.match_subscription_and_add(topic);
+                                self.tracker.track_matched_topics(topic);
                             }
 
                             // New topics. Use this to make a request to wake up request-reply loop
                             match self.tracker.next() {
-                                Some(request) => self.ask_for_more_data(request).await?,
+                                Some(request) => self.router_tx.send((self.id as usize, request)).await?,
                                 None => {
                                     all_topics_idle = true;
                                     continue

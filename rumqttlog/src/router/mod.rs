@@ -83,6 +83,8 @@ pub struct DataRequest {
     pub replica_offset: u64,
     /// Request Size / Reply size
     pub size: u64,
+    /// Offset of this topic in tracker
+    pub(crate) tracker_topic_offset: usize
 }
 
 #[derive(Debug)]
@@ -107,6 +109,8 @@ pub struct DataReply {
     pub pkids: Vec<u64>,
     /// Reply data chain
     pub payload: Vec<Bytes>,
+    /// Offset of this topic in tracker
+    pub(crate) tracker_topic_offset: usize
 }
 
 #[derive(Debug, Clone)]
@@ -128,13 +132,17 @@ pub struct TopicsReply {
 #[derive(Debug)]
 pub struct WatermarksRequest {
     pub(crate) topic: String,
-    pub(crate) watermarks: Vec<u64>
+    pub(crate) watermarks: Vec<u64>,
+    /// Offset of this topic in tracker
+    pub(crate) tracker_topic_offset: usize
 }
 
 #[derive(Debug)]
 pub struct WatermarksReply {
-    topic: String,
-    watermarks: Vec<u64>
+    pub(crate) topic: String,
+    pub(crate) watermarks: Vec<u64>,
+    /// Offset of this topic in tracker
+    pub(crate) tracker_topic_offset: usize
 }
 
 #[derive(Debug, Clone)]

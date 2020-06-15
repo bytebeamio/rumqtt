@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-use indexmap::IndexMap;
-use mqtt4bytes::*;
-use crate::DataRequest;
+
+use crate::{DataRequest, RouterInMessage, RouterOutMessage};
+use mqtt4bytes::{has_wildcards, matches};
 use crate::router::{TopicsRequest, WatermarksRequest};
 
-/// Tracker tracks current offsets of all the subscriptions of a link.
+/// Tracker tracks current offsets of all the subscriptions of a connection
 /// It also updates the iterator list to efficiently iterate over all
 /// the topics without having to create an iterator and thus locking itself
 /// to get updated. Instead tracker just returns number of topics it currently
@@ -12,58 +12,149 @@ use crate::router::{TopicsRequest, WatermarksRequest};
 /// to use while iterating. This helps us prevent maintaining 2 lists
 /// (active, inactive)
 pub struct Tracker {
-    /// List of topics that we are tracking
-    /// TODO Probably just a vector with swap remove will be more efficient
-    /// TODO Swap inactive topics to the end of the list so that vec is divided to improve iteration efficiency
-    /// TODO This can probably be an array in future by supporting a fixed number of topics
-    data_tracker: IndexMap<String, DataTracker>,
-    /// Topic tracker
-    topic_tracker: TopicTracker,
-    /// Watermark tracker
-    watermark_tracker: IndexMap<String, WatermarksTracker>,
+    /// List of topics that we are tracking for data
+    data_tracker: Vec<DataTracker>,
+    /// List of topics that we are tracking for watermark
+    watermarks_tracker: Vec<WatermarksTracker>,
+    /// List of topics that we are tracking for watermark
+    topics_tracker: TopicsTracker,
+    /// List of topics that are being tracked for data. This
+    /// index is used to not add topics which are are already
+    /// being tracked by `data_requests`
+    data_topics: HashSet<String>,
+    watermark_topics: HashSet<String>,
     /// List of concrete subscriptions
     concrete_subscriptions: HashSet<String>,
     /// List of wildcard subscriptions
     wild_subscriptions: Vec<String>,
+    /// Current tracker type. Data = 0, Watermarks = 1
+    tracker_type: u8,
     /// Current iteration position of `tracks`
-    next_position: usize
+    next_index: usize,
 }
 
 impl Tracker {
     pub fn new() -> Tracker {
         Tracker {
-            data_tracker: IndexMap::new(),
-            topic_tracker: TopicTracker::new(),
-            watermark_tracker: IndexMap::new(),
+            data_tracker: Vec::new(),
+            watermarks_tracker: Vec::new(),
+            topics_tracker: TopicsTracker::new(),
+            data_topics: HashSet::new(),
+            watermark_topics: HashSet::new(),
             concrete_subscriptions: HashSet::new(),
-            wild_subscriptions: vec!["#".to_owned()],
-            next_position: 0
+            wild_subscriptions: Vec::new(),
+            tracker_type: 0,
+            next_index: 0,
         }
     }
 
-    /// Adds a new topic to track. Duplicates are already covered by 'match_subscriptions'
-    fn add(&mut self, topic: String) {
-        let track = DataTracker::new(&topic);
-        self.data_tracker.insert(topic, track);
+    pub fn add_subscription(&mut self, filter: &str) {
+        if has_wildcards(filter) {
+            self.wild_subscriptions.push(filter.to_owned());
+            return;
+        }
+
+        self.concrete_subscriptions.insert(filter.to_owned());
+    }
+
+    /// Adds a new topic to watermarks tracker
+    pub fn track_watermark(&mut self, topic: String) {
+        // ignore if the topic is already being tracked
+        if self.watermark_topics.contains(&topic) {
+            return;
+        }
+
+        self.watermark_topics.insert(topic.to_owned());
+        let request = WatermarksTracker::new(topic, self.watermarks_tracker.len());
+        self.watermarks_tracker.push(request);
     }
 
     /// Match the subscriptions this connection is interested in. Matches
     /// only if the topic isn't already tracked.
-    pub fn match_subscription_and_add(&mut self, topic: String) {
-        if self.data_tracker.contains_key(&topic) {
+    pub fn track_matched_topics(&mut self, topic: String) {
+        // ignore if the topic is already being tracked
+        if self.data_topics.contains(&topic) {
             return;
         }
 
+        // Adds a new topic to track. Duplicates are already covered by 'match_subscriptions'
+        // A concrete subscription match. Add this new topic to data tracker
         if self.concrete_subscriptions.contains(&topic) {
-            self.add(topic);
+            self.data_topics.insert(topic.clone());
+            let request = DataTracker::new(topic, self.data_tracker.len());
+            self.data_tracker.push(request);
             return;
         }
 
         for filter in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
-                self.add(topic.clone());
+                self.data_topics.insert(topic.clone());
+                let request = DataTracker::new(topic, self.data_tracker.len());
+                self.data_tracker.push(request);
                 return;
             }
+        }
+    }
+
+    /// Updates offset of this topic for the next data request
+    /// Note that we don't support removing a topic. Topics are only disabled when they
+    /// are caught up. We don't remove even topics for unsubscribes at the moment.
+    /// This allows for index of the tracker vector to not be invalidated when router
+    /// holds a pending notification (be it immediate reply and notification when there
+    /// is new data)
+    pub fn update(&mut self, message: &RouterOutMessage) {
+        match message {
+            RouterOutMessage::DataReply(reply) => {
+                match self.data_tracker.get_mut(reply.tracker_topic_offset) {
+                    Some(track) => {
+                        let native_topic_caughtup = reply.native_count == 0;
+                        let replicated_topic_caughtup = reply.replica_count == 0;
+
+                        if native_topic_caughtup && replicated_topic_caughtup {
+                            track.active = false;
+                            return
+                        }
+
+                        if !native_topic_caughtup {
+                            track.request.native_segment = reply.native_segment;
+                            track.request.native_offset = reply.native_offset + 1;
+                        }
+
+                        if !replicated_topic_caughtup {
+                            track.request.replica_segment = reply.replica_segment;
+                            track.request.replica_offset = reply.replica_offset + 1;
+                        }
+
+                        track.active = true;
+                    }
+                    None => panic!("Invalid index while accessing data tracker"),
+                }
+            }
+            RouterOutMessage::TopicsReply(reply) => {
+                let caughtup = reply.topics.is_empty();
+                if caughtup {
+                    self.topics_tracker.active = false;
+                    return;
+                }
+
+                self.topics_tracker.active = true;
+                self.topics_tracker.request.offset = reply.offset + 1;
+            }
+            RouterOutMessage::WatermarksReply(reply) => {
+                match self.watermarks_tracker.get_mut(reply.tracker_topic_offset) {
+                    Some(track) => {
+                        let caughtup = reply.watermarks.is_empty();
+                        if caughtup {
+                            track.active = false;
+                            return
+                        }
+
+                        track.active = true
+                    }
+                    None => panic!("Invalid index while accessing data tracker"),
+                }
+            }
+            _ => {}
         }
     }
 
@@ -72,63 +163,83 @@ impl Tracker {
     /// This ignores inactive indexes while iterating
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
-    pub fn next(&mut self) -> Option<DataRequest> {
-        let start_position = self.next_position;
-        // FIXME We are iterating through all the topics which are inactive. This might be costly
+    pub fn next(&mut self) -> Option<RouterInMessage> {
+        let start_index = self.next_index;
+        let start_tracker = self.tracker_type;
+
+        // We are iterating through all the topics which are inactive. This might be costly
         // when there are a lot of caught up topics (just like switching between active and inactive
         // topics is costly when the producer quickly produce more data). Maybe we can have a middle
         // ground where we move inactive topics to a different item when they are inactive for a few
         // iterations?
         loop {
-            match self.data_tracker.get_index(self.next_position) {
-                Some((_key, track)) => {
-                    // Increment for next iteration of `next`
-                    self.next_position += 1;
-                    // Stop if next iteration is start again
-                    // This implies all the topics are inactive
-                    if !track.active && self.next_position == start_position { return None }
-                    if !track.active { continue };
-                    return Some(track.request.clone())
-                },
-                None => {
-                    self.next_position = 0;
-                    // Stop if next iteration is start again
-                    // This implies all the topics are inactive
-                    if self.next_position == start_position { return None }
-                },
+            if self.tracker_type == 0 {
+                // loop to go to next active topic if the topic at the current offset is inactive
+                match self.data_tracker.get(self.next_index) {
+                    Some(track) => {
+                        // Increment for next iteration of `next`
+                        self.next_index += 1;
+                        if !track.active {
+                            continue;
+                        };
+                        let message = RouterInMessage::DataRequest(track.request.clone());
+                        return Some(message);
+                    }
+                    None => {
+                        // Reset the next position and track next tracker type
+                        self.next_index = 0;
+                        self.tracker_type = 1;
+
+                        // Stop if next iteration is start again. All the topics are inactive
+                        if self.next_index == start_index && self.tracker_type == start_tracker {
+                            return None;
+                        }
+                    }
+                }
             }
-        }
-    }
 
-    /// Updates offset of this topic for the next data request
-    /// TODO Every time a topic catches up, we are removing it from active
-    /// TODO and moving it to paused tracks so that next topics iterator doesn't
-    /// TODO consider that. Probably there is a better way to to this with out
-    /// TODO maintaining 2 tracks and moving between them? Probably save active/inactive
-    /// TODO status in 'tracks' directly and use ids for iterating?
-    pub fn update(&mut self, topic: &str, segment: u64, offset: u64, len: usize) {
-        debug!(
-            "Data reply. Topic = {}, segment = {}, offset = {}, len = {}",
-            topic,
-            segment,
-            offset,
-            len
-        );
+            if self.tracker_type == 1 {
+                match self.watermarks_tracker.get(self.next_index) {
+                    Some(track) => {
+                        // Increment for next iteration of `next`
+                        self.next_index += 1;
 
-        // update topic request parameters for next data request
-        // if the reply is not in active tracks, this is a woken up paused track. Add it
-        // to active tracks to poll this in the next iteration
-        if let Some(track) = self.data_tracker.get_mut(topic) {
-            track.request.native_segment = segment;
-            track.request.native_offset = offset + 1;
+                        // Stop if next iteration is start again. All the topics are inactive
+                        if !track.active && self.next_index == start_index {
+                            return None;
+                        }
+                        if !track.active {
+                            continue;
+                        };
+                        let message = RouterInMessage::WatermarksRequest(track.request.clone());
+                        return Some(message);
+                    }
+                    None => {
+                        // Reset the next position and track next tracker type
+                        self.tracker_type = 2;
 
-            // Mark the caught up topic as inactive to allow link iterator to ignore this
-            if len == 0 {
-                // debug!("Caught up subscription. Topic = {:?}", topic);
-                track.active = false;
-            } else {
-                // debug!("Reactivating a subscription. Topic = {:?}", topic);
-                track.active = true;
+                        // Stop if next iteration is start again. All the topics are inactive
+                        if self.next_index == start_index && self.tracker_type == start_tracker {
+                            return None;
+                        };
+                    }
+                }
+            }
+
+            if self.tracker_type == 2 {
+                self.tracker_type = 0;
+                self.next_index = 0;
+
+                // Stop if next iteration is start again. All the topics are inactive
+                if !self.topics_tracker.active && self.next_index == start_index {
+                    return None;
+                }
+                if !self.topics_tracker.active {
+                    continue;
+                };
+
+                let message = RouterInMessage::TopicsRequest(self.topics_tracker.request.clone());
+                return Some(message);
             }
         }
     }
@@ -143,13 +254,14 @@ pub struct DataTracker {
 }
 
 impl DataTracker {
-    pub fn new(topic: &str) -> DataTracker {
+    pub fn new(topic: String, tracker_topic_offset: usize) -> DataTracker {
         let request = DataRequest {
-            topic: topic.to_string(),
+            topic,
             native_segment: 0,
             replica_segment: 0,
             native_offset: 0,
             replica_offset: 0,
+            tracker_topic_offset,
             size: 1024 * 1024,
         };
 
@@ -161,21 +273,21 @@ impl DataTracker {
 }
 
 #[derive(Debug)]
-pub struct TopicTracker {
+pub struct TopicsTracker {
     request: TopicsRequest,
-    active: bool
+    active: bool,
 }
 
-impl TopicTracker {
-    pub fn new() -> TopicTracker {
+impl TopicsTracker {
+    pub fn new() -> TopicsTracker {
         let request = TopicsRequest {
             offset: 0,
-            count: 100
+            count: 100,
         };
 
-        TopicTracker {
+        TopicsTracker {
             request,
-            active: true
+            active: true,
         }
     }
 }
@@ -183,53 +295,77 @@ impl TopicTracker {
 #[derive(Debug)]
 pub struct WatermarksTracker {
     request: WatermarksRequest,
-    active: bool
+    active: bool,
 }
 
 impl WatermarksTracker {
-    pub fn new(topic: &str) -> WatermarksTracker {
+    pub fn new(topic: String, tracker_topic_offset: usize) -> WatermarksTracker {
         let request = WatermarksRequest {
-            topic: topic.to_owned(),
-            watermarks: vec![]
+            topic,
+            watermarks: vec![],
+            tracker_topic_offset,
         };
 
         WatermarksTracker {
             request,
-            active: true
+            active: true,
         }
     }
 }
 
-// TODO: Replace all `new()` with `with_capacity()`
-
 #[cfg(test)]
-mod test {
+mod tests {
     use super::Tracker;
+    use crate::{DataReply, RouterInMessage, RouterOutMessage, TopicsReply, WatermarksReply};
+    use bytes::Bytes;
+    use crate::router::{WatermarksReply, TopicsReply};
 
     #[test]
     fn next_track_iterates_through_tracks_correctly() {
         let mut tracker = Tracker::new();
+        tracker.add_subscription("#");
+
         for i in 0..10 {
             let topic = format!("{}", i);
-            tracker.add(topic);
+            tracker.track_matched_topics(topic.clone());
+            tracker.track_watermark(topic);
         }
 
-        for i in 0..100 {
-            let topic = tracker.next().unwrap().topic;
-            let expected = format!("{}", i % 10);
+        // 10 data requests
+        for i in 0..10 {
+            let topic = get_data_topic(&tracker.next().unwrap());
+            let expected = format!("{}", i);
             assert_eq!(topic, expected);
         }
+
+        // 10 watermark requests
+        for i in 0..10 {
+            let topic = get_watermarks_topic(&tracker.next().unwrap());
+            let expected = format!("{}", i);
+            assert_eq!(topic, expected);
+        }
+
+        // 1 topics request
+        let message = tracker.next().unwrap();
+        assert!(is_topics_request(&message));
 
         // now add a new topics to the tracker
         for i in 10..20 {
             let topic = format!("{}", i);
-            tracker.add(topic);
+            tracker.track_matched_topics(topic.clone());
+            tracker.track_watermark(topic);
         }
 
+        // 20 data requests
+        for i in 0..20 {
+            let topic = get_data_topic(&tracker.next().unwrap());
+            let expected = format!("{}", i);
+            assert_eq!(topic, expected);
+        }
 
-        for i in 10..100 {
-            let topic = tracker.next().unwrap().topic;
-            let expected = format!("{}", i % 20);
+        for i in 0..20 {
+            let topic = get_watermarks_topic(&tracker.next().unwrap());
+            let expected = format!("{}", i);
             assert_eq!(topic, expected);
         }
     }
@@ -237,23 +373,28 @@ mod test {
     #[test]
     fn next_track_does_not_iterate_through_inactive_track() {
         let mut tracker = Tracker::new();
+        tracker.add_subscription("#");
+
         for i in 0..10 {
             let topic = format!("{}", i);
-            tracker.add(topic);
+            tracker.track_matched_topics(topic.clone());
+            tracker.track_watermark(topic);
         }
 
-        // disable alternate topics
+        // 10 data requests. Disable all even topics
         for i in 0..10 {
+            let request = tracker.next().unwrap();
             if i % 2 == 0 {
-                let topic = format!("{}", i);
-                tracker.update(&topic, 0, 10, 0);
+                let message = empty_data_reply(request);
+                tracker.update(&message);
             }
         }
 
-
-        for i in (1..100).step_by(2) {
-            let topic = tracker.next().unwrap().topic;
-            let expected = format!("{}", i % 10);
+        // reset the tracker
+        tracker.next_index = 0;
+        for i in (1..10).step_by(2) {
+            let topic = get_data_topic(&tracker.next().unwrap());
+            let expected = format!("{}", i);
             assert_eq!(topic, expected);
         }
     }
@@ -261,48 +402,191 @@ mod test {
     #[test]
     fn reactivated_topic_is_included_in_next_iteration() {
         let mut tracker = Tracker::new();
-        tracker.add("1".to_owned());
-        tracker.add("2".to_owned());
+        tracker.add_subscription("#");
 
-        // deactivate a topic
-        tracker.update("1", 0, 10, 0);
-        assert_eq!(tracker.next().unwrap().topic, "2");
-        assert_eq!(tracker.next().unwrap().topic, "2");
-        assert_eq!(tracker.next().unwrap().topic, "2");
-        assert_eq!(tracker.next().unwrap().topic, "2");
+        // create topics in all disabled state
+        for i in 0..10 {
+            let topic = format!("{}", i);
+            tracker.track_matched_topics(topic.clone());
+            tracker.track_watermark(topic);
+        }
 
-        // reactivate it again
-        tracker.update("1", 0, 10, 1);
-        assert_eq!(tracker.next().unwrap().topic, "1");
-        assert_eq!(tracker.next().unwrap().topic, "2");
-        assert_eq!(tracker.next().unwrap().topic, "1");
-        assert_eq!(tracker.next().unwrap().topic, "2");
+        // disable all topics in data tracker
+        for _ in 0..10 {
+            let request = tracker.next().unwrap();
+            let message = empty_data_reply(request);
+            tracker.update(&message);
+        }
+
+        // disable all topics in watermark tracker
+        for _ in 0..10 {
+            let request = tracker.next().unwrap();
+            let message = empty_watermarks_reply(request);
+            tracker.update(&message);
+        }
+
+        // disable topics tracker
+        let _request = tracker.next().unwrap();
+        let message = empty_topics_reply();
+        tracker.update(&message);
+
+        // no topics to track
+        assert!(tracker.next().is_none());
+
+        // re-enable all data topics
+        for i in 0..10 {
+            let topic = format!("{}", i);
+            let message = filled_data_reply(&topic, i);
+            tracker.update(&message);
+        }
+
+        // reset the tracker position. next() should read from data track again
+        tracker.next_index = 0;
+        tracker.tracker_type = 0;
+        for i in 0..10 {
+            let topic = get_data_topic(&tracker.next().unwrap());
+            assert_eq!(topic, format!("{}", i));
+        }
+
+        // re-enable all watermark topics
+        for i in 0..10 {
+            let topic = format!("{}", i);
+            let message = filled_watermarks_reply(&topic, i);
+            tracker.update(&message);
+        }
+
+        // tracker now iterates through watermarks
+        for i in 0..10 {
+            let topic = get_watermarks_topic(&tracker.next().unwrap());
+            assert_eq!(topic, format!("{}", i));
+        }
+
+        let message = filled_topics_reply();
+        tracker.update(&message);
+
+        // next() returns topics request now
+        let message = tracker.next().unwrap();
+        assert!(is_topics_request(&message));
     }
 
     #[test]
     fn all_inactive_topics_should_return_none() {
         let mut tracker = Tracker::new();
-        for i in 0..10 {
-            let topic = format!("{}", i);
-            tracker.add(topic);
-        }
+        tracker.add_subscription("#");
 
-        // disable all the topics
-        for i in 0..10 {
-            let topic = format!("{}", i);
-            tracker.update(&topic, 0, 10, 0);
-        }
+        let message = tracker.next().unwrap();
+        assert!(is_topics_request(&message));
 
+        // disable topics request with empty reply
+        let reply = empty_topics_reply();
+        tracker.update(&reply);
+
+        // no topics to track
         assert!(tracker.next().is_none());
     }
 
-    #[test]
-    fn tracks_return_none_only_when_current_topic_is_not_active() {
-        let mut tracker = Tracker::new();
-        tracker.add("1".to_owned());
-        assert!(tracker.next().is_some());
+    fn empty_data_reply(request: RouterInMessage) -> RouterOutMessage {
+        let request = match request {
+            RouterInMessage::DataRequest(r) => r,
+            request => panic!("Expecting data request. Received = {:?}", request),
+        };
+
+        let reply = DataReply {
+            done: true,
+            topic: request.topic,
+            native_segment: 0,
+            native_offset: 0,
+            native_count: 0,
+            replica_segment: 0,
+            replica_offset: 0,
+            replica_count: 0,
+            pkids: vec![],
+            tracker_topic_offset: request.tracker_topic_offset,
+            payload: vec![],
+        };
+
+        RouterOutMessage::DataReply(reply)
     }
 
+    fn empty_watermarks_reply(request: RouterInMessage) -> RouterOutMessage {
+        let request = match request {
+            RouterInMessage::WatermarksRequest(r) => r,
+            request => panic!("Expecting watermarks request. Received = {:?}", request),
+        };
 
-    // TODO Add unsubscription test
+        let reply = WatermarksReply {
+            topic: request.topic,
+            watermarks: vec![],
+            tracker_topic_offset: request.tracker_topic_offset,
+        };
+
+        RouterOutMessage::WatermarksReply(reply)
+    }
+
+    fn empty_topics_reply() -> RouterOutMessage {
+        let reply = TopicsReply {
+            offset: 0,
+            topics: vec![],
+        };
+
+        RouterOutMessage::TopicsReply(reply)
+    }
+
+    fn filled_data_reply(topic: &str, tracker_topic_offset: usize) -> RouterOutMessage {
+        let reply = DataReply {
+            done: false,
+            topic: topic.to_owned(),
+            native_segment: 0,
+            native_offset: 1,
+            native_count: 1,
+            replica_segment: 0,
+            replica_offset: 0,
+            replica_count: 0,
+            pkids: vec![],
+            tracker_topic_offset,
+            payload: vec![Bytes::from(vec![1, 2, 3])],
+        };
+
+        RouterOutMessage::DataReply(reply)
+    }
+
+    fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> RouterOutMessage {
+        let reply = WatermarksReply {
+            topic: topic.to_owned(),
+            watermarks: vec![1, 2, 3],
+            tracker_topic_offset
+        };
+
+        RouterOutMessage::WatermarksReply(reply)
+    }
+
+    fn filled_topics_reply() -> RouterOutMessage {
+        let reply = TopicsReply {
+            offset: 1,
+            topics: vec!["hello/world".to_owned()]
+        };
+
+        RouterOutMessage::TopicsReply(reply)
+    }
+
+    fn get_data_topic(message: &RouterInMessage) -> String {
+        match message {
+            RouterInMessage::DataRequest(request) => request.topic.clone(),
+            v => panic!("Expecting data request. Received = {:?}", v),
+        }
+    }
+
+    fn get_watermarks_topic(message: &RouterInMessage) -> String {
+        match message {
+            RouterInMessage::WatermarksRequest(request) => request.topic.clone(),
+            v => panic!("Expecting data request. Received = {:?}", v),
+        }
+    }
+
+    fn is_topics_request(message: &RouterInMessage) -> bool {
+        match message {
+            RouterInMessage::TopicsRequest(_) => true,
+            v => panic!("Expecting data request. Received = {:?}", v),
+        }
+    }
 }
