@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use crate::{DataRequest, RouterInMessage, RouterOutMessage};
+use crate::{DataRequest, RouterInMessage, DataReply};
 use mqtt4bytes::{has_wildcards, matches};
-use crate::router::{TopicsRequest, WatermarksRequest};
+use crate::router::{TopicsRequest, WatermarksRequest, WatermarksReply, TopicsReply};
 
 /// Tracker tracks current offsets of all the subscriptions of a connection
 /// It also updates the iterator list to efficiently iterate over all
@@ -96,65 +96,62 @@ impl Tracker {
         }
     }
 
+    pub fn update_watermarks_request(&mut self, reply: &WatermarksReply) {
+        match self.watermarks_tracker.get_mut(reply.tracker_topic_offset) {
+            Some(track) => {
+                let caughtup = reply.watermarks.is_empty();
+                if caughtup {
+                    track.active = false;
+                    return
+                }
+
+                track.active = true
+            }
+            None => panic!("Invalid index while accessing data tracker"),
+        }
+    }
+
+    pub fn update_topics_request(&mut self, reply: &TopicsReply) {
+        let caughtup = reply.topics.is_empty();
+        if caughtup {
+            self.topics_tracker.active = false;
+            return;
+        }
+
+        self.topics_tracker.active = true;
+        self.topics_tracker.request.offset = reply.offset + 1;
+    }
+
     /// Updates offset of this topic for the next data request
     /// Note that we don't support removing a topic. Topics are only disabled when they
     /// are caught up. We don't remove even topics for unsubscribes at the moment.
     /// This allows for index of the tracker vector to not be invalidated when router
     /// holds a pending notification (be it immediate reply and notification when there
     /// is new data)
-    pub fn update(&mut self, message: &RouterOutMessage) {
-        match message {
-            RouterOutMessage::DataReply(reply) => {
-                match self.data_tracker.get_mut(reply.tracker_topic_offset) {
-                    Some(track) => {
-                        let native_topic_caughtup = reply.native_count == 0;
-                        let replicated_topic_caughtup = reply.replica_count == 0;
+    pub fn update_data_request(&mut self, reply: &DataReply) {
+        match self.data_tracker.get_mut(reply.tracker_topic_offset) {
+            Some(track) => {
+                let native_topic_caughtup = reply.native_count == 0;
+                let replicated_topic_caughtup = reply.replica_count == 0;
 
-                        if native_topic_caughtup && replicated_topic_caughtup {
-                            track.active = false;
-                            return
-                        }
-
-                        if !native_topic_caughtup {
-                            track.request.native_segment = reply.native_segment;
-                            track.request.native_offset = reply.native_offset + 1;
-                        }
-
-                        if !replicated_topic_caughtup {
-                            track.request.replica_segment = reply.replica_segment;
-                            track.request.replica_offset = reply.replica_offset + 1;
-                        }
-
-                        track.active = true;
-                    }
-                    None => panic!("Invalid index while accessing data tracker"),
-                }
-            }
-            RouterOutMessage::TopicsReply(reply) => {
-                let caughtup = reply.topics.is_empty();
-                if caughtup {
-                    self.topics_tracker.active = false;
-                    return;
+                if native_topic_caughtup && replicated_topic_caughtup {
+                    track.active = false;
+                    return
                 }
 
-                self.topics_tracker.active = true;
-                self.topics_tracker.request.offset = reply.offset + 1;
-            }
-            RouterOutMessage::WatermarksReply(reply) => {
-                match self.watermarks_tracker.get_mut(reply.tracker_topic_offset) {
-                    Some(track) => {
-                        let caughtup = reply.watermarks.is_empty();
-                        if caughtup {
-                            track.active = false;
-                            return
-                        }
-
-                        track.active = true
-                    }
-                    None => panic!("Invalid index while accessing data tracker"),
+                if !native_topic_caughtup {
+                    track.request.native_segment = reply.native_segment;
+                    track.request.native_offset = reply.native_offset + 1;
                 }
+
+                if !replicated_topic_caughtup {
+                    track.request.replica_segment = reply.replica_segment;
+                    track.request.replica_offset = reply.replica_offset + 1;
+                }
+
+                track.active = true;
             }
-            _ => {}
+            None => panic!("Invalid index while accessing data tracker"),
         }
     }
 
@@ -182,6 +179,7 @@ impl Tracker {
                         if !track.active {
                             continue;
                         };
+
                         let message = RouterInMessage::DataRequest(track.request.clone());
                         return Some(message);
                     }

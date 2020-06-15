@@ -129,7 +129,7 @@ pub struct TopicsReply {
     pub topics: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WatermarksRequest {
     pub(crate) topic: String,
     pub(crate) watermarks: Vec<u64>,

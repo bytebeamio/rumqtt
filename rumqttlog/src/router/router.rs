@@ -47,7 +47,7 @@ pub struct Router {
     /// Waiters on watermark updates
     /// Whenever a topic is replicated, it's watermark is updated till the offset
     /// that replication has happened
-    watermark_waiters: HashMap<Topic, Vec<ConnectionId>>,
+    watermark_waiters: HashMap<Topic, Vec<(ConnectionId, WatermarksRequest)>>,
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
     /// Watermark 'n' implies data till n-1 is synced with the other node
@@ -228,7 +228,8 @@ impl Router {
                     replica_offset: request.replica_offset,
                     replica_count: 0,
                     pkids: vec![],
-                    payload: vec![]
+                    payload: vec![],
+                    tracker_topic_offset: 0
                 }
             }
         };
@@ -255,11 +256,13 @@ impl Router {
                     WatermarksReply {
                         topic: request.topic.clone(),
                         watermarks: Vec::new(),
+                        tracker_topic_offset: request.tracker_topic_offset
                     }
                 } else {
                     WatermarksReply {
                         topic: request.topic.clone(),
                         watermarks: watermarks.clone(),
+                        tracker_topic_offset: request.tracker_topic_offset
                     }
                 }
             }
@@ -267,6 +270,7 @@ impl Router {
                 WatermarksReply {
                     topic: request.topic.clone(),
                     watermarks: Vec::new(),
+                    tracker_topic_offset: request.tracker_topic_offset
                 }
             }
         };
@@ -364,10 +368,11 @@ impl Router {
             None => return,
         };
 
-        for link_id in waiters {
+        for (link_id, request) in waiters {
             let reply = WatermarksReply {
                 topic: topic.to_owned(),
                 watermarks: self.watermarks.get(topic).unwrap().clone(),
+                tracker_topic_offset: request.tracker_topic_offset
             };
 
             let reply = RouterOutMessage::WatermarksReply(reply);
@@ -454,6 +459,7 @@ impl Router {
                     replica_offset: request.replica_offset,
                     replica_count: 0,
                     pkids: v.4,
+                    tracker_topic_offset: request.tracker_topic_offset
                 };
 
                 Some(reply)
@@ -487,6 +493,7 @@ impl Router {
                     replica_offset: v.2,
                     replica_count,
                     pkids: v.4,
+                    tracker_topic_offset: request.tracker_topic_offset,
                 };
                 Some(reply)
             }
@@ -538,11 +545,12 @@ impl Router {
     }
 
     fn register_watermarks_waiter(&mut self, id: ConnectionId, request: WatermarksRequest) {
+        let topic = request.topic.clone();
         if let Some(waiters) = self.watermark_waiters.get_mut(&request.topic) {
-            waiters.push(id);
+            waiters.push((id, request));
         } else {
-            let waiters = vec![id];
-            self.watermark_waiters.insert(request.topic, waiters);
+            let waiters = vec![(id, request)];
+            self.watermark_waiters.insert(topic, waiters);
         }
     }
 
@@ -845,7 +853,8 @@ mod test {
                 replica_segment: 0,
                 native_offset,
                 replica_offset,
-                size: 100 * 1024
+                size: 100 * 1024,
+                tracker_topic_offset: 0
             }),
         );
         router_tx.try_send(message).unwrap();
@@ -860,7 +869,8 @@ mod test {
             id,
             RouterInMessage::WatermarksRequest(WatermarksRequest {
                 topic: topic.to_owned(),
-                watermarks: vec![]
+                watermarks: vec![],
+                tracker_topic_offset: 0
             }),
         );
         router_tx.try_send(message).unwrap();

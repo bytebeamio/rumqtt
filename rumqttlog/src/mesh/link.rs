@@ -10,11 +10,11 @@ use futures_util::StreamExt;
 use tokio::time;
 use tokio_util::codec::Framed;
 use bytes::BytesMut;
-use crate::{IO, RouterInMessage, RouterOutMessage, DataRequest, Connection};
+use crate::{IO, RouterInMessage, RouterOutMessage, Connection};
 use crate::router::{TopicsRequest, Data, ConnectionType};
-use crate::mesh::tracker::Tracker;
 use crate::mesh::codec::{MeshCodec, Packet};
 use crate::mesh::ConnectionId;
+use crate::tracker::Tracker;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -91,21 +91,6 @@ impl Link {
         }
     }
 
-    /// Next sweep request
-    /// NOTE: When ever there is a new publish, the topics iterator gets updated and starts again
-    /// from scratch. Too many new topics might affect the fairness
-    async fn ask_for_more_data(&mut self, request: DataRequest) -> Result<(), LinkError> {
-        // next topic's sweep request
-        debug!(
-            "Data request. Topic = {}, segment = {}, offset = {}, size = {}",
-            request.topic, request.native_segment, request.native_offset, request.size
-        );
-        let request = request.clone();
-        let message = RouterInMessage::DataRequest(request);
-        self.router_tx.send((self.id as usize, message)).await?;
-        Ok(())
-    }
-
     /// Request for topics to be polled again
     async fn ask_for_more_topics(&mut self) -> Result<(), LinkError> {
         debug!("Topics request. Offset = {}, Count = {}", self.topics_offset.offset, self.topics_offset.count);
@@ -137,8 +122,6 @@ impl Link {
         let mut framed = self.connect(&mut connections_rx).await;
 
         self.ask_for_more_topics().await.unwrap();
-        let mut topics_reply_pending = true;
-        let mut all_topics_idle = false;
         let mut broken = false;
         'start: loop {
             if broken {
@@ -176,13 +159,8 @@ impl Link {
                         Packet::DataAck(ack) => {
                             debug!("Replicated till offset = {:?}", ack);
                             match self.tracker.next() {
-                                Some(request) => {
-                                    self.router_tx.send((self.id as usize, request)).await?;
-                                }
-                                None => {
-                                    all_topics_idle = true;
-                                    continue
-                                }
+                                Some(request) => self.router_tx.send((self.id as usize, request)).await?,
+                                None => continue
                             };
                         }
                         packet => warn!("Received unsupported packet = {:?}", packet),
@@ -197,8 +175,8 @@ impl Link {
                         // We use this to mark this topic as 'caught up' and move it from 'active'
                         // to 'pending'. This ensures that next topics iterator ignores this topic
                         RouterOutMessage::DataReply(reply) => {
+                            self.tracker.update_data_request(&reply);
                             let topic = reply.topic;
-                            let payload_len = reply.payload.len();
 
                             // TODO Inefficient. Find a better way to convert Vec<Bytes> -> Bytes
                             let mut out = BytesMut::new();
@@ -209,8 +187,6 @@ impl Link {
                             if out.len() == 0 { continue }
                             let packet = Packet::Data(reply.native_offset, topic.clone(), out.freeze());
                             try_loop!(framed.send(packet).await, broken, continue 'start);
-
-                            self.tracker.update(&reply);
                         }
                         // Refresh the list of interested topics. Router doesn't reply empty responses.
                         // Router registers this link to notify whenever there are new topics. This
@@ -226,15 +202,11 @@ impl Link {
                             // New topics. Use this to make a request to wake up request-reply loop
                             match self.tracker.next() {
                                 Some(request) => self.router_tx.send((self.id as usize, request)).await?,
-                                None => {
-                                    all_topics_idle = true;
-                                    continue
-                                }
+                                None => continue,
                             };
 
                             // next topic request offset
                             self.topics_offset.offset += reply.offset + 1;
-                            topics_reply_pending = false;
                         }
                         message => error!("Invalid message = {:?}", message)
                     }

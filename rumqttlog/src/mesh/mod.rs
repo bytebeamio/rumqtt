@@ -2,7 +2,6 @@ use crate::router::RouterInMessage;
 use crate::{Config, MeshConfig, IO};
 
 mod link;
-mod tracker;
 mod codec;
 
 use tokio::net::{TcpListener, TcpStream};
