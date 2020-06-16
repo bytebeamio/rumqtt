@@ -7,7 +7,7 @@ fn main() {
     color_backtrace::install();
 
     // Set your MQTT options
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1882);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
 
     // Create a new client and extract handles to communicate with it
@@ -15,24 +15,7 @@ fn main() {
     let notifications = client.notifications();
 
     // Start the client in a separate thread to unblock the current one. You might as well have
-    // sent handles to a different thread and start client in this thread
-    thread::spawn(move || {
-        let mut connection = connection;
-        loop {
-            println!("Connecting");
-            let connection_success = connection.start(); // blocking call
-
-            if let Err(e) = connection_success {
-                println!("Connection Failed with error: {:?}", e);
-                println!("changing settings to port 1883");
-                let mut mqttoptions = MqttOptions::new("test-2", "localhost", 1883);
-                mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
-                connection.set_options(mqttoptions);
-            } else {
-                println!("Connection was canceled)");
-            }
-        }
-    });
+    let handle = connection.start_in_thread();
 
     // Start a new thread to send requests
     let mut publish_client = client.clone();
@@ -46,13 +29,19 @@ fn main() {
         }
     });
 
-    // Receive incoming notifications
-    for (i, notification) in notifications.iter().enumerate() {
-        // use the cancel handle to stop the client eventloop
-        if i == 10 {
-            client.cancel().unwrap();
-        }
+    // Receive incoming notifications in another thread
+    thread::spawn(move || {
+        for (i, notification) in notifications.iter().enumerate() {
+            // use the cancel handle to stop the client eventloop
+            if i == 10 {
+                client.cancel().unwrap();
+            }
 
-        println!("Received = {:?}", notification);
-    }
+            println!("Received = {:?}", notification);
+        }
+    });
+
+    // let the program exit once the connection has been canceled
+    let (_con, status) = handle.join().unwrap();
+    println!("Connection finished with: {:?}", status);
 }

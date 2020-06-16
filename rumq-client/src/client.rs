@@ -5,6 +5,7 @@ use crate::{eventloop, MqttEventLoop, MqttOptions, Notification, Request};
 
 use crossbeam_channel::TrySendError;
 use std::time::Duration;
+    use std::thread::JoinHandle;
 use tokio::stream::StreamExt;
 use tokio::time;
 use tokio::sync::mpsc::{channel, Sender, Receiver};
@@ -122,6 +123,15 @@ impl Connection {
 
     pub fn set_options(&mut self, opt: MqttOptions) {
         self.eventloop.options = opt;
+
+    }
+    /// Spawns a new thread to run the connection inside, this thread will consume the Connection
+    /// object, but return it and an eventual error when the connection is aborted
+    pub fn start_in_thread(mut self) -> JoinHandle<(Connection, Result<(), EventLoopError>)> {
+        std::thread::spawn(move || {
+            let e = self.start();
+            (self, e)
+        })
     }
 }
 
