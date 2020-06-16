@@ -11,6 +11,8 @@ use tokio::sync::mpsc::{channel, Sender, Receiver};
 use tokio::sync::mpsc::error::SendError;
 use rumq_core::mqtt4::{Publish, Subscribe, QoS};
 
+use crate::eventloop::EventLoopError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Failed to send cancel request to eventloop")]
@@ -83,10 +85,10 @@ pub struct Connection {
 
 impl Connection {
     #[tokio::main(core_threads = 1)]
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self) -> Result<(), EventLoopError>{
         let mut last_failed = None;
         'reconnection: loop {
-            let mut stream = self.eventloop.connect().await.unwrap();
+            let mut stream = self.eventloop.connect().await?;
             if let Some(item) = last_failed.take() {
                 match self.notification_tx.try_send(item) {
                     Err(TrySendError::Full(failed)) => last_failed = Some(failed),
@@ -115,6 +117,11 @@ impl Connection {
 
             time::delay_for(Duration::from_secs(1)).await;
         }
+        Ok(())
+    }
+
+    pub fn set_options(&mut self, opt: MqttOptions) {
+        self.eventloop.options = opt;
     }
 }
 
