@@ -1,0 +1,16 @@
+warning: field is never read: `watermarks`
+  --> rumqttlog/src/router/router.rs:54:5
+   |
+54 |     watermarks: HashMap<Topic, Vec<Offset>>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+    Finished release [optimized] target(s) in 0.08s
+     Running `/home/tekjar/Workspace/rumq/target/release/examples/routernxn`
+write.pb. File size = 976, Throughput = 1506 MB/s
+Id = 11, Total size = 1024000000
+Id = 12, Total size = 1024000000
+Id = 13, Total size = 1024000000
+Id = 14, Total size = 1024000000
+read.pb. File size = 3906, Throughput = 12723 MB/s

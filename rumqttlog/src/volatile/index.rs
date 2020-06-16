@@ -5,7 +5,7 @@ pub struct Index {
     /// Base offset
     base_offset: u64,
     /// Ids of the payloads
-    ids: Vec<u16>,
+    ids: Vec<u64>,
     /// Positions of the payloads
     positions: Vec<u64>,
     /// Sizes of the payloads
@@ -31,14 +31,14 @@ impl Index {
         self.sizes.len() as u64
     }
 
-    pub fn write(&mut self, id: u16, pos: u64, len: u64) {
+    pub fn write(&mut self, id: u64, pos: u64, len: u64) {
         self.ids.push(id);
         self.positions.push(pos);
         self.sizes.push(len);
     }
 
     /// Reads an offset from the index and returns segment record's offset, size and id
-    pub fn read(&self, offset: u64) -> io::Result<(u64, u64, u16)> {
+    pub fn read(&self, offset: u64) -> io::Result<(u64, u64, u64)> {
         if self.positions.len() == 0 {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No entries in index"));
         }
@@ -61,7 +61,7 @@ impl Index {
     /// Returns starting position, size required to fit 'n' records, n (count)
     /// Total size of records might cross the provided boundary. Use returned size
     /// for allocating the buffer
-    pub fn readv(&self, offset: u64, target_size: u64) -> io::Result<(u64, u64, Vec<u16>)> {
+    pub fn readv(&self, offset: u64, target_size: u64) -> io::Result<(u64, u64, Vec<u64>)> {
         let mut count = 0;
         let mut current_size = 0;
         let offset = offset as usize;

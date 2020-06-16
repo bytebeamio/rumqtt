@@ -186,14 +186,80 @@ There are multiple replication strategies
 the other router (which is inefficient). The router receiving individual acks doesn't have to do any
 other handling
 - Multiple message buffer wrapped in a publish. This will return one ack for all the packets. But the
-payload has to be split into publishes for commitlo to create correct index. Is there a way to write 
+payload has to be split into publishes for commitlog to create correct index. Is there a way to write 
 a buffer of packets to commitlog with correct index?
 
 We'll start with method 1 for ease of implementation
 
-12/May/2020
+18/May/2020
 -------------------------
 
+- Multiple clients can publish data on same topic and router merges them. With replication in picture where
+acks should only happen after acheiving a repication factor, router should have a way to tell connections
+about acks. E.g Connection A sends 1, 2, 3 and Connection B sends 4, 5 on same topic. After replication, router
+should should notify Connection A with 1, 2, 3 and Connection B with 4, 5.
+
+- One way to achieve this is to separate topic by publishing client id as well. This adds more tracking in router and
+replicator and gets in the way of topic & client separation 
+
+- Option 2 is to have router maintain a global id for a given topic. This id is intrinsic to commitlog and appended a
+a new record is added. Router replies connection with with id for every publish. Connection maintains a map of couter id 
+and actual id. While pulling data, it knows the id till replication has happened and replys with actual acks
+
+We'll go with opition 2
+
+19/May/2020
+-------------------------
+
+- Replication and connection link are drastically different interms of functionality. For example,
+replicator can write a batch of publishes as 1 message. Other replicator reading this a bunch of publishes 
+is only going to unnecessarily flood the mesh with acks.
+
+20/May/2020
+-------------------------
+
+- Write only publish payload to commitlog
+- Full publish is written to commitlog with the hope that we can achieve zero copy transmission to subscribers.
+But this is little complicated than expected. With zero copy, router don't have access to modify packet id per  
+subscribing connection. If this is BytesMut, then copy advantage is gone
+- Commitlog merges same topic publishes from different connections. Forwarding full payload without any modifications
+is not feasible as these merged publisLatest YouTube posts
+hes can have same packet ids
+
+30/May/2020
+--------------------------
+
+- Does writing the packet with modified packet id help achieve zero copy distribution (assuming we only support 
+  QoS 1 subscriptions)??
+  
+- If the broker only supports QoS 1, We can write the publish packet with modified packet id. If we can separate
+ router and connection data packet ids, we can be sure that packet ids won't collide while publishing. Since connection's 
+ next pull only happens while all the data is acked back, we don't have to worry about inflight collisions
+ 
+- To support all the QoS with (almost) zero copy, We can probably exploit the idea of framing batched publishes while
+  pulling data from commitlog. Commitlog while extracting data could return a Vec of Bytes(meta data header, pkid, qos 
+  etc) and Bytes (payload). Meta data is assembled based on DataRequest type (QoS 0, 1, 2 and dup) [experiment]
+  
+- The most approachable 1st step is to probably achieve zero copy for QoS 1 and don't bother too much about optimizing 
+  QoS 0 and 2 as they step into each other's legs. Also QoS 1 is the most used one
+  
+31/May/2020
+---------------------------
+
+- Link can request data for all the topics in 1 DataRequest. This might cause fairness issues for other connections 
+  it's handle a lot of topics
+  
+  
+TODO
+---------------------------
+
+-[ ] Subscriber should pull again from correct offset after reconnecting to a different broker
+-[X] When a connection/replicator requests data from invalid topic, router doesn't return anything. Links perform next poll
+  only after receiving reply on previous request. Not replying anything might be a footgun
+-[ ] Limit number of connections
+-[ ] Limit connection rate
+-[ ] Limit number of topics in connection and router
+ 
 
 References
 -----------------

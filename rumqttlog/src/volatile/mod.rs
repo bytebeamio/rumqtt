@@ -18,10 +18,18 @@ struct Chunk {
 }
 
 pub struct Log {
+    /// ID of the last appended record
+    last_record_id: u64,
+    /// Maximum size of a segment
     max_segment_size: u64,
+    /// Base offsets of all the segments
     base_offsets: Vec<u64>,
+    /// Maximum number of segments
     max_segments: usize,
+    /// Current active chunk to append
     active_chunk: u64,
+    /// All the segments mapped with their base offsets
+    /// TODO benchmark with id map
     chunks: HashMapFnv<u64, Chunk>,
 }
 
@@ -45,6 +53,7 @@ impl Log {
         base_offsets.push(0);
 
         let log = Log {
+            last_record_id: 0,
             max_segment_size,
             max_segments,
             base_offsets,
@@ -59,7 +68,8 @@ impl Log {
         self.active_chunk
     }
 
-    pub fn append(&mut self, id: u16, record: Bytes) -> io::Result<()> {
+    pub fn append(&mut self, record: Bytes) -> Result<u64, io::Error> {
+        // TODO last_record_id and offset are same. Remove last_record_id
         let active_chunk = if let Some(v) = self.chunks.get_mut(&self.active_chunk) {
             v
         } else {
@@ -90,13 +100,14 @@ impl Log {
         let len = record.len() as u64;
         let active_chunk = self.chunks.get_mut(&self.active_chunk).unwrap();
         let (offset, _) = active_chunk.segment.append(record)?;
-        active_chunk.index.write(id, offset, len);
-        Ok(())
+        self.last_record_id += 1;
+        active_chunk.index.write(self.last_record_id, offset, len);
+        Ok(self.last_record_id)
     }
 
     /// Read a record from correct segment
     /// Returns data, next base offset and relative offset
-    pub fn read(&mut self, base_offset: u64, offset: u64) -> io::Result<(u16, Bytes)> {
+    pub fn read(&mut self, base_offset: u64, offset: u64) -> io::Result<(u64, Bytes)> {
         let chunk = match self.chunks.get_mut(&base_offset) {
             Some(segment) => segment,
             None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment")),
@@ -178,7 +189,8 @@ impl Log {
         segment: u64,
         offset: u64,
         size: u64,
-    ) -> io::Result<(bool, u64, u64, u64, Vec<u16>, Vec<Bytes>)> {
+    ) -> io::Result<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)> {
+        // TODO We don't need Vec<u64>. Remove that from return
         let (done, chunks) = self.indexv(segment, offset, size)?;
         let mut out = Vec::new();
 
@@ -206,7 +218,7 @@ struct Chunks {
     count: u64,
     size: u64,
     /// All the identifiers of payloads to be collected from segments
-    ids: Vec<u16>,
+    ids: Vec<u64>,
     /// Segment, offset, size, count of a chunk
     chunks: Vec<(u64, u64, u64, u64)>,
 }
@@ -228,14 +240,14 @@ mod test {
         for i in 0..200 {
             payload[0] = i;
             let payload = Bytes::from(payload.clone());
-            log.append(i as u16, payload).unwrap();
+            log.append(payload).unwrap();
         }
 
         // Semi fill 200.segment
         for i in 200..205 {
             payload[0] = i;
             let payload = Bytes::from(payload.clone());
-            log.append(i as u16, payload).unwrap();
+            log.append(payload).unwrap();
         }
 
         let data = log.read(10, 0);
@@ -250,7 +262,7 @@ mod test {
             let (id, data) = log.read(base_offset, i).unwrap();
             let d = (base_offset + i) as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u16);
+            assert_eq!(id, d as u64 + 1);
         }
 
         // read segment with base offset 190
@@ -259,7 +271,7 @@ mod test {
             let (id, data) = log.read(base_offset, i).unwrap();
             let d = (base_offset + i) as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u16);
+            assert_eq!(id, d as u64 + 1);
         }
 
         // read 200.segment which is semi filled with 5 records
@@ -268,7 +280,7 @@ mod test {
             let (id, data) = log.read(base_offset, i).unwrap();
             let d = (base_offset + i) as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u16);
+            assert_eq!(id, d as u64 + 1);
         }
 
         let data = log.read(base_offset, 5);
@@ -295,7 +307,7 @@ mod test {
         for i in 0..record_count {
             payload[0] = i as u8;
             let payload = Bytes::from(payload.clone());
-            log.append(i as u16, payload).unwrap();
+            log.append(payload).unwrap();
         }
 
         // Read all the segments
@@ -304,7 +316,7 @@ mod test {
             let (id, data) = log.read(base_offset, i).unwrap();
             let d = (base_offset + i) as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u16);
+            assert_eq!(id, d as u64 + 1);
         }
     }
 
@@ -319,7 +331,7 @@ mod test {
         for i in 0..90 {
             payload[0] = i;
             let payload = Bytes::from(payload.clone());
-            log.append(i as u16, payload).unwrap();
+            log.append(payload).unwrap();
         }
 
         // Read 50K. Reads 0.segment - 4.segment
@@ -328,7 +340,7 @@ mod test {
         assert_eq!(offset, 9);
         assert_eq!(ids.len(), 50);
         for i in 0..ids.len() {
-            assert_eq!(i as u16, ids[i])
+            assert_eq!(i as u64 + 1, ids[i]);
         }
         assert_eq!(done, false);
         assert_eq!(total_size, 50 * 1024);
@@ -336,7 +348,7 @@ mod test {
         // Read 50.segment offset 0
         let (id, data) = log.read(50, 0).unwrap();
         assert_eq!(data[0], 50);
-        assert_eq!(id, 50);
+        assert_eq!(id, 51);
     }
 
     #[test]
@@ -349,7 +361,7 @@ mod test {
         for i in 0..25 {
             payload[0] = i;
             let payload = Bytes::from(payload.clone());
-            log.append(i as u16, payload).unwrap();
+            log.append(payload).unwrap();
         }
 
         // Read 15K. Crosses boundaries of the segment and offset will be in the middle of 2nd segment
@@ -358,7 +370,7 @@ mod test {
         assert_eq!(offset, 4);
         assert_eq!(ids.len(), 15);
         for i in 0..ids.len() {
-            assert_eq!(i as u16, ids[i])
+            assert_eq!(i as u64 + 1, ids[i])
         }
         assert_eq!(done, false);
         assert_eq!(total_size, 15 * 1024);
@@ -370,7 +382,7 @@ mod test {
         assert_eq!(ids.len(), 10);
         for i in 0..ids.len() {
             let id = i + 15;
-            assert_eq!(id as u16, ids[i])
+            assert_eq!(id as u64 + 1, ids[i])
         }
         assert_eq!(done, true);
         assert_eq!(total_size, 10 * 1024);
@@ -387,7 +399,7 @@ mod test {
         for i in 0..90 {
             payload[0] = i;
             let payload = Bytes::from(payload.clone());
-            log.append(i as u16, payload).unwrap();
+            log.append(payload).unwrap();
         }
 
         // Read 200K. Crosses boundaries of all the segments
@@ -396,7 +408,7 @@ mod test {
         assert_eq!(offset, 9);
         assert_eq!(ids.len(), 90);
         for i in 0..ids.len() {
-            assert_eq!(i as u16, ids[i])
+            assert_eq!(i as u64 + 1, ids[i])
         }
         assert_eq!(done, true);
         assert_eq!(total_size, 90 * 1024);

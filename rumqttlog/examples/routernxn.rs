@@ -1,10 +1,9 @@
 use std::time::Instant;
-use rumqttlog::{channel, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
+use rumqttlog::{bounded, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
 use argh::FromArgs;
-use mqtt4bytes::*;
 use std::thread;
-use rumqttlog::router::Connection;
-use bytes::BytesMut;
+use rumqttlog::router::{Connection, Data, ConnectionAck};
+use bytes::Bytes;
 use futures_util::future::join_all;
 use tokio::task;
 
@@ -17,8 +16,11 @@ struct CommandLine {
     #[argh(option, short = 'p', default = "1024")]
     payload_size: usize,
     /// number of messages
-    #[argh(option, short = 'n', default = "1*1024*1024")]
-    count: usize,
+    #[argh(option, short = 'n', default = "1*1000*1000")]
+    message_count: usize,
+    /// number of topics over which messages are distributed over
+    #[argh(option, short = 't', default = "1")]
+    topic_count: usize,
     /// maximum segment size
     #[argh(option, short = 's', default = "1*1024*1024")]
     segment_size: usize,
@@ -48,11 +50,11 @@ async fn main() {
     write(&commandline, tx.clone()).await;
 
     let mut reads = Vec::new();
-    for i in 0..commandline.subscriber_count {
+    for i in 100..commandline.subscriber_count + 100 {
         let commandline = commandline.clone();
         let tx = tx.clone();
         let f = task::spawn(async move {
-            read(&commandline, &format!("device-{}", i), tx).await;
+            read(&commandline, i, tx).await;
         });
 
         reads.push(f);
@@ -61,7 +63,7 @@ async fn main() {
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
     join_all(reads).await;
-    let total_size = commandline.payload_size * commandline.count * commandline.subscriber_count;
+    let total_size = commandline.payload_size * commandline.message_count * commandline.subscriber_count;
     common::report("read.pb", total_size as u64, start, guard);
 }
 
@@ -71,61 +73,94 @@ async fn start_router(mut router: Router) {
     router.start().await;
 }
 
-async fn write(commandline: &CommandLine, mut tx: Sender<(String, RouterInMessage)>) {
+async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) {
     // 10K packets of 1K size each. 10M total data
-    let data = vec![publish(commandline.payload_size); commandline.count];
+    let data = vec![Bytes::from(vec![1u8; commandline.payload_size]); commandline.message_count];
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
-    for packet in data.into_iter() {
-        let message = ("device-0".to_owned(), RouterInMessage::Packet(packet));
-        tx.send(message).await.unwrap();
-    }
 
-    common::report("write.pb", (commandline.count * commandline.payload_size) as u64, start, guard);
-}
+    let (this_tx, this_rx) = bounded(1000);
+    let connection = Connection::new("writer-1", this_tx);
+    let message = (0, RouterInMessage::Connect(connection));
+    tx.send(message).await.unwrap();
 
-async fn read(commandline: &CommandLine, id: &str, mut tx: Sender<(String, RouterInMessage)>) -> usize {
-    let (this_tx, mut this_rx) = channel(100);
-    let connection = Connection {
-        connect: rumqttlog::mqtt4bytes::Connect::new(id),
-        handle: this_tx,
+    let id = match this_rx.recv().await.unwrap() {
+        RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
+        message => panic!("Not connection ack = {:?}", message)
     };
 
-    let message = (id.to_owned(), RouterInMessage::Connect(connection));
+    let mut topic_count = 0;
+    let mut topic = "hello/world".to_owned() + &topic_count.to_string();
+    for (i, payload) in data.into_iter().enumerate() {
+        let data = Data { topic: topic.clone(), pkid: 0, payload };
+        let message = (id, RouterInMessage::Data(data));
+        tx.send(message).await.unwrap();
+
+        // Listen for acks in batches to fix send/recv synchronization stalls
+        let count = i + 1;
+        if count % 1000 == 0 {
+            for _ in 0..1000 {
+                if let RouterOutMessage::DataAck(_ack) = this_rx.recv().await.unwrap() {
+                    continue
+                } else {
+                    panic!("Expecting Ack");
+                }
+            }
+        }
+
+        if count == commandline.message_count / commandline.topic_count {
+            topic_count += 1;
+            topic = "hello/world".to_owned() + &topic_count.to_string();
+        }
+    }
+    common::report("write.pb", (commandline.message_count * commandline.payload_size) as u64, start, guard);
+}
+
+async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInMessage)>) -> usize {
+    let (this_tx, this_rx) = bounded(100);
+    let connection = Connection::new(&format!("{}", id), this_tx);
+    let message = (id, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();
+    let id = match this_rx.recv().await.unwrap() {
+        RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
+        message => panic!("Not connection ack = {:?}", message)
+    };
+
     let mut offset = 0;
     let mut segment = 0;
-    let count = commandline.payload_size * commandline.count / commandline.sweep_size;
+    let count = commandline.payload_size * commandline.message_count / commandline.sweep_size;
 
+    let mut topic_count = 0;
+    let mut topic = "hello/world".to_owned() + &topic_count.to_string();
     let mut total_size = 0;
     for _ in 0..count {
         let request = DataRequest {
-            topic: "hello/world".to_owned(),
-            segment,
-            offset,
-            size: commandline.sweep_size as u64
+            topic: topic.clone(),
+            native_segment: segment,
+            native_offset: offset,
+            replica_segment: 0,
+            replica_offset: 0,
+            size: commandline.sweep_size as u64,
+            tracker_topic_offset: 0
         };
 
         let message = (id.to_owned(), RouterInMessage::DataRequest(request));
         tx.send(message).await.unwrap();
         if let RouterOutMessage::DataReply(data_reply) = this_rx.recv().await.unwrap() {
-            segment = data_reply.segment;
-            offset = data_reply.offset + 1;
+            segment = data_reply.native_segment;
+            offset = data_reply.native_offset + 1;
             total_size += data_reply.payload.len() * commandline.payload_size;
+        }
+
+        if count == commandline.message_count / commandline.topic_count {
+            topic_count += 1;
+            topic = "hello/world".to_owned() + &topic_count.to_string();
         }
     }
 
+    println!("Id = {}, Total size = {}", id, total_size);
     total_size
-}
-
-pub fn publish(len: usize) -> Packet {
-    let mut publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; len]);
-    publish.set_pkid(1);
-    // serialize bytes
-    let mut payload = BytesMut::new();
-    let packet = Packet::Publish(publish.clone());
-    mqtt_write(packet, &mut payload).unwrap();
-    publish.bytes = payload.freeze();
-    Packet::Publish(publish)
 }
 

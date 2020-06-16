@@ -9,9 +9,8 @@ fn main() {
     let total_size = payload_size as u64 * count;
     let mut payloads = common::payloads(payload_size, count).into_iter();
     let mut log = Log::new(500 * 1024, 10000).unwrap();
-    for pkid in 0..count {
-        let pkid = pkid % 65000;
-        log.append(pkid as u16, payloads.next().unwrap()).unwrap();
+    for _ in 0..count {
+        log.append(payloads.next().unwrap()).unwrap();
     }
 
     let mut segment = 0;

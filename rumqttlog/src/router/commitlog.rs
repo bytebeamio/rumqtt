@@ -19,19 +19,19 @@ impl CommitLog {
         }
     }
 
-    pub fn append(&mut self, topic: &str, id: u16, record: Bytes) -> io::Result<()> {
+    pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<u64> {
         // Entry instead of if/else?
         if let Some(log) = self.logs.get_mut(topic) {
-            log.append(id, record)?;
+            let offset = log.append(record)?;
+            Ok(offset)
         } else {
             let max_segment_size = self.config.max_segment_size;
             let max_segment_count = self.config.max_segment_count;
             let mut log = Log::new(max_segment_size, max_segment_count)?;
-            log.append(id, record)?;
+            let offset = log.append(record)?;
             self.logs.insert(topic.to_owned(), log);
+            Ok(offset)
         }
-
-        Ok(())
     }
 
     pub fn readv(
@@ -40,13 +40,10 @@ impl CommitLog {
         segment: u64,
         offset: u64,
         size: u64,
-    ) -> io::Result<Option<(bool, u64, u64, u64, Vec<u16>, Vec<Bytes>)>> {
+    ) -> io::Result<Option<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)>> {
         let log = match self.logs.get_mut(topic) {
             Some(l) => l,
-            None => {
-                error!("Asking for non existent topic = {}", topic);
-                return Ok(None);
-            }
+            None => return Ok(None),
         };
 
         let (done, segment, offset, total_size, ids, data) = log.readv(segment, offset, size)?;
@@ -84,21 +81,19 @@ impl TopicLog {
         append
     }
 
-    /// read n topics from a give offset along with offsets of the last read topic
-    pub fn read(&self, offset: usize, count: usize) -> (bool, usize, Vec<String>) {
-        let mut done = false;
+    /// read n topics from a give offset along with offset of the last read topic
+    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
         let len = self.topics.len();
-        let mut last_offset = offset + count;
         if offset >= len || count == 0 {
-            return (true, offset, Vec::new());
+            return None;
         }
 
+        let mut last_offset = offset + count;
         if last_offset >= len {
-            done = true;
             last_offset = len;
         }
 
         let out = self.topics[offset..last_offset].to_vec();
-        (done, last_offset - 1, out)
+        Some((last_offset - 1, out))
     }
 }
