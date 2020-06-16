@@ -84,7 +84,7 @@ pub struct DataRequest {
     /// Request Size / Reply size
     pub size: u64,
     /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize
+    pub tracker_topic_offset: usize
 }
 
 #[derive(Debug)]

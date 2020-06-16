@@ -60,10 +60,10 @@ async fn node_2() {
         router.start().await
     });
 
-    let (id, this_rx) = register_with_router(100, "connection-2", &router_tx).await;
+    let (_id, this_rx) = register_with_router(100, "connection-2", &router_tx).await;
     // incoming data from the router
     loop {
-        let reply = wait_for_new_data(&this_rx).await;
+        let _reply = wait_for_new_data(&this_rx).await;
     }
 
 }
@@ -106,7 +106,8 @@ fn ask_data(
             replica_segment: 0,
             native_offset,
             replica_offset,
-            size: 100 * 1024
+            size: 100 * 1024,
+            tracker_topic_offset: 0
         }),
     );
 

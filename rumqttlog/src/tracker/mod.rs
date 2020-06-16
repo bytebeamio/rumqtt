@@ -313,10 +313,10 @@ impl WatermarksTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::Tracker;
-    use crate::{DataReply, RouterInMessage, RouterOutMessage, TopicsReply, WatermarksReply};
+    use crate::{DataReply, RouterInMessage};
     use bytes::Bytes;
     use crate::router::{WatermarksReply, TopicsReply};
+    use crate::tracker::Tracker;
 
     #[test]
     fn next_track_iterates_through_tracks_correctly() {
@@ -384,7 +384,7 @@ mod tests {
             let request = tracker.next().unwrap();
             if i % 2 == 0 {
                 let message = empty_data_reply(request);
-                tracker.update(&message);
+                tracker.update_data_request(&message);
             }
         }
 
@@ -413,20 +413,20 @@ mod tests {
         for _ in 0..10 {
             let request = tracker.next().unwrap();
             let message = empty_data_reply(request);
-            tracker.update(&message);
+            tracker.update_data_request(&message);
         }
 
         // disable all topics in watermark tracker
         for _ in 0..10 {
             let request = tracker.next().unwrap();
             let message = empty_watermarks_reply(request);
-            tracker.update(&message);
+            tracker.update_watermarks_request(&message);
         }
 
         // disable topics tracker
         let _request = tracker.next().unwrap();
         let message = empty_topics_reply();
-        tracker.update(&message);
+        tracker.update_topics_request(&message);
 
         // no topics to track
         assert!(tracker.next().is_none());
@@ -435,7 +435,7 @@ mod tests {
         for i in 0..10 {
             let topic = format!("{}", i);
             let message = filled_data_reply(&topic, i);
-            tracker.update(&message);
+            tracker.update_data_request(&message);
         }
 
         // reset the tracker position. next() should read from data track again
@@ -450,7 +450,7 @@ mod tests {
         for i in 0..10 {
             let topic = format!("{}", i);
             let message = filled_watermarks_reply(&topic, i);
-            tracker.update(&message);
+            tracker.update_watermarks_request(&message);
         }
 
         // tracker now iterates through watermarks
@@ -460,7 +460,7 @@ mod tests {
         }
 
         let message = filled_topics_reply();
-        tracker.update(&message);
+        tracker.update_topics_request(&message);
 
         // next() returns topics request now
         let message = tracker.next().unwrap();
@@ -477,13 +477,13 @@ mod tests {
 
         // disable topics request with empty reply
         let reply = empty_topics_reply();
-        tracker.update(&reply);
+        tracker.update_topics_request(&reply);
 
         // no topics to track
         assert!(tracker.next().is_none());
     }
 
-    fn empty_data_reply(request: RouterInMessage) -> RouterOutMessage {
+    fn empty_data_reply(request: RouterInMessage) -> DataReply {
         let request = match request {
             RouterInMessage::DataRequest(r) => r,
             request => panic!("Expecting data request. Received = {:?}", request),
@@ -503,10 +503,10 @@ mod tests {
             payload: vec![],
         };
 
-        RouterOutMessage::DataReply(reply)
+        reply
     }
 
-    fn empty_watermarks_reply(request: RouterInMessage) -> RouterOutMessage {
+    fn empty_watermarks_reply(request: RouterInMessage) -> WatermarksReply {
         let request = match request {
             RouterInMessage::WatermarksRequest(r) => r,
             request => panic!("Expecting watermarks request. Received = {:?}", request),
@@ -518,19 +518,19 @@ mod tests {
             tracker_topic_offset: request.tracker_topic_offset,
         };
 
-        RouterOutMessage::WatermarksReply(reply)
+        reply
     }
 
-    fn empty_topics_reply() -> RouterOutMessage {
+    fn empty_topics_reply() -> TopicsReply {
         let reply = TopicsReply {
             offset: 0,
             topics: vec![],
         };
 
-        RouterOutMessage::TopicsReply(reply)
+        reply
     }
 
-    fn filled_data_reply(topic: &str, tracker_topic_offset: usize) -> RouterOutMessage {
+    fn filled_data_reply(topic: &str, tracker_topic_offset: usize) -> DataReply {
         let reply = DataReply {
             done: false,
             topic: topic.to_owned(),
@@ -545,26 +545,26 @@ mod tests {
             payload: vec![Bytes::from(vec![1, 2, 3])],
         };
 
-        RouterOutMessage::DataReply(reply)
+        reply
     }
 
-    fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> RouterOutMessage {
+    fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> WatermarksReply {
         let reply = WatermarksReply {
             topic: topic.to_owned(),
             watermarks: vec![1, 2, 3],
             tracker_topic_offset
         };
 
-        RouterOutMessage::WatermarksReply(reply)
+        reply
     }
 
-    fn filled_topics_reply() -> RouterOutMessage {
+    fn filled_topics_reply() -> TopicsReply {
         let reply = TopicsReply {
             offset: 1,
             topics: vec!["hello/world".to_owned()]
         };
 
-        RouterOutMessage::TopicsReply(reply)
+        reply
     }
 
     fn get_data_topic(message: &RouterInMessage) -> String {
