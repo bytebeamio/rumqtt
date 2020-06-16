@@ -1,3 +1,6 @@
+
+
+/*
 #[macro_use]
 extern crate log;
 
@@ -12,10 +15,9 @@ use tokio::net::TcpListener;
 use tokio_util::codec::Framed;
 use tokio::time;
 use tokio::task;
-use tokio::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 
-use rumqttlog::{Router, RouterInMessage, Connection};
+use rumqttlog::{Router, RouterInMessage, Connection, Sender, bounded};
 use rumqttlog::mqtt4bytes::{self, MqttCodec, Packet, ConnAck, ConnectReturnCode};
 use tokio::time::Elapsed;
 use crate::link::Link;
@@ -166,12 +168,12 @@ impl Connector {
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (link_tx, link_rx) = channel(4);
+        let (link_tx, link_rx) = bounded(4);
         let client_id = connect.client_id.clone();
-        let connection = Connection { connect, handle: link_tx };
-        let message = RouterInMessage::Connect(connection);
+        let connection = Connection::new(client_id, link_tx);
+        let message = (0, RouterInMessage::Connect(connection));
         let mut router_tx = self.router_tx.clone();
-        router_tx.send((client_id.clone(), message)).await.unwrap();
+        router_tx.send(message).await.unwrap();
 
         // Send connection acknowledgement back to the client
         let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
@@ -191,3 +193,5 @@ impl Connector {
 
 pub trait IO: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Unpin> IO for T {}
+
+ */
