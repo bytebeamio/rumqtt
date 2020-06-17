@@ -152,6 +152,12 @@ pub enum Request {
     Disconnect,
 }
 
+#[derive(Debug)]
+pub enum Key{
+    RSA,
+    ECC,
+}
+
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
         return Request::Publish(publish);
@@ -438,12 +444,10 @@ impl MqttOptions {
     }
 
     /// Set key type
-    pub fn set_key_type<S: Into<String>>(&mut self, key_type: S) -> &mut Self {
-        let key_type = key_type.into();
-        match key_type.as_str() {
-            "RSA" => self.key_type = Some(key_type),
-            "ECC" => self.key_type = Some(key_type),
-            _ => panic!("Key type should be either ECC or RSA"),
+    pub fn set_key_type(&mut self, key_type: Key) -> &mut Self {
+        match key_type {
+            Key::RSA => self.key_type = Some("RSA".to_owned()),
+            Key::ECC => self.key_type = Some("ECC".to_owned()),
         };
         self
     }
@@ -469,11 +473,5 @@ mod test {
     #[should_panic]
     fn no_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
-    }
-
-    #[test]
-    #[should_panic]
-    fn set_key_type_illegal_panics() {
-        let _mqtt_opts = MqttOptions::new("test_ops", "localhost", 8883).set_key_type("ABC");
     }
 }
