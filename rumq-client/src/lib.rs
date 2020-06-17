@@ -141,6 +141,8 @@ pub enum Notification {
     Abort(EventLoopError),
 }
 
+pub struct Outgoing;
+
 /// Requests by the client to mqtt event loop. Request are
 /// handle one by one
 #[derive(Debug)]

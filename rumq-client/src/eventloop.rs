@@ -1,5 +1,5 @@
 use crate::state::{MqttState, StateError};
-use crate::MqttOptions;
+use crate::{MqttOptions, Outgoing};
 use crate::{network, Notification, Request};
 
 use async_stream::stream;
@@ -29,6 +29,7 @@ pub struct MqttEventLoop<R: Requests> {
     pub requests: R,
     pending_pub: VecDeque<Publish>,
     pending_rel: VecDeque<PacketIdentifier>,
+    network: Option<Framed<Box<dyn N>, MqttCodec>>,
 }
 
 /// Critical errors during eventloop polling
@@ -48,6 +49,8 @@ pub enum EventLoopError {
     StreamDone,
     #[error("Requests done")]
     RequestsDone,
+    #[error("No network link. Call eventloop.connect()")]
+    NoLink,
 }
 
 /// Returns an object which encompasses state of the connection.
@@ -72,11 +75,12 @@ pub enum EventLoopError {
 /// Options can be used to update gcp iotcore password
 pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> MqttEventLoop<R> {
     MqttEventLoop {
-        options: options,
+        options,
         state: MqttState::new(),
         requests,
         pending_pub: VecDeque::new(),
         pending_rel: VecDeque::new(),
+        network: None
     }
 }
 
@@ -85,64 +89,39 @@ impl<R: Requests> MqttEventLoop<R> {
     /// This stream internally processes requests from the request stream provided to the eventloop
     /// while also consuming byte stream from the network and yielding mqtt packets as the output of
     /// the stream
-    pub async fn connect<'eventloop>(&'eventloop mut self) -> Result<impl Stream<Item = Notification> + 'eventloop, EventLoopError> {
+    pub async fn connect(&mut self) -> Result<(), EventLoopError> {
         self.state.await_pingresp = false;
 
         // connect to the broker
         let mut network = self.network_connect().await?;
         self.mqtt_connect(&mut network).await?;
+        self.network = Some(network);
 
         // move pending messages from state to eventloop and create a pending stream of requests
         self.populate_pending();
+        Ok(())
+    }
 
+    pub async fn next(&mut self) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
         // create mqtt stream
-        let stream = stream! {
-            let pending_rel = iter(self.pending_rel.drain(..)).map(Packet::Pubrec);
-            let mut pending = iter(self.pending_pub.drain(..)).map(Packet::Publish).chain(pending_rel);
-            let mut pending = time::throttle(self.options.throttle, pending);
-            let mut requests = time::throttle(self.options.throttle, &mut self.requests);
+        let mut timeout = time::delay_for(self.options.keep_alive);
+        let mut inout_marker = 0;
+        let mut pending_done = false;
 
-            let mut timeout = time::delay_for(self.options.keep_alive);
-            let mut inout_marker = 0;
-            let mut pending_done = false;
+        let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
+        let network = self.network.as_mut().ok_or(EventLoopError::NoLink)?;
+        let o = select(
+            network,
+            &mut self.requests,
+            &mut self.state,
+            self.options.keep_alive,
+            &mut inout_marker,
+            inflight_full,
+            &mut pending_done,
+            &mut timeout
+        ).await?;
 
-            loop {
-                let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
-                let o = select(
-                    &mut network,
-                    &mut pending,
-                    &mut requests,
-                    &mut self.state,
-                    self.options.keep_alive,
-                    &mut inout_marker,
-                    inflight_full,
-                    &mut pending_done,
-                    &mut timeout
-                ).await;
-
-                let (notification, outpacket) = match o {
-                    Ok((n, p)) => (n, p),
-                    Err(e) => {
-                        yield Notification::Abort(e.into());
-                        break
-                    }
-                };
-
-                // write the reply back to the network
-                // FIXME flush??
-                if let Some(p) = outpacket {
-                    if let Err(e) = network.send(p).await {
-                        yield Notification::Abort(e.into());
-                        break
-                    }
-                }
-
-                // yield the notification to the user
-                if let Some(n) = notification { yield n }
-            }
-        };
-
-        Ok(Box::pin(stream))
+        Ok(o)
     }
 
     fn populate_pending(&mut self) {
@@ -154,9 +133,8 @@ impl<R: Requests> MqttEventLoop<R> {
     }
 }
 
-async fn select<R: Requests, P: Packets>(
+async fn select<R: Requests>(
     network: &mut Framed<Box<dyn N>, MqttCodec>,
-    mut pending: P,
     mut requests: R,
     state: &mut MqttState,
     keepalive: Duration,
@@ -164,7 +142,7 @@ async fn select<R: Requests, P: Packets>(
     inflight_full: bool,
     pending_done: &mut bool,
     mut timeout: &mut Delay,
-) -> Result<(Option<Notification>, Option<Packet>), EventLoopError> {
+) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
     // Select on network and requests and orchestrate keep alive delay timer based on it
     let ticker = &mut timeout;
     let o = select! {
@@ -176,13 +154,6 @@ async fn select<R: Requests, P: Packets>(
             Some(request) => state.handle_outgoing_packet(request.into())?,
             None => return Err(EventLoopError::RequestsDone),
         },
-        o = pending.next(), if !*pending_done => match o {
-            Some(packet) => state.handle_outgoing_packet(packet)?,
-            None => {
-                *pending_done = true;
-                (None, None)
-            }
-        },
         _ = ticker => {
             timeout.reset(Instant::now() + keepalive);
             *inout_marker = 0;
@@ -190,7 +161,7 @@ async fn select<R: Requests, P: Packets>(
             let packet = Packet::Pingreq;
             state.handle_outgoing_packet(packet)?;
             let packet = Some(Packet::Pingreq);
-            return Ok((notification, packet))
+            (notification, packet)
         }
     };
 
@@ -208,7 +179,17 @@ async fn select<R: Requests, P: Packets>(
         *inout_marker = 0;
     }
 
-    Ok(o)
+    let (notification, outpacket) = o;
+    let mut out = None;
+
+    // write the reply back to the network
+    // FIXME flush??
+    if let Some(p) = outpacket {
+        network.send(p).await?;
+        out = Some(Outgoing)
+    }
+
+    Ok((notification, out))
 }
 
 impl<R: Requests> MqttEventLoop<R> {
@@ -289,8 +270,8 @@ impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
 
-pub trait Requests: Stream<Item = Request> + Unpin + Send + Sync {}
-impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send + Sync {}
+pub trait Requests: Stream<Item = Request> + Unpin + Send {}
+impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 
 pub trait Packets: Stream<Item = Packet> + Unpin + Send + Sync {}
 impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
