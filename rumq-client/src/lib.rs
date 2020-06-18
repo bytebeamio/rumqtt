@@ -152,6 +152,12 @@ pub enum Request {
     Disconnect,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum Key{
+    RSA,
+    ECC,
+}
+
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
         return Request::Publish(publish);
@@ -257,6 +263,8 @@ pub struct MqttOptions {
     inflight: usize,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
+    /// Key type for TLS 
+    key_type: Key,
 }
 
 impl MqttOptions {
@@ -283,6 +291,7 @@ impl MqttOptions {
             throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
+            key_type: Key::RSA,
         }
     }
 
@@ -433,6 +442,18 @@ impl MqttOptions {
     pub fn inflight(&self) -> usize {
         self.inflight
     }
+
+    /// Use this setter to modify key_type enum, by default RSA
+    pub fn set_key_type(&mut self, key_type: Key) -> &mut Self {
+        self.key_type = key_type;
+        self
+    }
+
+    /// get key type
+    pub fn get_key_type(&self) -> Key{
+        self.key_type
+    }
+
 }
 
 #[cfg(test)]

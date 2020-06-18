@@ -1,10 +1,10 @@
 use tokio::net::TcpStream;
-use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
+use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
 use tokio_rustls::rustls::{ClientConfig, TLSError};
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
-use crate::MqttOptions;
+use crate::{MqttOptions, Key};
 
 use std::io;
 use std::io::{BufReader, Cursor};
@@ -52,7 +52,16 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     // Add der encoded client cert and key
     if let Some(client) = options.client_auth.as_ref() {
         let certs = certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
-        let mut keys = rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone())))?;
+        // load appropriate Key as per the user request. The underlying signature algorithm
+        // of key generation determines the Signature Algorithm during the TLS Handskahe.
+        let read_keys = match options.get_key_type() {
+            Key::RSA => rsa_private_keys(&mut BufReader::new(Cursor::new(client.1.clone()))),
+            Key::ECC => pkcs8_private_keys(&mut BufReader::new(Cursor::new(client.1.clone()))),
+        };
+        let mut keys = match read_keys {
+            Ok(v) => v,
+            Err(_e) => return Err(Error::NoValidCertInChain),
+        };
         config.set_single_client_cert(certs, keys.remove(0))?;
     }
 
