@@ -443,12 +443,8 @@ impl MqttOptions {
         self.inflight
     }
 
-    /// Use this setter to modify key_type enum
+    /// Use this setter to modify key_type enum, by default RSA
     pub fn set_key_type(&mut self, key_type: Key) -> &mut Self {
-        // match key_type {
-        //     Key::RSA => self.key_type = Some("RSA".to_owned()),
-        //     Key::ECC => self.key_type = Some("ECC".to_owned()),
-        // };
         self.key_type = key_type;
         self
     }
