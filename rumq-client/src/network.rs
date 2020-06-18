@@ -25,8 +25,6 @@ pub enum Error {
     TLS(#[from] TLSError),
     #[error("No valid cert in chain")]
     NoValidCertInChain,
-    #[error("Invalid key type")]
-    InvalidKeyType,
 }
 
 // The cert handling functions return unit right now, this is a shortcut
