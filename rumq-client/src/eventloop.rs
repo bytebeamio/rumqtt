@@ -9,28 +9,12 @@ use rumq_core::mqtt4::{Connect, Packet, PacketIdentifier, Publish};
 use tokio::select;
 use tokio::time::{self, Delay, Elapsed, Instant};
 use tokio_util::codec::Framed;
+use async_channel::{bounded, Sender, Receiver};
 
 use std::collections::VecDeque;
 use std::io;
 use std::mem;
 use std::time::Duration;
-
-/// Complete state of the eventloop
-pub struct EventLoop<R: Requests> {
-    // intermediate state of the eventloop. this is set
-    // by the state machine when the streaming ends
-    /// Options of the current mqtt connection
-    pub options: MqttOptions,
-    /// Current state of the connection
-    pub state: MqttState,
-    /// Request stream
-    pub requests: R,
-    pending_pub: VecDeque<Publish>,
-    pending_rel: VecDeque<PacketIdentifier>,
-    has_pending: bool,
-    network: Option<Framed<Box<dyn N>, MqttCodec>>,
-    keepalive_timeout: Delay,
-}
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +39,32 @@ pub enum EventLoopError {
     Cancel,
 }
 
+/// Complete state of the eventloop
+pub struct EventLoop<R: Requests> {
+    /// Options of the current mqtt connection
+    pub options: MqttOptions,
+    /// Current state of the connection
+    pub state: MqttState,
+    /// Request stream
+    pub requests: R,
+    /// Pending publishes from last session
+    pending_pub: VecDeque<Publish>,
+    /// Pending releases from last session
+    pending_rel: VecDeque<PacketIdentifier>,
+    /// Flag to disable pending branch while polling
+    has_pending: bool,
+    /// Network connection to the broker
+    network: Option<Framed<Box<dyn N>, MqttCodec>>,
+    /// Keep alive time
+    keepalive_timeout: Delay,
+    /// Re
+    /// Handle to read cancellation requests
+    cancel_rx: Receiver<()>,
+    /// Handle to send cancellation requests (and drops)
+    cancel_tx: Option<Sender<()>>,
+    /// Delay between reconnection (after a failure)
+    reconnection_delay: Duration
+}
 
 impl<R: Requests> EventLoop<R> {
     /// Returns an object which encompasses state of the connection.
@@ -79,6 +89,8 @@ impl<R: Requests> EventLoop<R> {
     /// Options can be used to update gcp iotcore password
     pub async fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
         let keepalive = options.keep_alive;
+        let (cancel_tx, cancel_rx) = bounded(5);
+
         EventLoop {
             options,
             state: MqttState::new(),
@@ -87,25 +99,19 @@ impl<R: Requests> EventLoop<R> {
             pending_rel: VecDeque::new(),
             has_pending: false,
             network: None,
-            keepalive_timeout: time::delay_for(keepalive)
+            keepalive_timeout: time::delay_for(keepalive),
+            cancel_rx,
+            cancel_tx: Some(cancel_tx),
+            reconnection_delay: Duration::from_secs(0)
         }
     }
 
-    /// Connects to the broker and returns a stream that does everything MQTT.
-    /// This stream internally processes requests from the request stream provided to the eventloop
-    /// while also consuming byte stream from the network and yielding mqtt packets as the output of
-    /// the stream
-    pub async fn connect(&mut self) -> Result<(), EventLoopError> {
-        self.state.await_pingresp = false;
+    pub fn set_reconnection_delay(&mut self, delay: Duration) {
+        self.reconnection_delay = delay;
+    }
 
-        // connect to the broker
-        let mut network = self.network_connect().await?;
-        self.mqtt_connect(&mut network).await?;
-        self.network = Some(network);
-
-        // move pending messages from state to eventloop and create a pending stream of requests
-        self.populate_pending();
-        Ok(())
+    pub fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
+        self.cancel_tx.take()
     }
 
     /// Next notification or outgoing request
@@ -179,6 +185,10 @@ impl<R: Requests> EventLoop<R> {
                 let packet = Some(Packet::Pingreq);
                 (notification, packet)
             }
+            // cancellation requests to stop the polling
+            _ = self.cancel_rx.next() => {
+                return Err(EventLoopError::Cancel)
+            }
         };
 
         Ok(o)
@@ -188,6 +198,48 @@ impl<R: Requests> EventLoop<R> {
 
 
 impl<R: Requests> EventLoop<R> {
+    pub async fn connect_or_cancel(&mut self) -> Result<(), EventLoopError> {
+        let cancel_rx = self.cancel_rx.clone();
+        // select here prevents cancel request from being blocked until connection request is
+        // resolved. Returns with an error if connections fail continuously
+        select! {
+            o = self.connect() => o,
+            _ = cancel_rx.recv() => {
+                Err(EventLoopError::Cancel)
+            }
+        }
+    }
+
+    /// This stream internally processes requests from the request stream provided to the eventloop
+    /// while also consuming byte stream from the network and yielding mqtt packets as the output of
+    /// the stream.
+    /// This function (for convenience) includes internal delays for users to perform internal sleeps
+    /// between re-connections so that cancel semantics can be used during this sleep
+    pub async fn connect(&mut self) -> Result<(), EventLoopError> {
+        self.state.await_pingresp = false;
+
+        // connect to the broker
+        let mut network = match self.network_connect().await {
+            Ok(network) => network,
+            Err(e) => {
+                time::delay_for(self.reconnection_delay).await;
+                return Err(e)
+            }
+        };
+
+        // make MQTT connection request (which internally awaits for ack)
+        if let Err(e) = self.mqtt_connect(&mut network).await {
+            time::delay_for(self.reconnection_delay).await;
+            return Err(e)
+        }
+
+
+        // move pending messages from state to eventloop and create a pending stream of requests
+        self.network = Some(network);
+        self.populate_pending();
+        Ok(())
+    }
+
     async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
         let network = time::timeout(Duration::from_secs(5), async {
             let network = if self.options.ca.is_some() {
