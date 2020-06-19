@@ -2,13 +2,11 @@ use crate::state::{MqttState, StateError};
 use crate::{MqttOptions, Outgoing};
 use crate::{network, Notification, Request};
 
-use async_stream::stream;
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
 use rumq_core::mqtt4::{Connect, Packet, PacketIdentifier, Publish};
 use tokio::select;
-use tokio::stream::iter;
 use tokio::time::{self, Delay, Elapsed, Instant};
 use tokio_util::codec::Framed;
 
@@ -29,7 +27,9 @@ pub struct MqttEventLoop<R: Requests> {
     pub requests: R,
     pending_pub: VecDeque<Publish>,
     pending_rel: VecDeque<PacketIdentifier>,
+    has_pending: bool,
     network: Option<Framed<Box<dyn N>, MqttCodec>>,
+    keepalive_timeout: Delay,
 }
 
 /// Critical errors during eventloop polling
@@ -74,13 +74,16 @@ pub enum EventLoopError {
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
 pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> MqttEventLoop<R> {
+    let keepalive = options.keep_alive;
     MqttEventLoop {
         options,
         state: MqttState::new(),
         requests,
         pending_pub: VecDeque::new(),
         pending_rel: VecDeque::new(),
-        network: None
+        has_pending: false,
+        network: None,
+        keepalive_timeout: time::delay_for(keepalive)
     }
 }
 
@@ -102,95 +105,88 @@ impl<R: Requests> MqttEventLoop<R> {
         Ok(())
     }
 
-    pub async fn next(&mut self) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
+    /// Next notification or outgoing request
+    /// This method used to return only incoming network notification while silently looping through
+    /// outgoing requests. Internal loops inside async functions are risky. Imagine this function
+    /// with 100 requests and 1 incoming packet. If the `Stream` which is using this internally is
+    /// selected with other streams, can potentially do more internal polling
+    pub async fn step(&mut self) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
         // create mqtt stream
-        let mut timeout = time::delay_for(self.options.keep_alive);
-        let mut inout_marker = 0;
-        let mut pending_done = false;
-
-        let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
-        let network = self.network.as_mut().ok_or(EventLoopError::NoLink)?;
-        let o = select(
-            network,
-            &mut self.requests,
-            &mut self.state,
-            self.options.keep_alive,
-            &mut inout_marker,
-            inflight_full,
-            &mut pending_done,
-            &mut timeout
-        ).await?;
-
+        let timeout = time::delay_for(self.options.keep_alive);
+        let o = self.select().await?;
         Ok(o)
     }
 
+    /// Last session might contain packets which aren't acked. MQTT says these packets should be
+    /// republished in the next session. We save all such pending packets here.
     fn populate_pending(&mut self) {
         let mut pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
         self.pending_pub.append(&mut pending_pub);
 
         let mut pending_rel = mem::replace(&mut self.state.outgoing_rel, VecDeque::new());
         self.pending_rel.append(&mut pending_rel);
-    }
-}
 
-async fn select<R: Requests>(
-    network: &mut Framed<Box<dyn N>, MqttCodec>,
-    mut requests: R,
-    state: &mut MqttState,
-    keepalive: Duration,
-    inout_marker: &mut u8,
-    inflight_full: bool,
-    pending_done: &mut bool,
-    mut timeout: &mut Delay,
-) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
-    // Select on network and requests and orchestrate keep alive delay timer based on it
-    let ticker = &mut timeout;
-    let o = select! {
-        o = network.next() => match o {
-            Some(packet) => state.handle_incoming_packet(packet?)?,
-            None => return Err(EventLoopError::StreamDone)
-        },
-        o = requests.next(), if !inflight_full && *pending_done => match o {
-            Some(request) => state.handle_outgoing_packet(request.into())?,
-            None => return Err(EventLoopError::RequestsDone),
-        },
-        _ = ticker => {
-            timeout.reset(Instant::now() + keepalive);
-            *inout_marker = 0;
-            let notification = None;
-            let packet = Packet::Pingreq;
-            state.handle_outgoing_packet(packet)?;
-            let packet = Some(Packet::Pingreq);
-            (notification, packet)
+        if !self.pending_pub.is_empty() || !self.pending_rel.is_empty() {
+            self.has_pending = true;
         }
-    };
-
-    let (notification, packet) = (o.0.is_some(), o.1.is_some());
-    match (notification, packet) {
-        (true, true) => *inout_marker |= 3,
-        (true, false) => *inout_marker |= 1,
-        (false, true) => *inout_marker |= 2,
-        (false, false) => (),
     }
 
-    // Extend the keep alive ping window
-    if *inout_marker == 3 {
-        timeout.reset(Instant::now() + keepalive);
-        *inout_marker = 0;
+    /// Select on network and requests and generate keepalive pings when necessary
+    async fn select(&mut self) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
+        let network = match &mut self.network {
+            Some(network) => network,
+            None => panic!("No network handle. Connect first")
+        };
+
+        let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
+        let o = select! {
+            // pull next packet from network
+            o = network.next() => match o {
+                Some(packet) => self.state.handle_incoming_packet(packet?)?,
+                None => return Err(EventLoopError::StreamDone)
+            },
+            // pull next request from user requests channel.
+            // we read user requests only when we are done sending pending
+            // packets and inflight queue has space (for flow control)
+            o = self.requests.next(), if !inflight_full && !self.has_pending => match o {
+                Some(request) => self.state.handle_outgoing_packet(request.into())?,
+                None => return Err(EventLoopError::RequestsDone),
+            },
+            // handle the next pending packet from previous session. Disable
+            // this branch when done with all the pending packets
+            o = next_pending(&mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
+                Some(packet) => self.state.handle_outgoing_packet(packet)?,
+                None => {
+                    self.has_pending = false;
+                    (None, None)
+                }
+            },
+            // the above two branches will move next keepalive time
+            _ = &mut self.keepalive_timeout => {
+                self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
+                let notification = None;
+                let packet = Packet::Pingreq;
+                self.state.handle_outgoing_packet(packet)?;
+                let packet = Some(Packet::Pingreq);
+                (notification, packet)
+            }
+        };
+
+        let (notification, outpacket) = o;
+        let mut out = None;
+
+        // write the reply back to the network
+        // FIXME flush??
+        if let Some(p) = outpacket {
+            network.send(p).await?;
+            out = Some(Outgoing)
+        }
+
+        Ok((notification, out))
     }
-
-    let (notification, outpacket) = o;
-    let mut out = None;
-
-    // write the reply back to the network
-    // FIXME flush??
-    if let Some(p) = outpacket {
-        network.send(p).await?;
-        out = Some(Outgoing)
-    }
-
-    Ok((notification, out))
 }
+
+
 
 impl<R: Requests> MqttEventLoop<R> {
     async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
@@ -248,6 +244,23 @@ impl<R: Requests> MqttEventLoop<R> {
 
         Ok(())
     }
+}
+
+/// Returns the next pending packet asyncronously to be used in select!
+/// This is a synchronous function but made async to make it fit in select!
+async fn next_pending(
+    pending_pub: &mut VecDeque<Publish>,
+    pending_rel: &mut VecDeque<PacketIdentifier>
+) -> Option<Packet> {
+    if let Some(p) = pending_pub.pop_front() {
+        return Some(Packet::Publish(p))
+    }
+
+    if let Some(p) = pending_rel.pop_front() {
+        return Some(Packet::Pubrel(p))
+    }
+
+    None
 }
 
 impl From<Request> for Packet {
