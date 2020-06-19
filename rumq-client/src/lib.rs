@@ -126,6 +126,8 @@ pub use rumq_core::mqtt4::*;
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
 pub enum Incoming {
+    /// Connection successful
+    Connected,
     /// Incoming publish from the broker
     Publish(Publish),
     /// Incoming puback from the broker

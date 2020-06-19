@@ -1,13 +1,12 @@
 //! This module offers a high level synchronous abstraction to async eventloop.
 //! Uses channels internally to get `Requests` and send `Notifications`
 
-use crate::{EventLoop, MqttOptions, Incoming, Request, EventLoopError};
+use crate::{EventLoop, MqttOptions, Incoming, Request, EventLoopError, Outgoing};
 
 use std::time::Duration;
-use tokio::stream::{StreamExt, Stream};
-use tokio::{time, select};
+use tokio::{time, select, runtime};
 use rumq_core::mqtt4::{Publish, Subscribe, QoS};
-use async_channel::{bounded, Sender, SendError, TrySendError, RecvError};
+use async_channel::{bounded, Sender, Receiver, SendError, RecvError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -77,70 +76,76 @@ impl Client {
 ///  MQTT connection. Maintains all the necessary state and automatically retries connections
 /// in flaky networks.
 pub struct Connection {
-    cancel_rx: async_channel::Receiver<()>,
-    max_connection_retries: Option<usize>,
-    current_connection_count: usize,
+    cancel_rx: Receiver<()>,
     connection_retry_delay: Duration,
-    eventloop: EventLoop<async_channel::Receiver<Request>>,
+    eventloop: EventLoop<Receiver<Request>>,
 }
 
 impl Connection {
-    fn new(eventloop: EventLoop<async_channel::Receiver<Request>>, cancel_rx: async_channel::Receiver<()>) -> Connection {
+    fn new(eventloop: EventLoop<Receiver<Request>>, cancel_rx: Receiver<()>) -> Connection {
         Connection {
             eventloop,
             cancel_rx,
-            max_connection_retries: None,
-            current_connection_count: 0,
             connection_retry_delay: Duration::from_secs(1)
         }
     }
 
-    /// Set maximum number of continuous connection retries. `start` method returns
-    /// with an error after this count
-    pub fn set_max_connection_retries(&mut self, max: usize) {
-        self.max_connection_retries = Some(max);
-    }
-
-    async fn connect_or_cancel(&mut self) -> Result<bool, EventLoopError> {
+    async fn connect_or_cancel(&mut self) -> Result<(), EventLoopError> {
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
         select! {
-            o = connect_with_sleep(&mut self.eventloop, self.connection_retry_delay) => {
-                match o {
-                    Ok(stream) => {
-                        self.current_connection_count = 0;
-                        Ok(true)
-                    }
-                    Err(e) => match self.max_connection_retries {
-                        Some(max) if self.current_connection_count > max => Err(e),
-                        Some(_) | None => {
-                            self.current_connection_count += 1;
-                            Ok(false)
-                        }
-                    }
-                }
-            }
+            o = connect_with_sleep(&mut self.eventloop, self.connection_retry_delay) => o,
             _ = self.cancel_rx.recv() => {
                 Err(EventLoopError::Cancel)
             }
         }
     }
-}
 
-async fn connect_with_sleep(
-    eventloop: &mut EventLoop<async_channel::Receiver<Request>>,
-    sleep: Duration
-) -> Result<(), EventLoopError> {
-    match eventloop.connect().await {
-        Ok(stream) => Ok(()),
-        Err(e) => {
-            error!("Failed to connect. Error = {:?}", e);
-            time::delay_for(sleep).await;
-            Err(e)
+    pub fn iter(&mut self) -> Iter {
+        let mut runtime = runtime::Builder::new();
+        runtime.basic_scheduler().enable_io().enable_time();
+
+        Iter {
+            connection: self,
+            runtime: runtime::Runtime::new().unwrap(),
+            connected: false
         }
     }
 }
 
-pub struct Iter {
+pub struct Iter<'a> {
+    connection: &'a mut Connection,
+    runtime: runtime::Runtime,
+    connected: bool
+}
 
+impl<'a> Iter<'a> {
+    fn connect(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), EventLoopError> {
+        let f = self.connection.connect_or_cancel();
+        self.runtime.block_on(f)?;
+        Ok((Some(Incoming::Connected), None))
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = Result<(Option<Incoming>, Option<Outgoing>), EventLoopError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.connected {
+            return Some(self.connect())
+        }
+
+        let f = self.connection.eventloop.poll();
+        Some(self.runtime.block_on(f))
+    }
+}
+
+async fn connect_with_sleep(eventloop: &mut EventLoop<Receiver<Request>>, sleep: Duration) -> Result<(), EventLoopError> {
+    match eventloop.connect().await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            time::delay_for(sleep).await;
+            Err(e)
+        }
+    }
 }
