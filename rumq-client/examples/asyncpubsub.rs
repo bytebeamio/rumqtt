@@ -2,7 +2,7 @@ use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{task, time};
 
-use rumq_client::{self, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe, EventLoopError};
+use rumq_client::{self, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe, ConnectionError};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -24,7 +24,7 @@ async fn main() {
     println!("Done with the stream. out = {:?}", o);
 }
 
-async fn stream_it(eventloop: &mut EventLoop<Receiver<Request>>) -> Result<(), EventLoopError>{
+async fn stream_it(eventloop: &mut EventLoop<Receiver<Request>>) -> Result<(), ConnectionError>{
     eventloop.connect().await?;
 
     loop {

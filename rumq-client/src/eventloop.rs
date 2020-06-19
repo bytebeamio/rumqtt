@@ -18,7 +18,7 @@ use std::time::Duration;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
-pub enum EventLoopError {
+pub enum ConnectionError {
     #[error("Mqtt state")]
     MqttState(#[from] StateError),
     #[error("Timeout")]
@@ -119,7 +119,7 @@ impl<R: Requests> EventLoop<R> {
     /// outgoing requests. Internal loops inside async functions are risky. Imagine this function
     /// with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
     /// selected with other streams, can potentially do more internal polling (if the socket is ready)
-    pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), EventLoopError> {
+    pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let (notification, outpacket) = self.select().await?;
         let mut out = None;
 
@@ -147,10 +147,10 @@ impl<R: Requests> EventLoop<R> {
     }
 
     /// Select on network and requests and generate keepalive pings when necessary
-    async fn select(&mut self) -> Result<(Option<Incoming>, Option<Packet>), EventLoopError> {
+    async fn select(&mut self) -> Result<(Option<Incoming>, Option<Packet>), ConnectionError> {
         let network = match &mut self.network {
             Some(network) => network,
-            None => return Err(EventLoopError::NoLink)
+            None => return Err(ConnectionError::NoLink)
         };
 
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
@@ -158,14 +158,14 @@ impl<R: Requests> EventLoop<R> {
             // pull next packet from network
             o = network.next() => match o {
                 Some(packet) => self.state.handle_incoming_packet(packet?)?,
-                None => return Err(EventLoopError::StreamDone)
+                None => return Err(ConnectionError::StreamDone)
             },
             // pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
             o = self.requests.next(), if !inflight_full && !self.has_pending => match o {
                 Some(request) => self.state.handle_outgoing_packet(request.into())?,
-                None => return Err(EventLoopError::RequestsDone),
+                None => return Err(ConnectionError::RequestsDone),
             },
             // handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
@@ -187,7 +187,7 @@ impl<R: Requests> EventLoop<R> {
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
-                return Err(EventLoopError::Cancel)
+                return Err(ConnectionError::Cancel)
             }
         };
 
@@ -198,14 +198,14 @@ impl<R: Requests> EventLoop<R> {
 
 
 impl<R: Requests> EventLoop<R> {
-    pub async fn connect_or_cancel(&mut self) -> Result<(), EventLoopError> {
+    pub async fn connect_or_cancel(&mut self) -> Result<(), ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
         select! {
             o = self.connect() => o,
             _ = cancel_rx.recv() => {
-                Err(EventLoopError::Cancel)
+                Err(ConnectionError::Cancel)
             }
         }
     }
@@ -215,7 +215,7 @@ impl<R: Requests> EventLoop<R> {
     /// the stream.
     /// This function (for convenience) includes internal delays for users to perform internal sleeps
     /// between re-connections so that cancel semantics can be used during this sleep
-    pub async fn connect(&mut self) -> Result<(), EventLoopError> {
+    pub async fn connect(&mut self) -> Result<(), ConnectionError> {
         self.state.await_pingresp = false;
 
         // connect to the broker
@@ -240,7 +240,7 @@ impl<R: Requests> EventLoop<R> {
         Ok(())
     }
 
-    async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
+    async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, ConnectionError> {
         let network = time::timeout(Duration::from_secs(5), async {
             let network = if self.options.ca.is_some() {
                 let o = network::tls_connect(&self.options).await?;
@@ -252,14 +252,14 @@ impl<R: Requests> EventLoop<R> {
                 Framed::new(o, MqttCodec::new(self.options.max_packet_size))
             };
 
-            Ok::<Framed<Box<dyn N>, MqttCodec>, EventLoopError>(network)
+            Ok::<Framed<Box<dyn N>, MqttCodec>, ConnectionError>(network)
         })
         .await??;
 
         Ok(network)
     }
 
-    async fn mqtt_connect(&mut self, mut network: impl Network) -> Result<(), EventLoopError> {
+    async fn mqtt_connect(&mut self, mut network: impl Network) -> Result<(), ConnectionError> {
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
         let clean_session = self.options.clean_session();
@@ -278,7 +278,7 @@ impl<R: Requests> EventLoop<R> {
         time::timeout(Duration::from_secs(5), async {
             network.send(Packet::Connect(connect)).await?;
             self.state.handle_outgoing_connect()?;
-            Ok::<_, EventLoopError>(())
+            Ok::<_, ConnectionError>(())
         })
         .await??;
 
@@ -286,10 +286,10 @@ impl<R: Requests> EventLoop<R> {
         time::timeout(Duration::from_secs(5), async {
             let packet = match network.next().await {
                 Some(o) => o?,
-                None => return Err(EventLoopError::StreamDone),
+                None => return Err(ConnectionError::StreamDone),
             };
             self.state.handle_incoming_connack(packet)?;
-            Ok::<_, EventLoopError>(())
+            Ok::<_, ConnectionError>(())
         })
         .await??;
 

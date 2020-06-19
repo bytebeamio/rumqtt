@@ -14,6 +14,14 @@ fn main() {
         publish(client)
     });
 
+    for (i, notification) in connection.iter().enumerate() {
+        if i == 7 { break }
+        println!("Notification = {:?}", notification);
+    }
+
+    println!("Iterator 1 done!!");
+
+    // muliple iterators continue the state (after reconnection)
     for notification in connection.iter() {
         println!("Notification = {:?}", notification);
     }
@@ -24,7 +32,7 @@ fn main() {
 fn publish(mut client: Client) {
     client.subscribe("hello/world", QoS::AtMostOnce).unwrap();
     for i in 0..10 {
-        let payload = vec![1, 2, 3, i];
+        let payload = vec![i; i as usize];
         client.publish("hello", QoS::AtLeastOnce, false, payload).unwrap();
         thread::sleep(Duration::from_secs(1));
     }

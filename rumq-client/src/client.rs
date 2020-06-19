@@ -1,7 +1,7 @@
 //! This module offers a high level synchronous abstraction to async eventloop.
 //! Uses channels internally to get `Requests` and send `Notifications`
 
-use crate::{EventLoop, MqttOptions, Incoming, Request, EventLoopError, Outgoing};
+use crate::{EventLoop, MqttOptions, Incoming, Request, ConnectionError, Outgoing};
 
 use tokio::runtime;
 use rumq_core::mqtt4::{Publish, Subscribe, QoS};
@@ -117,7 +117,7 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iter<'a> {
-    fn connect(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), EventLoopError> {
+    fn connect(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let f = self.connection.eventloop.connect_or_cancel();
         self.runtime.block_on(f)?;
         self.connected = true;
@@ -126,14 +126,14 @@ impl<'a> Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = Result<(Option<Incoming>, Option<Outgoing>), EventLoopError>;
+    type Item = Result<(Option<Incoming>, Option<Outgoing>), ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.connected {
             return match self.connect() {
                 Ok(v) => Some(Ok(v)),
                 // cancellation errors during connection should stop the iterator
-                Err(EventLoopError::Cancel) => {
+                Err(ConnectionError::Cancel) => {
                     trace!("Cancellation request received while connecting");
                     None
                 },
@@ -145,11 +145,11 @@ impl<'a> Iterator for Iter<'a> {
         match self.runtime.block_on(f) {
             Ok(v)  => Some(Ok(v)),
             // closing of request channel should stop the iterator
-            Err(EventLoopError::RequestsDone) => {
+            Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");
                 None
             },
-            Err(EventLoopError::Cancel) => {
+            Err(ConnectionError::Cancel) => {
                 trace!("Cancellation request received");
                 None
             },

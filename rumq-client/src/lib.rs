@@ -117,7 +117,7 @@ mod network;
 mod state;
 mod client;
 
-pub use eventloop::{EventLoopError, EventLoop};
+pub use eventloop::{ConnectionError, EventLoop};
 pub use client::{Error, Client};
 pub use state::MqttState;
 
