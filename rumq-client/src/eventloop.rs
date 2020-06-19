@@ -51,6 +51,8 @@ pub enum EventLoopError {
     RequestsDone,
     #[error("No network link. Call eventloop.connect()")]
     NoLink,
+    #[error("Cancel request by the user")]
+    Cancel,
 }
 
 
