@@ -77,7 +77,7 @@ impl<R: Requests> EventLoop<R> {
     /// access and update `options`, `state` and `requests`.
     /// For example, state and requests can be used to save state to disk before shutdown.
     /// Options can be used to update gcp iotcore password
-    pub fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
+    pub async fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
         let keepalive = options.keep_alive;
         EventLoop {
             options,
