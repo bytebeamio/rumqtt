@@ -116,7 +116,6 @@ mod eventloop;
 mod network;
 mod state;
 
-pub use eventloop::eventloop;
 pub use eventloop::{EventLoopError, EventLoop};
 pub use state::MqttState;
 
@@ -137,8 +136,8 @@ pub enum Incoming {
     Suback(Suback),
     /// Incoming unsuback from the broker
     Unsuback(PacketIdentifier),
-    /// Eventloop error
-    Abort(EventLoopError),
+    /// Ping response
+    PingResp
 }
 
 #[derive(Debug)]

@@ -53,41 +53,42 @@ pub enum EventLoopError {
     NoLink,
 }
 
-/// Returns an object which encompasses state of the connection.
-/// Use this to create a `Stream` with `connect().await?` method and poll it with tokio.
-///
-/// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
-/// internal state and mqtt options after the work with the `Stream` is done or stopped.
-/// This is useful in scenarios like shutdown where the current state should be persisted or
-/// during reconnection when the state from last disconnection should be resumed.
-/// For a similar reason, requests are also initialized as part of this method to reuse same
-/// request stream while retrying after the previous `Stream` has stopped
-/// ```ignore
-/// let mut eventloop = eventloop(options, requests);
-/// loop {
-///     let mut stream = eventloop.connect(reconnection_options).await.unwrap();
-///     while let Some(notification) = stream.next().await() {}
-/// }
-/// ```
-/// When mqtt `stream` ends due to critical errors (like auth failure), user has a choice to
-/// access and update `options`, `state` and `requests`.
-/// For example, state and requests can be used to save state to disk before shutdown.
-/// Options can be used to update gcp iotcore password
-pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> EventLoop<R> {
-    let keepalive = options.keep_alive;
-    EventLoop {
-        options,
-        state: MqttState::new(),
-        requests,
-        pending_pub: VecDeque::new(),
-        pending_rel: VecDeque::new(),
-        has_pending: false,
-        network: None,
-        keepalive_timeout: time::delay_for(keepalive)
-    }
-}
 
 impl<R: Requests> EventLoop<R> {
+    /// Returns an object which encompasses state of the connection.
+    /// Use this to create a `Stream` with `connect().await?` method and poll it with tokio.
+    ///
+    /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
+    /// internal state and mqtt options after the work with the `Stream` is done or stopped.
+    /// This is useful in scenarios like shutdown where the current state should be persisted or
+    /// during reconnection when the state from last disconnection should be resumed.
+    /// For a similar reason, requests are also initialized as part of this method to reuse same
+    /// request stream while retrying after the previous `Stream` has stopped
+    /// ```ignore
+    /// let mut eventloop = eventloop(options, requests);
+    /// loop {
+    ///     let mut stream = eventloop.connect(reconnection_options).await.unwrap();
+    ///     while let Some(notification) = stream.next().await() {}
+    /// }
+    /// ```
+    /// When mqtt `stream` ends due to critical errors (like auth failure), user has a choice to
+    /// access and update `options`, `state` and `requests`.
+    /// For example, state and requests can be used to save state to disk before shutdown.
+    /// Options can be used to update gcp iotcore password
+    pub fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
+        let keepalive = options.keep_alive;
+        EventLoop {
+            options,
+            state: MqttState::new(),
+            requests,
+            pending_pub: VecDeque::new(),
+            pending_rel: VecDeque::new(),
+            has_pending: false,
+            network: None,
+            keepalive_timeout: time::delay_for(keepalive)
+        }
+    }
+
     /// Connects to the broker and returns a stream that does everything MQTT.
     /// This stream internally processes requests from the request stream provided to the eventloop
     /// while also consuming byte stream from the network and yielding mqtt packets as the output of
@@ -108,8 +109,8 @@ impl<R: Requests> EventLoop<R> {
     /// Next notification or outgoing request
     /// This method used to return only incoming network notification while silently looping through
     /// outgoing requests. Internal loops inside async functions are risky. Imagine this function
-    /// with 100 requests and 1 incoming packet. If the `Stream` which is using this internally is
-    /// selected with other streams, can potentially do more internal polling
+    /// with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
+    /// selected with other streams, can potentially do more internal polling (if the socket is ready)
     pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), EventLoopError> {
         let (notification, outpacket) = self.select().await?;
         let mut out = None;

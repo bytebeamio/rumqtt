@@ -2,7 +2,7 @@ use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{task, time};
 
-use rumq_client::{self, eventloop, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe, EventLoopError};
+use rumq_client::{self, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe, EventLoopError};
 use std::time::Duration;
 
 #[tokio::main(basic_scheduler)]
@@ -14,7 +14,7 @@ async fn main() {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
 
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
-    let mut eventloop = eventloop(mqttoptions, requests_rx);
+    let mut eventloop = EventLoop::new(mqttoptions, requests_rx);
     task::spawn(async move {
         requests(requests_tx).await;
         time::delay_for(Duration::from_secs(3)).await;
@@ -25,18 +25,16 @@ async fn main() {
 }
 
 async fn stream_it(eventloop: &mut EventLoop<Receiver<Request>>) -> Result<(), EventLoopError>{
-    eventloop.connect().await.unwrap();
+    eventloop.connect().await?;
 
     loop {
         let (incoming, outgoing) = eventloop.poll().await?;
         println!("Incoming = {:?}, Outgoing = {:?}", incoming, outgoing);
     }
-
-    Ok(())
 }
 
 async fn requests(mut requests_tx: Sender<Request>) {
-    let subscription = Subscribe::new("hello/world", QoS::AtLeastOnce);
+    let subscription = Subscribe::new("hello/world", QoS::AtMostOnce);
     let _ = requests_tx.send(Request::Subscribe(subscription)).await;
 
     for i in 0..10 {

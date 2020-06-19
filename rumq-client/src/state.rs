@@ -140,8 +140,8 @@ impl MqttState {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
                 let request = None;
-                let notification = Some(Incoming::Puback(pkid));
-                Ok((notification, request))
+                let incoming = Some(Incoming::Puback(pkid));
+                Ok((incoming, request))
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", pkid);
@@ -151,15 +151,15 @@ impl MqttState {
     }
 
     fn handle_incoming_suback(&mut self, suback: Suback) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        let request = None;
-        let notification = Some(Incoming::Suback(suback));
-        Ok((notification, request))
+        let incoming = Some(Incoming::Suback(suback));
+        let response = None;
+        Ok((incoming, response))
     }
 
     fn handle_incoming_unsuback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        let request = None;
-        let notification = Some(Incoming::Unsuback(pkid));
-        Ok((notification, request))
+        let incoming = Some(Incoming::Unsuback(pkid));
+        let response = None;
+        Ok((incoming, response))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
@@ -172,9 +172,9 @@ impl MqttState {
                 let _ = self.outgoing_pub.remove(index);
                 self.outgoing_rel.push_back(pkid);
 
-                let reply = Some(Packet::Pubrel(pkid));
-                let notification = Some(Incoming::Pubrec(pkid));
-                Ok((notification, reply))
+                let response = Some(Packet::Pubrel(pkid));
+                let incoming = Some(Incoming::Pubrec(pkid));
+                Ok((incoming, response))
             }
             None => {
                 error!("Unsolicited pubrec packet: {:?}", pkid);
@@ -190,22 +190,22 @@ impl MqttState {
 
         match qos {
             QoS::AtMostOnce => {
-                let notification = Incoming::Publish(publish);
-                Ok((Some(notification), None))
+                let incoming = Incoming::Publish(publish);
+                Ok((Some(incoming), None))
             }
             QoS::AtLeastOnce => {
                 let pkid = publish.pkid.unwrap();
-                let request = Packet::Puback(pkid);
-                let notification = Incoming::Publish(publish);
-                Ok((Some(notification), Some(request)))
+                let response = Packet::Puback(pkid);
+                let incoming = Incoming::Publish(publish);
+                Ok((Some(incoming), Some(response)))
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid.unwrap();
-                let reply = Packet::Pubrec(pkid);
-                let notification = Incoming::Publish(publish);
+                let response = Packet::Pubrec(pkid);
+                let incoming = Incoming::Publish(publish);
 
                 self.incoming_pub.push_back(pkid);
-                Ok((Some(notification), Some(reply)))
+                Ok((Some(incoming), Some(response)))
             }
         }
     }
@@ -214,8 +214,8 @@ impl MqttState {
         match self.incoming_pub.iter().position(|x| *x == pkid) {
             Some(index) => {
                 let _ = self.incoming_pub.remove(index);
-                let reply = Packet::Pubcomp(pkid);
-                Ok((None, Some(reply)))
+                let response = Packet::Pubcomp(pkid);
+                Ok((None, Some(response)))
             }
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pkid);
@@ -228,9 +228,9 @@ impl MqttState {
         match self.outgoing_rel.iter().position(|x| *x == pkid) {
             Some(index) => {
                 self.outgoing_rel.remove(index).expect("Wrong index");
-                let notification = Some(Incoming::Pubcomp(pkid));
-                let reply = None;
-                Ok((notification, reply))
+                let incoming = Some(Incoming::Pubcomp(pkid));
+                let response = None;
+                Ok((incoming, response))
             }
             _ => {
                 error!("Unsolicited pubcomp packet: {:?}", pkid);
@@ -267,7 +267,8 @@ impl MqttState {
 
     fn handle_incoming_pingresp(&mut self) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         self.await_pingresp = false;
-        Ok((None, None))
+        let incoming = Some(Incoming::PingResp);
+        Ok((incoming, None))
     }
 
     fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Packet, StateError> {
