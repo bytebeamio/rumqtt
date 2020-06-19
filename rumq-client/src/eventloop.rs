@@ -1,6 +1,6 @@
 use crate::state::{MqttState, StateError};
 use crate::{MqttOptions, Outgoing};
-use crate::{network, Notification, Request};
+use crate::{network, Incoming, Request};
 
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
@@ -16,7 +16,7 @@ use std::mem;
 use std::time::Duration;
 
 /// Complete state of the eventloop
-pub struct MqttEventLoop<R: Requests> {
+pub struct EventLoop<R: Requests> {
     // intermediate state of the eventloop. this is set
     // by the state machine when the streaming ends
     /// Options of the current mqtt connection
@@ -73,9 +73,9 @@ pub enum EventLoopError {
 /// access and update `options`, `state` and `requests`.
 /// For example, state and requests can be used to save state to disk before shutdown.
 /// Options can be used to update gcp iotcore password
-pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> MqttEventLoop<R> {
+pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> EventLoop<R> {
     let keepalive = options.keep_alive;
-    MqttEventLoop {
+    EventLoop {
         options,
         state: MqttState::new(),
         requests,
@@ -87,7 +87,7 @@ pub fn eventloop<R: Requests>(options: MqttOptions, requests: R) -> MqttEventLoo
     }
 }
 
-impl<R: Requests> MqttEventLoop<R> {
+impl<R: Requests> EventLoop<R> {
     /// Connects to the broker and returns a stream that does everything MQTT.
     /// This stream internally processes requests from the request stream provided to the eventloop
     /// while also consuming byte stream from the network and yielding mqtt packets as the output of
@@ -110,11 +110,17 @@ impl<R: Requests> MqttEventLoop<R> {
     /// outgoing requests. Internal loops inside async functions are risky. Imagine this function
     /// with 100 requests and 1 incoming packet. If the `Stream` which is using this internally is
     /// selected with other streams, can potentially do more internal polling
-    pub async fn step(&mut self) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
-        // create mqtt stream
-        let timeout = time::delay_for(self.options.keep_alive);
-        let o = self.select().await?;
-        Ok(o)
+    pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), EventLoopError> {
+        let (notification, outpacket) = self.select().await?;
+        let mut out = None;
+
+        // write the reply back to the network. flush??
+        if let Some(packet) = outpacket {
+            out = Some(outgoing(&packet));
+            self.network.as_mut().unwrap().send(packet).await?;
+        }
+
+        Ok((notification, out))
     }
 
     /// Last session might contain packets which aren't acked. MQTT says these packets should be
@@ -132,14 +138,14 @@ impl<R: Requests> MqttEventLoop<R> {
     }
 
     /// Select on network and requests and generate keepalive pings when necessary
-    async fn select(&mut self) -> Result<(Option<Notification>, Option<Outgoing>), EventLoopError> {
+    async fn select(&mut self) -> Result<(Option<Incoming>, Option<Packet>), EventLoopError> {
         let network = match &mut self.network {
             Some(network) => network,
-            None => panic!("No network handle. Connect first")
+            None => return Err(EventLoopError::NoLink)
         };
 
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
-        let o = select! {
+        let o  = select! {
             // pull next packet from network
             o = network.next() => match o {
                 Some(packet) => self.state.handle_incoming_packet(packet?)?,
@@ -172,23 +178,13 @@ impl<R: Requests> MqttEventLoop<R> {
             }
         };
 
-        let (notification, outpacket) = o;
-        let mut out = None;
-
-        // write the reply back to the network
-        // FIXME flush??
-        if let Some(p) = outpacket {
-            network.send(p).await?;
-            out = Some(Outgoing)
-        }
-
-        Ok((notification, out))
+        Ok(o)
     }
 }
 
 
 
-impl<R: Requests> MqttEventLoop<R> {
+impl<R: Requests> EventLoop<R> {
     async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, EventLoopError> {
         let network = time::timeout(Duration::from_secs(5), async {
             let network = if self.options.ca.is_some() {
@@ -252,6 +248,8 @@ async fn next_pending(
     pending_pub: &mut VecDeque<Publish>,
     pending_rel: &mut VecDeque<PacketIdentifier>
 ) -> Option<Packet> {
+    // publishes are prioritized over releases
+    // goto releases only after done with publishes
     if let Some(p) = pending_pub.pop_front() {
         return Some(Packet::Publish(p))
     }
@@ -261,6 +259,20 @@ async fn next_pending(
     }
 
     None
+}
+
+fn outgoing(packet: &Packet) -> Outgoing {
+    match packet {
+        Packet::Publish(publish) => Outgoing::Publish(publish.pkid.clone()),
+        Packet::Puback(pkid) => Outgoing::Puback(*pkid),
+        Packet::Pubrec(pkid) => Outgoing::Pubrec(*pkid),
+        Packet::Pubcomp(pkid) => Outgoing::Pubcomp(*pkid),
+        Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
+        Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
+        Packet::Pingreq => Outgoing::Pingreq,
+        Packet::Disconnect => Outgoing::Disconnect,
+        packet => panic!("Invalid outgoing packet = {:?}", packet)
+    }
 }
 
 impl From<Request> for Packet {
@@ -289,11 +301,12 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 pub trait Packets: Stream<Item = Packet> + Unpin + Send + Sync {}
 impl<T> Packets for T where T: Stream<Item = Packet> + Unpin + Send + Sync {}
 
+/*
 #[cfg(test)]
 mod test {
     use super::broker::*;
     use crate::state::StateError;
-    use crate::{EventLoopError, MqttOptions, Notification, Request};
+    use crate::{EventLoopError, MqttOptions, Incoming, Request};
     use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
@@ -489,7 +502,7 @@ mod test {
 
         let start = Instant::now();
         match stream.next().await.unwrap() {
-            Notification::Abort(EventLoopError::MqttState(StateError::AwaitPingResp)) => assert_eq!(start.elapsed().as_secs(), 10),
+            Incoming::Abort(EventLoopError::MqttState(StateError::AwaitPingResp)) => assert_eq!(start.elapsed().as_secs(), 10),
             _ => panic!("Expecting await pingresp error"),
         }
     }
@@ -765,3 +778,4 @@ mod broker {
         }
     }
 }
+*/

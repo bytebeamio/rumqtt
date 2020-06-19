@@ -117,14 +117,14 @@ mod network;
 mod state;
 
 pub use eventloop::eventloop;
-pub use eventloop::{EventLoopError, MqttEventLoop};
+pub use eventloop::{EventLoopError, EventLoop};
 pub use state::MqttState;
 
 pub use rumq_core::mqtt4::*;
 
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
-pub enum Notification {
+pub enum Incoming {
     /// Incoming publish from the broker
     Publish(Publish),
     /// Incoming puback from the broker
@@ -141,7 +141,17 @@ pub enum Notification {
     Abort(EventLoopError),
 }
 
-pub struct Outgoing;
+#[derive(Debug)]
+pub enum Outgoing {
+    Publish(Option<PacketIdentifier>),
+    Subscribe(PacketIdentifier),
+    Unsubscribe(PacketIdentifier),
+    Puback(PacketIdentifier),
+    Pubrec(PacketIdentifier),
+    Pubcomp(PacketIdentifier),
+    Pingreq,
+    Disconnect,
+}
 
 /// Requests by the client to mqtt event loop. Request are
 /// handle one by one
