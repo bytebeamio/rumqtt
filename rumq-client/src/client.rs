@@ -1,14 +1,14 @@
 //! This module offers a high level synchronous abstraction to async eventloop.
 //! Uses channels internally to get `Requests` and send `Notifications`
 
-use crate::{EventLoop, MqttOptions, Incoming, Request, ConnectionError, Outgoing};
+use crate::{ConnectionError, EventLoop, Incoming, MqttOptions, Outgoing, Request};
 
-use tokio::runtime;
-use rumq_core::mqtt4::{Publish, Subscribe, QoS};
-use async_channel::{bounded, Sender, Receiver, SendError, RecvError};
-use tokio::runtime::Runtime;
+use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
+use rumq_core::mqtt4::{Publish, QoS, Subscribe};
 use std::mem;
 use std::time::Duration;
+use tokio::runtime;
+use tokio::runtime::Runtime;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -35,7 +35,11 @@ impl Client {
         let (request_tx, request_rx) = bounded(cap);
 
         // create mqtt eventloop and take cancellation handle
-        let mut runtime = runtime::Builder::new().basic_scheduler().enable_all().build().unwrap();
+        let mut runtime = runtime::Builder::new()
+            .basic_scheduler()
+            .enable_all()
+            .build()
+            .unwrap();
         let eventloop = EventLoop::new(options, request_rx);
         let mut eventloop = runtime.block_on(eventloop);
         let cancel_tx = eventloop.take_cancel_handle().unwrap();
@@ -55,8 +59,16 @@ impl Client {
     }
 
     /// Sends a MQTT Publish to the eventloop
-    pub fn publish<S, V>(&mut self, topic: S, qos: QoS, retain: bool, payload: V) -> Result<(), Error>
-        where S: Into<String>, V: Into<Vec<u8>>,
+    pub fn publish<S, V>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), Error>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
     {
         let mut publish = Publish::new(topic, qos, payload.into());
         publish.retain = retain;
@@ -84,7 +96,7 @@ impl Client {
 /// in flaky networks.
 pub struct Connection {
     eventloop: EventLoop<Receiver<Request>>,
-    runtime: Option<Runtime>
+    runtime: Option<Runtime>,
 }
 
 impl Connection {
@@ -92,7 +104,7 @@ impl Connection {
         eventloop.set_reconnection_delay(Duration::from_secs(1));
         Connection {
             eventloop,
-            runtime: Some(runtime)
+            runtime: Some(runtime),
         }
     }
 
@@ -105,7 +117,7 @@ impl Connection {
         Iter {
             connection: self,
             runtime,
-            connected: false
+            connected: false,
         }
     }
 }
@@ -113,7 +125,7 @@ impl Connection {
 pub struct Iter<'a> {
     connection: &'a mut Connection,
     runtime: runtime::Runtime,
-    connected: bool
+    connected: bool,
 }
 
 impl<'a> Iter<'a> {
@@ -136,23 +148,23 @@ impl<'a> Iterator for Iter<'a> {
                 Err(ConnectionError::Cancel) => {
                     trace!("Cancellation request received while connecting");
                     None
-                },
-                Err(e) => Some(Err(e))
-            }
+                }
+                Err(e) => Some(Err(e)),
+            };
         }
 
         let f = self.connection.eventloop.poll();
         match self.runtime.block_on(f) {
-            Ok(v)  => Some(Ok(v)),
+            Ok(v) => Some(Ok(v)),
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");
                 None
-            },
+            }
             Err(ConnectionError::Cancel) => {
                 trace!("Cancellation request received");
                 None
-            },
+            }
             Err(e) => {
                 self.connected = false;
                 Some(Err(e))

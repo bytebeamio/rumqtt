@@ -74,7 +74,10 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub(crate) fn handle_outgoing_packet(&mut self, packet: Packet) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    pub(crate) fn handle_outgoing_packet(
+        &mut self,
+        packet: Packet,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         let out = match packet {
             Packet::Publish(publish) => self.handle_outgoing_publish(publish)?,
             Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
@@ -92,7 +95,10 @@ impl MqttState {
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub(crate) fn handle_incoming_packet(&mut self, packet: Packet) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    pub(crate) fn handle_incoming_packet(
+        &mut self,
+        packet: Packet,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         let out = match packet {
             Packet::Pingresp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
@@ -134,7 +140,10 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    fn handle_incoming_puback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_puback(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
@@ -150,13 +159,19 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_suback(&mut self, suback: Suback) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_suback(
+        &mut self,
+        suback: Suback,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         let incoming = Some(Incoming::Suback(suback));
         let response = None;
         Ok((incoming, response))
     }
 
-    fn handle_incoming_unsuback(&mut self, pkid: PacketIdentifier) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_unsuback(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         let incoming = Some(Incoming::Unsuback(pkid));
         let response = None;
         Ok((incoming, response))
@@ -166,7 +181,10 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    fn handle_incoming_pubrec(&mut self, pkid: PacketIdentifier) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_pubrec(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         match self.outgoing_pub.iter().position(|x| x.pkid == Some(pkid)) {
             Some(index) => {
                 let _ = self.outgoing_pub.remove(index);
@@ -185,7 +203,10 @@ impl MqttState {
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_publish(
+        &mut self,
+        publish: Publish,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         let qos = publish.qos;
 
         match qos {
@@ -210,7 +231,10 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pubrel(&mut self, pkid: PacketIdentifier) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_pubrel(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         match self.incoming_pub.iter().position(|x| *x == pkid) {
             Some(index) => {
                 let _ = self.incoming_pub.remove(index);
@@ -224,7 +248,10 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pubcomp(&mut self, pkid: PacketIdentifier) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_pubcomp(
+        &mut self,
+        pkid: PacketIdentifier,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         match self.outgoing_rel.iter().position(|x| *x == pkid) {
             Some(index) => {
                 self.outgoing_rel.remove(index).expect("Wrong index");
@@ -265,17 +292,25 @@ impl MqttState {
         Ok(Packet::Pingreq)
     }
 
-    fn handle_incoming_pingresp(&mut self) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_pingresp(
+        &mut self,
+    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         self.await_pingresp = false;
         let incoming = Some(Incoming::PingResp);
         Ok((incoming, None))
     }
 
-    fn handle_outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<Packet, StateError> {
+    fn handle_outgoing_subscribe(
+        &mut self,
+        mut subscription: Subscribe,
+    ) -> Result<Packet, StateError> {
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
 
-        debug!("Subscribe. Topics = {:?}, Pkid = {:?}", subscription.topics, subscription.pkid);
+        debug!(
+            "Subscribe. Topics = {:?}, Pkid = {:?}",
+            subscription.topics, subscription.pkid
+        );
         Ok(Packet::Subscribe(subscription))
     }
 
@@ -295,11 +330,15 @@ impl MqttState {
         };
 
         match connack.code {
-            ConnectReturnCode::Accepted if self.connection_status == MqttConnectionStatus::Handshake => {
+            ConnectReturnCode::Accepted
+                if self.connection_status == MqttConnectionStatus::Handshake =>
+            {
                 self.connection_status = MqttConnectionStatus::Connected;
                 Ok(())
             }
-            ConnectReturnCode::Accepted if self.connection_status != MqttConnectionStatus::Handshake => {
+            ConnectReturnCode::Accepted
+                if self.connection_status != MqttConnectionStatus::Handshake =>
+            {
                 error!(
                     "Invalid state. Expected = {:?}, Current = {:?}",
                     MqttConnectionStatus::Handshake,
@@ -349,7 +388,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttConnectionStatus, MqttState, Packet, StateError};
-    use crate::{MqttOptions, Incoming};
+    use crate::{Incoming, MqttOptions};
     use rumq_core::mqtt4::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
@@ -468,7 +507,9 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_publish(publish).unwrap();
 
         match notification {
-            Some(Incoming::Publish(publish)) => assert_eq!(publish.pkid.unwrap(), PacketIdentifier(1)),
+            Some(Incoming::Publish(publish)) => {
+                assert_eq!(publish.pkid.unwrap(), PacketIdentifier(1))
+            }
             _ => panic!("Invalid notification: {:?}", notification),
         }
 
@@ -585,8 +626,10 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_packet(Packet::Publish(publish)).unwrap();
-        mqtt.handle_incoming_packet(Packet::Puback(PacketIdentifier(1))).unwrap();
+        mqtt.handle_outgoing_packet(Packet::Publish(publish))
+            .unwrap();
+        mqtt.handle_incoming_packet(Packet::Puback(PacketIdentifier(1)))
+            .unwrap();
 
         // should throw error because we didn't get pingresp for previous ping
         match mqtt.handle_outgoing_ping() {

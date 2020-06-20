@@ -112,13 +112,13 @@ use rumq_core::mqtt4::{MqttRead, MqttWrite, Packet};
 use std::io::Cursor;
 use std::time::Duration;
 
+mod client;
 mod eventloop;
 mod network;
 mod state;
-mod client;
 
+pub use client::{Client, Error};
 pub use eventloop::{ConnectionError, EventLoop};
-pub use client::{Error, Client};
 pub use state::MqttState;
 
 pub use rumq_core::mqtt4::*;
@@ -141,7 +141,7 @@ pub enum Incoming {
     /// Incoming unsuback from the broker
     Unsuback(PacketIdentifier),
     /// Ping response
-    PingResp
+    PingResp,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

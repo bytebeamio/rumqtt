@@ -368,14 +368,13 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 mod test {
     use super::broker::*;
     use crate::state::StateError;
-    use crate::{ConnectionError, Incoming, MqttOptions, Outgoing, Request};
+    use crate::{ConnectionError, MqttOptions, Outgoing, Request};
     use async_channel::{bounded, Receiver, Sender};
-    use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
 
-    async fn start_requests(count: u8, qos: QoS, delay: u64, mut requests_tx: Sender<Request>) {
+    async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Request>) {
         for i in 0..count {
             let topic = "hello/world".to_owned();
             let payload = vec![i, 1, 2, 3];
@@ -391,14 +390,17 @@ mod test {
         time::delay_for(Duration::from_secs(1)).await;
         let mut eventloop = super::EventLoop::new(options, requests).await;
         'reconnect: loop {
-            eventloop.connect().await;
+            if let Err(_) = eventloop.connect().await {
+                continue 'reconnect;
+            }
+
             loop {
                 let o = eventloop.poll().await;
                 // println!("{:?}", o);
                 match o {
-                    Ok(v) => continue,
-                    Err(e) if reconnect => continue 'reconnect,
-                    Err(e) => break 'reconnect,
+                    Ok(_) => continue,
+                    Err(_) if reconnect => continue 'reconnect,
+                    Err(_) => break 'reconnect,
                 }
             }
         }
@@ -573,7 +575,7 @@ mod test {
         loop {
             match eventloop.poll().await {
                 Err(ConnectionError::MqttState(StateError::AwaitPingResp)) => {
-                    assert_eq!(start.elapsed().as_secs(), 15)
+                    assert_eq!(start.elapsed().as_secs(), 10)
                 }
                 Ok((_, outgoing)) => assert_eq!(Some(Outgoing::Pingreq), outgoing),
                 v => panic!("Expecting pingreq or pingresp error. Found = {:?}", v),
