@@ -1,7 +1,8 @@
 use crate::state::{MqttState, StateError};
-use crate::{MqttOptions, Outgoing};
 use crate::{network, Incoming, Request};
+use crate::{MqttOptions, Outgoing};
 
+use async_channel::{bounded, Receiver, Sender};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
 use rumq_core::mqtt4::codec::MqttCodec;
@@ -9,7 +10,6 @@ use rumq_core::mqtt4::{Connect, Packet, PacketIdentifier, Publish};
 use tokio::select;
 use tokio::time::{self, Delay, Elapsed, Instant, Throttle};
 use tokio_util::codec::Framed;
-use async_channel::{bounded, Sender, Receiver};
 
 use std::collections::VecDeque;
 use std::io;
@@ -62,7 +62,7 @@ pub struct EventLoop<R: Requests> {
     /// Handle to send cancellation requests (and drops)
     cancel_tx: Option<Sender<()>>,
     /// Delay between reconnection (after a failure)
-    reconnection_delay: Duration
+    reconnection_delay: Duration,
 }
 
 impl<R: Requests> EventLoop<R> {
@@ -102,7 +102,7 @@ impl<R: Requests> EventLoop<R> {
             keepalive_timeout: time::delay_for(keepalive),
             cancel_rx,
             cancel_tx: Some(cancel_tx),
-            reconnection_delay: Duration::from_secs(0)
+            reconnection_delay: Duration::from_secs(0),
         }
     }
 
@@ -150,11 +150,11 @@ impl<R: Requests> EventLoop<R> {
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Packet>), ConnectionError> {
         let network = match &mut self.network {
             Some(network) => network,
-            None => return Err(ConnectionError::NoLink)
+            None => return Err(ConnectionError::NoLink),
         };
 
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
-        let o  = select! {
+        let o = select! {
             // Pull next packet from network
             o = network.next() => match o {
                 Some(packet) => self.state.handle_incoming_packet(packet?)?,
@@ -197,8 +197,6 @@ impl<R: Requests> EventLoop<R> {
     }
 }
 
-
-
 impl<R: Requests> EventLoop<R> {
     pub async fn connect_or_cancel(&mut self) -> Result<(), ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
@@ -225,16 +223,15 @@ impl<R: Requests> EventLoop<R> {
             Ok(network) => network,
             Err(e) => {
                 time::delay_for(self.reconnection_delay).await;
-                return Err(e)
+                return Err(e);
             }
         };
 
         // make MQTT connection request (which internally awaits for ack)
         if let Err(e) = self.mqtt_connect(&mut network).await {
             time::delay_for(self.reconnection_delay).await;
-            return Err(e)
+            return Err(e);
         }
-
 
         // move pending messages from state to eventloop and create a pending stream of requests
         self.network = Some(network);
@@ -304,18 +301,18 @@ impl<R: Requests> EventLoop<R> {
 async fn next_pending(
     delay: Duration,
     pending_pub: &mut VecDeque<Publish>,
-    pending_rel: &mut VecDeque<PacketIdentifier>
+    pending_rel: &mut VecDeque<PacketIdentifier>,
 ) -> Option<Packet> {
     time::delay_for(delay).await;
 
     // publishes are prioritized over releases
     // goto releases only after done with publishes
     if let Some(p) = pending_pub.pop_front() {
-        return Some(Packet::Publish(p))
+        return Some(Packet::Publish(p));
     }
 
     if let Some(p) = pending_rel.pop_front() {
-        return Some(Packet::Pubrel(p))
+        return Some(Packet::Pubrel(p));
     }
 
     None
@@ -331,7 +328,7 @@ fn outgoing(packet: &Packet) -> Outgoing {
         Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
         Packet::Pingreq => Outgoing::Pingreq,
         Packet::Disconnect => Outgoing::Disconnect,
-        packet => panic!("Invalid outgoing packet = {:?}", packet)
+        packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
 }
 
@@ -352,8 +349,17 @@ use tokio::io::{AsyncRead, AsyncWrite};
 pub trait N: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
 
-pub trait Network: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
-impl<T> Network for T where T: Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send {}
+pub trait Network:
+    Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send
+{
+}
+impl<T> Network for T where
+    T: Stream<Item = Result<Packet, rumq_core::Error>>
+        + Sink<Packet, Error = io::Error>
+        + Unpin
+        + Send
+{
+}
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
@@ -362,12 +368,12 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 mod test {
     use super::broker::*;
     use crate::state::StateError;
-    use crate::{ConnectionError, MqttOptions, Incoming, Outgoing, Request};
+    use crate::{ConnectionError, Incoming, MqttOptions, Outgoing, Request};
+    use async_channel::{bounded, Receiver, Sender};
     use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
-    use async_channel::{bounded, Sender, Receiver};
 
     async fn start_requests(count: u8, qos: QoS, delay: u64, mut requests_tx: Sender<Request>) {
         for i in 0..count {
@@ -396,7 +402,6 @@ mod test {
                 }
             }
         }
-
     }
 
     #[tokio::test]
@@ -458,268 +463,270 @@ mod test {
         }
     }
 
-        #[tokio::test]
-        async fn idle_connection_triggers_pings_on_time() {
-            let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-            options.set_keep_alive(5);
-            let keep_alive = options.keep_alive();
+    #[tokio::test]
+    async fn idle_connection_triggers_pings_on_time() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+        options.set_keep_alive(5);
+        let keep_alive = options.keep_alive();
 
-            // start sending requests
-            let (_requests_tx, requests_rx) = bounded(5);
-            // start the eventloop
-            task::spawn(async move {
-                eventloop(options, requests_rx, false).await;
-            });
+        // start sending requests
+        let (_requests_tx, requests_rx) = bounded(5);
+        // start the eventloop
+        task::spawn(async move {
+            eventloop(options, requests_rx, false).await;
+        });
 
-            let mut broker = Broker::new(1885, true).await;
+        let mut broker = Broker::new(1885, true).await;
 
-            // check incoming rate at th broker
-            let start = Instant::now();
-            let mut ping_received = false;
+        // check incoming rate at th broker
+        let start = Instant::now();
+        let mut ping_received = false;
 
-            for _ in 0..10 {
-                let packet = broker.read_packet().await;
-                let elapsed = start.elapsed();
-                if packet == Packet::Pingreq {
-                    ping_received = true;
-                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                    break;
-                }
-            }
-
-            assert!(ping_received);
-        }
-
-            #[tokio::test]
-            async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
-                let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
-                options.set_keep_alive(5);
-                let keep_alive = options.keep_alive();
-
-                // start sending qos0 publishes. this makes sure that there is
-                // outgoing activity but no incomin activity
-                let (requests_tx, requests_rx) = bounded(5);
-                task::spawn(async move {
-                    start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
-                });
-
-                // start the eventloop
-                task::spawn(async move {
-                    eventloop(options, requests_rx, false).await;
-                });
-
-                let mut broker = Broker::new(1886, true).await;
-
-                let start = Instant::now();
-                let mut ping_received = false;
-
-                for _ in 0..10 {
-                    let packet = broker.read_packet_and_respond().await;
-                    let elapsed = start.elapsed();
-                    if packet == Packet::Pingreq {
-                        ping_received = true;
-                        assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                        break;
-                    }
-                }
-
-                assert!(ping_received);
-            }
-
-            #[tokio::test]
-            async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
-                let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
-                options.set_keep_alive(5);
-                let keep_alive = options.keep_alive();
-
-                let (_requests_tx, requests_rx) = bounded(5);
-                task::spawn(async move {
-                    eventloop(options, requests_rx, false).await;
-                });
-
-                let mut broker = Broker::new(2000, true).await;
-                let start = Instant::now();
-                broker.start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1)).await;
-                let packet = broker.read_packet().await;
-                assert_eq!(packet, Packet::Pingreq);
-                assert_eq!(start.elapsed().as_secs(), keep_alive.as_secs());
-            }
-
-    /*
-        #[tokio::test]
-        async fn detects_halfopen_connections_in_the_second_ping_request() {
-            let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
-            options.set_keep_alive(5);
-
-            // A broker which consumes packets but doesn't reply
-            task::spawn(async move {
-                let mut broker = Broker::new(2001, true).await;
-                broker.blackhole().await;
-            });
-
-            time::delay_for(Duration::from_secs(1)).await;
-            let (_requests_tx, requests_rx) = bounded(5);
-            let mut eventloop = super::EventLoop::new(options, requests_rx).await;
-            eventloop.connect().await.unwrap();
-
-            let start = Instant::now();
-
-            loop {
-                match eventloop.poll().await {
-                    Err(ConnectionError::MqttState(StateError::AwaitPingResp)) => assert_eq!(start.elapsed().as_secs(), 10),
-                    Ok((_, outgoing)) => assert_eq!(Some(Outgoing::Pingreq), outgoing),
-                    v => panic!("Expecting pingreq or pingresp error. Found = {:?}", v),
-                }
-            }
-        }
-     */
-
-        #[tokio::test]
-        async fn requests_are_blocked_after_max_inflight_queue_size() {
-            let mut options = MqttOptions::new("dummy", "127.0.0.1", 1887);
-            options.set_inflight(5);
-            let inflight = options.inflight();
-
-            // start sending qos0 publishes. this makes sure that there is
-            // outgoing activity but no incoming activity
-            let (requests_tx, requests_rx) = bounded(5);
-            task::spawn(async move {
-                start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
-            });
-
-            // start the eventloop
-            task::spawn(async move {
-                eventloop(options, requests_rx, false).await;
-            });
-
-            let mut broker = Broker::new(1887, true).await;
-            for i in 1..=10 {
-                let packet = broker.read_publish().await;
-
-                if i > inflight {
-                    assert!(packet.is_none());
-                }
+        for _ in 0..10 {
+            let packet = broker.read_packet().await;
+            let elapsed = start.elapsed();
+            if packet == Packet::Pingreq {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                break;
             }
         }
 
-        #[tokio::test]
-        async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
-            let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
-            options.set_inflight(3);
+        assert!(ping_received);
+    }
 
-            let (requests_tx, requests_rx) = bounded(5);
-            task::spawn(async move {
-                start_requests(5, QoS::AtLeastOnce, 1, requests_tx).await;
-                time::delay_for(Duration::from_secs(60)).await;
-            });
+    #[tokio::test]
+    async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
+        options.set_keep_alive(5);
+        let keep_alive = options.keep_alive();
 
-            // start the eventloop
-            task::spawn(async move {
-                eventloop(options, requests_rx, true).await;
-            });
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (requests_tx, requests_rx) = bounded(5);
+        task::spawn(async move {
+            start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
+        });
 
-            let mut broker = Broker::new(1888, true).await;
+        // start the eventloop
+        task::spawn(async move {
+            eventloop(options, requests_rx, false).await;
+        });
 
-            // packet 1
-            let packet = broker.read_publish().await;
-            assert!(packet.is_some());
-            // packet 2
-            let packet = broker.read_publish().await;
-            assert!(packet.is_some());
-            // packet 3
-            let packet = broker.read_publish().await;
-            assert!(packet.is_some());
-            // packet 4
-            let packet = broker.read_publish().await;
-            assert!(packet.is_none());
-            // ack packet 1 and we should receiver packet 4
-            broker.ack(PacketIdentifier(1)).await;
-            let packet = broker.read_publish().await;
-            assert!(packet.is_some());
-            // packet 5
-            let packet = broker.read_publish().await;
-            assert!(packet.is_none());
-            // ack packet 2 and we should receiver packet 5
-            broker.ack(PacketIdentifier(2)).await;
-            let packet = broker.read_publish().await;
-            assert!(packet.is_some());
-        }
+        let mut broker = Broker::new(1886, true).await;
 
-        #[tokio::test]
-        async fn reconnection_resumes_from_the_previous_state() {
-            let options = MqttOptions::new("dummy", "127.0.0.1", 1889);
+        let start = Instant::now();
+        let mut ping_received = false;
 
-            // start sending qos0 publishes. this makes sure that there is
-            // outgoing activity but no incomin activity
-            let (requests_tx, requests_rx) = bounded(5);
-            task::spawn(async move {
-                start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
-                time::delay_for(Duration::from_secs(10)).await;
-            });
-
-            // start the eventloop
-            task::spawn(async move {
-                eventloop(options, requests_rx, true).await;
-            });
-
-            // broker connection 1
-            {
-                let mut broker = Broker::new(1889, true).await;
-                for i in 1..=2 {
-                    let packet = broker.read_publish().await;
-                    assert_eq!(PacketIdentifier(i), packet.unwrap());
-                    broker.ack(packet.unwrap()).await;
-                }
-            }
-
-            // broker connection 2
-            {
-                let mut broker = Broker::new(1889, true).await;
-                for i in 3..=4 {
-                    let packet = broker.read_publish().await;
-                    assert_eq!(PacketIdentifier(i), packet.unwrap());
-                    broker.ack(packet.unwrap()).await;
-                }
+        for _ in 0..10 {
+            let packet = broker.read_packet_and_respond().await;
+            let elapsed = start.elapsed();
+            if packet == Packet::Pingreq {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                break;
             }
         }
 
+        assert!(ping_received);
+    }
 
-        #[tokio::test]
-        async fn reconnection_resends_unacked_packets_from_the_previous_connection_before_sending_current_connection_requests() {
-            let options = MqttOptions::new("dummy", "127.0.0.1", 1890);
+    #[tokio::test]
+    async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
+        options.set_keep_alive(5);
+        let keep_alive = options.keep_alive();
 
-            // start sending qos0 publishes. this makes sure that there is
-            // outgoing activity but no incoming activity
-            let (requests_tx, requests_rx) = bounded(5);
-            task::spawn(async move {
-                start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
-                time::delay_for(Duration::from_secs(10)).await;
-            });
+        let (_requests_tx, requests_rx) = bounded(5);
+        task::spawn(async move {
+            eventloop(options, requests_rx, false).await;
+        });
 
-            // start the client eventloop
-            task::spawn(async move {
-                eventloop(options, requests_rx, true).await;
-            });
+        let mut broker = Broker::new(2000, true).await;
+        let start = Instant::now();
+        broker
+            .start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1))
+            .await;
+        let packet = broker.read_packet().await;
+        assert_eq!(packet, Packet::Pingreq);
+        assert_eq!(start.elapsed().as_secs(), keep_alive.as_secs());
+    }
 
-            // broker connection 1. receive but don't ack
-            {
-                let mut broker = Broker::new(1890, true).await;
-                for i in 1..=2 {
-                    let packet = broker.read_publish().await;
-                    assert_eq!(PacketIdentifier(i), packet.unwrap());
+    #[tokio::test]
+    async fn detects_halfopen_connections_in_the_second_ping_request() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
+        options.set_keep_alive(5);
+
+        // A broker which consumes packets but doesn't reply
+        task::spawn(async move {
+            let mut broker = Broker::new(2001, true).await;
+            broker.blackhole().await;
+        });
+
+        time::delay_for(Duration::from_secs(1)).await;
+        let (_requests_tx, requests_rx) = bounded(5);
+        let mut eventloop = super::EventLoop::new(options, requests_rx).await;
+        eventloop.connect().await.unwrap();
+
+        let start = Instant::now();
+
+        loop {
+            match eventloop.poll().await {
+                Err(ConnectionError::MqttState(StateError::AwaitPingResp)) => {
+                    assert_eq!(start.elapsed().as_secs(), 15)
                 }
-            }
-
-            // broker connection 2 receives from scratch
-            {
-                let mut broker = Broker::new(1890, true).await;
-                for i in 1..=6 {
-                    let packet = broker.read_publish().await;
-                    assert_eq!(PacketIdentifier(i), packet.unwrap());
-                }
+                Ok((_, outgoing)) => assert_eq!(Some(Outgoing::Pingreq), outgoing),
+                v => panic!("Expecting pingreq or pingresp error. Found = {:?}", v),
             }
         }
     }
+
+    #[tokio::test]
+    async fn requests_are_blocked_after_max_inflight_queue_size() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1887);
+        options.set_inflight(5);
+        let inflight = options.inflight();
+
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incoming activity
+        let (requests_tx, requests_rx) = bounded(5);
+        task::spawn(async move {
+            start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            eventloop(options, requests_rx, false).await;
+        });
+
+        let mut broker = Broker::new(1887, true).await;
+        for i in 1..=10 {
+            let packet = broker.read_publish().await;
+
+            if i > inflight {
+                assert!(packet.is_none());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        options.set_inflight(3);
+
+        let (requests_tx, requests_rx) = bounded(5);
+        task::spawn(async move {
+            start_requests(5, QoS::AtLeastOnce, 1, requests_tx).await;
+            time::delay_for(Duration::from_secs(60)).await;
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            eventloop(options, requests_rx, true).await;
+        });
+
+        let mut broker = Broker::new(1888, true).await;
+
+        // packet 1
+        let packet = broker.read_publish().await;
+        assert!(packet.is_some());
+        // packet 2
+        let packet = broker.read_publish().await;
+        assert!(packet.is_some());
+        // packet 3
+        let packet = broker.read_publish().await;
+        assert!(packet.is_some());
+        // packet 4
+        let packet = broker.read_publish().await;
+        assert!(packet.is_none());
+        // ack packet 1 and we should receiver packet 4
+        broker.ack(PacketIdentifier(1)).await;
+        let packet = broker.read_publish().await;
+        assert!(packet.is_some());
+        // packet 5
+        let packet = broker.read_publish().await;
+        assert!(packet.is_none());
+        // ack packet 2 and we should receiver packet 5
+        broker.ack(PacketIdentifier(2)).await;
+        let packet = broker.read_publish().await;
+        assert!(packet.is_some());
+    }
+
+    #[tokio::test]
+    async fn reconnection_resumes_from_the_previous_state() {
+        let options = MqttOptions::new("dummy", "127.0.0.1", 1889);
+
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incomin activity
+        let (requests_tx, requests_rx) = bounded(5);
+        task::spawn(async move {
+            start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
+            time::delay_for(Duration::from_secs(10)).await;
+        });
+
+        // start the eventloop
+        task::spawn(async move {
+            eventloop(options, requests_rx, true).await;
+        });
+
+        // broker connection 1
+        {
+            let mut broker = Broker::new(1889, true).await;
+            for i in 1..=2 {
+                let packet = broker.read_publish().await;
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+                broker.ack(packet.unwrap()).await;
+            }
+        }
+
+        // broker connection 2
+        {
+            let mut broker = Broker::new(1889, true).await;
+            for i in 3..=4 {
+                let packet = broker.read_publish().await;
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+                broker.ack(packet.unwrap()).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnection_resends_unacked_packets_from_the_previous_connection_before_sending_current_connection_requests(
+    ) {
+        let options = MqttOptions::new("dummy", "127.0.0.1", 1890);
+
+        // start sending qos0 publishes. this makes sure that there is
+        // outgoing activity but no incoming activity
+        let (requests_tx, requests_rx) = bounded(5);
+        task::spawn(async move {
+            start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
+            time::delay_for(Duration::from_secs(10)).await;
+        });
+
+        // start the client eventloop
+        task::spawn(async move {
+            eventloop(options, requests_rx, true).await;
+        });
+
+        // broker connection 1. receive but don't ack
+        {
+            let mut broker = Broker::new(1890, true).await;
+            for i in 1..=2 {
+                let packet = broker.read_publish().await;
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+            }
+        }
+
+        // broker connection 2 receives from scratch
+        {
+            let mut broker = Broker::new(1890, true).await;
+            for i in 1..=6 {
+                let packet = broker.read_publish().await;
+                assert_eq!(PacketIdentifier(i), packet.unwrap());
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod broker {
@@ -760,7 +767,9 @@ mod broker {
 
         // Reads a publish packet from the stream with 2 second timeout
         pub async fn read_publish(&mut self) -> Option<PacketIdentifier> {
-            let packet = time::timeout(Duration::from_secs(2), async { self.framed.next().await.unwrap() });
+            let packet = time::timeout(Duration::from_secs(2), async {
+                self.framed.next().await.unwrap()
+            });
             match packet.await {
                 Ok(Ok(Packet::Publish(publish))) => publish.pkid,
                 Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
@@ -772,12 +781,16 @@ mod broker {
 
         /// Reads next packet from the stream
         pub async fn read_packet(&mut self) -> Packet {
-            let packet = time::timeout(Duration::from_secs(30), async { self.framed.next().await.unwrap() });
+            let packet = time::timeout(Duration::from_secs(30), async {
+                self.framed.next().await.unwrap()
+            });
             packet.await.unwrap().unwrap()
         }
 
         pub async fn read_packet_and_respond(&mut self) -> Packet {
-            let packet = time::timeout(Duration::from_secs(30), async { self.framed.next().await.unwrap() });
+            let packet = time::timeout(Duration::from_secs(30), async {
+                self.framed.next().await.unwrap()
+            });
             let packet = packet.await.unwrap().unwrap();
 
             match packet.clone() {
