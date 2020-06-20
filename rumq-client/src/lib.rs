@@ -161,6 +161,8 @@ pub enum Outgoing {
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
+    PubAck(PacketIdentifier),
+    PubRel(PacketIdentifier),
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
     Reconnect(Connect),

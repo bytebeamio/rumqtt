@@ -14,7 +14,7 @@ async fn main() {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
 
     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
-    let mut eventloop = EventLoop::new(mqttoptions, requests_rx);
+    let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;
     task::spawn(async move {
         requests(requests_tx).await;
         time::delay_for(Duration::from_secs(3)).await;
