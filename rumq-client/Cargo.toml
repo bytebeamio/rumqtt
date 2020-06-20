@@ -15,7 +15,7 @@ tokio-util = { version = "0.3", features = ["codec"] }
 futures-util = { version =  "0.3", features = ["sink"] }
 webpki = "0.21"
 tokio-rustls = "0.13"
-rumq-core = { path = "../rumq-core", version = "0.1.0-alpha.10" }
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.1" }
 async-channel = "1"
 blocking = "0.4"
 log = "0.4"

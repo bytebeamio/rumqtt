@@ -4,7 +4,7 @@
 use crate::{ConnectionError, EventLoop, Incoming, MqttOptions, Outgoing, Request};
 
 use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
-use rumq_core::mqtt4::{Publish, QoS, Subscribe};
+use mqtt4bytes::*;
 use std::mem;
 use std::time::Duration;
 use tokio::runtime;

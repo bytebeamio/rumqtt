@@ -5,8 +5,7 @@ use crate::{MqttOptions, Outgoing};
 use async_channel::{bounded, Receiver, Sender};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::{Stream, StreamExt};
-use rumq_core::mqtt4::codec::MqttCodec;
-use rumq_core::mqtt4::{Connect, Packet, PacketIdentifier, Publish};
+use mqtt4bytes::*;
 use tokio::select;
 use tokio::time::{self, Delay, Elapsed, Instant, Throttle};
 use tokio_util::codec::Framed;
@@ -24,7 +23,7 @@ pub enum ConnectionError {
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("Rumq")]
-    Rumq(#[from] rumq_core::Error),
+    Mqtt4Bytes(#[from] mqtt4bytes::Error),
     #[error("Network")]
     Network(#[from] network::Error),
     #[error("I/O")]
@@ -50,7 +49,7 @@ pub struct EventLoop<R: Requests> {
     /// Pending publishes from last session
     pending_pub: VecDeque<Publish>,
     /// Pending releases from last session
-    pending_rel: VecDeque<PacketIdentifier>,
+    pending_rel: VecDeque<u16>,
     /// Flag to disable pending branch while polling
     has_pending: bool,
     /// Network connection to the broker
@@ -127,6 +126,7 @@ impl<R: Requests> EventLoop<R> {
         if let Some(packet) = outpacket {
             out = Some(outgoing(&packet));
             self.network.as_mut().unwrap().send(packet).await?;
+            // self.network.as_mut().unwrap().flush().await?;
         }
 
         Ok((notification, out))
@@ -181,8 +181,8 @@ impl<R: Requests> EventLoop<R> {
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = &mut self.keepalive_timeout => {
                 self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
-                self.state.handle_outgoing_packet(Packet::Pingreq)?;
-                (None, Some(Packet::Pingreq))
+                self.state.handle_outgoing_packet(Packet::PingReq)?;
+                (None, Some(Packet::PingReq))
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
@@ -298,7 +298,7 @@ impl<R: Requests> EventLoop<R> {
 async fn next_pending(
     delay: Duration,
     pending_pub: &mut VecDeque<Publish>,
-    pending_rel: &mut VecDeque<PacketIdentifier>,
+    pending_rel: &mut VecDeque<u16>,
 ) -> Option<Packet> {
     time::delay_for(delay).await;
 
@@ -309,7 +309,7 @@ async fn next_pending(
     }
 
     if let Some(p) = pending_rel.pop_front() {
-        return Some(Packet::Pubrel(p));
+        return Some(Packet::PubRel(PubRel::new(p)));
     }
 
     None
@@ -317,13 +317,13 @@ async fn next_pending(
 
 fn outgoing(packet: &Packet) -> Outgoing {
     match packet {
-        Packet::Publish(publish) => Outgoing::Publish(publish.pkid.clone()),
-        Packet::Puback(pkid) => Outgoing::Puback(*pkid),
-        Packet::Pubrec(pkid) => Outgoing::Pubrec(*pkid),
-        Packet::Pubcomp(pkid) => Outgoing::Pubcomp(*pkid),
+        Packet::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Packet::PubAck(puback) => Outgoing::Puback(puback.pkid),
+        Packet::PubRec(pubrec) => Outgoing::Pubrec(pubrec.pkid),
+        Packet::PubComp(pubcomp) => Outgoing::Pubcomp(pubcomp.pkid),
         Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
-        Packet::Pingreq => Outgoing::Pingreq,
+        Packet::PingReq => Outgoing::Pingreq,
         Packet::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
@@ -347,12 +347,12 @@ pub trait N: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
 
 pub trait Network:
-    Stream<Item = Result<Packet, rumq_core::Error>> + Sink<Packet, Error = io::Error> + Unpin + Send
+    Stream<Item = Result<Packet, mqtt4bytes::Error>> + Sink<Packet, Error = mqtt4bytes::Error> + Unpin + Send
 {
 }
 impl<T> Network for T where
-    T: Stream<Item = Result<Packet, rumq_core::Error>>
-        + Sink<Packet, Error = io::Error>
+    T: Stream<Item = Result<Packet, mqtt4bytes::Error>>
+        + Sink<Packet, Error = mqtt4bytes::Error>
         + Unpin
         + Send
 {
@@ -367,7 +367,7 @@ mod test {
     use crate::state::StateError;
     use crate::{ConnectionError, MqttOptions, Outgoing, Request};
     use async_channel::{bounded, Receiver, Sender};
-    use rumq_core::mqtt4::*;
+    use mqtt4bytes::*;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
 
@@ -393,7 +393,7 @@ mod test {
 
             loop {
                 let o = eventloop.poll().await;
-                // println!("{:?}", o);
+                println!("Polled = {:?}", o);
                 match o {
                     Ok(_) => continue,
                     Err(_) if reconnect => continue 'reconnect,
@@ -481,11 +481,15 @@ mod test {
 
         for _ in 0..10 {
             let packet = broker.read_packet().await;
+            println!("packet = {:?}", packet);
             let elapsed = start.elapsed();
-            if packet == Packet::Pingreq {
-                ping_received = true;
-                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                break;
+            match packet {
+                Packet::PingReq => {
+                    ping_received = true;
+                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                    break;
+                }
+                _ => ()
             }
         }
 
@@ -518,10 +522,13 @@ mod test {
         for _ in 0..10 {
             let packet = broker.read_packet_and_respond().await;
             let elapsed = start.elapsed();
-            if packet == Packet::Pingreq {
-                ping_received = true;
-                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                break;
+            match packet {
+                Packet::PingReq => {
+                    ping_received = true;
+                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                    break;
+                }
+                _ => ()
             }
         }
 
@@ -545,7 +552,10 @@ mod test {
             .start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1))
             .await;
         let packet = broker.read_packet().await;
-        assert_eq!(packet, Packet::Pingreq);
+        match packet {
+            Packet::PingReq => (),
+            packet => panic!("Expecting pingreq. Found = {:?}", packet)
+        };
         assert_eq!(start.elapsed().as_secs(), keep_alive.as_secs());
     }
 
@@ -637,14 +647,14 @@ mod test {
         let packet = broker.read_publish().await;
         assert!(packet.is_none());
         // ack packet 1 and we should receiver packet 4
-        broker.ack(PacketIdentifier(1)).await;
+        broker.ack(1).await;
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
         // packet 5
         let packet = broker.read_publish().await;
         assert!(packet.is_none());
         // ack packet 2 and we should receiver packet 5
-        broker.ack(PacketIdentifier(2)).await;
+        broker.ack(2).await;
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
     }
@@ -670,7 +680,7 @@ mod test {
         let mut broker = Broker::new(1889, true).await;
         for i in 1..=2 {
             let packet = broker.read_publish().await;
-            assert_eq!(PacketIdentifier(i), packet.unwrap());
+            assert_eq!(i, packet.unwrap());
             broker.ack(packet.unwrap()).await;
         }
 
@@ -678,7 +688,7 @@ mod test {
         let mut broker = Broker::new(1889, true).await;
         for i in 3..=4 {
             let packet = broker.read_publish().await;
-            assert_eq!(PacketIdentifier(i), packet.unwrap());
+            assert_eq!(i, packet.unwrap());
             broker.ack(packet.unwrap()).await;
         }
     }
@@ -704,14 +714,14 @@ mod test {
         let mut broker = Broker::new(1890, true).await;
         for i in 1..=2 {
             let packet = broker.read_publish().await;
-            assert_eq!(PacketIdentifier(i), packet.unwrap());
+            assert_eq!(i, packet.unwrap());
         }
 
         // broker connection 2 receives from scratch
         let mut broker = Broker::new(1890, true).await;
         for i in 1..=6 {
             let packet = broker.read_publish().await;
-            assert_eq!(PacketIdentifier(i), packet.unwrap());
+            assert_eq!(i, packet.unwrap());
         }
     }
 }
@@ -719,7 +729,7 @@ mod test {
 #[cfg(test)]
 mod broker {
     use futures_util::sink::SinkExt;
-    use rumq_core::mqtt4::*;
+    use mqtt4bytes::*;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::select;
@@ -728,7 +738,7 @@ mod broker {
     use tokio_util::codec::Framed;
 
     pub struct Broker {
-        framed: Framed<TcpStream, codec::MqttCodec>,
+        framed: Framed<TcpStream, MqttCodec>,
     }
 
     impl Broker {
@@ -737,13 +747,13 @@ mod broker {
             let addr = format!("127.0.0.1:{}", port);
             let mut listener = TcpListener::bind(&addr).await.unwrap();
             let (stream, _) = listener.accept().await.unwrap();
-            let mut framed = Framed::new(stream, codec::MqttCodec::new(1024 * 1024));
+            let mut framed = Framed::new(stream,MqttCodec::new(1024 * 1024));
 
             let packet = framed.next().await.unwrap().unwrap();
             if let Packet::Connect(_) = packet {
                 if send_connack {
-                    let connack = Connack::new(ConnectReturnCode::Accepted, false);
-                    let packet = Packet::Connack(connack);
+                    let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+                    let packet = Packet::ConnAck(connack);
                     framed.send(packet).await.unwrap();
                 }
             } else {
@@ -754,12 +764,12 @@ mod broker {
         }
 
         // Reads a publish packet from the stream with 2 second timeout
-        pub async fn read_publish(&mut self) -> Option<PacketIdentifier> {
+        pub async fn read_publish(&mut self) -> Option<u16> {
             let packet = time::timeout(Duration::from_secs(2), async {
                 self.framed.next().await.unwrap()
             });
             match packet.await {
-                Ok(Ok(Packet::Publish(publish))) => publish.pkid,
+                Ok(Ok(Packet::Publish(publish))) => Some(publish.pkid),
                 Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
                 Ok(Err(e)) => panic!("Error = {:?}", e),
                 // timedout
@@ -770,9 +780,13 @@ mod broker {
         /// Reads next packet from the stream
         pub async fn read_packet(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(30), async {
-                self.framed.next().await.unwrap()
+                let p = self.framed.next().await;
+                println!("Broker read = {:?}", p);
+                p.unwrap()
             });
-            packet.await.unwrap().unwrap()
+
+            let packet = packet.await.unwrap().unwrap();
+            packet
         }
 
         pub async fn read_packet_and_respond(&mut self) -> Packet {
@@ -783,8 +797,9 @@ mod broker {
 
             match packet.clone() {
                 Packet::Publish(publish) => {
-                    if let Some(pkid) = publish.pkid {
-                        self.framed.send(Packet::Puback(pkid)).await.unwrap();
+                    if publish.pkid > 0 {
+                        let packet = PubAck::new(publish.pkid);
+                        self.framed.send(Packet::PubAck(packet)).await.unwrap();
                     }
                 }
                 _ => (),
@@ -801,8 +816,8 @@ mod broker {
         }
 
         /// Sends an acknowledgement
-        pub async fn ack(&mut self, pkid: PacketIdentifier) {
-            let packet = Packet::Puback(pkid);
+        pub async fn ack(&mut self, pkid: u16) {
+            let packet = Packet::PubAck(PubAck::new(pkid));
             self.framed.send(packet).await.unwrap();
             self.framed.flush().await.unwrap();
         }
@@ -820,7 +835,7 @@ mod broker {
                         self.framed.send(packet).await.unwrap();
                     }
                     packet = self.framed.next() => match packet.unwrap().unwrap() {
-                        Packet::Pingreq => self.framed.send(Packet::Pingresp).await.unwrap(),
+                        Packet::PingReq => self.framed.send(Packet::PingResp).await.unwrap(),
                         _ => ()
                     }
                 }

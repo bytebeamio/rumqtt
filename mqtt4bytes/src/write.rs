@@ -164,29 +164,23 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
         }
         Packet::UnsubAck(packet) => {
             payload.reserve(4);
-            let o: &[u8] = &[0xB0, 0x02];
-            payload.put_slice(o);
+            payload.put_slice(&[0xB0, 0x02]);
             payload.put_u16(packet.pkid);
             Ok(())
         }
         Packet::PingReq => {
             payload.reserve(2);
-            let mut payload = BytesMut::with_capacity(2);
-            payload.put_u8(0xc0);
-            payload.put_u8(0);
+            payload.put_slice(&[0xC0, 0x00]);
             Ok(())
         }
         Packet::PingResp => {
             payload.reserve(2);
-            let mut payload = BytesMut::with_capacity(2);
-            payload.put_u8(0xd0);
-            payload.put_u8(0);
+            payload.put_slice(&[0xD0, 0x00]);
             Ok(())
         }
         Packet::Disconnect => {
             payload.reserve(2);
-            let o: &[u8] = &[0xe0, 0];
-            payload.put_slice(o);
+            payload.put_slice(&[0xE0, 0x00]);
             Ok(())
         }
     }
