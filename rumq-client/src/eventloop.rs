@@ -155,19 +155,19 @@ impl<R: Requests> EventLoop<R> {
 
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
         let o  = select! {
-            // pull next packet from network
+            // Pull next packet from network
             o = network.next() => match o {
                 Some(packet) => self.state.handle_incoming_packet(packet?)?,
                 None => return Err(ConnectionError::StreamDone)
             },
-            // pull next request from user requests channel.
+            // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
             o = self.requests.next(), if !inflight_full && !self.has_pending => match o {
                 Some(request) => self.state.handle_outgoing_packet(request.into())?,
                 None => return Err(ConnectionError::RequestsDone),
             },
-            // handle the next pending packet from previous session. Disable
+            // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             o = next_pending(self.options.throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
                 Some(packet) => self.state.handle_outgoing_packet(packet)?,
@@ -177,7 +177,8 @@ impl<R: Requests> EventLoop<R> {
                     (None, None)
                 }
             },
-            // the above two branches will move next keepalive time
+            // We generate pings irrespective of network activity. This keeps the ping
+            // logic simple. We can change this behavior in future if necessary
             _ = &mut self.keepalive_timeout => {
                 self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
                 let notification = None;
@@ -361,7 +362,7 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 mod test {
     use super::broker::*;
     use crate::state::StateError;
-    use crate::{ConnectionError, MqttOptions, Incoming, Request};
+    use crate::{ConnectionError, MqttOptions, Incoming, Outgoing, Request};
     use futures_util::stream::StreamExt;
     use rumq_core::mqtt4::*;
     use std::time::{Duration, Instant};
@@ -456,7 +457,7 @@ mod test {
             }
         }
     }
-/*
+
         #[tokio::test]
         async fn idle_connection_triggers_pings_on_time() {
             let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
@@ -464,14 +465,10 @@ mod test {
             let keep_alive = options.keep_alive();
 
             // start sending requests
-            let (_requests_tx, requests_rx) = channel(5);
+            let (_requests_tx, requests_rx) = bounded(5);
             // start the eventloop
             task::spawn(async move {
-                time::delay_for(Duration::from_secs(1)).await;
-                let mut eventloop = super::eventloop(options, requests_rx);
-                let mut stream = eventloop.connect().await.unwrap();
-
-                while let Some(_) = stream.next().await {}
+                eventloop(options, requests_rx, false).await;
             });
 
             let mut broker = Broker::new(1885, true).await;
@@ -493,65 +490,62 @@ mod test {
             assert!(ping_received);
         }
 
-        #[tokio::test]
-        async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
-            let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
-            options.set_keep_alive(5);
-            let keep_alive = options.keep_alive();
+            #[tokio::test]
+            async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
+                let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
+                options.set_keep_alive(5);
+                let keep_alive = options.keep_alive();
 
-            // start sending qos0 publishes. this makes sure that there is
-            // outgoing activity but no incomin activity
-            let (requests_tx, requests_rx) = channel(5);
-            task::spawn(async move {
-                start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
-            });
+                // start sending qos0 publishes. this makes sure that there is
+                // outgoing activity but no incomin activity
+                let (requests_tx, requests_rx) = bounded(5);
+                task::spawn(async move {
+                    start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
+                });
 
-            // start the eventloop
-            task::spawn(async move {
-                time::delay_for(Duration::from_secs(1)).await;
-                let mut eventloop = super::eventloop(options, requests_rx);
-                let mut stream = eventloop.connect().await.unwrap();
+                // start the eventloop
+                task::spawn(async move {
+                    eventloop(options, requests_rx, false).await;
+                });
 
-                while let Some(_) = stream.next().await {}
-            });
+                let mut broker = Broker::new(1886, true).await;
 
-            let mut broker = Broker::new(1886, true).await;
+                let start = Instant::now();
+                let mut ping_received = false;
 
-            let start = Instant::now();
-            let mut ping_received = false;
-
-            for _ in 0..10 {
-                let packet = broker.read_packet_and_respond().await;
-                let elapsed = start.elapsed();
-                if packet == Packet::Pingreq {
-                    ping_received = true;
-                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                    break;
+                for _ in 0..10 {
+                    let packet = broker.read_packet_and_respond().await;
+                    let elapsed = start.elapsed();
+                    if packet == Packet::Pingreq {
+                        ping_received = true;
+                        assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                        break;
+                    }
                 }
+
+                assert!(ping_received);
             }
 
-            assert!(ping_received);
-        }
+            #[tokio::test]
+            async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
+                let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
+                options.set_keep_alive(5);
+                let keep_alive = options.keep_alive();
 
-        #[tokio::test]
-        async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
-            let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
-            options.set_keep_alive(5);
+                let (_requests_tx, requests_rx) = bounded(5);
+                task::spawn(async move {
+                    eventloop(options, requests_rx, false).await;
+                });
 
-            task::spawn(async move {
-                time::delay_for(Duration::from_secs(1)).await;
-                let (_requests_tx, requests_rx) = channel(5);
-                let mut eventloop = super::eventloop(options, requests_rx);
-                let mut stream = eventloop.connect().await.unwrap();
-                while let Some(_) = stream.next().await {}
-            });
+                let mut broker = Broker::new(2000, true).await;
+                let start = Instant::now();
+                broker.start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1)).await;
+                let packet = broker.read_packet().await;
+                assert_eq!(packet, Packet::Pingreq);
+                assert_eq!(start.elapsed().as_secs(), keep_alive.as_secs());
+            }
 
-            let mut broker = Broker::new(2000, true).await;
-            broker.start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1)).await;
-            let packet = broker.read_packet().await;
-            assert_eq!(packet, Packet::Pingreq);
-        }
-
+    /*
         #[tokio::test]
         async fn detects_halfopen_connections_in_the_second_ping_request() {
             let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
@@ -564,17 +558,21 @@ mod test {
             });
 
             time::delay_for(Duration::from_secs(1)).await;
-            let (_requests_tx, requests_rx) = channel(5);
-            let mut eventloop = super::eventloop(options, requests_rx);
-            let mut stream = eventloop.connect().await.unwrap();
+            let (_requests_tx, requests_rx) = bounded(5);
+            let mut eventloop = super::EventLoop::new(options, requests_rx).await;
+            eventloop.connect().await.unwrap();
 
             let start = Instant::now();
-            match stream.next().await.unwrap() {
-                Incoming::Abort(EventLoopError::MqttState(StateError::AwaitPingResp)) => assert_eq!(start.elapsed().as_secs(), 10),
-                _ => panic!("Expecting await pingresp error"),
+
+            loop {
+                match eventloop.poll().await {
+                    Err(ConnectionError::MqttState(StateError::AwaitPingResp)) => assert_eq!(start.elapsed().as_secs(), 10),
+                    Ok((_, outgoing)) => assert_eq!(Some(Outgoing::Pingreq), outgoing),
+                    v => panic!("Expecting pingreq or pingresp error. Found = {:?}", v),
+                }
             }
         }
- */
+     */
 
         #[tokio::test]
         async fn requests_are_blocked_after_max_inflight_queue_size() {
@@ -583,7 +581,7 @@ mod test {
             let inflight = options.inflight();
 
             // start sending qos0 publishes. this makes sure that there is
-            // outgoing activity but no incomin activity
+            // outgoing activity but no incoming activity
             let (requests_tx, requests_rx) = bounded(5);
             task::spawn(async move {
                 start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;

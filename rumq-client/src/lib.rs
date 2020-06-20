@@ -144,7 +144,7 @@ pub enum Incoming {
     PingResp
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Outgoing {
     Publish(Option<PacketIdentifier>),
     Subscribe(PacketIdentifier),
