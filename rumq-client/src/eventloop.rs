@@ -177,15 +177,12 @@ impl<R: Requests> EventLoop<R> {
                     (None, None)
                 }
             },
-            // We generate pings irrespective of network activity. This keeps the ping
-            // logic simple. We can change this behavior in future if necessary
+            // We generate pings irrespective of network activity. This keeps the ping logic
+            // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = &mut self.keepalive_timeout => {
                 self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
-                let notification = None;
-                let packet = Packet::Pingreq;
-                self.state.handle_outgoing_packet(packet)?;
-                let packet = Some(Packet::Pingreq);
-                (notification, packet)
+                self.state.handle_outgoing_packet(Packet::Pingreq)?;
+                (None, Some(Packet::Pingreq))
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
@@ -432,8 +429,6 @@ mod test {
         assert_eq!(elapsed.as_secs(), 5);
     }
 
-    // TODO: This tests fails on ci with elapsed time of 955 milliseconds. This drift
-    // (less than set delay) isn't observed in other tests
     #[tokio::test]
     async fn throttled_requests_works_with_correct_delays_between_requests() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1882);
@@ -567,20 +562,20 @@ mod test {
 
         time::delay_for(Duration::from_secs(1)).await;
         let (_requests_tx, requests_rx) = bounded(5);
+        let start = Instant::now();
         let mut eventloop = super::EventLoop::new(options, requests_rx).await;
         eventloop.connect().await.unwrap();
-
-        let start = Instant::now();
-
         loop {
             match eventloop.poll().await {
-                Err(ConnectionError::MqttState(StateError::AwaitPingResp)) => {
-                    assert_eq!(start.elapsed().as_secs(), 10)
-                }
+                Err(e) => match e {
+                    ConnectionError::MqttState(StateError::AwaitPingResp) => break,
+                    v => panic!("Expecting  pingresp error. Found = {:?}", v),
+                },
                 Ok((_, outgoing)) => assert_eq!(Some(Outgoing::Pingreq), outgoing),
-                v => panic!("Expecting pingreq or pingresp error. Found = {:?}", v),
             }
         }
+
+        assert_eq!(start.elapsed().as_secs(), 10);
     }
 
     #[tokio::test]
@@ -672,29 +667,24 @@ mod test {
         });
 
         // broker connection 1
-        {
-            let mut broker = Broker::new(1889, true).await;
-            for i in 1..=2 {
-                let packet = broker.read_publish().await;
-                assert_eq!(PacketIdentifier(i), packet.unwrap());
-                broker.ack(packet.unwrap()).await;
-            }
+        let mut broker = Broker::new(1889, true).await;
+        for i in 1..=2 {
+            let packet = broker.read_publish().await;
+            assert_eq!(PacketIdentifier(i), packet.unwrap());
+            broker.ack(packet.unwrap()).await;
         }
 
         // broker connection 2
-        {
-            let mut broker = Broker::new(1889, true).await;
-            for i in 3..=4 {
-                let packet = broker.read_publish().await;
-                assert_eq!(PacketIdentifier(i), packet.unwrap());
-                broker.ack(packet.unwrap()).await;
-            }
+        let mut broker = Broker::new(1889, true).await;
+        for i in 3..=4 {
+            let packet = broker.read_publish().await;
+            assert_eq!(PacketIdentifier(i), packet.unwrap());
+            broker.ack(packet.unwrap()).await;
         }
     }
 
     #[tokio::test]
-    async fn reconnection_resends_unacked_packets_from_the_previous_connection_before_sending_current_connection_requests(
-    ) {
+    async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
         let options = MqttOptions::new("dummy", "127.0.0.1", 1890);
 
         // start sending qos0 publishes. this makes sure that there is
@@ -711,21 +701,17 @@ mod test {
         });
 
         // broker connection 1. receive but don't ack
-        {
-            let mut broker = Broker::new(1890, true).await;
-            for i in 1..=2 {
-                let packet = broker.read_publish().await;
-                assert_eq!(PacketIdentifier(i), packet.unwrap());
-            }
+        let mut broker = Broker::new(1890, true).await;
+        for i in 1..=2 {
+            let packet = broker.read_publish().await;
+            assert_eq!(PacketIdentifier(i), packet.unwrap());
         }
 
         // broker connection 2 receives from scratch
-        {
-            let mut broker = Broker::new(1890, true).await;
-            for i in 1..=6 {
-                let packet = broker.read_publish().await;
-                assert_eq!(PacketIdentifier(i), packet.unwrap());
-            }
+        let mut broker = Broker::new(1890, true).await;
+        for i in 1..=6 {
+            let packet = broker.read_publish().await;
+            assert_eq!(PacketIdentifier(i), packet.unwrap());
         }
     }
 }
