@@ -1,17 +1,17 @@
-use tokio_util::codec::{LengthDelimitedCodec, Decoder, Encoder};
-use bytes::{BytesMut, Bytes, Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
+use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 #[derive(Debug, Clone)]
 pub enum Packet {
     Connect(u8),
     ConnAck,
     Data(u64, String, Bytes),
-    DataAck(u64)
+    DataAck(u64),
 }
 
 pub struct MeshCodec {
-    c: LengthDelimitedCodec
+    c: LengthDelimitedCodec,
 }
 
 impl MeshCodec {
@@ -27,7 +27,7 @@ impl Decoder for MeshCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.c.decode(src)? {
-            Some(mut b)  => {
+            Some(mut b) => {
                 // dbg!(&b);
                 let typ = b.get_u8();
                 match typ {
@@ -47,12 +47,11 @@ impl Decoder for MeshCodec {
                     4 => Ok(Some(Packet::DataAck(b.get_u64()))),
                     _ => Err(io::Error::new(io::ErrorKind::InvalidData, "Unrecognized")),
                 }
-            },
+            }
             None => Ok(None),
         }
     }
 }
-
 
 impl Encoder<Packet> for MeshCodec {
     type Error = io::Error;
@@ -77,7 +76,7 @@ impl Encoder<Packet> for MeshCodec {
                 let mut out = BytesMut::from(&[4][..]);
                 out.put_u64(pkid);
                 out.freeze()
-            },
+            }
         };
 
         self.c.encode(out, dst)

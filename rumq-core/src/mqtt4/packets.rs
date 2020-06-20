@@ -106,7 +106,10 @@ pub struct Connack {
 impl Connack {
     /// Creates a new connack packet
     pub fn new(code: ConnectReturnCode, session_present: bool) -> Connack {
-        Connack { code, session_present }
+        Connack {
+            code,
+            session_present,
+        }
     }
 }
 
@@ -186,7 +189,10 @@ impl Subscribe {
     }
 
     pub fn add(&mut self, topic: String, qos: QoS) -> &mut Self {
-        let topic = SubscribeTopic { topic_path: topic, qos };
+        let topic = SubscribeTopic {
+            topic_path: topic,
+            qos,
+        };
         self.topics.push(topic);
         self
     }
@@ -253,7 +259,11 @@ impl fmt::Debug for Connect {
 
 impl fmt::Debug for Subscribe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Filters = {:?}, Packet id = {:?}", self.pkid, self.topics)
+        write!(
+            f,
+            "Filters = {:?}, Packet id = {:?}",
+            self.pkid, self.topics
+        )
     }
 }
 

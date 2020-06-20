@@ -47,7 +47,11 @@ impl Decoder for MqttCodec {
             // not completely full
             // https://doc.rust-lang.org/stable/std/io/trait.Read.html#tymethod.read
             // https://doc.rust-lang.org/stable/src/std/io/mod.rs.html#501-944
-            Err(Error::Io(e)) if e.kind() == TimedOut || e.kind() == WouldBlock || e.kind() == UnexpectedEof => return Ok(None),
+            Err(Error::Io(e))
+                if e.kind() == TimedOut || e.kind() == WouldBlock || e.kind() == UnexpectedEof =>
+            {
+                return Ok(None)
+            }
             Err(e) => return Err(e.into()),
         };
 

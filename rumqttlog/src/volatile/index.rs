@@ -40,7 +40,10 @@ impl Index {
     /// Reads an offset from the index and returns segment record's offset, size and id
     pub fn read(&self, offset: u64) -> io::Result<(u64, u64, u64)> {
         if self.positions.len() == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No entries in index"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "No entries in index",
+            ));
         }
 
         // get position of the segment. we could have directly calculated this
@@ -49,7 +52,12 @@ impl Index {
         // file storage index for consistency
         match self.positions.get(offset as usize) {
             Some(pos) => *pos,
-            None => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Reading at an invalid offset")),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Reading at an invalid offset",
+                ))
+            }
         };
 
         let len = *self.sizes.get(offset as usize).unwrap();
@@ -67,7 +75,10 @@ impl Index {
         let offset = offset as usize;
 
         if self.positions.len() == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No entries in index"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "No entries in index",
+            ));
         }
 
         for size in self.sizes[offset..].iter() {

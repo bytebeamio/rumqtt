@@ -56,7 +56,9 @@ pub trait MqttRead: ReadBytesExt {
             }
             PacketType::Subscribe => Ok(Packet::Subscribe(self.read_subscribe(remaining_len)?)),
             PacketType::Suback => Ok(Packet::Suback(self.read_suback(remaining_len)?)),
-            PacketType::Unsubscribe => Ok(Packet::Unsubscribe(self.read_unsubscribe(remaining_len)?)),
+            PacketType::Unsubscribe => {
+                Ok(Packet::Unsubscribe(self.read_unsubscribe(remaining_len)?))
+            }
             PacketType::Unsuback if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Unsuback => {
                 let pkid = self.read_u16::<byteorder::BigEndian>()?;
@@ -149,7 +151,9 @@ pub trait MqttRead: ReadBytesExt {
         // Packet identifier exists where QoS > 0
         let pkid = match qos {
             QoS::AtMostOnce => None,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => Some(PacketIdentifier(self.read_u16::<byteorder::BigEndian>()?)),
+            QoS::AtLeastOnce | QoS::ExactlyOnce => {
+                Some(PacketIdentifier(self.read_u16::<byteorder::BigEndian>()?))
+            }
         };
 
         // variable header len = len of topic (2 bytes) + topic.len() + [optional packet id (2 bytes)]
@@ -285,21 +289,25 @@ impl<R: ReadBytesExt + ?Sized> MqttRead for R {}
 mod test {
     use super::MqttRead;
     use crate::mqtt4::{Connack, Connect, Packet, Publish, Suback, Subscribe, Unsubscribe};
-    use crate::mqtt4::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes, SubscribeTopic};
+    use crate::mqtt4::{
+        ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes,
+        SubscribeTopic,
+    };
     use std::io::Cursor;
 
     #[test]
     fn read_packet_connect_mqtt_protocol() {
         let mut stream = Cursor::new(vec![
             0x10, 39, // packet type, flags and remaining len
-            0x00, 0x04, 'M' as u8, 'Q' as u8, 'T' as u8, 'T' as u8, 0x04,       // variable header
+            0x00, 0x04, 'M' as u8, 'Q' as u8, 'T' as u8, 'T' as u8, 0x04, // variable header
             0b11001110, // variable header. +username, +password, -will retain, will qos=1, +last_will, +clean_session
             0x00, 0x0a, // variable header. keep alive = 10 sec
             0x00, 0x04, 't' as u8, 'e' as u8, 's' as u8, 't' as u8, // payload. client_id
             0x00, 0x02, '/' as u8, 'a' as u8, // payload. will topic = '/a'
             0x00, 0x07, 'o' as u8, 'f' as u8, 'f' as u8, 'l' as u8, 'i' as u8, 'n' as u8,
             'e' as u8, // payload. variable header. will msg = 'offline'
-            0x00, 0x04, 'r' as u8, 'u' as u8, 'm' as u8, 'q' as u8, // payload. username = 'rumq'
+            0x00, 0x04, 'r' as u8, 'u' as u8, 'm' as u8,
+            'q' as u8, // payload. username = 'rumq'
             0x00, 0x02, 'm' as u8, 'q' as u8, // payload. password = 'mq'
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
@@ -347,7 +355,8 @@ mod test {
     fn read_packet_publish_qos1_works() {
         let mut stream = Cursor::new(vec![
             0b00110010, 11, // packet type, flags and remaining len
-            0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, // variable header. topic name = 'a/b'
+            0x00, 0x03, 'a' as u8, '/' as u8,
+            'b' as u8, // variable header. topic name = 'a/b'
             0x00, 0x0a, // variable header. pkid = 10
             0xF1, 0xF2, 0xF3, 0xF4, // publish payload
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
@@ -372,7 +381,8 @@ mod test {
     fn read_packet_publish_qos0_works() {
         let mut stream = Cursor::new(vec![
             0b00110000, 7, // packet type, flags and remaining len
-            0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, // variable header. topic name = 'a/b'
+            0x00, 0x03, 'a' as u8, '/' as u8,
+            'b' as u8, // variable header. topic name = 'a/b'
             0x01, 0x02, // payload
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
@@ -413,7 +423,8 @@ mod test {
             0x00,      // payload. qos = 0
             0x00, 0x01, '#' as u8, // payload. topic filter = '#'
             0x01,      // payload. qos = 1
-            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8, 'c' as u8, // payload. topic filter = 'a/b/c'
+            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8,
+            'c' as u8, // payload. topic filter = 'a/b/c'
             0x02,      // payload. qos = 2
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
@@ -449,7 +460,8 @@ mod test {
             0x00, 0x0F, // variable header. pkid = 15
             0x00, 0x03, 'a' as u8, '/' as u8, '+' as u8, // payload. topic filter = 'a/+'
             0x00, 0x01, '#' as u8, // pyaload. topic filter = '#'
-            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8, 'c' as u8, // payload. topic filter = 'a/b/c'
+            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8,
+            'c' as u8, // payload. topic filter = 'a/b/c'
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
 
@@ -479,7 +491,10 @@ mod test {
             packet,
             Packet::Suback(Suback {
                 pkid: PacketIdentifier(15),
-                return_codes: vec![SubscribeReturnCodes::Success(QoS::AtLeastOnce), SubscribeReturnCodes::Failure]
+                return_codes: vec![
+                    SubscribeReturnCodes::Success(QoS::AtLeastOnce),
+                    SubscribeReturnCodes::Failure
+                ]
             })
         );
     }

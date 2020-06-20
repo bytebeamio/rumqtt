@@ -1,24 +1,24 @@
 use crate::router::RouterInMessage;
 use crate::{Config, MeshConfig, IO};
 
-mod link;
 mod codec;
+mod link;
 
+use async_channel::{bounded, Receiver, Sender};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
+use tokio::stream::StreamExt;
 use tokio::task;
 use tokio::time;
 use tokio_util::codec::Framed;
-use tokio::stream::StreamExt;
-use async_channel::{bounded, Sender, Receiver};
 
-use link::Link;
-use std::collections::HashMap;
-use tokio::time::Duration;
-use std::io;
-use tokio::sync::mpsc::error::SendError;
 use crate::mesh::codec::{MeshCodec, Packet};
 use futures_util::SinkExt;
+use link::Link;
+use std::collections::HashMap;
+use std::io;
+use tokio::sync::mpsc::error::SendError;
+use tokio::time::Duration;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
@@ -27,7 +27,7 @@ pub enum Error {
     Send(#[from] SendError<(String, RouterInMessage)>),
     StreamDone,
     ConnectionHandover,
-    WrongPacket(Packet)
+    WrongPacket(Packet),
 }
 
 type ConnectionId = usize;
@@ -124,7 +124,8 @@ impl Mesh {
     async fn start_router_links(&mut self, config: Vec<MeshConfig>, is_client: bool) {
         // launch the client links. We'll connect later
         for server in config.iter() {
-            self.start_link(is_client, server.id, &server.host, server.port).await;
+            self.start_link(is_client, server.id, &server.host, server.port)
+                .await;
         }
     }
 
@@ -186,7 +187,11 @@ pub struct LinkHandle<S> {
 }
 
 impl<S: IO> LinkHandle<S> {
-    pub fn new(id: u8, addr: String, connections_tx: Sender<Framed<S, MeshCodec>>) -> LinkHandle<S> {
+    pub fn new(
+        id: u8,
+        addr: String,
+        connections_tx: Sender<Framed<S, MeshCodec>>,
+    ) -> LinkHandle<S> {
         LinkHandle {
             id,
             addr,
@@ -194,8 +199,11 @@ impl<S: IO> LinkHandle<S> {
         }
     }
 
-
-    pub async fn connect(&mut self, this_id: u8, mut framed: Framed<S, MeshCodec>) -> Result<(), Error> {
+    pub async fn connect(
+        &mut self,
+        this_id: u8,
+        mut framed: Framed<S, MeshCodec>,
+    ) -> Result<(), Error> {
         framed.send(Packet::Connect(this_id)).await?;
         let packet = match framed.next().await {
             Some(packet) => packet,
@@ -220,7 +228,7 @@ impl<H> Clone for LinkHandle<H> {
         LinkHandle {
             id: self.id,
             addr: self.addr.to_string(),
-            connections_tx: self.connections_tx.clone()
+            connections_tx: self.connections_tx.clone(),
         }
     }
 }

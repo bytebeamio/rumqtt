@@ -44,6 +44,4 @@ pub fn vread_records(log: &mut Log) -> Result<u64, io::Error> {
 }
 */
 
-fn main() {
-
-}
+fn main() {}

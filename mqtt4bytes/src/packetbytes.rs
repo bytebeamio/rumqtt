@@ -66,7 +66,10 @@ fn extract_last_will(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<
     Ok(last_will)
 }
 
-fn extract_username_password(connect_flags: u8, mut bytes: &mut Bytes) -> Result<(Option<String>, Option<String>), Error> {
+fn extract_username_password(
+    connect_flags: u8,
+    mut bytes: &mut Bytes,
+) -> Result<(Option<String>, Option<String>), Error> {
     let username = match connect_flags & 0b1000_0000 {
         0 => None,
         _ => Some(read_mqtt_string(&mut bytes)?),
@@ -136,7 +139,10 @@ impl ConnAck {
 
         let session_present = (flags & 0x01) == 1;
         let code = connect_return(return_code)?;
-        let connack = ConnAck { session_present, code };
+        let connack = ConnAck {
+            session_present,
+            code,
+        };
 
         Ok(connack)
     }
@@ -734,7 +740,10 @@ mod test {
             packet,
             SubAck {
                 pkid: 15,
-                return_codes: vec![SubscribeReturnCodes::Success(QoS::AtLeastOnce), SubscribeReturnCodes::Failure]
+                return_codes: vec![
+                    SubscribeReturnCodes::Success(QoS::AtLeastOnce),
+                    SubscribeReturnCodes::Failure
+                ]
             }
         );
     }

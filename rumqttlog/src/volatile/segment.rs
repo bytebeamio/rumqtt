@@ -37,7 +37,10 @@ impl Segment {
     pub fn append(&mut self, record: Bytes) -> io::Result<(u64, u64)> {
         let record_size = record.len() as u64;
         if record_size > self.max_record_size {
-            return Err(io::Error::new(io::ErrorKind::Other, "Max record size exceeded"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Max record size exceeded",
+            ));
         }
 
         // append record and increment size. cursor is moved to the end as per the docs
