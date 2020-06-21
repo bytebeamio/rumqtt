@@ -1,16 +1,19 @@
+use async_channel::{bounded, Receiver, Sender};
 use std::collections::HashMap;
 use std::{io, mem, thread};
-use async_channel::{bounded, Sender, Receiver};
 
 use super::bytes::Bytes;
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, WatermarksRequest, WatermarksReply};
+use crate::router::{
+    ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
+    TopicsRequest, WatermarksReply, WatermarksRequest,
+};
 use crate::Config;
-use thiserror::Error;
 use futures_util::StreamExt;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -107,7 +110,9 @@ impl Router {
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
-                RouterInMessage::WatermarksRequest(request) => self.handle_watermarks_request(id, request),
+                RouterInMessage::WatermarksRequest(request) => {
+                    self.handle_watermarks_request(id, request)
+                }
             }
         }
 
@@ -142,7 +147,10 @@ impl Router {
             error!("Failed to send connection ack. Error = {:?}", e.to_string());
         }
 
-        info!("New Connection. Incoming ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
+        info!(
+            "New Connection. Incoming ID = {:?}, Router assigned ID = {:?}",
+            connection.conn, id
+        );
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             warn!("Replacing an existing connection with same ID");
         }
@@ -151,7 +159,10 @@ impl Router {
     /// Handles new incoming data on a topic
     fn handle_incoming_data(&mut self, id: ConnectionId, data: Data) {
         if data.payload.len() == 0 {
-            error!("Empty publish. Ignoring. ID = {:?}, topic = {:?}", id, data.topic);
+            error!(
+                "Empty publish. Ignoring. ID = {:?}, topic = {:?}",
+                id, data.topic
+            );
             return;
         }
 
@@ -183,12 +194,10 @@ impl Router {
         let reply = self.extract_topics(&request);
         let reply = match reply {
             Some(r) => r,
-            None => {
-                TopicsReply {
-                    offset: request.offset,
-                    topics: Vec::new()
-                }
-            }
+            None => TopicsReply {
+                offset: request.offset,
+                topics: Vec::new(),
+            },
         };
 
         // register this id to wake up when there are new topics and send an empty reply
@@ -217,21 +226,19 @@ impl Router {
         // exists while sending notification due to new data
         let reply = match reply {
             Some(r) => r,
-            None => {
-                DataReply {
-                    done: true,
-                    topic: request.topic.clone(),
-                    native_segment: request.native_segment,
-                    native_offset: request.native_offset,
-                    native_count: 0,
-                    replica_segment: request.replica_segment,
-                    replica_offset: request.replica_offset,
-                    replica_count: 0,
-                    pkids: vec![],
-                    payload: vec![],
-                    tracker_topic_offset: 0
-                }
-            }
+            None => DataReply {
+                done: true,
+                topic: request.topic.clone(),
+                native_segment: request.native_segment,
+                native_offset: request.native_offset,
+                native_count: 0,
+                replica_segment: request.replica_segment,
+                replica_offset: request.replica_offset,
+                replica_count: 0,
+                pkids: vec![],
+                payload: vec![],
+                tracker_topic_offset: 0,
+            },
         };
 
         // This connection/linker is completely caught up with this topic.
@@ -256,23 +263,21 @@ impl Router {
                     WatermarksReply {
                         topic: request.topic.clone(),
                         watermarks: Vec::new(),
-                        tracker_topic_offset: request.tracker_topic_offset
+                        tracker_topic_offset: request.tracker_topic_offset,
                     }
                 } else {
                     WatermarksReply {
                         topic: request.topic.clone(),
                         watermarks: watermarks.clone(),
-                        tracker_topic_offset: request.tracker_topic_offset
+                        tracker_topic_offset: request.tracker_topic_offset,
                     }
                 }
             }
-            None => {
-                WatermarksReply {
-                    topic: request.topic.clone(),
-                    watermarks: Vec::new(),
-                    tracker_topic_offset: request.tracker_topic_offset
-                }
-            }
+            None => WatermarksReply {
+                topic: request.topic.clone(),
+                watermarks: Vec::new(),
+                tracker_topic_offset: request.tracker_topic_offset,
+            },
         };
 
         if reply.watermarks.is_empty() {
@@ -291,7 +296,8 @@ impl Router {
         } else {
             // Fresh topic only initialize with 0 offset. Updates during the next request
             // Watermark 'n' implies data till n-1 is synced with the other node
-            self.watermarks.insert(request.topic.clone(), vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            self.watermarks
+                .insert(request.topic.clone(), vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         }
     }
 
@@ -336,20 +342,19 @@ impl Router {
                 // extract new native connection data to be sent to replication link
                 0..=9 => match self.extract_connection_data(&request) {
                     Some(reply) => reply,
-                    None => continue
-                }
+                    None => continue,
+                },
                 // extract new replication data to be sent to connection link
                 _ if replication_data => match self.extract_replicated_data(&request) {
                     Some(reply) => reply,
-                    None => continue
-                }
+                    None => continue,
+                },
                 // extract new native connection data to be sent to connection link
-                _ => match self.extract_connection_data(&request){
+                _ => match self.extract_connection_data(&request) {
                     Some(reply) => reply,
-                    None => continue
-                }
+                    None => continue,
+                },
             };
-
 
             let reply = RouterOutMessage::DataReply(reply);
             self.reply(link_id, reply);
@@ -372,7 +377,7 @@ impl Router {
             let reply = WatermarksReply {
                 topic: topic.to_owned(),
                 watermarks: self.watermarks.get(topic).unwrap().clone(),
-                tracker_topic_offset: request.tracker_topic_offset
+                tracker_topic_offset: request.tracker_topic_offset,
             };
 
             let reply = RouterOutMessage::WatermarksReply(reply);
@@ -383,7 +388,13 @@ impl Router {
     /// Separate logs due to replication and logs from connections. Connections pull
     /// logs from both replication and connections where as linker only pull logs
     /// from connections
-    fn append_to_commitlog(&mut self, id: ConnectionId, pkid: u64, topic: &str, bytes: Bytes) -> Option<u64> {
+    fn append_to_commitlog(
+        &mut self,
+        id: ConnectionId,
+        pkid: u64,
+        topic: &str,
+        bytes: Bytes,
+    ) -> Option<u64> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
@@ -433,18 +444,20 @@ impl Router {
 
                 Some(reply)
             }
-            None => None
+            None => None,
         }
     }
 
-
-    fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply>{
+    fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let segment = request.native_segment;
         let offset = request.native_offset;
         let size = request.size;
 
-        debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        debug!(
+            "Pull native data. Topic = {}, seg = {}, offset = {}",
+            topic, segment, offset
+        );
         match self.commitlog.readv(topic, segment, offset, size) {
             Ok(Some(v)) => {
                 let native_count = v.5.len();
@@ -459,7 +472,7 @@ impl Router {
                     replica_offset: request.replica_offset,
                     replica_count: 0,
                     pkids: v.4,
-                    tracker_topic_offset: request.tracker_topic_offset
+                    tracker_topic_offset: request.tracker_topic_offset,
                 };
 
                 Some(reply)
@@ -472,13 +485,16 @@ impl Router {
         }
     }
 
-    fn extract_replicated_data(&mut self, request: &DataRequest) -> Option<DataReply>{
+    fn extract_replicated_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let segment = request.replica_segment;
         let offset = request.replica_offset;
         let size = request.size;
 
-        debug!("Pull replicated data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        debug!(
+            "Pull replicated data. Topic = {}, seg = {}, offset = {}",
+            topic, segment, offset
+        );
         match self.replicatedlog.readv(topic, segment, offset, size) {
             Ok(Some(v)) => {
                 let replica_count = v.5.len();
@@ -518,7 +534,7 @@ impl Router {
             }
 
             Some(reply)
-        } else if let Some(reply) =  self.extract_replicated_data(&request) {
+        } else if let Some(reply) = self.extract_replicated_data(&request) {
             Some(reply)
         } else {
             error!("Empty connection and replication data!!");
@@ -573,12 +589,14 @@ impl Router {
 #[cfg(test)]
 mod test {
     use super::{ConnectionId, Router};
-    use crate::router::{ConnectionAck, ConnectionType, Data, TopicsRequest, TopicsReply, DataAck, WatermarksRequest, WatermarksReply};
-    use crate::{Config, Connection, RouterInMessage, RouterOutMessage, DataRequest, DataReply};
+    use crate::router::{
+        ConnectionAck, ConnectionType, Data, DataAck, TopicsReply, TopicsRequest, WatermarksReply,
+        WatermarksRequest,
+    };
+    use crate::{Config, Connection, DataReply, DataRequest, RouterInMessage, RouterOutMessage};
+    use async_channel::{bounded, Receiver, Sender};
     use bytes::Bytes;
     use std::time::Duration;
-    use async_channel::{bounded, Receiver, Sender};
-
 
     #[tokio::test(core_threads = 1)]
     async fn router_doesnt_give_data_when_not_asked() {
@@ -605,7 +623,6 @@ mod test {
         assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
         assert_eq!(reply.payload[1].as_ref(), &[4, 5, 6]);
 
-
         new_data_request(connection_id, &mut router_tx, "hello/world", 2, 0);
         let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
         assert_eq!(reply.native_count, 0);
@@ -614,7 +631,8 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn connection_reads_existing_native_and_replicated_data() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
 
         // write data from a native connection and read from connection
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
@@ -633,7 +651,8 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn replicator_reads_existing_native_data_but_not_replicated_data() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
 
         // write data from a native connection and read from connection
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
@@ -651,68 +670,135 @@ mod test {
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_connection_should_notify_replicator_and_connection() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
 
         // Send request for new topics. Router should reply with new topics when there are any
         new_topics_request(replicator_id, &mut router_tx);
         new_topics_request(connection_id, &mut router_tx);
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics.len(), 0);
-        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics.len(), 0);
+        assert_eq!(
+            wait_for_new_topics(&mut replicator_rx)
+                .await
+                .unwrap()
+                .topics
+                .len(),
+            0
+        );
+        assert_eq!(
+            wait_for_new_topics(&mut connection_rx)
+                .await
+                .unwrap()
+                .topics
+                .len(),
+            0
+        );
 
         // Send new data to router to be written to commitlog
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics[0], "hello/world");
-        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics[0], "hello/world");
+        assert_eq!(
+            wait_for_new_topics(&mut replicator_rx)
+                .await
+                .unwrap()
+                .topics[0],
+            "hello/world"
+        );
+        assert_eq!(
+            wait_for_new_topics(&mut connection_rx)
+                .await
+                .unwrap()
+                .topics[0],
+            "hello/world"
+        );
     }
-
 
     #[tokio::test(core_threads = 1)]
     async fn new_topic_from_replicator_should_notify_only_connection() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
         // Send request for new topics. Router should reply with new topics when there are any
         new_topics_request(replicator_id, &mut router_tx);
         new_topics_request(connection_id, &mut router_tx);
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_topics(&mut replicator_rx).await.unwrap().topics.len(), 0);
-        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics.len(), 0);
+        assert_eq!(
+            wait_for_new_topics(&mut replicator_rx)
+                .await
+                .unwrap()
+                .topics
+                .len(),
+            0
+        );
+        assert_eq!(
+            wait_for_new_topics(&mut connection_rx)
+                .await
+                .unwrap()
+                .topics
+                .len(),
+            0
+        );
 
         // Send new data to router to be written to commitlog
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_topics(&mut connection_rx).await.unwrap().topics[0], "hello/world");
+        assert_eq!(
+            wait_for_new_topics(&mut connection_rx)
+                .await
+                .unwrap()
+                .topics[0],
+            "hello/world"
+        );
         assert!(wait_for_new_topics(&mut replicator_rx).await.is_none());
     }
 
-
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_connection_should_notify_replicator_and_connection() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
 
         // Request data on non existent topic. Router will reply when there is data on this topic (new/old)
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
+        assert_eq!(
+            wait_for_new_data(&mut connection_rx)
+                .await
+                .unwrap()
+                .payload
+                .len(),
+            0
+        );
+        assert_eq!(
+            wait_for_new_data(&mut replicator_rx)
+                .await
+                .unwrap()
+                .payload
+                .len(),
+            0
+        );
 
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
+        assert_eq!(
+            wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(),
+            &[4, 5, 6]
+        );
+        assert_eq!(
+            wait_for_new_data(&mut replicator_rx).await.unwrap().payload[0].as_ref(),
+            &[4, 5, 6]
+        );
     }
-
 
     #[tokio::test(core_threads = 1)]
     async fn new_data_from_replicator_should_notify_only_connection() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
 
         // Send request for new topics. Router should reply with new topics when there are any
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
@@ -720,17 +806,35 @@ mod test {
 
         // first wait on connection_rx should return some data and next wait none
         // for replicated receiver, router only checks native data. replicator receives nothing back
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload.len(), 0);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
+        assert_eq!(
+            wait_for_new_data(&mut connection_rx)
+                .await
+                .unwrap()
+                .payload
+                .len(),
+            0
+        );
+        assert_eq!(
+            wait_for_new_data(&mut replicator_rx)
+                .await
+                .unwrap()
+                .payload
+                .len(),
+            0
+        );
 
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         assert!(wait_for_ack(&mut replicator_rx).await.is_some());
-        assert_eq!(wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(), &[4, 5, 6]);
+        assert_eq!(
+            wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(),
+            &[4, 5, 6]
+        );
     }
 
     #[tokio::test(core_threads = 1)]
     async fn replicated_data_updates_watermark_as_expected() {
-        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) = setup().await;
+        let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
+            setup().await;
 
         // this registers watermark notification in router as the topic isn't existent yet
         new_watermarks_request(connection_id, &mut router_tx, "hello/world");
@@ -746,11 +850,25 @@ mod test {
         // new data request from the router means previous request is replicated. First request
         // will only add this topic to watermark list
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 3);
+        assert_eq!(
+            wait_for_new_data(&mut replicator_rx)
+                .await
+                .unwrap()
+                .payload
+                .len(),
+            3
+        );
 
         // Second data request from replicator implies that previous request has been replicated
         new_data_request(replicator_id, &mut router_tx, "hello/world", 3, 0);
-        assert_eq!(wait_for_new_data(&mut replicator_rx).await.unwrap().payload.len(), 0);
+        assert_eq!(
+            wait_for_new_data(&mut replicator_rx)
+                .await
+                .unwrap()
+                .payload
+                .len(),
+            0
+        );
 
         let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
         assert_eq!(reply.watermarks, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -854,7 +972,7 @@ mod test {
                 native_offset,
                 replica_offset,
                 size: 100 * 1024,
-                tracker_topic_offset: 0
+                tracker_topic_offset: 0,
             }),
         );
         router_tx.try_send(message).unwrap();
@@ -870,7 +988,7 @@ mod test {
             RouterInMessage::WatermarksRequest(WatermarksRequest {
                 topic: topic.to_owned(),
                 watermarks: vec![],
-                tracker_topic_offset: 0
+                tracker_topic_offset: 0,
             }),
         );
         router_tx.try_send(message).unwrap();
@@ -898,7 +1016,6 @@ mod test {
         }
     }
 
-
     async fn wait_for_new_data(rx: &mut Receiver<RouterOutMessage>) -> Option<DataReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
@@ -910,7 +1027,9 @@ mod test {
         }
     }
 
-    async fn wait_for_new_watermarks(rx: &mut Receiver<RouterOutMessage>) -> Option<WatermarksReply> {
+    async fn wait_for_new_watermarks(
+        rx: &mut Receiver<RouterOutMessage>,
+    ) -> Option<WatermarksReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::WatermarksReply(reply)) => Some(reply),

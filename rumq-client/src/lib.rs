@@ -108,37 +108,49 @@
 #[macro_use]
 extern crate log;
 
-use rumq_core::mqtt4::{MqttRead, MqttWrite, Packet};
-use std::io::Cursor;
 use std::time::Duration;
 
+mod client;
 mod eventloop;
 mod network;
 mod state;
 
-pub use eventloop::eventloop;
-pub use eventloop::{EventLoopError, MqttEventLoop};
+pub use client::{Client, Error};
+pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
-
-pub use rumq_core::mqtt4::*;
+pub use mqtt4bytes::*;
 
 /// Includes incoming packets from the network and other interesting events happening in the eventloop
 #[derive(Debug)]
-pub enum Notification {
+pub enum Incoming {
+    /// Connection successful
+    Connected,
     /// Incoming publish from the broker
     Publish(Publish),
     /// Incoming puback from the broker
-    Puback(PacketIdentifier),
+    Puback(PubAck),
     /// Incoming pubrec from the broker
-    Pubrec(PacketIdentifier),
+    Pubrec(PubRec),
     /// Incoming pubcomp from the broker
-    Pubcomp(PacketIdentifier),
+    Pubcomp(PubComp),
     /// Incoming suback from the broker
-    Suback(Suback),
+    Suback(SubAck),
     /// Incoming unsuback from the broker
-    Unsuback(PacketIdentifier),
-    /// Eventloop error
-    Abort(EventLoopError),
+    Unsuback(UnsubAck),
+    /// Ping response
+    PingResp,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Outgoing {
+    Publish(u16),
+    Subscribe(u16),
+    Unsubscribe(u16),
+    Puback(u16),
+    Pubrec(u16),
+    Pubcomp(u16),
+    Pingreq,
+    Disconnect,
 }
 
 /// Requests by the client to mqtt event loop. Request are
@@ -173,37 +185,6 @@ impl From<Subscribe> for Request {
 impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
         return Request::Unsubscribe(unsubscribe);
-    }
-}
-
-/// From implementations for serialized requests
-/// TODO Probably implement for io::Result<Vec<u8>> if possible?
-impl From<Request> for Vec<u8> {
-    fn from(request: Request) -> Vec<u8> {
-        let mut packet = Cursor::new(Vec::new());
-        let o = match request {
-            Request::Reconnect(connect) => packet.mqtt_write(&Packet::Connect(connect)),
-            Request::Publish(publish) => packet.mqtt_write(&Packet::Publish(publish)),
-            Request::Subscribe(subscribe) => packet.mqtt_write(&Packet::Subscribe(subscribe)),
-            _ => unimplemented!(),
-        };
-
-        o.unwrap();
-        packet.into_inner()
-    }
-}
-
-impl From<Vec<u8>> for Request {
-    fn from(payload: Vec<u8>) -> Request {
-        let mut payload = Cursor::new(payload);
-        let packet = payload.mqtt_read().unwrap();
-
-        match packet {
-            Packet::Connect(connect) => Request::Reconnect(connect),
-            Packet::Publish(publish) => Request::Publish(publish),
-            Packet::Subscribe(subscribe) => Request::Subscribe(subscribe),
-            _ => unimplemented!(),
-        }
     }
 }
 

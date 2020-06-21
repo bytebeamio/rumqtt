@@ -3,12 +3,15 @@
 //!
 
 use bytes::Bytes;
+use rumqttlog::router::{ConnectionAck, Data};
+use rumqttlog::{
+    bounded, Config, Connection, DataReply, DataRequest, Receiver, Router, RouterInMessage,
+    RouterOutMessage, Sender,
+};
 use std::path::PathBuf;
 use std::thread;
-use tokio::time::Duration;
-use rumqttlog::{Config, Router, RouterInMessage, Sender, Connection, RouterOutMessage, bounded, Receiver, DataReply, DataRequest};
-use rumqttlog::router::{Data, ConnectionAck};
 use tokio::task;
+use tokio::time::Duration;
 
 // Configuration parameters
 
@@ -65,9 +68,7 @@ async fn node_2() {
     loop {
         let _reply = wait_for_new_data(&this_rx).await;
     }
-
 }
-
 
 /// Everything from here is a list of helper methods to make the test readable
 /// ---------------------------------------------------------------------------
@@ -78,8 +79,8 @@ async fn receive_ack(this_rx: &Receiver<RouterOutMessage>, pkid: u64) {
         RouterOutMessage::DataAck(ack) => {
             assert_eq!(ack.pkid, pkid);
             assert_eq!(ack.offset, pkid);
-        },
-        message => panic!("Invalid message = {:?}", message)
+        }
+        message => panic!("Invalid message = {:?}", message),
     };
 }
 
@@ -87,7 +88,7 @@ async fn wait_for_new_data(rx: &Receiver<RouterOutMessage>) -> DataReply {
     tokio::time::delay_for(Duration::from_secs(1)).await;
     match rx.try_recv() {
         Ok(RouterOutMessage::DataReply(reply)) => reply,
-        v => panic!("Expecting Data Reply. {:?}", v)
+        v => panic!("Expecting Data Reply. {:?}", v),
     }
 }
 
@@ -107,7 +108,7 @@ fn ask_data(
             native_offset,
             replica_offset,
             size: 100 * 1024,
-            tracker_topic_offset: 0
+            tracker_topic_offset: 0,
         }),
     );
 
@@ -118,19 +119,23 @@ async fn send_data(
     id: ConnectionId,
     router_tx: &Sender<(ConnectionId, RouterInMessage)>,
     payload_size: usize,
-    pkid: u64
+    pkid: u64,
 ) {
     let payload = vec![pkid as u8; payload_size];
     let payload = Bytes::from(payload);
     let topic = "hello/distributed/broker".to_owned();
-    let message = RouterInMessage::Data(Data { topic, pkid, payload });
+    let message = RouterInMessage::Data(Data {
+        topic,
+        pkid,
+        payload,
+    });
     router_tx.send((id, message)).await.unwrap();
 }
 
 async fn register_with_router(
     cap: usize,
     id: &str,
-    router_tx: &Sender<(ConnectionId, RouterInMessage)>
+    router_tx: &Sender<(ConnectionId, RouterInMessage)>,
 ) -> (ConnectionId, Receiver<RouterOutMessage>) {
     let (this_tx, this_rx) = bounded(cap);
     let connection = Connection::new(id, this_tx);
@@ -139,8 +144,10 @@ async fn register_with_router(
 
     let id = match this_rx.recv().await.unwrap() {
         RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
-        message => panic!("Not connection ack = {:?}", message)
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => {
+            panic!("Connection failed {:?}", e)
+        }
+        message => panic!("Not connection ack = {:?}", message),
     };
 
     (id, this_rx)

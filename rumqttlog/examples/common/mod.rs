@@ -28,7 +28,10 @@ pub fn payloads(size: usize, count: u64) -> Vec<Bytes> {
 pub fn report(name: &str, size: u64, start: Instant, guard: pprof::ProfilerGuard) {
     let file_size = size / 1024 / 1024;
     let throughput = file_size as u128 * 1000 / start.elapsed().as_millis();
-    println!("{}. File size = {}, Throughput = {} MB/s", name, file_size, throughput);
+    println!(
+        "{}. File size = {}, Throughput = {} MB/s",
+        name, file_size, throughput
+    );
 
     if let Ok(report) = guard.report().build() {
         let mut file = File::create(name).unwrap();

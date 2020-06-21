@@ -57,7 +57,9 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
         PacketType::PubComp => Packet::PubComp(PubComp::assemble(fixed_header, packet)?),
         PacketType::Subscribe => Packet::Subscribe(Subscribe::assemble(fixed_header, packet)?),
         PacketType::SubAck => Packet::SubAck(SubAck::assemble(fixed_header, packet)?),
-        PacketType::Unsubscribe => Packet::Unsubscribe(Unsubscribe::assemble(fixed_header, packet)?),
+        PacketType::Unsubscribe => {
+            Packet::Unsubscribe(Unsubscribe::assemble(fixed_header, packet)?)
+        }
         PacketType::UnsubAck => Packet::UnsubAck(UnsubAck::assemble(fixed_header, packet)?),
         PacketType::PingReq => Packet::PingReq,
         PacketType::PingResp => Packet::PingResp,

@@ -63,7 +63,12 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
         }
         Packet::Publish(packet) => {
             payload.reserve(packet.topic.len() + packet.payload.len() + 10);
-            payload.put_u8(0b0011_0000 | packet.retain as u8 | ((packet.qos as u8) << 1) | ((packet.dup as u8) << 3));
+            payload.put_u8(
+                0b0011_0000
+                    | packet.retain as u8
+                    | ((packet.qos as u8) << 1)
+                    | ((packet.dup as u8) << 3),
+            );
             let mut len = packet.topic.len() + 2 + packet.payload.len();
             if packet.qos != QoS::AtMostOnce && packet.pkid != 0 {
                 len += 2;
@@ -112,7 +117,10 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
             Ok(())
         }
         Packet::Subscribe(packet) => {
-            let len = 2 + packet.topics.iter().fold(0, |s, ref t| s + t.topic_path.len() + 3);
+            let len = 2 + packet
+                .topics
+                .iter()
+                .fold(0, |s, ref t| s + t.topic_path.len() + 3);
             payload.reserve(len + 8);
             payload.put_u8(0x82);
             write_remaining_length(payload, len)?;
@@ -141,7 +149,10 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
             Ok(())
         }
         Packet::Unsubscribe(packet) => {
-            let len = 2 + packet.topics.iter().fold(0, |s, ref topic| s + topic.len() + 2);
+            let len = 2 + packet
+                .topics
+                .iter()
+                .fold(0, |s, ref topic| s + topic.len() + 2);
             payload.reserve(len + 8);
             payload.put_u8(0xA2);
             write_remaining_length(payload, len)?;
@@ -153,29 +164,23 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
         }
         Packet::UnsubAck(packet) => {
             payload.reserve(4);
-            let o: &[u8] = &[0xB0, 0x02];
-            payload.put_slice(o);
+            payload.put_slice(&[0xB0, 0x02]);
             payload.put_u16(packet.pkid);
             Ok(())
         }
         Packet::PingReq => {
             payload.reserve(2);
-            let mut payload = BytesMut::with_capacity(2);
-            payload.put_u8(0xc0);
-            payload.put_u8(0);
+            payload.put_slice(&[0xC0, 0x00]);
             Ok(())
         }
         Packet::PingResp => {
             payload.reserve(2);
-            let mut payload = BytesMut::with_capacity(2);
-            payload.put_u8(0xd0);
-            payload.put_u8(0);
+            payload.put_slice(&[0xD0, 0x00]);
             Ok(())
         }
         Packet::Disconnect => {
             payload.reserve(2);
-            let o: &[u8] = &[0xe0, 0];
-            payload.put_slice(o);
+            payload.put_slice(&[0xE0, 0x00]);
             Ok(())
         }
     }
@@ -313,7 +318,21 @@ mod test {
 
         assert_eq!(
             buf,
-            vec![0b0011_0010, 11, 0x00, 0x03, b'a', b'/', b'b', 0x00, 0x0a, 0xF1, 0xF2, 0xF3, 0xF4]
+            vec![
+                0b0011_0010,
+                11,
+                0x00,
+                0x03,
+                b'a',
+                b'/',
+                b'b',
+                0x00,
+                0x0a,
+                0xF1,
+                0xF2,
+                0xF3,
+                0xF4
+            ]
         );
     }
 
@@ -332,7 +351,22 @@ mod test {
         let mut buf = BytesMut::new();
         mqtt_write(publish, &mut buf).unwrap();
 
-        assert_eq!(buf, vec![0b0011_0000, 9, 0x00, 0x03, b'a', b'/', b'b', 0xE1, 0xE2, 0xE3, 0xE4]);
+        assert_eq!(
+            buf,
+            vec![
+                0b0011_0000,
+                9,
+                0x00,
+                0x03,
+                b'a',
+                b'/',
+                b'b',
+                0xE1,
+                0xE2,
+                0xE3,
+                0xE4
+            ]
+        );
     }
 
     #[test]

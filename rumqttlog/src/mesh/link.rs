@@ -5,16 +5,16 @@ use tokio::select;
 use std::io;
 use std::time::Duration;
 
-use async_channel::{bounded, Sender, Receiver, SendError, RecvError};
+use crate::mesh::codec::{MeshCodec, Packet};
+use crate::mesh::ConnectionId;
+use crate::router::{ConnectionType, Data, TopicsRequest};
+use crate::tracker::Tracker;
+use crate::{Connection, RouterInMessage, RouterOutMessage, IO};
+use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
+use bytes::BytesMut;
 use futures_util::StreamExt;
 use tokio::time;
 use tokio_util::codec::Framed;
-use bytes::BytesMut;
-use crate::{IO, RouterInMessage, RouterOutMessage, Connection};
-use crate::router::{TopicsRequest, Data, ConnectionType};
-use crate::mesh::codec::{MeshCodec, Packet};
-use crate::mesh::ConnectionId;
-use crate::tracker::Tracker;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -65,11 +65,14 @@ impl Link {
         id: u8,
         mut router_tx: Sender<(ConnectionId, RouterInMessage)>,
         supervisor_tx: Sender<u8>,
-        is_client: bool
+        is_client: bool,
     ) -> Link {
         // Register this link with router even though there is no network connection with other router yet.
         // Actual connection will be requested in `start`
-        info!("Creating link {} with router. Client mode = {}", id, is_client);
+        info!(
+            "Creating link {} with router. Client mode = {}",
+            id, is_client
+        );
         let link_rx = register_with_router(id, &mut router_tx).await;
         let topics_offset = TopicsRequest {
             offset: 0,
@@ -93,7 +96,10 @@ impl Link {
 
     /// Request for topics to be polled again
     async fn ask_for_more_topics(&mut self) -> Result<(), LinkError> {
-        debug!("Topics request. Offset = {}, Count = {}", self.topics_offset.offset, self.topics_offset.count);
+        debug!(
+            "Topics request. Offset = {}, Count = {}",
+            self.topics_offset.offset, self.topics_offset.count
+        );
         let message = RouterInMessage::TopicsRequest(self.topics_offset.clone());
         self.router_tx.send((self.id as usize, message)).await?;
         Ok(())
@@ -101,7 +107,10 @@ impl Link {
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
-    async fn connect<S: IO>(&mut self, connections_rx: &mut Receiver<Framed<S, MeshCodec>>) -> Framed<S, MeshCodec> {
+    async fn connect<S: IO>(
+        &mut self,
+        connections_rx: &mut Receiver<Framed<S, MeshCodec>>,
+    ) -> Framed<S, MeshCodec> {
         info!("Link with {} broken!!", self.id);
         if self.is_client {
             info!("About to make a new connection ...");
@@ -117,7 +126,10 @@ impl Link {
     /// Start handling the connection
     /// Links and connections communicate with router with a pull. This allows router to just reply.
     /// This ensured router never fills links/connections channel and take care of error handling
-    pub async fn start<S: IO>(&mut self, mut connections_rx: Receiver<Framed<S, MeshCodec>>) -> Result<(), LinkError> {
+    pub async fn start<S: IO>(
+        &mut self,
+        mut connections_rx: Receiver<Framed<S, MeshCodec>>,
+    ) -> Result<(), LinkError> {
         let (router_tx, link_rx) = self.extract_handles();
         let mut framed = self.connect(&mut connections_rx).await;
 
@@ -219,14 +231,22 @@ impl Link {
         }
     }
 
-    fn extract_handles(&mut self) -> (Sender<(ConnectionId, RouterInMessage)>, Receiver<RouterOutMessage>) {
+    fn extract_handles(
+        &mut self,
+    ) -> (
+        Sender<(ConnectionId, RouterInMessage)>,
+        Receiver<RouterOutMessage>,
+    ) {
         let router_tx = self.router_tx.clone();
         let link_rx = self.link_rx.take().unwrap();
         (router_tx, link_rx)
     }
 }
 
-async fn register_with_router(id: u8, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) -> Receiver<RouterOutMessage> {
+async fn register_with_router(
+    id: u8,
+    router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
+) -> Receiver<RouterOutMessage> {
     let (link_tx, link_rx) = bounded(4);
     let connection = Connection {
         conn: ConnectionType::Replicator(id as usize),

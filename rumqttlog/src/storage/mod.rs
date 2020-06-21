@@ -54,20 +54,14 @@ impl Log {
             for base_offset in offsets.iter() {
                 let index = Index::new(&dir, *base_offset, max_index_size, false)?;
                 let segment = Segment::new(&dir, *base_offset)?;
-                let chunk = Chunk {
-                    index,
-                    segment,
-                };
+                let chunk = Chunk { index, segment };
                 chunks.insert(*base_offset, chunk);
             }
 
             // Initialize active segment
             let index = Index::new(&dir, *last_offset, max_index_size, true)?;
             let segment = Segment::new(&dir, *last_offset)?;
-            let mut chunk = Chunk {
-                index,
-                segment,
-            };
+            let mut chunk = Chunk { index, segment };
 
             // Wrong counts due to unclosed segments are handled during initialization. We can just assume
             // count is always right from here on
@@ -78,10 +72,7 @@ impl Log {
         } else {
             let index = Index::new(&dir, 0, max_index_size, true)?;
             let segment = Segment::new(&dir, 0)?;
-            let chunk = Chunk {
-                index,
-                segment,
-            };
+            let chunk = Chunk { index, segment };
             chunks.insert(0, chunk);
             base_offsets.push(0);
             0
@@ -115,10 +106,7 @@ impl Log {
             let base_offset = active_chunk.index.base_offset() + active_chunk.index.count();
             let index = Index::new(&self.dir, base_offset, self.max_index_size, true)?;
             let segment = Segment::new(&self.dir, base_offset)?;
-            let chunk = Chunk {
-                index,
-                segment,
-            };
+            let chunk = Chunk { index, segment };
             self.chunks.insert(base_offset, chunk);
             self.base_offsets.push(base_offset);
             self.active_chunk = base_offset;
@@ -141,7 +129,12 @@ impl Log {
     pub fn read(&mut self, base_offset: u64, offset: u64) -> io::Result<Vec<u8>> {
         let chunk = match self.chunks.get_mut(&base_offset) {
             Some(segment) => segment,
-            None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment")),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid segment",
+                ))
+            }
         };
 
         let (position, len) = chunk.index.read(offset)?;
@@ -169,7 +162,12 @@ impl Log {
             // Get the chunk with given base offset
             let chunk = match self.chunks.get(&chunks.base_offset) {
                 Some(c) => c,
-                None if chunks.count == 0 => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment")),
+                None if chunks.count == 0 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Invalid segment",
+                    ))
+                }
                 None => break,
             };
 
@@ -199,11 +197,14 @@ impl Log {
             // Get what to read from the segment and fill the buffer. Covers the case where the logic has just moved to next
             // segment and the segment is empty
             let read_size = size - chunks.size;
-            let (position, payload_size, count) = chunk.index.readv(chunks.relative_offset, read_size)?;
+            let (position, payload_size, count) =
+                chunk.index.readv(chunks.relative_offset, read_size)?;
             chunks.relative_offset += count;
             chunks.count += count;
             chunks.size += payload_size;
-            chunks.chunks.push((chunks.base_offset, position, payload_size, count));
+            chunks
+                .chunks
+                .push((chunks.base_offset, position, payload_size, count));
             if chunks.size >= size {
                 chunks.relative_offset -= 1;
                 break;
@@ -216,7 +217,12 @@ impl Log {
     /// Reads multiple packets from the storage and return base offset and relative offset of the
     /// Returns base offset, relative offset of the last record along with number of messages and count
     /// Goes to next segment when relative off set crosses boundary
-    pub fn readv(&mut self, base_offset: u64, relative_offset: u64, size: u64) -> io::Result<(u64, u64, u64, Vec<u8>)> {
+    pub fn readv(
+        &mut self,
+        base_offset: u64,
+        relative_offset: u64,
+        size: u64,
+    ) -> io::Result<(u64, u64, u64, Vec<u8>)> {
         let chunks = self.indexv(base_offset, relative_offset, size)?;
 
         // Fill the pre-allocated buffer
@@ -230,11 +236,18 @@ impl Log {
 
             let position = c.1;
             let payload_size = c.2;
-            chunk.segment.read(position, &mut out[start..start + payload_size as usize])?;
+            chunk
+                .segment
+                .read(position, &mut out[start..start + payload_size as usize])?;
             start += payload_size as usize;
         }
 
-        Ok((chunks.base_offset, chunks.relative_offset, chunks.count, out))
+        Ok((
+            chunks.base_offset,
+            chunks.relative_offset,
+            chunks.count,
+            out,
+        ))
     }
 
     pub fn close(&mut self, base_offset: u64) -> io::Result<()> {
@@ -515,7 +528,9 @@ mod test {
         assert_eq!(data.len(), 15 * 1024);
 
         // Read 15K. Crosses boundaries of the segment and offset will be at last record of 3rd segment
-        let (base_offset, relative_offset, count, data) = log.readv(base_offset, relative_offset + 1, 15 * 1024).unwrap();
+        let (base_offset, relative_offset, count, data) = log
+            .readv(base_offset, relative_offset + 1, 15 * 1024)
+            .unwrap();
         assert_eq!(base_offset, 20);
         assert_eq!(relative_offset, 4);
         assert_eq!(count, 10);

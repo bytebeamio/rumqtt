@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use crate::{DataRequest, RouterInMessage, DataReply};
+use crate::router::{TopicsReply, TopicsRequest, WatermarksReply, WatermarksRequest};
+use crate::{DataReply, DataRequest, RouterInMessage};
 use mqtt4bytes::{has_wildcards, matches};
-use crate::router::{TopicsRequest, WatermarksRequest, WatermarksReply, TopicsReply};
 
 /// Tracker tracks current offsets of all the subscriptions of a connection
 /// It also updates the iterator list to efficiently iterate over all
@@ -102,7 +102,7 @@ impl Tracker {
                 let caughtup = reply.watermarks.is_empty();
                 if caughtup {
                     track.active = false;
-                    return
+                    return;
                 }
 
                 track.active = true
@@ -136,7 +136,7 @@ impl Tracker {
 
                 if native_topic_caughtup && replicated_topic_caughtup {
                     track.active = false;
-                    return
+                    return;
                 }
 
                 if !native_topic_caughtup {
@@ -313,10 +313,10 @@ impl WatermarksTracker {
 
 #[cfg(test)]
 mod tests {
+    use crate::router::{TopicsReply, WatermarksReply};
+    use crate::tracker::Tracker;
     use crate::{DataReply, RouterInMessage};
     use bytes::Bytes;
-    use crate::router::{WatermarksReply, TopicsReply};
-    use crate::tracker::Tracker;
 
     #[test]
     fn next_track_iterates_through_tracks_correctly() {
@@ -552,7 +552,7 @@ mod tests {
         let reply = WatermarksReply {
             topic: topic.to_owned(),
             watermarks: vec![1, 2, 3],
-            tracker_topic_offset
+            tracker_topic_offset,
         };
 
         reply
@@ -561,7 +561,7 @@ mod tests {
     fn filled_topics_reply() -> TopicsReply {
         let reply = TopicsReply {
             offset: 1,
-            topics: vec!["hello/world".to_owned()]
+            topics: vec!["hello/world".to_owned()],
         };
 
         reply

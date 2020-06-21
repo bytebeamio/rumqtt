@@ -1,10 +1,10 @@
-use std::time::Instant;
-use rumqttlog::{bounded, Router, Config, RouterInMessage, Sender, DataRequest, RouterOutMessage};
 use argh::FromArgs;
-use std::thread;
-use rumqttlog::router::{Connection, Data, ConnectionAck};
 use bytes::Bytes;
 use futures_util::future::join_all;
+use rumqttlog::router::{Connection, ConnectionAck, Data};
+use rumqttlog::{bounded, Config, DataRequest, Router, RouterInMessage, RouterOutMessage, Sender};
+use std::thread;
+use std::time::Instant;
 use tokio::task;
 
 pub mod common;
@@ -32,7 +32,7 @@ struct CommandLine {
     subscriber_count: usize,
 }
 
-#[tokio::main(core_threads=1)]
+#[tokio::main(core_threads = 1)]
 async fn main() {
     pretty_env_logger::init();
     let commandline: CommandLine = argh::from_env();
@@ -42,7 +42,7 @@ async fn main() {
         dir: Default::default(),
         max_segment_size: commandline.segment_size as u64,
         max_segment_count: 10000,
-        routers: None
+        routers: None,
     };
 
     let (router, tx) = Router::new(config);
@@ -63,10 +63,10 @@ async fn main() {
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
     join_all(reads).await;
-    let total_size = commandline.payload_size * commandline.message_count * commandline.subscriber_count;
+    let total_size =
+        commandline.payload_size * commandline.message_count * commandline.subscriber_count;
     common::report("read.pb", total_size as u64, start, guard);
 }
-
 
 #[tokio::main(core_threads = 1)]
 async fn start_router(mut router: Router) {
@@ -86,14 +86,20 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
 
     let id = match this_rx.recv().await.unwrap() {
         RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
-        message => panic!("Not connection ack = {:?}", message)
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => {
+            panic!("Connection failed {:?}", e)
+        }
+        message => panic!("Not connection ack = {:?}", message),
     };
 
     let mut topic_count = 0;
     let mut topic = "hello/world".to_owned() + &topic_count.to_string();
     for (i, payload) in data.into_iter().enumerate() {
-        let data = Data { topic: topic.clone(), pkid: 0, payload };
+        let data = Data {
+            topic: topic.clone(),
+            pkid: 0,
+            payload,
+        };
         let message = (id, RouterInMessage::Data(data));
         tx.send(message).await.unwrap();
 
@@ -102,7 +108,7 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
         if count % 1000 == 0 {
             for _ in 0..1000 {
                 if let RouterOutMessage::DataAck(_ack) = this_rx.recv().await.unwrap() {
-                    continue
+                    continue;
                 } else {
                     panic!("Expecting Ack");
                 }
@@ -114,7 +120,12 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
             topic = "hello/world".to_owned() + &topic_count.to_string();
         }
     }
-    common::report("write.pb", (commandline.message_count * commandline.payload_size) as u64, start, guard);
+    common::report(
+        "write.pb",
+        (commandline.message_count * commandline.payload_size) as u64,
+        start,
+        guard,
+    );
 }
 
 async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInMessage)>) -> usize {
@@ -124,8 +135,10 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
     tx.send(message).await.unwrap();
     let id = match this_rx.recv().await.unwrap() {
         RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => panic!("Connection failed {:?}", e),
-        message => panic!("Not connection ack = {:?}", message)
+        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => {
+            panic!("Connection failed {:?}", e)
+        }
+        message => panic!("Not connection ack = {:?}", message),
     };
 
     let mut offset = 0;
@@ -143,7 +156,7 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
             replica_segment: 0,
             replica_offset: 0,
             size: commandline.sweep_size as u64,
-            tracker_topic_offset: 0
+            tracker_topic_offset: 0,
         };
 
         let message = (id.to_owned(), RouterInMessage::DataRequest(request));
@@ -163,4 +176,3 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
     println!("Id = {}, Total size = {}", id, total_size);
     total_size
 }
-

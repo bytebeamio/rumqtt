@@ -45,7 +45,12 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     // certs in the chain, converts each to der and adds them to root store
     // TODO: Check if there is a better way to do this
     let ca = options.ca.as_ref().unwrap();
-    if config.root_store.add_pem_file(&mut BufReader::new(Cursor::new(ca)))?.0 == 0 {
+    if config
+        .root_store
+        .add_pem_file(&mut BufReader::new(Cursor::new(ca)))?
+        .0
+        == 0
+    {
         return Err(Error::NoValidCertInChain);
     }
 

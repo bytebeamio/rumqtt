@@ -54,7 +54,12 @@ pub trait MqttWrite: WriteBytesExt {
                 Ok(())
             }
             Packet::Publish(publish) => {
-                self.write_u8(0b00110000 | publish.retain as u8 | ((publish.qos as u8) << 1) | ((publish.dup as u8) << 3))?;
+                self.write_u8(
+                    0b00110000
+                        | publish.retain as u8
+                        | ((publish.qos as u8) << 1)
+                        | ((publish.dup as u8) << 3),
+                )?;
                 let mut len = publish.topic_name.len() + 2 + publish.payload.len();
 
                 if publish.qos != QoS::AtMostOnce && None != publish.pkid {
@@ -93,7 +98,10 @@ pub trait MqttWrite: WriteBytesExt {
             }
             Packet::Subscribe(subscribe) => {
                 self.write_all(&[0x82])?;
-                let len = 2 + subscribe.topics.iter().fold(0, |s, ref t| s + t.topic_path.len() + 3);
+                let len = 2 + subscribe
+                    .topics
+                    .iter()
+                    .fold(0, |s, ref t| s + t.topic_path.len() + 3);
 
                 self.write_remaining_length(len)?;
                 self.write_u16::<byteorder::BigEndian>(subscribe.pkid.0)?;
@@ -122,7 +130,10 @@ pub trait MqttWrite: WriteBytesExt {
             }
             Packet::Unsubscribe(unsubscribe) => {
                 self.write_all(&[0xA2])?;
-                let len = 2 + unsubscribe.topics.iter().fold(0, |s, ref topic| s + topic.len() + 2);
+                let len = 2 + unsubscribe
+                    .topics
+                    .iter()
+                    .fold(0, |s, ref topic| s + topic.len() + 2);
                 self.write_remaining_length(len)?;
                 self.write_u16::<byteorder::BigEndian>(unsubscribe.pkid.0)?;
 
@@ -185,7 +196,9 @@ impl<W: WriteBytesExt + ?Sized> MqttWrite for W {}
 mod test {
     use super::MqttWrite;
     use crate::mqtt4::{Connack, Connect, Packet, Publish, Subscribe};
-    use crate::mqtt4::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic};
+    use crate::mqtt4::{
+        ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeTopic,
+    };
 
     #[test]
     fn write_packet_connect_mqtt_protocol_works() {
@@ -215,7 +228,8 @@ mod test {
                 0x00, 0x0a, // 10 sec
                 0x00, 0x04, 't' as u8, 'e' as u8, 's' as u8, 't' as u8, // client_id
                 0x00, 0x02, '/' as u8, 'a' as u8, // will topic = '/a'
-                0x00, 0x07, 'o' as u8, 'f' as u8, 'f' as u8, 'l' as u8, 'i' as u8, 'n' as u8, 'e' as u8, // will msg = 'offline'
+                0x00, 0x07, 'o' as u8, 'f' as u8, 'f' as u8, 'l' as u8, 'i' as u8, 'n' as u8,
+                'e' as u8, // will msg = 'offline'
                 0x00, 0x04, 'r' as u8, 'u' as u8, 's' as u8, 't' as u8, // username = 'rust'
                 0x00, 0x02, 'm' as u8, 'q' as u8 // password = 'mq'
             ]
@@ -251,7 +265,10 @@ mod test {
 
         assert_eq!(
             stream,
-            vec![0b00110010, 11, 0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, 0x00, 0x0a, 0xF1, 0xF2, 0xF3, 0xF4]
+            vec![
+                0b00110010, 11, 0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, 0x00, 0x0a, 0xF1,
+                0xF2, 0xF3, 0xF4
+            ]
         );
     }
 
@@ -271,7 +288,9 @@ mod test {
 
         assert_eq!(
             stream,
-            vec![0b00110000, 9, 0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, 0xE1, 0xE2, 0xE3, 0xE4]
+            vec![
+                0b00110000, 9, 0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, 0xE1, 0xE2, 0xE3, 0xE4
+            ]
         );
     }
 
@@ -306,7 +325,8 @@ mod test {
                 0x00,      // qos = 0
                 0x00, 0x01, '#' as u8, // topic filter = '#'
                 0x01,      // qos = 1
-                0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8, 'c' as u8, // topic filter = 'a/b/c'
+                0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8,
+                'c' as u8, // topic filter = 'a/b/c'
                 0x02       // qos = 2
             ]
         );

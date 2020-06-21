@@ -12,7 +12,11 @@ pub trait AsyncMqttRead: AsyncReadExt + Unpin {
         self.async_deserialize(packet_type, remaining_len).await
     }
 
-    async fn async_deserialize(&mut self, byte1: u8, remaining_len: usize) -> Result<Packet, Error> {
+    async fn async_deserialize(
+        &mut self,
+        byte1: u8,
+        remaining_len: usize,
+    ) -> Result<Packet, Error> {
         let kind = packet_type(byte1 >> 4)?;
 
         if remaining_len == 0 {
@@ -28,7 +32,9 @@ pub trait AsyncMqttRead: AsyncReadExt + Unpin {
         match kind {
             PacketType::Connect => Ok(Packet::Connect(self.read_connect().await?)),
             PacketType::Connack => Ok(Packet::Connack(self.read_connack(remaining_len).await?)),
-            PacketType::Publish => Ok(Packet::Publish(self.read_publish(byte1, remaining_len).await?)),
+            PacketType::Publish => Ok(Packet::Publish(
+                self.read_publish(byte1, remaining_len).await?,
+            )),
             PacketType::Puback if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Puback => {
                 let pkid = self.read_u16().await?;
@@ -49,9 +55,13 @@ pub trait AsyncMqttRead: AsyncReadExt + Unpin {
                 let pkid = self.read_u16().await?;
                 Ok(Packet::Pubcomp(PacketIdentifier(pkid)))
             }
-            PacketType::Subscribe => Ok(Packet::Subscribe(self.read_subscribe(remaining_len).await?)),
+            PacketType::Subscribe => {
+                Ok(Packet::Subscribe(self.read_subscribe(remaining_len).await?))
+            }
             PacketType::Suback => Ok(Packet::Suback(self.read_suback(remaining_len).await?)),
-            PacketType::Unsubscribe => Ok(Packet::Unsubscribe(self.read_unsubscribe(remaining_len).await?)),
+            PacketType::Unsubscribe => Ok(Packet::Unsubscribe(
+                self.read_unsubscribe(remaining_len).await?,
+            )),
             PacketType::Unsuback if remaining_len != 2 => Err(Error::PayloadSizeIncorrect),
             PacketType::Unsuback => {
                 let pkid = self.read_u16().await?;
@@ -268,21 +278,25 @@ impl<R: AsyncReadExt + ?Sized + Unpin> AsyncMqttRead for R {}
 mod test {
     use super::AsyncMqttRead;
     use super::{Connack, Connect, Packet, Publish, Suback, Subscribe, Unsubscribe};
-    use super::{ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes, SubscribeTopic};
+    use super::{
+        ConnectReturnCode, LastWill, PacketIdentifier, Protocol, QoS, SubscribeReturnCodes,
+        SubscribeTopic,
+    };
     use std::io::Cursor;
 
     #[tokio::test]
     async fn read_packet_connect_mqtt_protocol() {
         let mut stream = Cursor::new(vec![
             0x10, 39, // packet type, flags and remaining len
-            0x00, 0x04, 'M' as u8, 'Q' as u8, 'T' as u8, 'T' as u8, 0x04,       // variable header
+            0x00, 0x04, 'M' as u8, 'Q' as u8, 'T' as u8, 'T' as u8, 0x04, // variable header
             0b11001110, // variable header. +username, +password, -will retain, will qos=1, +last_will, +clean_session
             0x00, 0x0a, // variable header. keep alive = 10 sec
             0x00, 0x04, 't' as u8, 'e' as u8, 's' as u8, 't' as u8, // payload. client_id
             0x00, 0x02, '/' as u8, 'a' as u8, // payload. will topic = '/a'
             0x00, 0x07, 'o' as u8, 'f' as u8, 'f' as u8, 'l' as u8, 'i' as u8, 'n' as u8,
             'e' as u8, // payload. variable header. will msg = 'offline'
-            0x00, 0x04, 'r' as u8, 'u' as u8, 'm' as u8, 'q' as u8, // payload. username = 'rumq'
+            0x00, 0x04, 'r' as u8, 'u' as u8, 'm' as u8,
+            'q' as u8, // payload. username = 'rumq'
             0x00, 0x02, 'm' as u8, 'q' as u8, // payload. password = 'mq'
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
@@ -330,7 +344,8 @@ mod test {
     async fn read_packet_publish_qos1_works() {
         let mut stream = Cursor::new(vec![
             0b00110010, 11, // packet type, flags and remaining len
-            0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, // variable header. topic name = 'a/b'
+            0x00, 0x03, 'a' as u8, '/' as u8,
+            'b' as u8, // variable header. topic name = 'a/b'
             0x00, 0x0a, // variable header. pkid = 10
             0xF1, 0xF2, 0xF3, 0xF4, // publish payload
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
@@ -355,7 +370,8 @@ mod test {
     async fn read_packet_publish_qos0_works() {
         let mut stream = Cursor::new(vec![
             0b00110000, 7, // packet type, flags and remaining len
-            0x00, 0x03, 'a' as u8, '/' as u8, 'b' as u8, // variable header. topic name = 'a/b'
+            0x00, 0x03, 'a' as u8, '/' as u8,
+            'b' as u8, // variable header. topic name = 'a/b'
             0x01, 0x02, // payload
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
@@ -396,7 +412,8 @@ mod test {
             0x00,      // payload. qos = 0
             0x00, 0x01, '#' as u8, // payload. topic filter = '#'
             0x01,      // payload. qos = 1
-            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8, 'c' as u8, // payload. topic filter = 'a/b/c'
+            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8,
+            'c' as u8, // payload. topic filter = 'a/b/c'
             0x02,      // payload. qos = 2
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
@@ -432,7 +449,8 @@ mod test {
             0x00, 0x0F, // variable header. pkid = 15
             0x00, 0x03, 'a' as u8, '/' as u8, '+' as u8, // payload. topic filter = 'a/+'
             0x00, 0x01, '#' as u8, // pyaload. topic filter = '#'
-            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8, 'c' as u8, // payload. topic filter = 'a/b/c'
+            0x00, 0x05, 'a' as u8, '/' as u8, 'b' as u8, '/' as u8,
+            'c' as u8, // payload. topic filter = 'a/b/c'
             0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
         ]);
 
@@ -462,7 +480,10 @@ mod test {
             packet,
             Packet::Suback(Suback {
                 pkid: PacketIdentifier(15),
-                return_codes: vec![SubscribeReturnCodes::Success(QoS::AtLeastOnce), SubscribeReturnCodes::Failure]
+                return_codes: vec![
+                    SubscribeReturnCodes::Success(QoS::AtLeastOnce),
+                    SubscribeReturnCodes::Failure
+                ]
             })
         );
     }

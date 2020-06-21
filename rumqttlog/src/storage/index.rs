@@ -17,12 +17,21 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn new<P: AsRef<Path>>(dir: P, base_offset: u64, max_size: u64, active: bool) -> io::Result<Index> {
+    pub fn new<P: AsRef<Path>>(
+        dir: P,
+        base_offset: u64,
+        max_size: u64,
+        active: bool,
+    ) -> io::Result<Index> {
         let file_name = format!("{:020}.index", base_offset);
         let file_path: PathBuf = dir.as_ref().join(file_name);
         let verify = file_path.exists();
 
-        let file = OpenOptions::new().read(true).append(true).create(true).open(&file_path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(&file_path)?;
         let metadata = file.metadata()?;
         let size = metadata.len() as u64;
 
@@ -74,7 +83,10 @@ impl Index {
 
         let (position, len) = self.read(count - 1)?;
         if position == 0 || len == 0 {
-            let e = format!("Index {} has trailing 0s. Index corrupted", self.base_offset);
+            let e = format!(
+                "Index {} has trailing 0s. Index corrupted",
+                self.base_offset
+            );
             return Err(io::Error::new(io::ErrorKind::InvalidData, e));
         }
 
@@ -103,7 +115,10 @@ impl Index {
     /// Reads an offset from the index and returns segment record's position and size
     pub fn read(&self, offset: u64) -> io::Result<(u64, u64)> {
         if self.size == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No entries in index"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "No entries in index",
+            ));
         }
 
         // entry of the target offset
@@ -112,7 +127,10 @@ impl Index {
         // reading at invalid postion from a file is implementation dependent. handle this explicitly
         // https://doc.rust-lang.org/std/io/trait.Seek.html#tymethod.seek
         if self.size < entry_position + ENTRY_WIDTH {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Reading at an invalid offset"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Reading at an invalid offset",
+            ));
         }
 
         // read position

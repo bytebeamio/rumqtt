@@ -79,6 +79,4 @@ fn vread_records(segment: &mut Segment, batch_size: u64, total_size: u64) -> Res
 }
  */
 
-fn main() {
-
-}
+fn main() {}

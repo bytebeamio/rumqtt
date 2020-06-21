@@ -2,15 +2,14 @@ extern crate bytes;
 
 /// NOTE: Don't let mqtt4bytes creep in here. By keeping MQTT specifics outside,
 /// supporting mqtt4 and 5 with the same router becomes easy
-
 mod commitlog;
 mod router;
 
 pub use router::Router;
 
 use self::bytes::Bytes;
-use std::fmt;
 use async_channel::Sender;
+use std::fmt;
 
 /// Messages going into router
 #[derive(Debug)]
@@ -42,7 +41,6 @@ pub enum RouterOutMessage {
     WatermarksReply(WatermarksReply),
 }
 
-
 /// Data sent router to be written to commitlog
 #[derive(Debug)]
 pub struct Data {
@@ -51,7 +49,7 @@ pub struct Data {
     /// Topic of publish
     pub topic: String,
     /// Publish payload
-    pub payload: Bytes
+    pub payload: Bytes,
 }
 
 /// Acknowledgement after data is written to commitlog
@@ -62,7 +60,7 @@ pub struct DataAck {
     /// Packet id that connection received
     pub pkid: u64,
     /// Packet id that router assigned
-    pub offset: u64
+    pub offset: u64,
 }
 
 /// Request that connection/linker makes to extract data from commitlog
@@ -84,7 +82,7 @@ pub struct DataRequest {
     /// Request Size / Reply size
     pub size: u64,
     /// Offset of this topic in tracker
-    pub tracker_topic_offset: usize
+    pub tracker_topic_offset: usize,
 }
 
 #[derive(Debug)]
@@ -110,7 +108,7 @@ pub struct DataReply {
     /// Reply data chain
     pub payload: Vec<Bytes>,
     /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize
+    pub(crate) tracker_topic_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -134,7 +132,7 @@ pub struct WatermarksRequest {
     pub(crate) topic: String,
     pub(crate) watermarks: Vec<u64>,
     /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize
+    pub(crate) tracker_topic_offset: usize,
 }
 
 #[derive(Debug)]
@@ -142,13 +140,13 @@ pub struct WatermarksReply {
     pub(crate) topic: String,
     pub(crate) watermarks: Vec<u64>,
     /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize
+    pub(crate) tracker_topic_offset: usize,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum ConnectionType {
     Device(String),
-    Replicator(usize)
+    Replicator(usize),
 }
 
 /// Used to register a new connection with the router
@@ -169,7 +167,7 @@ impl Connection {
     pub fn new(id: &str, handle: Sender<RouterOutMessage>) -> Connection {
         Connection {
             conn: ConnectionType::Device(id.to_owned()),
-            handle
+            handle,
         }
     }
 }
@@ -179,7 +177,7 @@ pub enum ConnectionAck {
     /// Id assigned by the router for this connection
     Success(usize),
     /// Failure and reason for failure string
-    Failure(String)
+    Failure(String),
 }
 
 impl fmt::Debug for Connection {
@@ -187,4 +185,3 @@ impl fmt::Debug for Connection {
         write!(f, "{:?}", self.conn)
     }
 }
-

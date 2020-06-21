@@ -4,6 +4,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::read::mqtt_read;
 use crate::{mqtt_write, Packet};
+extern crate std;
 
 pub struct MqttCodec {
     max_payload_size: usize,

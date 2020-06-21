@@ -44,10 +44,7 @@ impl Log {
 
         let index = Index::new(0);
         let segment = Segment::new(0)?;
-        let chunk = Chunk {
-            index,
-            segment,
-        };
+        let chunk = Chunk { index, segment };
 
         chunks.insert(0, chunk);
         base_offsets.push(0);
@@ -81,10 +78,7 @@ impl Log {
             let base_offset = active_chunk.index.base_offset() + active_chunk.index.count();
             let index = Index::new(base_offset);
             let segment = Segment::new(base_offset)?;
-            let chunk = Chunk {
-                index,
-                segment,
-            };
+            let chunk = Chunk { index, segment };
 
             self.chunks.insert(base_offset, chunk);
             self.base_offsets.push(base_offset);
@@ -110,7 +104,12 @@ impl Log {
     pub fn read(&mut self, base_offset: u64, offset: u64) -> io::Result<(u64, Bytes)> {
         let chunk = match self.chunks.get_mut(&base_offset) {
             Some(segment) => segment,
-            None => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment")),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid segment",
+                ))
+            }
         };
 
         let (offset, _len, id) = chunk.index.read(offset)?;
@@ -139,7 +138,12 @@ impl Log {
             // Get the chunk with given base offset
             let chunk = match self.chunks.get(&chunks.segment) {
                 Some(c) => c,
-                None if chunks.count == 0 => return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment")),
+                None if chunks.count == 0 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Invalid segment",
+                    ))
+                }
                 None => {
                     done = true;
                     break;
@@ -171,7 +175,9 @@ impl Log {
             chunks.count += count;
             chunks.size += payload_size;
             chunks.ids.extend(ids);
-            chunks.chunks.push((chunks.segment, position, payload_size, count));
+            chunks
+                .chunks
+                .push((chunks.segment, position, payload_size, count));
             if chunks.size >= size {
                 chunks.offset -= 1;
                 break;
@@ -204,7 +210,14 @@ impl Log {
             out.extend(o);
         }
 
-        Ok((done, chunks.segment, chunks.offset, chunks.size, chunks.ids, out))
+        Ok((
+            done,
+            chunks.segment,
+            chunks.offset,
+            chunks.size,
+            chunks.ids,
+            out,
+        ))
     }
 }
 
@@ -376,7 +389,8 @@ mod test {
         assert_eq!(total_size, 15 * 1024);
 
         // Read 15K. Crosses boundaries of the segment and offset will be at last record of 3rd segment
-        let (done, segment, offset, total_size, ids, _data) = log.readv(segment, offset + 1, 15 * 1024).unwrap();
+        let (done, segment, offset, total_size, ids, _data) =
+            log.readv(segment, offset + 1, 15 * 1024).unwrap();
         assert_eq!(segment, 20);
         assert_eq!(offset, 4);
         assert_eq!(ids.len(), 10);

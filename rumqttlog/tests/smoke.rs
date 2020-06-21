@@ -1,7 +1,6 @@
-
+use rumqttlog::Log;
 use std::fs;
 use std::io;
-use rumqttlog::Log;
 
 //use pretty_assertions::assert_eq;
 // 10MB per segmet => 100000 records per segment
@@ -79,7 +78,8 @@ fn vread_records(count: u64) -> Result<(), io::Error> {
     let mut current_count = 0;
     loop {
         dbg!(current_count);
-        let (base_offset, rel_offset, cnt, data) = log.readv(next_base_offset, next_rel_offset, 500)?;
+        let (base_offset, rel_offset, cnt, data) =
+            log.readv(next_base_offset, next_rel_offset, 500)?;
         let records = String::from_utf8(data).unwrap();
         // number of records in a batch. boundaries of a segment might've less than 5 records
         let record_count = records.len() / 100;

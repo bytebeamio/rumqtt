@@ -1,17 +1,17 @@
 #[macro_use]
 extern crate log;
 
+pub mod mesh;
 pub mod router;
 pub mod storage;
-pub mod volatile;
-pub mod mesh;
 pub mod tracker;
+pub mod volatile;
 
+pub use async_channel::{bounded, Receiver, Sender};
 pub use mqtt4bytes;
-pub use router::{Router, RouterInMessage, RouterOutMessage, DataRequest, DataReply, Connection};
+pub use router::{Connection, DataReply, DataRequest, Router, RouterInMessage, RouterOutMessage};
 pub use storage::segment::Segment;
 pub use storage::Log;
-pub use async_channel::{bounded, Receiver, Sender};
 
 use std::path::PathBuf;
 
