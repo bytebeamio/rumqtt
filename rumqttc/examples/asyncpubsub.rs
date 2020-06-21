@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::{task, time};
 
-use rumq_client::{
+use rumqttc::{
     self, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe,
 };
 use std::time::Duration;

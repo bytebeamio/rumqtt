@@ -1,4 +1,4 @@
-use rumq_client::{self, EventLoop, MqttOptions, Incoming, QoS, Request};
+use rumqttc::{self, EventLoop, MqttOptions, Incoming, QoS, Request, Publish};
 use std::time::{Duration, Instant};
 use std::error::Error;
 use std::fs::File;
@@ -82,10 +82,10 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
 
 async fn requests(id: &str, payloads: Vec<Vec<u8>>, requests_tx: Sender<Request>) {
     let topic = format!("hello/{}/world", id);
-    // let subscription = rumq_client::Subscribe::new(&topic, QoS::AtLeastOnce);
+    // let subscription = rumqttc::Subscribe::new(&topic, QoS::AtLeastOnce);
     // let _ = requests_tx.send(Request::Subscribe(subscription)).await;
     for payload in payloads.into_iter() {
-        let publish = rumq_client::Publish::new(&topic, QoS::AtLeastOnce, payload);
+        let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
         let publish = Request::Publish(publish);
         if let Err(_) = requests_tx.send(publish).await {
             break;
