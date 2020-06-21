@@ -4,27 +4,11 @@
 
 MQTT ecosystem in rust which strives to be simple, robust and performant
 
-* Fully asynchronous. Built on top of tokio 0.2 and futures 0.3
+* **mqtt4bytes:**        MQTT 3.1.1 serialization and deserialization
+* **mqtt5bytes:**        MQTT 5 serialization and deserialization
+* **rumqttc:**           A high level, easy to use mqtt client
+* **rumqttd:**           A high performance, embeddable, clustered MQTT broker
+* **commandline:**       Commandline tools
 
-#### Client
-* Mqtt eventloop is just a stream. Easily plug it into async ecosystem
-* Takes a `Stream` for user requests. Solves both bounded and unbounded
-  usecases
-* Reconnections are just a loop away. Resumes from previous state
-* Request throttling
-* Inflight queue size based throttling
-* Tls using RustTLS. Cross compilation and multi platform support is painless
+See respective folders for more details
 
-#### Broker
-* Embeddable
-* Passes mqtt 3.1.1 paho conformance test suite (Without qos2)
-* Supports retained messages
-* Supports will messages
-* Offline message queueing
-* Deduplicates overlapping subscriptions
-
-
-
-#### REFERENCES
-----------------
-* http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html

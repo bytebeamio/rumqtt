@@ -1,7 +1,7 @@
 //! This is a low level (no_std) crate with the ability to assemble and disassemble MQTT 3.1.1
-//! packets and is used by both client and the broker. Uses 'bytes' crate internally
-#![no_std]
+//! packets and is used by both client and broker. Uses 'bytes' crate internally
 
+#![no_std]
 use cfg_if::cfg_if;
 
 extern crate alloc;
@@ -105,7 +105,8 @@ pub enum PacketType {
 }
 
 /// Packet type from a byte
-/// ```
+///
+/// ```ignore
 ///          7                          3                          0
 ///          +--------------------------+--------------------------+
 /// byte 1   | MQTT Control Packet Type | Flags for each type      |
