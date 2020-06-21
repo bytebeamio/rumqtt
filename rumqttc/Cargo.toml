@@ -15,7 +15,7 @@ tokio-util = { version = "0.3", features = ["codec"] }
 futures-util = { version =  "0.3", features = ["sink"] }
 webpki = "0.21"
 tokio-rustls = "0.13"
-mqtt4bytes = { path = "../mqtt4bytes", version = "0.1" }
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.1", features = ["std"] }
 async-channel = "1"
 blocking = "0.4"
 log = "0.4"

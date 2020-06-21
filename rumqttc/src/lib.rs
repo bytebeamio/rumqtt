@@ -1,109 +1,82 @@
-//! A pure rust mqtt client which strives to be robust, efficient and easy to use.
-//! * Eventloop is just an async `Stream` which can be polled by tokio
-//! * Requests to eventloop is also a `Stream`. Solves both bounded an unbounded usecases
-//! * Robustness just a loop away
-//! * Flexible access to the state of eventloop to control its behaviour
+//! A pure rust MQTT client which strives to be robust, efficient and easy to use.
+//! This library is backed by an async (tokio) eventloop which handles all the robustness and
+//! and efficiency parts of MQTT but naturally fits into both sync and async worlds as we'll see
 //!
-//! Accepts any stream of Requests
+//! Let's jump into examples right away
+//!
+//! A simple synchronous publish and subscribe
 //! ----------------------------
-//! Build bounded, unbounded, interruptible or any other stream (that fits your need) to
-//! feed the eventloop.
+//!
+//! What's happening behind the scenes
+//! - Eventloop orchestrates user requests and incoming packets concurrently and hadles the state
+//! - Ping the broker when necessary and detects client side half open connections as well
+//! - Throttling of outgoing packets
+//! - Queue size based flow control on outgoing packets
+//! - Automatic reconnections
+//! - Natural backpressure to the client during slow network
+//!
+//! ```
+//!use rumqttc::{MqttOptions, Client, QoS};
+//!use std::time::Duration;
+//!use std::thread;
+//!
+//! fn main() {
+//!     let mut mqttoptions = MqttOptions::new("rumqtt-sync-client", "test.mosquitto.org", 1883);
+//!     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
+//!
+//!     let (mut client, mut connection) = Client::new(mqttoptions, 10);
+//!     client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
+//!     thread::spawn(move || for i in 0..10 {
+//!        client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).unwrap();
+//!        thread::sleep(Duration::from_millis(100));
+//!     });
+//!
+//!     // Iterate to poll the eventloop for connection progress
+//!     for (i, notification) in connection.iter().enumerate() {
+//!         println!("Notification = {:?}", notification);
+//!     }
+//! }
+//! ```
+//!
+//! In short, everything necessary to maintain a robust connection
+//!
+//! **NOTE**: Looping on `connection.iter()` is necessary to run the eventloop. It yields both
+//! incoming and outgoing activity notifications which allows customization as user sees fit.
+//! Blocking here will block connection progress
+//!
+//! A simple asynchronous publish and subscribe
+//! ------------------------------
+//! - Reconnects if polled again after an error
+//! - Takes any `Stream` for requests and hence offers a lot of customization
 //!
 //! **Few of our real world use cases**
-//!
+//! - Bounded or unbounded requests
 //! - A stream which orchestrates data between disk and memory by detecting backpressure and never (practically) loose data
 //! - A stream which juggles data between several channels based on priority of the data
 //!
-//! ```ignore
+//! ```no_run
+//! use rumqttc::{MqttOptions, Request, EventLoop};
+//! use std::time::Duration;
+//! use std::error::Error;
+//!
 //! #[tokio::main(core_threads = 1)]
 //! async fn main() {
-//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-//!     let requests = Vec::new::<Request>();
+//!     let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
+//!     let requests_rx = tokio::stream::iter(Vec::new());;
+//!     let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;
 //!
-//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
-//!     let mut stream = eventloop.connect().await.unwrap();
-//!     while let Some(item) = stream.next().await {
-//!         println!("Received = {:?}", item);
-//!     }
-//! }
-//! ```
-//! Robustness a loop away
-//! ----------------------
-//! Networks are unreliable. But robustness is easy
-//!
-//! - Just create a new stream from the existing eventloop
-//! - Resumes from where it left
-//! - Access the state of the eventloop to customize the behaviour of the next connection
-//!
-//! ```ignore
-//! #[tokio::main(core_threads = 1)]
-//! async fn main() {
-//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-//!     let requests = Vec::new::<Request>();
-//!
-//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
-//!
-//!     // loop to reconnect and resume
 //!     loop {
-//!         let mut stream = eventloop.connect().await.unwrap();
-//!         while let Some(item) = stream.next().await {
-//!             println!("Received = {:?}", item);
-//!         }
-//!
-//!         time::delay_for(Duration::from_secs(1)).await;
+//!         let notification = eventloop.poll().await.unwrap();
+//!         println!("Received = {:?}", notification);
+//!         tokio::time::delay_for(Duration::from_secs(1)).await;
 //!     }
 //! }
 //! ```
 //!
-//! Eventloop is just a stream which can be polled with tokio
-//! ----------------------
-//! - Plug it into `select!` `join!` to interleave with other streams on the the same thread
-//!
-//! ```ignore
-//! #[tokio::main(core_threads = 1)]
-//! async fn main() {
-//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-//!     let requests = Vec::new::<Request>();
-//!
-//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
-//!
-//!     // plug it into tokio ecosystem
-//!     let mut stream = eventloop.connect().await.unwrap();
-//! }
-//! ```
-//!
-//! Powerful notification system to control the runtime
-//! ----------------------
-//! Eventloop stream yields all the interesting event ranging for data on the network to
-//! disconnections and reconnections. Use it the way you see fit
-//!
-//! - Resubscribe after reconnection
-//! - Stop after receiving Nth puback
-//!
-//! ```ignore
-//! #[tokio::main(core_threads = 1)]
-//! async fn main() {
-//!     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-//!     let (requests_tx, requests_rx) = channel(10);
-//!
-//!     let mut eventloop = eventloop(mqttoptions, requests_rx);
-//!
-//!     // loop to reconnect and resume
-//!     loop {
-//!         let mut stream = eventloop.connect().await.unwrap();
-//!         while let Some(notification) = stream.next().await {
-//!             println!("Received = {:?}", item);
-//!             match notification {
-//!                 Notification::Connect => requests_tx.send(subscribe).unwrap(),
-//!             }
-//!         }
-//!
-//!         time::delay_for(Duration::from_secs(1)).await;
-//!     }
-//! }
-//! ```
-
-#![recursion_limit = "512"]
+//! Since eventloop is externally polled (with `iter()/poll()`) out side the library, users can
+//! - Distribute incoming messages based on topics
+//! - Stop it when required
+//! - Access internal state for use cases like graceful shutdown
 
 #[macro_use]
 extern crate log;
@@ -115,7 +88,7 @@ mod eventloop;
 mod network;
 mod state;
 
-pub use client::{Client, Error};
+pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
@@ -141,15 +114,24 @@ pub enum Incoming {
     PingResp,
 }
 
+/// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Outgoing {
+    /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
+    /// Subscribe packet with packet identifier
     Subscribe(u16),
+    /// Unsubscribe packet with packet identifier
     Unsubscribe(u16),
-    Puback(u16),
-    Pubrec(u16),
-    Pubcomp(u16),
-    Pingreq,
+    /// PubAck packet
+    PubAck(u16),
+    /// PubRec packet
+    PubRec(u16),
+    /// PubComp packet
+    PubComp(u16),
+    /// Ping request packet
+    PingReq,
+    /// Disconnect packet
     Disconnect,
 }
 
@@ -164,6 +146,7 @@ pub enum Request {
     Disconnect,
 }
 
+/// Key type for TLS authentication
 #[derive(Debug, Copy, Clone)]
 pub enum Key{
     RSA,
@@ -186,17 +169,6 @@ impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
         return Request::Unsubscribe(unsubscribe);
     }
-}
-
-/// Commands sent by the client to mqtt event loop. Commands
-/// are of higher priority and will be `select`ed along with
-/// [request]s
-///
-/// request: enum.Request.html
-#[derive(Debug)]
-pub enum Command {
-    Pause,
-    Resume,
 }
 
 /// Client authentication option for mqtt connect packet

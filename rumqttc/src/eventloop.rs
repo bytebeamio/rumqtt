@@ -36,7 +36,7 @@ pub enum ConnectionError {
     Cancel,
 }
 
-/// Complete state of the eventloop
+/// Eventloop with all the state of a connection
 pub struct EventLoop<R: Requests> {
     /// Options of the current mqtt connection
     pub options: MqttOptions,
@@ -63,26 +63,10 @@ pub struct EventLoop<R: Requests> {
 }
 
 impl<R: Requests> EventLoop<R> {
-    /// Returns an object which encompasses state of the connection.
-    /// Use this to create a `Stream` with `connect().await?` method and poll it with tokio.
+    /// New MQTT `EventLoop`
     ///
-    /// The choice of separating `MqttEventLoop` and `stream` methods is to get access to the
-    /// internal state and mqtt options after the work with the `Stream` is done or stopped.
-    /// This is useful in scenarios like shutdown where the current state should be persisted or
-    /// during reconnection when the state from last disconnection should be resumed.
-    /// For a similar reason, requests are also initialized as part of this method to reuse same
-    /// request stream while retrying after the previous `Stream` has stopped
-    /// ```ignore
-    /// let mut eventloop = eventloop(options, requests);
-    /// loop {
-    ///     let mut stream = eventloop.connect(reconnection_options).await.unwrap();
-    ///     while let Some(notification) = stream.next().await() {}
-    /// }
-    /// ```
-    /// When mqtt `stream` ends due to critical errors (like auth failure), user has a choice to
+    /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    /// For example, state and requests can be used to save state to disk before shutdown.
-    /// Options can be used to update gcp iotcore password
     pub async fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
         let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
@@ -103,20 +87,25 @@ impl<R: Requests> EventLoop<R> {
         }
     }
 
+    /// Set delay between (automatic) reconnections
     pub fn set_reconnection_delay(&mut self, delay: Duration) {
         self.reconnection_delay = delay;
     }
 
+    /// Handle for cancelling the eventloop.
+    ///
+    /// Can be useful in cases when connection should be halted immediately
+    /// between half-open connection detections or (re)connection timeouts
     pub fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
         self.cancel_tx.take()
     }
 
     /// Next notification or outgoing request
-    /// This method used to return only incoming network notification while silently looping through
-    /// outgoing requests. Internal loops inside async functions are risky. Imagine this function
-    /// with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
-    /// selected with other streams, can potentially do more internal polling (if the socket is ready)
     pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
+        // This method used to return only incoming network notification while silently looping through
+        // outgoing requests. Internal loops inside async functions are risky. Imagine this function
+        // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
+        // selected with other streams, can potentially do more internal polling (if the socket is ready)
         if self.network.is_none() {
             self.connect_or_cancel().await?;
         }
@@ -323,12 +312,12 @@ async fn next_pending(
 fn outgoing(packet: &Packet) -> Outgoing {
     match packet {
         Packet::Publish(publish) => Outgoing::Publish(publish.pkid),
-        Packet::PubAck(puback) => Outgoing::Puback(puback.pkid),
-        Packet::PubRec(pubrec) => Outgoing::Pubrec(pubrec.pkid),
-        Packet::PubComp(pubcomp) => Outgoing::Pubcomp(pubcomp.pkid),
+        Packet::PubAck(puback) => Outgoing::PubAck(puback.pkid),
+        Packet::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
+        Packet::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
-        Packet::PingReq => Outgoing::Pingreq,
+        Packet::PingReq => Outgoing::PingReq,
         Packet::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
@@ -580,7 +569,7 @@ mod test {
                     ConnectionError::MqttState(StateError::AwaitPingResp) => break,
                     v => panic!("Expecting  pingresp error. Found = {:?}", v),
                 },
-                Ok((_, outgoing)) => assert_eq!(Some(Outgoing::Pingreq), outgoing),
+                Ok((_, outgoing)) => assert_eq!(Some(Outgoing::PingReq), outgoing),
             }
         }
 

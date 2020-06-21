@@ -3,26 +3,26 @@
 
 use crate::{ConnectionError, EventLoop, Incoming, MqttOptions, Outgoing, Request};
 
-use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
+use async_channel::{bounded, Receiver, SendError, Sender};
 use mqtt4bytes::*;
 use std::mem;
 use std::time::Duration;
 use tokio::runtime;
 use tokio::runtime::Runtime;
 
+/// Client Error
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum ClientError {
     #[error("Failed to send cancel request to eventloop")]
     Cancel(#[from] SendError<()>),
     #[error("Failed to send mqtt requests to eventloop")]
     Request(#[from] SendError<Request>),
-    #[error("Failed to recv mqtt notification from eventloop")]
-    Notification(#[from] RecvError),
 }
 
-/// `Client` can communicate with MQTT eventloop `Connection`. Client is
-/// cloneable and can be used to synchronously Publish, Subscribe as well as
-/// receive incoming MQTT messages
+/// `Client` to communicate with MQTT eventloop `Connection`.
+///
+/// Client is cloneable and can be used to synchronously Publish, Subscribe.
+/// Asynchronous channel handle can also be extracted if necessary
 #[derive(Clone)]
 pub struct Client {
     request_tx: Sender<Request>,
@@ -65,7 +65,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), Error>
+    ) -> Result<(), ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -78,7 +78,7 @@ impl Client {
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), Error> {
+    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
         blocking::block_on(self.request_tx.send(request))?;
@@ -86,7 +86,7 @@ impl Client {
     }
 
     /// Stops the eventloop right away
-    pub fn cancel(&mut self) -> Result<(), Error> {
+    pub fn cancel(&mut self) -> Result<(), ClientError> {
         blocking::block_on(self.cancel_tx.send(()))?;
         Ok(())
     }
@@ -108,10 +108,15 @@ impl Connection {
         }
     }
 
+    /// Set delay between (automatic) re-connections (on error).
     pub fn set_reconnection_delay(&mut self, delay: Duration) {
         self.eventloop.set_reconnection_delay(delay)
     }
 
+    /// Returns an iterator over this connection. Iterating over this is all that's
+    /// necessary to make connection progress and maintain a robust connection
+    /// **NOTE** Don't block this
+    #[must_use = "Connection should be iterated over a loop to poll the eventloop"]
     pub fn iter(&mut self) -> Iter {
         let runtime = self.runtime.take().unwrap();
         Iter {
@@ -121,6 +126,7 @@ impl Connection {
     }
 }
 
+/// Iterator which polls the eventloop for connection progress
 pub struct Iter<'a> {
     connection: &'a mut Connection,
     runtime: runtime::Runtime,
