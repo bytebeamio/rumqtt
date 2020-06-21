@@ -7,15 +7,17 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rumq-client = { path = "../" }
+rumqttc = { path = "../rumqttc" }
 tokio = { version = "0.2", features = ["full"]}
 async-channel = "1"
 pretty_env_logger = "0.4"
 prost = "0.6"
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 
-[workspace]
-
 [[bin]]
 name = "rumqttasync"
 path = "rumqttasync.rs"
+
+[[bin]]
+name = "rumqttsync"
+path = "rumqttsync.rs"

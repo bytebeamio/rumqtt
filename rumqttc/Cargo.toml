@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.0.1"
+version = "0.0.2"
 description = "An efficeint and robust mqtt client for your connected devices"
 license = "MIT"
 repository = "https://github.com/tekjar/rumq"

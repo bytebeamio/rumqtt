@@ -24,7 +24,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         time::delay_for(Duration::from_secs(3)).await;
     });
 
-    eventloop.connect().await?;
     loop {
         let (incoming, outgoing) = eventloop.poll().await?;
         println!("Incoming = {:?}, Outgoing = {:?}", incoming, outgoing);

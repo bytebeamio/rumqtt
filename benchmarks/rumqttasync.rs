@@ -1,27 +1,19 @@
 use rumqttc::{self, EventLoop, MqttOptions, Incoming, QoS, Request, Publish};
 use std::time::{Duration, Instant};
 use std::error::Error;
-use std::fs::File;
-use std::io::Write;
 
 use tokio::task;
 use tokio::time;
 use async_channel::{bounded as channel, Sender};
-use prost::Message;
+
+mod common;
 
 #[tokio::main(core_threads = 2)]
 async fn main() {
     pretty_env_logger::init();
-    let guard = pprof::ProfilerGuard::new(250).unwrap();
-    let o = start("rumq-async", 100, 1_000_000).await;
-    if let Ok(report) = guard.report().build() {
-        let mut file = File::create("bench.pb").unwrap();
-        let profile = report.pprof().unwrap();
-
-        let mut content = Vec::new();
-        profile.encode(&mut content).unwrap();
-        file.write_all(&content).unwrap();
-    };
+    // let guard = pprof::ProfilerGuard::new(100).unwrap();
+    let o = start("rumqtt-async", 100, 1_000_000).await;
+    // common::profile("bench.pb", guard);
     println!("\n\nDone!! Result = {:?}", o);
 }
 
@@ -41,7 +33,6 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
         time::delay_for(Duration::from_secs(10)).await;
     });
 
-    eventloop.connect().await.unwrap();
     let mut acks_count = 0;
     let start = Instant::now();
     loop {

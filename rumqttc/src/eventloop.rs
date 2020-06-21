@@ -32,8 +32,6 @@ pub enum ConnectionError {
     StreamDone,
     #[error("Requests done")]
     RequestsDone,
-    #[error("No network link. Call eventloop.connect()")]
-    NoLink,
     #[error("Cancel request by the user")]
     Cancel,
 }
@@ -119,17 +117,20 @@ impl<R: Requests> EventLoop<R> {
     /// with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
     /// selected with other streams, can potentially do more internal polling (if the socket is ready)
     pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
-        let (notification, outpacket) = self.select().await?;
-        let mut out = None;
-
-        // write the reply back to the network. flush??
-        if let Some(packet) = outpacket {
-            out = Some(outgoing(&packet));
-            self.network.as_mut().unwrap().send(packet).await?;
-            // self.network.as_mut().unwrap().flush().await?;
+        if self.network.is_none() {
+            self.connect_or_cancel().await?;
         }
 
-        Ok((notification, out))
+        let (incoming, outgoing) = match self.select().await {
+            Ok((i, o)) => (i, o),
+            Err(e) => {
+                self.network = None;
+                return Err(e)
+            }
+        };
+
+
+        Ok((incoming, outgoing))
     }
 
     /// Last session might contain packets which aren't acked. MQTT says these packets should be
@@ -147,14 +148,11 @@ impl<R: Requests> EventLoop<R> {
     }
 
     /// Select on network and requests and generate keepalive pings when necessary
-    async fn select(&mut self) -> Result<(Option<Incoming>, Option<Packet>), ConnectionError> {
-        let network = match &mut self.network {
-            Some(network) => network,
-            None => return Err(ConnectionError::NoLink),
-        };
+    async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
+        let network = &mut self.network.as_mut().unwrap();
 
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
-        let o = select! {
+        let (incoming, outpacket) = select! {
             // Pull next packet from network
             o = network.next() => match o {
                 Some(packet) => self.state.handle_incoming_packet(packet?)?,
@@ -190,12 +188,19 @@ impl<R: Requests> EventLoop<R> {
             }
         };
 
-        Ok(o)
+        // write the reply back to the network. flush??
+        if let Some(packet) = outpacket {
+            let outgoing = Some(outgoing(&packet));
+            network.send(packet).await?;
+            return Ok((incoming, outgoing))
+        }
+
+        Ok((incoming, None))
     }
 }
 
 impl<R: Requests> EventLoop<R> {
-    pub async fn connect_or_cancel(&mut self) -> Result<(), ConnectionError> {
+    async fn connect_or_cancel(&mut self) -> Result<(), ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
@@ -212,7 +217,7 @@ impl<R: Requests> EventLoop<R> {
     /// the stream.
     /// This function (for convenience) includes internal delays for users to perform internal sleeps
     /// between re-connections so that cancel semantics can be used during this sleep
-    pub async fn connect(&mut self) -> Result<(), ConnectionError> {
+    async fn connect(&mut self) -> Result<(), ConnectionError> {
         self.state.await_pingresp = false;
 
         // connect to the broker
@@ -384,13 +389,8 @@ mod test {
     }
 
     async fn eventloop(options: MqttOptions, requests: Receiver<Request>, reconnect: bool) {
-        time::delay_for(Duration::from_secs(1)).await;
         let mut eventloop = super::EventLoop::new(options, requests).await;
         'reconnect: loop {
-            if let Err(_) = eventloop.connect().await {
-                continue 'reconnect;
-            }
-
             loop {
                 let o = eventloop.poll().await;
                 println!("Polled = {:?}", o);
@@ -417,7 +417,7 @@ mod test {
         let mut eventloop = super::EventLoop::new(options, requests_rx).await;
 
         let start = Instant::now();
-        let o = eventloop.connect().await;
+        let o = eventloop.poll().await;
         let elapsed = start.elapsed();
 
         match o {
@@ -574,7 +574,6 @@ mod test {
         let (_requests_tx, requests_rx) = bounded(5);
         let start = Instant::now();
         let mut eventloop = super::EventLoop::new(options, requests_rx).await;
-        eventloop.connect().await.unwrap();
         loop {
             match eventloop.poll().await {
                 Err(e) => match e {

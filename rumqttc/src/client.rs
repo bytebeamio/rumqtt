@@ -117,7 +117,6 @@ impl Connection {
         Iter {
             connection: self,
             runtime,
-            connected: false,
         }
     }
 }
@@ -125,34 +124,12 @@ impl Connection {
 pub struct Iter<'a> {
     connection: &'a mut Connection,
     runtime: runtime::Runtime,
-    connected: bool,
-}
-
-impl<'a> Iter<'a> {
-    fn connect(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
-        let f = self.connection.eventloop.connect_or_cancel();
-        self.runtime.block_on(f)?;
-        self.connected = true;
-        Ok((Some(Incoming::Connected), None))
-    }
 }
 
 impl<'a> Iterator for Iter<'a> {
     type Item = Result<(Option<Incoming>, Option<Outgoing>), ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.connected {
-            return match self.connect() {
-                Ok(v) => Some(Ok(v)),
-                // cancellation errors during connection should stop the iterator
-                Err(ConnectionError::Cancel) => {
-                    trace!("Cancellation request received while connecting");
-                    None
-                }
-                Err(e) => Some(Err(e)),
-            };
-        }
-
         let f = self.connection.eventloop.poll();
         match self.runtime.block_on(f) {
             Ok(v) => Some(Ok(v)),
@@ -165,10 +142,7 @@ impl<'a> Iterator for Iter<'a> {
                 trace!("Cancellation request received");
                 None
             }
-            Err(e) => {
-                self.connected = false;
-                Some(Err(e))
-            }
+            Err(e) => Some(Err(e)),
         }
     }
 }
