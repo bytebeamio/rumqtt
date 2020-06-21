@@ -4,6 +4,7 @@ use bytes::BytesMut;
 
 use alloc::vec::Vec;
 
+/// Converts MQTT packet to serialized bytes
 pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
     match packet {
         Packet::Connect(packet) => {
@@ -186,11 +187,13 @@ pub fn mqtt_write(packet: Packet, payload: &mut BytesMut) -> Result<(), Error> {
     }
 }
 
+/// Serializes a string to stream
 fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
     stream.put_u16(string.len() as u16);
     stream.extend_from_slice(string.as_bytes());
 }
 
+/// Writes remaining length to stream
 fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<(), Error> {
     if len > 268_435_455 {
         return Err(Error::PayloadTooLong);

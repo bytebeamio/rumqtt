@@ -1,3 +1,5 @@
+//! This is a low level (no_std) crate with the ability to assemble and disassemble MQTT 3.1.1
+//! packets and is used by both client and the broker. Uses 'bytes' crate internally
 #![no_std]
 
 use cfg_if::cfg_if;
@@ -22,9 +24,9 @@ pub use read::*;
 pub use topic::*;
 pub use write::*;
 
-// NOTE: Std is an exclusive or features. Won't work with all features enabled
 cfg_if! {
     if #[cfg(feature = "std")] {
+        /// Serialization and deserialization errors
         #[derive(Debug, thiserror::Error)]
         pub enum Error {
             #[error("Invalid connect return code `{0}`")]
@@ -61,6 +63,7 @@ cfg_if! {
             Io(#[from] std::io::Error),
         }
     } else {
+        /// Serialization and deserialization errors
         pub enum Error {
             InvalidConnectReturnCode(u8),
             InvalidProtocol,
@@ -81,6 +84,7 @@ cfg_if! {
     }
 }
 
+/// MQTT packet type
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketType {
@@ -100,6 +104,8 @@ pub enum PacketType {
     Disconnect,
 }
 
+/// Packet type from a byte
+/// ```
 ///          7                          3                          0
 ///          +--------------------------+--------------------------+
 /// byte 1   | MQTT Control Packet Type | Flags for each type      |
@@ -108,7 +114,7 @@ pub enum PacketType {
 ///          +-----------------------------------------------------+
 ///
 /// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
-
+/// ```
 pub fn packet_type(num: u8) -> Result<PacketType, Error> {
     match num {
         1 => Ok(PacketType::Connect),
@@ -129,11 +135,14 @@ pub fn packet_type(num: u8) -> Result<PacketType, Error> {
     }
 }
 
+/// Protocol type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     MQTT(u8),
 }
 
+
+/// Quality of service
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum QoS {
@@ -148,6 +157,7 @@ struct FixedHeader {
     remaining_len: usize,
 }
 
+/// Maps a number to QoS
 pub fn qos(num: u8) -> Result<QoS, Error> {
     match num {
         0 => Ok(QoS::AtMostOnce),

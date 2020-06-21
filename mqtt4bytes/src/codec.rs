@@ -6,6 +6,7 @@ use crate::read::mqtt_read;
 use crate::{mqtt_write, Packet};
 extern crate std;
 
+/// Codec to present a stream of bytes as Stream and Sink
 pub struct MqttCodec {
     max_payload_size: usize,
 }

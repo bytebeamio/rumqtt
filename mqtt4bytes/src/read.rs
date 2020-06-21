@@ -2,6 +2,7 @@ use crate::packetbytes::*;
 use crate::{packet_type, Error, FixedHeader, PacketType};
 use bytes::BytesMut;
 
+/// Reads a stream of bytes and extracts MQTT packets
 pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packet, Error> {
     // Read the initial bytes necessary from the stream with out mutating the stream cursor
     let (byte1, remaining_len) = parse_fixed_header(stream)?;
@@ -69,6 +70,7 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
     Ok(packet)
 }
 
+/// Parses fixed header. Doesn't modify the source
 fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize), Error> {
     if stream.is_empty() {
         return Err(Error::UnexpectedEof);
@@ -101,6 +103,7 @@ fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize), Error> {
     Ok((byte1, len))
 }
 
+/// Header length from remaining length.
 fn header_len(remaining_len: usize) -> usize {
     if remaining_len >= 2_097_152 {
         4 + 1

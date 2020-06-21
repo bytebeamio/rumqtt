@@ -8,6 +8,7 @@ use crate::{qos, Protocol, QoS};
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// Encapsulates all MQTT packet types
 #[derive(Debug, Clone)]
 pub enum Packet {
     Connect(Connect),
@@ -26,6 +27,7 @@ pub enum Packet {
     Disconnect,
 }
 
+/// Connection packet initiated by the client
 #[derive(Clone, PartialEq)]
 pub struct Connect {
     /// Mqtt protocol version
@@ -119,6 +121,7 @@ impl Connect {
     }
 }
 
+/// Acknowledgement to connect packet
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnAck {
     pub session_present: bool,
@@ -148,6 +151,7 @@ impl ConnAck {
     }
 }
 
+/// Publish packet
 #[derive(Clone, PartialEq)]
 pub struct Publish {
     pub qos: QoS,
@@ -194,6 +198,7 @@ impl Publish {
     }
 }
 
+/// Acknowledgement to QoS1 publish
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubAck {
     pub pkid: u16,
@@ -214,6 +219,7 @@ impl PubAck {
     }
 }
 
+/// Acknowledgement to QoS2 publish
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubRec {
     pub pkid: u16,
@@ -234,6 +240,7 @@ impl PubRec {
     }
 }
 
+/// Acknowledgement to pubrec
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubRel {
     pub pkid: u16,
@@ -254,6 +261,7 @@ impl PubRel {
     }
 }
 
+/// Acknowledgement to pubrel
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubComp {
     pub pkid: u16,
@@ -274,6 +282,7 @@ impl PubComp {
     }
 }
 
+/// Subscription packet
 #[derive(Clone, PartialEq)]
 pub struct Subscribe {
     pub pkid: u16,
@@ -306,6 +315,7 @@ impl Subscribe {
     }
 }
 
+/// Acknowledgement to subscribe
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubAck {
     pub pkid: u16,
@@ -336,6 +346,7 @@ impl SubAck {
     }
 }
 
+/// Unsubscribe packet
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unsubscribe {
     pub pkid: u16,
@@ -362,6 +373,7 @@ impl Unsubscribe {
     }
 }
 
+/// Acknowledgement to unsubscribe
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnsubAck {
     pub pkid: u16,
@@ -382,6 +394,7 @@ impl UnsubAck {
     }
 }
 
+/// Reads a string from bytes stream
 fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     let len = stream.get_u16() as usize;
     // Invalid packets which reached this point (simulated invalid packets actually triggered this)
@@ -397,6 +410,7 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     }
 }
 
+/// Connection return code type
 fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
     match num {
         0 => Ok(ConnectReturnCode::Accepted),

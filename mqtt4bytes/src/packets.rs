@@ -52,6 +52,7 @@ impl Connect {
     }
 }
 
+/// Return code in connack
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ConnectReturnCode {
@@ -72,6 +73,7 @@ impl ConnAck {
     }
 }
 
+/// LastWill that broker forwards on behalf of the client
 #[derive(Debug, Clone, PartialEq)]
 pub struct LastWill {
     pub topic: String,
@@ -154,12 +156,14 @@ impl Subscribe {
     }
 }
 
+///  Subscription filter
 #[derive(Clone, PartialEq)]
 pub struct SubscribeTopic {
     pub topic_path: String,
     pub qos: QoS,
 }
 
+/// Subscription return code
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscribeReturnCodes {
     Success(QoS),

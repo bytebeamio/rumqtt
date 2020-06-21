@@ -1,6 +1,7 @@
 [package]
 name = "mqtt4bytes"
 version = "0.1.2"
+readme = "README.md"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 license = "MIT"

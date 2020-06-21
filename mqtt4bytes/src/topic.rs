@@ -1,11 +1,11 @@
 use alloc::vec::Vec;
 
-// checks if a topic or topic filter has wildcards
+/// Checks if a topic or topic filter has wildcards
 pub fn has_wildcards(s: &str) -> bool {
     s.contains('+') || s.contains('#')
 }
 
-/// checks if a topic is valid
+/// Checks if a topic is valid
 pub fn valid_topic(topic: &str) -> bool {
     if topic.contains('+') {
         return false;
@@ -18,7 +18,8 @@ pub fn valid_topic(topic: &str) -> bool {
     true
 }
 
-/// checks if the filter is valid
+/// Checks if the filter is valid
+///
 /// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106
 pub fn valid_filter(filter: &str) -> bool {
     if filter.is_empty() {
@@ -46,9 +47,10 @@ pub fn valid_filter(filter: &str) -> bool {
     true
 }
 
-/// checks if topic matches a filter. topic and filter validation isn't done here.
-/// NOTE: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
-/// NOTE: make sure a topic is validated during a publish and filter is validated
+/// Checks if topic matches a filter. topic and filter validation isn't done here.
+/// 
+/// **NOTE**: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
+/// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
     if !topic.is_empty() && topic[..1].contains('$') {
@@ -84,6 +86,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
 
     true
 }
+
 #[cfg(test)]
 mod test {
     #[test]
