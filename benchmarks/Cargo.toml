@@ -8,7 +8,9 @@ edition = "2018"
 
 [dependencies]
 rumqttc = { path = "../rumqttc" }
+rumqttlog = { path = "../rumqttlog" }
 tokio = { version = "0.2", features = ["full"]}
+bytes = "0.5"
 async-channel = "1"
 pretty_env_logger = "0.4"
 prost = "0.6"
@@ -21,3 +23,7 @@ path = "rumqttasync.rs"
 [[bin]]
 name = "rumqttsync"
 path = "rumqttsync.rs"
+
+[[bin]]
+name = "mesh"
+path = "mesh.rs"
