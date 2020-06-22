@@ -12,15 +12,14 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    let o = start("rumqtt-async", 100, 1_000_000).await;
+    let _o = start("rumqtt-async", 100, 100000).await;
     // common::profile("bench.pb", guard);
-    println!("\n\nDone!! Result = {:?}", o);
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(5);
+    mqttoptions.set_keep_alive(20);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
@@ -58,16 +57,14 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
     }
 
     let elapsed_ms = start.elapsed().as_millis();
-    let acks_throughput = acks_count as usize / elapsed_ms as usize;
-    let acks_throughput = acks_throughput * 1000;
-
-    println!("Id = {}, Acks: Total = {}, Payload size = {}, Incoming Throughput = {} messages/s",
-        id,
-        acks_count,
-        payload_size,
-        acks_throughput,
+    let throughput = acks_count as usize / elapsed_ms as usize;
+    let throughput = throughput * 1000;
+    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput = {} messages/s",
+             id,
+             count,
+             payload_size,
+             throughput,
     );
-
     Ok(())
 }
 

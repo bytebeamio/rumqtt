@@ -8,14 +8,13 @@ mod common;
 fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(250).unwrap();
-    let o = start("rumqtt-sync", 100, 1_000_000);
+    let _o = start("rumqtt-sync", 100, 100000);
     // common::profile("bench.pb", guard);
-    println!("\n\nDone!! Result = {:?}", o);
 }
 
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(5);
+    mqttoptions.set_keep_alive(20);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
@@ -23,7 +22,8 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     let (client, mut connection) = Client::new(mqttoptions, 10);
     let payloads = generate_payloads(count, payload_size);
     thread::spawn(move || {
-        requests(payloads, client);
+        let mut client = client;
+        requests(payloads, &mut client);
         thread::sleep(Duration::from_secs(10));
     });
 
@@ -52,28 +52,24 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     }
 
     let elapsed_ms = start.elapsed().as_millis();
-    let acks_throughput = acks_count as usize / elapsed_ms as usize;
-    let acks_throughput = acks_throughput * 1000;
-
-    println!("Id = {}, Acks: Total = {}, Payload size = {}, Incoming Throughput = {} messages/s",
-        id,
-        acks_count,
-        payload_size,
-        acks_throughput,
+    let throughput = acks_count as usize / elapsed_ms as usize;
+    let acks_throughput = throughput * 1000;
+    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput = {} messages/s",
+             id,
+             count,
+             payload_size,
+             acks_throughput,
     );
-
     Ok(())
 }
 
-fn requests(payloads: Vec<Vec<u8>>, mut client: Client) {
+fn requests(payloads: Vec<Vec<u8>>, client: &mut Client) {
     for payload in payloads.into_iter() {
         if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, false, payload) {
             println!("Client error: {:?}", e);
             break;
         }
     }
-
-     thread::sleep(Duration::from_secs(5));
 }
 
 fn generate_payloads(count: usize, payload_size: usize) -> Vec<Vec<u8>> {
