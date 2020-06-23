@@ -17,6 +17,7 @@ pub fn profile(name: &str, guard: ProfilerGuard) {
     };
 }
 
+#[allow(unused)]
 pub async fn new_connection(
     id: &str,
     cap: usize,
