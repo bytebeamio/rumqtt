@@ -79,8 +79,7 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
 
-    let (this_tx, this_rx) = bounded(1000);
-    let connection = Connection::new("writer-1", this_tx);
+    let (connection, this_rx) = Connection::new("writer-1", 1000);
     let message = (0, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();
 
@@ -129,8 +128,7 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
 }
 
 async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInMessage)>) -> usize {
-    let (this_tx, this_rx) = bounded(100);
-    let connection = Connection::new(&format!("{}", id), this_tx);
+    let (connection, this_rx) = Connection::new("writer-1", 1000);
     let message = (id, RouterInMessage::Connect(connection));
     tx.send(message).await.unwrap();
     let id = match this_rx.recv().await.unwrap() {
