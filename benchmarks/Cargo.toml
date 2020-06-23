@@ -9,10 +9,12 @@ edition = "2018"
 [dependencies]
 rumqttc = { path = "../rumqttc" }
 tokio = { version = "0.2", features = ["full"]}
-paho-mqtt = "0.7"
+futures = { version = "0.3", features = ["compat"] }
+paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 async-channel = "1"
 pretty_env_logger = "0.4"
 prost = "0.6"
+
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 
 [[bin]]
@@ -22,6 +24,15 @@ path = "rumqttasync.rs"
 [[bin]]
 name = "rumqttsync"
 path = "rumqttsync.rs"
+
+[[bin]]
+name = "pahosync"
+path = "pahosync.rs"
+
+[[bin]]
+name = "pahoasync"
+path = "pahoasync.rs"
+
 
 [[bin]]
 name = "paho"
