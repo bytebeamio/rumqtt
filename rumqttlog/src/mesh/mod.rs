@@ -139,10 +139,10 @@ impl Mesh {
 
         task::spawn(async move {
             let mut link = Link::new(id, router_tx, supervisor_tx, is_client).await;
-            match link.start(connections_rx).await {
-                Ok(_) => error!("Link with {} down", id),
-                Err(e) => error!("Link with {} down with error = {:?}", id, e),
-            }
+            // match link.start(connections_rx).await {
+            //     Ok(_) => error!("Link with {} down", id),
+            //     Err(e) => error!("Link with {} down with error = {:?}", id, e),
+            // }
         });
     }
 

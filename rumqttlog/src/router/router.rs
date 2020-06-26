@@ -174,7 +174,8 @@ impl Router {
 
         // Acknowledge the connection after writing data to commitlog
         if let Some(offset) = self.append_to_commitlog(id, pkid, &topic, payload) {
-            self.ack_data(id, pkid, offset)
+            // TODO Fix this push
+            // self.ack_data(id, pkid, offset)
         }
 
         // If there is a new unique append, send it to connection/linker waiting
@@ -194,17 +195,18 @@ impl Router {
         let reply = self.extract_topics(&request);
         let reply = match reply {
             Some(r) => r,
-            None => TopicsReply {
-                offset: request.offset,
-                topics: Vec::new(),
+            None => {
+                self.register_topics_waiter(id, request);
+                return
             },
         };
 
-        // register this id to wake up when there are new topics and send an empty reply
-        // for link's tracker to proceed with next poll
+        // register this id to wake up when there are new topics
         if reply.topics.is_empty() {
             self.register_topics_waiter(id, request);
+            return
         }
+
         self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
@@ -226,29 +228,19 @@ impl Router {
         // exists while sending notification due to new data
         let reply = match reply {
             Some(r) => r,
-            None => DataReply {
-                done: true,
-                topic: request.topic.clone(),
-                native_segment: request.native_segment,
-                native_offset: request.native_offset,
-                native_count: 0,
-                replica_segment: request.replica_segment,
-                replica_offset: request.replica_offset,
-                replica_count: 0,
-                pkids: vec![],
-                payload: vec![],
-                tracker_topic_offset: 0,
+            None => {
+                self.register_data_waiter(id, request);
+                return
             },
         };
 
-        // This connection/linker is completely caught up with this topic.
+        // This connectionr/replicator is completely caught up with this topic.
         // Add this connection/linker into waiters list of this topic.
-        // Note that we also send empty reply to the link with uses this to mark
-        // this topic as a caught up to not make a request again while iterating
-        // through its list of topics. Not sending an empty response will block
-        // the 'link' from polling next topic
+        // We don't send any response
+        // TODO: This check can probably be removed after verifying the flow
         if reply.payload.is_empty() {
             self.register_data_waiter(id, request);
+            return
         }
 
         let reply = RouterOutMessage::DataReply(reply);
@@ -260,23 +252,18 @@ impl Router {
             Some(watermarks) => {
                 let caught_up = watermarks == &request.watermarks;
                 if caught_up {
-                    WatermarksReply {
-                        topic: request.topic.clone(),
-                        watermarks: Vec::new(),
-                        tracker_topic_offset: request.tracker_topic_offset,
-                    }
+                    self.register_watermarks_waiter(id, request);
+                    return
                 } else {
                     WatermarksReply {
                         topic: request.topic.clone(),
                         watermarks: watermarks.clone(),
-                        tracker_topic_offset: request.tracker_topic_offset,
                     }
                 }
             }
-            None => WatermarksReply {
-                topic: request.topic.clone(),
-                watermarks: Vec::new(),
-                tracker_topic_offset: request.tracker_topic_offset,
+            None => {
+                self.register_watermarks_waiter(id, request);
+                return
             },
         };
 
@@ -373,11 +360,10 @@ impl Router {
             None => return,
         };
 
-        for (link_id, request) in waiters {
+        for (link_id, _request) in waiters {
             let reply = WatermarksReply {
                 topic: topic.to_owned(),
                 watermarks: self.watermarks.get(topic).unwrap().clone(),
-                tracker_topic_offset: request.tracker_topic_offset,
             };
 
             let reply = RouterOutMessage::WatermarksReply(reply);
@@ -472,7 +458,6 @@ impl Router {
                     replica_offset: request.replica_offset,
                     replica_count: 0,
                     pkids: v.4,
-                    tracker_topic_offset: request.tracker_topic_offset,
                 };
 
                 Some(reply)
@@ -509,7 +494,6 @@ impl Router {
                     replica_offset: v.2,
                     replica_count,
                     pkids: v.4,
-                    tracker_topic_offset: request.tracker_topic_offset,
                 };
                 Some(reply)
             }
@@ -972,7 +956,6 @@ mod test {
                 native_offset,
                 replica_offset,
                 size: 100 * 1024,
-                tracker_topic_offset: 0,
             }),
         );
         router_tx.try_send(message).unwrap();
@@ -988,7 +971,6 @@ mod test {
             RouterInMessage::WatermarksRequest(WatermarksRequest {
                 topic: topic.to_owned(),
                 watermarks: vec![],
-                tracker_topic_offset: 0,
             }),
         );
         router_tx.try_send(message).unwrap();

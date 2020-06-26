@@ -81,8 +81,37 @@ pub struct DataRequest {
     pub replica_offset: u64,
     /// Request Size / Reply size
     pub size: u64,
-    /// Offset of this topic in tracker
-    pub tracker_topic_offset: usize,
+}
+
+impl DataRequest {
+    /// New data request with offsets starting from 0
+    pub fn new(topic: String) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment: 0,
+            replica_segment: 0,
+            native_offset: 0,
+            replica_offset: 0,
+            size: 1024 * 1024,
+        }
+    }
+
+    /// New data request with provided offsets
+    pub fn offsets(
+        topic: String,
+        native_segment: u64,
+        native_offset: u64,
+        replica_segment: u64,
+        replica_offset: u64) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment,
+            replica_segment,
+            native_offset,
+            replica_offset,
+            size: 1024 * 1024,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -107,8 +136,6 @@ pub struct DataReply {
     pub pkids: Vec<u64>,
     /// Reply data chain
     pub payload: Vec<Bytes>,
-    /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +144,22 @@ pub struct TopicsRequest {
     pub offset: usize,
     /// Maximum number of topics to read
     pub count: usize,
+}
+
+impl TopicsRequest {
+    pub fn new() -> TopicsRequest {
+        TopicsRequest {
+            offset: 0,
+            count: 10
+        }
+    }
+
+    pub fn offset(offset: usize) -> TopicsRequest {
+        TopicsRequest {
+            offset,
+            count: 10
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -131,16 +174,28 @@ pub struct TopicsReply {
 pub struct WatermarksRequest {
     pub(crate) topic: String,
     pub(crate) watermarks: Vec<u64>,
-    /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize,
+}
+
+impl WatermarksRequest {
+    pub fn new(topic: String) -> WatermarksRequest {
+        WatermarksRequest {
+            topic,
+            watermarks: vec![],
+        }
+    }
+
+    pub fn watermarks(topic: String, watermarks: Vec<u64>) -> WatermarksRequest {
+        WatermarksRequest {
+            topic,
+            watermarks,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct WatermarksReply {
     pub(crate) topic: String,
     pub(crate) watermarks: Vec<u64>,
-    /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize,
 }
 
 #[derive(Debug, Clone)]

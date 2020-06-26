@@ -123,6 +123,8 @@ impl Link {
         framed
     }
 
+
+    /*
     /// Start handling the connection
     /// Links and connections communicate with router with a pull. This allows router to just reply.
     /// This ensured router never fills links/connections channel and take care of error handling
@@ -226,6 +228,7 @@ impl Link {
             }
         }
     }
+     */
 
     fn extract_handles(
         &mut self,
