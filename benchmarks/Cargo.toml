@@ -12,6 +12,7 @@ mqtt4bytes = { path = "../mqtt4bytes", version = "0.1"}
 rumqttc = { path = "../rumqttc" }
 rumqttlog = { path = "../rumqttlog" }
 tokio = { version = "=0.2.19", features = ["full"] }
+futures = { version = "0.3", features = ["compat"] }	
 bytes = "0.5"
 paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 async-channel = "1"
