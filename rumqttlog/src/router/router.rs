@@ -587,19 +587,14 @@ mod test {
         let (mut router_tx, _, _, connection_id, mut connection_rx) = setup().await;
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-
         assert!(wait_for_new_data(&mut connection_rx).await.is_none());
     }
 
     #[tokio::test(core_threads = 1)]
-    async fn router_responds_with_empty_message_when_a_topic_is_caught_up() {
+    async fn router_registers_and_doesnt_repond_when_a_topic_is_caughtup() {
         let (mut router_tx, _, _, connection_id, mut connection_rx) = setup().await;
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
         let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
@@ -608,9 +603,8 @@ mod test {
         assert_eq!(reply.payload[1].as_ref(), &[4, 5, 6]);
 
         new_data_request(connection_id, &mut router_tx, "hello/world", 2, 0);
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.native_count, 0);
-        assert_eq!(reply.payload.len(), 0);
+        let reply = wait_for_new_data(&mut connection_rx).await;
+        assert!(reply.is_none());
     }
 
     #[tokio::test(core_threads = 1)]
@@ -621,8 +615,6 @@ mod test {
         // write data from a native connection and read from connection
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // new data request from the replicator
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
@@ -641,8 +633,6 @@ mod test {
         // write data from a native connection and read from connection
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // new data request from the replicator
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
@@ -660,28 +650,10 @@ mod test {
         // Send request for new topics. Router should reply with new topics when there are any
         new_topics_request(replicator_id, &mut router_tx);
         new_topics_request(connection_id, &mut router_tx);
-
-        // see if routers replys with topics
-        assert_eq!(
-            wait_for_new_topics(&mut replicator_rx)
-                .await
-                .unwrap()
-                .topics
-                .len(),
-            0
-        );
-        assert_eq!(
-            wait_for_new_topics(&mut connection_rx)
-                .await
-                .unwrap()
-                .topics
-                .len(),
-            0
-        );
+        // TODO: Add test to check no response at every place like this
 
         // Send new data to router to be written to commitlog
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // see if routers replys with topics
         assert_eq!(
@@ -708,27 +680,8 @@ mod test {
         new_topics_request(replicator_id, &mut router_tx);
         new_topics_request(connection_id, &mut router_tx);
 
-        // see if routers replys with topics
-        assert_eq!(
-            wait_for_new_topics(&mut replicator_rx)
-                .await
-                .unwrap()
-                .topics
-                .len(),
-            0
-        );
-        assert_eq!(
-            wait_for_new_topics(&mut connection_rx)
-                .await
-                .unwrap()
-                .topics
-                .len(),
-            0
-        );
-
         // Send new data to router to be written to commitlog
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
 
         // see if routers replys with topics
         assert_eq!(
@@ -749,26 +702,9 @@ mod test {
         // Request data on non existent topic. Router will reply when there is data on this topic (new/old)
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
-        assert_eq!(
-            wait_for_new_data(&mut connection_rx)
-                .await
-                .unwrap()
-                .payload
-                .len(),
-            0
-        );
-        assert_eq!(
-            wait_for_new_data(&mut replicator_rx)
-                .await
-                .unwrap()
-                .payload
-                .len(),
-            0
-        );
 
+        // Write data and old requests should be catered
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-
         assert_eq!(
             wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(),
             &[4, 5, 6]
@@ -788,27 +724,7 @@ mod test {
         new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
         new_data_request(replicator_id, &mut router_tx, "hello/world", 0, 0);
 
-        // first wait on connection_rx should return some data and next wait none
-        // for replicated receiver, router only checks native data. replicator receives nothing back
-        assert_eq!(
-            wait_for_new_data(&mut connection_rx)
-                .await
-                .unwrap()
-                .payload
-                .len(),
-            0
-        );
-        assert_eq!(
-            wait_for_new_data(&mut replicator_rx)
-                .await
-                .unwrap()
-                .payload
-                .len(),
-            0
-        );
-
         write_to_commitlog(replicator_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_ack(&mut replicator_rx).await.is_some());
         assert_eq!(
             wait_for_new_data(&mut connection_rx).await.unwrap().payload[0].as_ref(),
             &[4, 5, 6]
@@ -822,14 +738,10 @@ mod test {
 
         // this registers watermark notification in router as the topic isn't existent yet
         new_watermarks_request(connection_id, &mut router_tx, "hello/world");
-        assert!(wait_for_new_watermarks(&mut connection_rx).await.is_some());
 
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
         write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![7, 8, 9]);
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
-        assert!(wait_for_ack(&mut connection_rx).await.is_some());
 
         // new data request from the router means previous request is replicated. First request
         // will only add this topic to watermark list
@@ -845,15 +757,6 @@ mod test {
 
         // Second data request from replicator implies that previous request has been replicated
         new_data_request(replicator_id, &mut router_tx, "hello/world", 3, 0);
-        assert_eq!(
-            wait_for_new_data(&mut replicator_rx)
-                .await
-                .unwrap()
-                .payload
-                .len(),
-            0
-        );
-
         let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
         assert_eq!(reply.watermarks, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
@@ -980,17 +883,6 @@ mod test {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::TopicsReply(reply)) => Some(reply),
-            v => {
-                error!("{:?}", v);
-                None
-            }
-        }
-    }
-
-    async fn wait_for_ack(rx: &mut Receiver<RouterOutMessage>) -> Option<DataAck> {
-        tokio::time::delay_for(Duration::from_secs(1)).await;
-        match rx.try_recv() {
-            Ok(RouterOutMessage::DataAck(ack)) => Some(ack),
             v => {
                 error!("{:?}", v);
                 None

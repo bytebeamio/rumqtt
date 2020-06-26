@@ -108,7 +108,6 @@ fn ask_data(
             native_offset,
             replica_offset,
             size: 100 * 1024,
-            tracker_topic_offset: 0,
         }),
     );
 

@@ -154,7 +154,6 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
             replica_segment: 0,
             replica_offset: 0,
             size: commandline.sweep_size as u64,
-            tracker_topic_offset: 0,
         };
 
         let message = (id.to_owned(), RouterInMessage::DataRequest(request));
