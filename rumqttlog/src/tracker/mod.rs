@@ -71,7 +71,7 @@ impl Tracker {
 
     /// Match the subscriptions this connection is interested in. Matches
     /// only if the topic isn't already tracked.
-    pub fn track_matched_topics(&mut self, topic: String) {
+    fn track_matched_topics(&mut self, topic: String) {
         // ignore if the topic is already being tracked
         if self.data_topics.contains(&topic) {
             return;
@@ -116,6 +116,10 @@ impl Tracker {
         if caughtup {
             self.topics_tracker.active = false;
             return;
+        }
+
+        for topic in reply.topics.iter() {
+            self.track_matched_topics(topic.clone());
         }
 
         self.topics_tracker.active = true;

@@ -7,9 +7,12 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+argh = "0.1"
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.1"}
 rumqttc = { path = "../rumqttc" }
-tokio = { version = "0.2", features = ["full"]}
-futures = { version = "0.3", features = ["compat"] }
+rumqttlog = { path = "../rumqttlog" }
+tokio = { version = "=0.2.19", features = ["full"] }
+bytes = "0.5"
 paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 async-channel = "1"
 pretty_env_logger = "0.4"
@@ -26,14 +29,13 @@ name = "rumqttsync"
 path = "rumqttsync.rs"
 
 [[bin]]
+name = "routernxn"
+path = "routernxn.rs"
+
+[[bin]]
 name = "pahosync"
 path = "pahosync.rs"
 
 [[bin]]
 name = "pahoasync"
 path = "pahoasync.rs"
-
-
-[[bin]]
-name = "paho"
-path = "paho.rs"

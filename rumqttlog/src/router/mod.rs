@@ -8,7 +8,7 @@ mod router;
 pub use router::Router;
 
 use self::bytes::Bytes;
-use async_channel::Sender;
+use async_channel::{Sender, bounded, Receiver};
 use std::fmt;
 
 /// Messages going into router
@@ -164,11 +164,15 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(id: &str, handle: Sender<RouterOutMessage>) -> Connection {
-        Connection {
+    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+        let (this_tx, this_rx) = bounded(capacity);
+
+        let connection = Connection {
             conn: ConnectionType::Device(id.to_owned()),
-            handle,
-        }
+            handle: this_tx,
+        };
+
+        (connection , this_rx)
     }
 }
 

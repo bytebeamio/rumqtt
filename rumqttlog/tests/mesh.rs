@@ -137,8 +137,7 @@ async fn register_with_router(
     id: &str,
     router_tx: &Sender<(ConnectionId, RouterInMessage)>,
 ) -> (ConnectionId, Receiver<RouterOutMessage>) {
-    let (this_tx, this_rx) = bounded(cap);
-    let connection = Connection::new(id, this_tx);
+    let (connection, this_rx) = Connection::new(id, cap);
     let message = (0, RouterInMessage::Connect(connection));
     router_tx.send(message).await.unwrap();
 

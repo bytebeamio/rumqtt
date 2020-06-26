@@ -13,7 +13,7 @@ bytes = "0.5"
 confy = "0.4"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.1" }
 async-channel = "1"
-tokio = { version = "=0.2.20", features = ["full"] }
+tokio = { version = "0.2", features = ["full"] }
 tokio-util = { version = "0.3", features = ["codec"] }
 futures-util = { version =  "0.3", features = ["sink"] }
 serde = { version = "1", features = ["derive"] }
