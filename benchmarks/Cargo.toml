@@ -13,9 +13,11 @@ rumqttc = { path = "../rumqttc" }
 rumqttlog = { path = "../rumqttlog" }
 tokio = { version = "=0.2.19", features = ["full"] }
 bytes = "0.5"
+paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 async-channel = "1"
 pretty_env_logger = "0.4"
 prost = "0.6"
+
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 
 [[bin]]
@@ -29,3 +31,11 @@ path = "rumqttsync.rs"
 [[bin]]
 name = "routernxn"
 path = "routernxn.rs"
+
+[[bin]]
+name = "pahosync"
+path = "pahosync.rs"
+
+[[bin]]
+name = "pahoasync"
+path = "pahoasync.rs"
