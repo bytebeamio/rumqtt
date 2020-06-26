@@ -4,7 +4,7 @@ use rumqttlog::tracker::Tracker;
 use rumqttlog::{Config, Router, RouterInMessage, RouterOutMessage, Sender};
 use mqtt4bytes::*;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::{task, select, time};
 use tokio::stream::StreamExt;
 use async_channel::{Receiver, bounded};
@@ -15,10 +15,10 @@ pub mod common;
 /// Reach new heights.
 struct CommandLine {
     /// size of payload
-    #[argh(option, short = 'b', default = "1024")]
+    #[argh(option, short = 'b', default = "100")]
     payload_size: usize,
     /// number of messages
-    #[argh(option, short = 'n', default = "1*1000*1000")]
+    #[argh(option, short = 'n', default = "20")]
     message_count: usize,
     /// number of topics over which data is being sent
     #[argh(option, short = 't', default = "1")]
@@ -57,16 +57,17 @@ async fn main() {
 
     // start connection
     let router_tx = tx.clone();
+    let cli = commandline.clone();
     task::spawn(async move {
-        connection("connection-1", network_rx, router_tx).await;
+        connection(cli, "connection-1", network_rx, router_tx).await;
     });
 
     // start network publisher
-    let options = commandline.clone();
+    let cli = commandline.clone();
     task::spawn(async move {
         let network_tx = network_tx;
-        for i in 0..100 {
-            let payload = vec![i as u8; options.payload_size];
+        for i in 0..cli.message_count {
+            let payload = vec![i as u8; cli.payload_size];
             let mut packet = Publish::new("hello/mqtt", QoS::AtLeastOnce, payload);
             packet.set_pkid((i % 65000) as u16 + 1);
             network_tx.send(packet).await.unwrap();
@@ -82,13 +83,17 @@ async fn start_router(mut router: Router) {
 }
 
 async fn connection(
+    commandline: CommandLine,
     id: &str,
     mut network_rx: Receiver<Publish>,
     router_tx: Sender<(usize, RouterInMessage)>
 ) {
-    let (id, mut this_rx) = common::new_connection(id, 100, &router_tx).await;
+    let (id, mut this_rx) = common::new_connection(id, 10, &router_tx).await;
     let mut tracker = Tracker::new();
+    tracker.add_subscription("#");
     let mut got_last_reply = true;
+    let mut count = 0;
+    let start = Instant::now();
 
     loop {
         if got_last_reply {
@@ -102,9 +107,24 @@ async fn connection(
             Some(message) = this_rx.next() => {
                 match message {
                     RouterOutMessage::DataAck(_ack) => continue,
+                    RouterOutMessage::TopicsReply(reply) => {
+                        println!("Received = {:?}", reply);
+                        tracker.update_topics_request(&reply);
+                        got_last_reply = true;
+                    }
+                    RouterOutMessage::DataReply(reply) => {
+                        // println!("Received = {:?}, {:?}, {:?}, {:?}", reply.topic, reply.native_segment, reply.native_offset, reply.native_count);
+                        tracker.update_data_request(&reply);
+                        got_last_reply = true;
+
+                        println!("{:?}", count);
+                        count += reply.native_count;
+                        if count == commandline.message_count {
+                            break
+                        }
+                    }
                     packet => {
-                        println!("Expecting ack. Received = {:?}", packet);
-                        got_last_reply = false;
+                        panic!("Expecting ack. Received = {:?}", packet);
                     }
                 }
             }
@@ -115,5 +135,15 @@ async fn connection(
             }
         }
     }
+
+    let elapsed_ms = start.elapsed().as_millis();
+    let throughput = count as usize / elapsed_ms as usize;
+    let throughput = throughput * 1000;
+    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput = {} messages/s",
+             id,
+             count,
+             commandline.payload_size,
+             throughput,
+    );
 }
 
