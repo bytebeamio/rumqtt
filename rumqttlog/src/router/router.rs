@@ -581,7 +581,7 @@ impl Router {
         };
 
         if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to topics refresh reply. Error = {:?}", e);
+            error!("Failed to reply. Error = {:?}", e);
         }
     }
 }

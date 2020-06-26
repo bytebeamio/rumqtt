@@ -205,11 +205,7 @@ impl Link {
                         // behaviour is contrary to data reply where router returns empty responses
                         RouterOutMessage::TopicsReply(reply) => {
                             debug!("Topics reply. Offset = {}, Count = {}", reply.offset, reply.topics.len());
-                            // TODO make a debug assert here and bring topics_reply_pending here
-                            if reply.topics.len() == 0 { continue }
-                            for topic in reply.topics {
-                                self.tracker.track_matched_topics(topic);
-                            }
+                            self.tracker.update_topics_request(&reply);
 
                             // New topics. Use this to make a request to wake up request-reply loop
                             match self.tracker.next() {
