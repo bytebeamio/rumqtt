@@ -9,7 +9,7 @@ use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
 use crate::router::{
     ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
-    TopicsRequest, WatermarksReply, WatermarksRequest,
+    TopicsRequest, AcksReply, AcksRequest,
 };
 use crate::Config;
 use futures_util::StreamExt;
@@ -51,7 +51,7 @@ pub struct Router {
     /// Waiters on watermark updates
     /// Whenever a topic is replicated, it's watermark is updated till the offset
     /// that replication has happened
-    watermark_waiters: HashMap<Topic, Vec<(ConnectionId, WatermarksRequest)>>,
+    watermark_waiters: HashMap<Topic, Vec<(ConnectionId, AcksRequest)>>,
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
     /// Watermark 'n' implies data till n-1 is synced with the other node
@@ -112,7 +112,7 @@ impl Router {
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::WatermarksRequest(request) => {
-                    self.handle_watermarks_request(id, request)
+                    self.handle_acks_request(id, request)
                 }
             }
         }
@@ -255,30 +255,27 @@ impl Router {
         self.reply(id, reply);
     }
 
-    pub fn handle_watermarks_request(&mut self, id: ConnectionId, request: WatermarksRequest) {
+    pub fn handle_acks_request(&mut self, id: ConnectionId, request: AcksRequest) {
         let reply = match self.watermarks.get(&request.topic) {
             Some(watermarks) => {
-                let caught_up = watermarks.cluster_offsets == request.cluster_offsets;
+                // let caught_up = watermarks.cluster_offsets == request.offset;
+                let caught_up = false;
                 if caught_up {
-                    self.register_watermarks_waiter(id, request);
+                    self.register_acks_waiter(id, request);
                     return
                 } else {
-                    WatermarksReply {
+                    AcksReply {
                         topic: request.topic.clone(),
                         pkids: vec![],
-                        cluster_offsets: watermarks.cluster_offsets.clone(),
+                        offset: 100,
                     }
                 }
             }
             None => {
-                self.register_watermarks_waiter(id, request);
+                self.register_acks_waiter(id, request);
                 return
             },
         };
-
-        if reply.cluster_offsets.is_empty() {
-            self.register_watermarks_waiter(id, request);
-        }
 
         let reply = RouterOutMessage::WatermarksReply(reply);
         self.reply(id, reply);
@@ -369,10 +366,10 @@ impl Router {
         };
 
         for (link_id, _request) in waiters {
-            let reply = WatermarksReply {
+            let reply = AcksReply {
                 topic: topic.to_owned(),
                 pkids: vec![],
-                cluster_offsets: self.watermarks.get(topic).unwrap().cluster_offsets.clone(),
+                offset: 100,
             };
 
             let reply = RouterOutMessage::WatermarksReply(reply);
@@ -552,7 +549,7 @@ impl Router {
         }
     }
 
-    fn register_watermarks_waiter(&mut self, id: ConnectionId, request: WatermarksRequest) {
+    fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
         let topic = request.topic.clone();
         if let Some(waiters) = self.watermark_waiters.get_mut(&request.topic) {
             waiters.push((id, request));
@@ -607,8 +604,8 @@ impl Watermarks {
 mod test {
     use super::{ConnectionId, Router};
     use crate::router::{
-        ConnectionAck, ConnectionType, Data, DataAck, TopicsReply, TopicsRequest, WatermarksReply,
-        WatermarksRequest,
+        ConnectionAck, ConnectionType, Data, DataAck, TopicsReply, TopicsRequest, AcksReply,
+        AcksRequest,
     };
     use crate::{Config, Connection, DataReply, DataRequest, RouterInMessage, RouterOutMessage};
     use async_channel::{bounded, Receiver, Sender};
@@ -791,7 +788,7 @@ mod test {
         // Second data request from replicator implies that previous request has been replicated
         new_data_request(replicator_id, &mut router_tx, "hello/world", 3, 0);
         let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.cluster_offsets, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(reply.offset, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
@@ -904,9 +901,9 @@ mod test {
     ) {
         let message = (
             id,
-            RouterInMessage::WatermarksRequest(WatermarksRequest {
+            RouterInMessage::WatermarksRequest(AcksRequest {
                 topic: topic.to_owned(),
-                cluster_offsets: vec![],
+                offset: vec![],
             }),
         );
         router_tx.try_send(message).unwrap();
@@ -936,7 +933,7 @@ mod test {
 
     async fn wait_for_new_watermarks(
         rx: &mut Receiver<RouterOutMessage>,
-    ) -> Option<WatermarksReply> {
+    ) -> Option<AcksReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::WatermarksReply(reply)) => Some(reply),

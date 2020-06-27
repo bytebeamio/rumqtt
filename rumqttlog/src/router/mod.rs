@@ -23,7 +23,7 @@ pub enum RouterInMessage {
     /// Topics request
     TopicsRequest(TopicsRequest),
     /// Watermarks request
-    WatermarksRequest(WatermarksRequest),
+    WatermarksRequest(AcksRequest),
 }
 
 /// Messages coming from router
@@ -38,7 +38,7 @@ pub enum RouterOutMessage {
     /// Topics reply
     TopicsReply(TopicsReply),
     /// Watermarks reply
-    WatermarksReply(WatermarksReply),
+    WatermarksReply(AcksReply),
 }
 
 /// Data sent router to be written to commitlog
@@ -171,32 +171,31 @@ pub struct TopicsReply {
 }
 
 #[derive(Debug, Clone)]
-pub struct WatermarksRequest {
+pub struct AcksRequest {
+    /// Acks request topic
     pub(crate) topic: String,
-    pub(crate) cluster_offsets: Vec<u64>,
+    /// Router return acks after this offset
+    /// Registers this request if it can't return acks
+    /// yet due to incomplete replication
+    pub(crate) offset: u64,
 }
 
-impl WatermarksRequest {
-    pub fn new(topic: String) -> WatermarksRequest {
-        WatermarksRequest {
+impl AcksRequest {
+    pub fn new(topic: String, offset: u64) -> AcksRequest {
+        AcksRequest {
             topic,
-            cluster_offsets: vec![],
-        }
-    }
-
-    pub fn watermarks(topic: String, watermarks: Vec<u64>) -> WatermarksRequest {
-        WatermarksRequest {
-            topic,
-            cluster_offsets: watermarks,
+            offset
         }
     }
 }
 
 #[derive(Debug)]
-pub struct WatermarksReply {
+pub struct AcksReply {
     pub(crate) topic: String,
+    /// packet ids that can be acked
     pub(crate) pkids: Vec<u16>,
-    pub(crate) cluster_offsets: Vec<u64>,
+    /// offset till which pkids are returned
+    pub(crate) offset: u64,
 }
 
 #[derive(Debug, Clone)]

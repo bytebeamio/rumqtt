@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::router::{TopicsReply, TopicsRequest, WatermarksReply, WatermarksRequest};
+use crate::router::{TopicsReply, TopicsRequest, AcksReply, AcksRequest};
 use crate::{DataReply, DataRequest, RouterInMessage};
 use mqtt4bytes::{has_wildcards, matches};
 
@@ -16,7 +16,7 @@ pub struct Tracker {
     /// List of topics that we are tracking for data
     data_tracker: VecDeque<DataRequest>,
     /// List of topics that we are tracking for watermark
-    watermarks_tracker: VecDeque<WatermarksRequest>,
+    watermarks_tracker: VecDeque<AcksRequest>,
     /// List of topics that we are tracking for watermark
     topics_tracker: Option<TopicsRequest>,
     /// List of topics that are being tracked for data. This
@@ -68,7 +68,7 @@ impl Tracker {
         }
 
         self.watermark_topics.insert(topic.to_owned());
-        let request = WatermarksRequest::new(topic);
+        let request = AcksRequest::new(topic, 0);
         self.watermarks_tracker.push_back(request);
     }
 
@@ -99,8 +99,8 @@ impl Tracker {
         }
     }
 
-    pub fn update_watermarks_tracker(&mut self, reply: WatermarksReply) {
-        let request = WatermarksRequest::watermarks(reply.topic, reply.cluster_offsets);
+    pub fn update_watermarks_tracker(&mut self, reply: AcksReply) {
+        let request = AcksRequest::new(reply.topic, reply.offset);
         self.watermarks_tracker.push_back(request);
     }
 
@@ -185,7 +185,7 @@ impl Tracker {
 
 #[cfg(test)]
 mod tests {
-    use crate::router::{TopicsReply, WatermarksReply};
+    use crate::router::{TopicsReply, AcksReply};
     use crate::tracker::Tracker;
     use crate::{DataReply, RouterInMessage};
     use bytes::Bytes;
@@ -271,11 +271,11 @@ mod tests {
         reply
     }
 
-    fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> WatermarksReply {
-        let reply = WatermarksReply {
+    fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> AcksReply {
+        let reply = AcksReply {
             topic: topic.to_owned(),
             pkids: vec![],
-            cluster_offsets: vec![1, 2, 3],
+            offset: vec![1, 2, 3],
         };
 
         reply
