@@ -173,21 +173,21 @@ pub struct TopicsReply {
 #[derive(Debug, Clone)]
 pub struct WatermarksRequest {
     pub(crate) topic: String,
-    pub(crate) watermarks: Vec<u64>,
+    pub(crate) cluster_offsets: Vec<u64>,
 }
 
 impl WatermarksRequest {
     pub fn new(topic: String) -> WatermarksRequest {
         WatermarksRequest {
             topic,
-            watermarks: vec![],
+            cluster_offsets: vec![],
         }
     }
 
     pub fn watermarks(topic: String, watermarks: Vec<u64>) -> WatermarksRequest {
         WatermarksRequest {
             topic,
-            watermarks,
+            cluster_offsets: watermarks,
         }
     }
 }
@@ -195,7 +195,8 @@ impl WatermarksRequest {
 #[derive(Debug)]
 pub struct WatermarksReply {
     pub(crate) topic: String,
-    pub(crate) watermarks: Vec<u64>,
+    pub(crate) pkids: Vec<u16>,
+    pub(crate) cluster_offsets: Vec<u64>,
 }
 
 #[derive(Debug, Clone)]

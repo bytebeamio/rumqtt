@@ -100,7 +100,7 @@ impl Tracker {
     }
 
     pub fn update_watermarks_tracker(&mut self, reply: WatermarksReply) {
-        let request = WatermarksRequest::watermarks(reply.topic, reply.watermarks);
+        let request = WatermarksRequest::watermarks(reply.topic, reply.cluster_offsets);
         self.watermarks_tracker.push_back(request);
     }
 
@@ -274,7 +274,8 @@ mod tests {
     fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> WatermarksReply {
         let reply = WatermarksReply {
             topic: topic.to_owned(),
-            watermarks: vec![1, 2, 3],
+            pkids: vec![],
+            cluster_offsets: vec![1, 2, 3],
         };
 
         reply

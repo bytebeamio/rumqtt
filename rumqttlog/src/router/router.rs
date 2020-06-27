@@ -1,5 +1,5 @@
 use async_channel::{bounded, Receiver, Sender};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::{io, mem, thread};
 
 use super::bytes::Bytes;
@@ -24,6 +24,7 @@ pub enum Error {
 type ConnectionId = usize;
 type Topic = String;
 type Offset = u64;
+type Pkid = u16;
 
 pub struct Router {
     config: Config,
@@ -54,7 +55,7 @@ pub struct Router {
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
     /// Watermark 'n' implies data till n-1 is synced with the other node
-    watermarks: HashMap<Topic, Vec<Offset>>,
+    watermarks: HashMap<Topic, Watermarks>,
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
@@ -250,14 +251,15 @@ impl Router {
     pub fn handle_watermarks_request(&mut self, id: ConnectionId, request: WatermarksRequest) {
         let reply = match self.watermarks.get(&request.topic) {
             Some(watermarks) => {
-                let caught_up = watermarks == &request.watermarks;
+                let caught_up = watermarks.cluster_offsets == request.cluster_offsets;
                 if caught_up {
                     self.register_watermarks_waiter(id, request);
                     return
                 } else {
                     WatermarksReply {
                         topic: request.topic.clone(),
-                        watermarks: watermarks.clone(),
+                        pkids: vec![],
+                        cluster_offsets: watermarks.cluster_offsets.clone(),
                     }
                 }
             }
@@ -267,7 +269,7 @@ impl Router {
             },
         };
 
-        if reply.watermarks.is_empty() {
+        if reply.cluster_offsets.is_empty() {
             self.register_watermarks_waiter(id, request);
         }
 
@@ -278,13 +280,12 @@ impl Router {
     /// Updates replication watermarks
     fn update_watermarks(&mut self, id: ConnectionId, request: &DataRequest) {
         if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
-            watermarks.insert(id as usize, request.native_offset);
+            watermarks.cluster_offsets.insert(id as usize, request.native_offset);
             self.fresh_watermarks_notification(&request.topic);
         } else {
             // Fresh topic only initialize with 0 offset. Updates during the next request
             // Watermark 'n' implies data till n-1 is synced with the other node
-            self.watermarks
-                .insert(request.topic.clone(), vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            self.watermarks.insert(request.topic.clone(), Watermarks::new(0));
         }
     }
 
@@ -363,7 +364,8 @@ impl Router {
         for (link_id, _request) in waiters {
             let reply = WatermarksReply {
                 topic: topic.to_owned(),
-                watermarks: self.watermarks.get(topic).unwrap().clone(),
+                pkids: vec![],
+                cluster_offsets: self.watermarks.get(topic).unwrap().cluster_offsets.clone(),
             };
 
             let reply = RouterOutMessage::WatermarksReply(reply);
@@ -570,6 +572,22 @@ impl Router {
     }
 }
 
+pub struct Watermarks {
+    replication: usize,
+    pkids_and_offset: (VecDeque<Pkid>, VecDeque<Offset>),
+    cluster_offsets: Vec<Offset>
+}
+
+impl Watermarks {
+    pub fn new(replication: usize) -> Watermarks {
+        Watermarks {
+            replication,
+            pkids_and_offset: (VecDeque::new(), VecDeque::new()),
+            cluster_offsets: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{ConnectionId, Router};
@@ -758,7 +776,7 @@ mod test {
         // Second data request from replicator implies that previous request has been replicated
         new_data_request(replicator_id, &mut router_tx, "hello/world", 3, 0);
         let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.watermarks, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(reply.cluster_offsets, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
@@ -873,7 +891,7 @@ mod test {
             id,
             RouterInMessage::WatermarksRequest(WatermarksRequest {
                 topic: topic.to_owned(),
-                watermarks: vec![],
+                cluster_offsets: vec![],
             }),
         );
         router_tx.try_send(message).unwrap();

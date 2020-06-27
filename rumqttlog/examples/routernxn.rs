@@ -104,16 +104,6 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
 
         // Listen for acks in batches to fix send/recv synchronization stalls
         let count = i + 1;
-        if count % 1000 == 0 {
-            for _ in 0..1000 {
-                if let RouterOutMessage::DataAck(_ack) = this_rx.recv().await.unwrap() {
-                    continue;
-                } else {
-                    panic!("Expecting Ack");
-                }
-            }
-        }
-
         if count == commandline.message_count / commandline.topic_count {
             topic_count += 1;
             topic = "hello/world".to_owned() + &topic_count.to_string();
