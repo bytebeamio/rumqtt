@@ -45,7 +45,7 @@ pub enum RouterOutMessage {
 #[derive(Debug)]
 pub struct Data {
     /// Id of the packet that connection received
-    pub pkid: u64,
+    pub pkid: u16,
     /// Topic of publish
     pub topic: String,
     /// Publish payload

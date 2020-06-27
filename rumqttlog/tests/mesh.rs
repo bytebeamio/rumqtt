@@ -1,3 +1,5 @@
+/*
+
 //! 3 node cluster for correctness and chaos testing
 //!
 //!
@@ -118,7 +120,7 @@ async fn send_data(
     id: ConnectionId,
     router_tx: &Sender<(ConnectionId, RouterInMessage)>,
     payload_size: usize,
-    pkid: u64,
+    pkid: u16,
 ) {
     let payload = vec![pkid as u8; payload_size];
     let payload = Bytes::from(payload);
@@ -160,3 +162,5 @@ fn config(id: u8) -> Config {
         routers: None,
     }
 }
+
+ */

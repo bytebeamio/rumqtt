@@ -174,9 +174,16 @@ impl Router {
         } = data;
 
         // Acknowledge the connection after writing data to commitlog
-        if let Some(offset) = self.append_to_commitlog(id, pkid, &topic, payload) {
-            // TODO Fix this push
-            // self.ack_data(id, pkid, offset)
+        if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
+            let watermarks = match self.watermarks.get_mut(&topic) {
+                Some(w) => w,
+                None => {
+                    self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                    self.watermarks.get_mut(&topic).unwrap()
+                },
+            };
+
+            watermarks.update_pkid_offset_map(id, pkid, offset);
         }
 
         // If there is a new unique append, send it to connection/linker waiting
@@ -216,7 +223,7 @@ impl Router {
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
         let reply = if id < 10 {
-            self.update_watermarks(id, &request);
+            self.update_cluster_offsets(id, &request);
             self.extract_connection_data(&request)
         } else {
             self.extract_data(&request)
@@ -278,7 +285,7 @@ impl Router {
     }
 
     /// Updates replication watermarks
-    fn update_watermarks(&mut self, id: ConnectionId, request: &DataRequest) {
+    fn update_cluster_offsets(&mut self, id: ConnectionId, request: &DataRequest) {
         if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
             watermarks.cluster_offsets.insert(id as usize, request.native_offset);
             self.fresh_watermarks_notification(&request.topic);
@@ -373,13 +380,12 @@ impl Router {
         }
     }
 
-    /// Separate logs due to replication and logs from connections. Connections pull
-    /// logs from both replication and connections where as linker only pull logs
-    /// from connections
+    /// Connections pull logs from both replication and connections where as replicator
+    /// only pull logs from connections.
+    /// Data from replicator and data from connection are separated for this reason
     fn append_to_commitlog(
         &mut self,
         id: ConnectionId,
-        pkid: u64,
         topic: &str,
         bytes: Bytes,
     ) -> Option<u64> {
@@ -388,7 +394,7 @@ impl Router {
         if replication_data {
             debug!("Receiving replication data from {}, topic = {}", id, topic);
             match self.replicatedlog.append(&topic, bytes) {
-                Ok(_) => Some(pkid),
+                Ok(offset) => Some(offset),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
                     None
@@ -574,7 +580,7 @@ impl Router {
 
 pub struct Watermarks {
     replication: usize,
-    pkids_and_offset: (VecDeque<Pkid>, VecDeque<Offset>),
+    pkid_offset_map: Vec<Option<(VecDeque<Pkid>, VecDeque<Offset>)>>,
     cluster_offsets: Vec<Offset>
 }
 
@@ -582,9 +588,18 @@ impl Watermarks {
     pub fn new(replication: usize) -> Watermarks {
         Watermarks {
             replication,
-            pkids_and_offset: (VecDeque::new(), VecDeque::new()),
+            pkid_offset_map: vec![None; 1000],
             cluster_offsets: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         }
+    }
+
+    pub fn update_pkid_offset_map(&mut self, id: usize, pkid: u16, offset: u64) {
+        // connection ids which are greater than supported count should be rejected during
+        // connection itself. Crashing here is a bug
+        let connection = self.pkid_offset_map.get_mut(id).unwrap();
+        let map = connection.get_or_insert((VecDeque::new(), VecDeque::new()));
+        map.0.push_back(pkid);
+        map.1.push_back(offset);
     }
 }
 
