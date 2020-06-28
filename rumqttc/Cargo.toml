@@ -2,8 +2,8 @@
 name = "rumqttc"
 version = "0.0.3"
 description = "An efficeint and robust mqtt client for your connected devices"
-license = "MIT"
-repository = "https://github.com/tekjar/rumq"
+license = "Apache-2.0"
+repository = "https://github.com/bytebeamio/rumqtt"
 authors = ["tekjar"]
 edition = "2018"
 

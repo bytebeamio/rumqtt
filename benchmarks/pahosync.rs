@@ -5,7 +5,7 @@ use std::error::Error;
 use mqtt::Client;
 
 fn main() {
-    let _o = start("paho-rust", 100, 100000);
+    let _o = start("paho-rust", 100, 100_000);
 }
 
 
@@ -28,7 +28,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     let elapsed_ms = start.elapsed().as_millis();
     let throughput = count as usize / elapsed_ms as usize;
     let acks_throughput = throughput * 1000;
-    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput = {} messages/s",
+    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
              id,
              count,
              payload_size,

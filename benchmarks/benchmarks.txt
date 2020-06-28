@@ -1,0 +1,4 @@
+Id = rumqtt-async, Messages = 1000000, Payload (bytes) = 100, Throughput (messages/sec) = 86000
+Id = rumqtt-sync, Messages = 1000000, Payload (bytes) = 100, Throughput (messages/sec) = 81000
+Id = paho-rust, Messages = 100000, Payload (bytes) = 100, Throughput (messages/sec) = 4000
+Id = paho-go , Messages = 1000000 , Payload (bytes) = 100 , Throughput (messages/sec) = 23000

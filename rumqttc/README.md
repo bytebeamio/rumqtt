@@ -9,14 +9,6 @@ Let's jump into examples right away
 A simple synchronous publish and subscribe
 ----------------------------
 
-What's happening behind the scenes
-- Eventloop orchestrates user requests and incoming packets concurrently and hadles the state
-- Ping the broker when necessary and detects client side half open connections as well
-- Throttling of outgoing packets
-- Queue size based flow control on outgoing packets
-- Automatic reconnections
-- Natural backpressure to the client during slow network
-
 ```rust
 use rumqttc::{MqttOptions, Client, QoS};
 use std::time::Duration;
@@ -40,6 +32,14 @@ fn main() {
 }
 ```
 
+What's happening behind the scenes
+- Eventloop orchestrates user requests and incoming packets concurrently and hadles the state
+- Ping the broker when necessary and detects client side half open connections as well
+- Throttling of outgoing packets
+- Queue size based flow control on outgoing packets
+- Automatic reconnections
+- Natural backpressure to the client during slow network
+
 In short, everything necessary to maintain a robust connection
 
 **NOTE**: Looping on `connection.iter()` is necessary to run the eventloop. It yields both
@@ -48,14 +48,6 @@ Blocking here will block connection progress
 
 A simple asynchronous publish and subscribe
 ------------------------------
-- Reconnects if polled again after an error
-- Takes any `Stream` for requests and hence offers a lot of customization
-
-**Few of our real world use cases**
-- Bounded or unbounded requests
-- A stream which orchestrates data between disk and memory by detecting backpressure and never (practically) loose data
-- A stream which juggles data between several channels based on priority of the data
-
 ```rust
 use rumqttc::{MqttOptions, Request, EventLoop};
 use std::time::Duration;
@@ -74,6 +66,13 @@ async fn main() {
     }
 }
 ```
+- Reconnects if polled again after an error
+- Takes any `Stream` for requests and hence offers a lot of customization
+
+**Few of our real world use cases**
+- Bounded or unbounded requests
+- A stream which orchestrates data between disk and memory by detecting backpressure and never (practically) loose data
+- A stream which juggles data between several channels based on priority of the data
 
 Since eventloop is externally polled (with `iter()/poll()`) out side the library, users can
 - Distribute incoming messages based on topics

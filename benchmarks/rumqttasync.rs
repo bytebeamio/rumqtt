@@ -12,7 +12,7 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    let _o = start("rumqtt-async", 100, 100000).await;
+    let _o = start("rumqtt-async", 100, 1_000_000).await;
     // common::profile("bench.pb", guard);
 }
 
@@ -59,7 +59,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
     let elapsed_ms = start.elapsed().as_millis();
     let throughput = acks_count as usize / elapsed_ms as usize;
     let throughput = throughput * 1000;
-    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput = {} messages/s",
+    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
              id,
              count,
              payload_size,
