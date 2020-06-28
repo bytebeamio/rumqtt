@@ -33,7 +33,7 @@ pub struct Tracker {
     /// Current tracker type. Data = 0, Watermarks = 1
     tracker_type: u8,
     /// flag to indicate if all the trackers are inactive
-    active: bool
+    pub(crate) active: bool
 }
 
 impl Tracker {

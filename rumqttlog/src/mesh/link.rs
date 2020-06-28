@@ -15,6 +15,7 @@ use bytes::BytesMut;
 use futures_util::StreamExt;
 use tokio::time;
 use tokio_util::codec::Framed;
+use std::collections::VecDeque;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -49,6 +50,8 @@ pub struct Link {
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handle to this link which router uses
     link_rx: Option<Receiver<RouterOutMessage>>,
+    /// Inflight outgoing data
+    inflight_outgoing: VecDeque<Data>,
     /// Connection handle which supervisor uses to pass new connection handles
     /// Handle to supervisor
     supervisor_tx: Sender<u8>,
@@ -89,6 +92,7 @@ impl Link {
             topics_offset,
             router_tx,
             link_rx: Some(link_rx),
+            inflight_outgoing: VecDeque::with_capacity(100),
             supervisor_tx,
             is_client,
         }
@@ -123,6 +127,66 @@ impl Link {
         framed
     }
 
+    pub async fn start<S: IO>(
+        &mut self,
+        mut connections_rx: Receiver<Framed<S, MeshCodec>>,
+    ) -> Result<(), LinkError> {
+        let (router_tx, link_rx) = self.extract_handles();
+        let mut framed = self.connect(&mut connections_rx).await;
+        let mut broken = false;
+
+        'start: loop {
+            if broken {
+                drop(framed);
+                framed = self.connect(&mut connections_rx).await;
+                broken = false;
+            }
+
+            if self.tracker.active {
+                if let Some(request) = self.tracker.next() {
+                    let message = (self.id as usize, request);
+                    router_tx.send(message).await.unwrap();
+                }
+            }
+
+            select! {
+                o = framed.next() => {
+                    let o = match o {
+                        Some(Ok(o)) => o,
+                        Some(Err(e)) => {
+                            error!("Stream error = {:?}", e);
+                            broken = true;
+                            continue;
+                        }
+                        None => {
+                            info!("Stream end!!");
+                            broken = true;
+                            continue;
+                        }
+                    };
+
+                    match o {
+                        Packet::Data(pkid, topic, payload) => {
+                            let ack = Packet::DataAck(pkid);
+                            try_loop!(framed.send(ack).await, broken, continue 'start);
+                            // This is a dummy in replication context
+                            let pkid = 0;
+                            let data = RouterInMessage::Data(Data { pkid, topic, payload });
+                            router_tx.send((self.id as usize, data)).await?;
+                        }
+                        Packet::DataAck(ack) => {
+                            debug!("Replicated till offset = {:?}", ack);
+                            match self.tracker.next() {
+                                Some(request) => self.router_tx.send((self.id as usize, request)).await?,
+                                None => continue
+                            };
+                        }
+                        packet => warn!("Received unsupported packet = {:?}", packet),
+                    }
+                }
+            }
+        }
+    }
 
     /*
     /// Start handling the connection
