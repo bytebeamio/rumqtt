@@ -586,7 +586,15 @@ impl Watermarks {
         Watermarks {
             replication,
             pkid_offset_map: vec![None; 1000],
-            cluster_offsets: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            cluster_offsets: vec![0, 0, 0]
+        }
+    }
+
+    pub fn update_cluster_offsets(&mut self, id: usize, offset: u64) {
+        if let Some(position) = self.cluster_offsets.get_mut(id) {
+            *position = offset
+        } else {
+            panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
         }
     }
 
