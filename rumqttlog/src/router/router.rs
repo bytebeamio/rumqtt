@@ -410,7 +410,7 @@ impl Router {
     }
 
     /// Acknowledge connection after the data is written to commitlog
-    fn ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
+    fn _ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
         let connection = match self.connections.get_mut(id).unwrap() {
             Some(c) => c,
             None => {
@@ -576,7 +576,7 @@ impl Router {
 }
 
 pub struct Watermarks {
-    replication: usize,
+    _replication: usize,
     pkid_offset_map: Vec<Option<(VecDeque<Pkid>, VecDeque<Offset>)>>,
     cluster_offsets: Vec<Offset>
 }
@@ -584,12 +584,13 @@ pub struct Watermarks {
 impl Watermarks {
     pub fn new(replication: usize) -> Watermarks {
         Watermarks {
-            replication,
+            _replication: replication,
             pkid_offset_map: vec![None; 1000],
             cluster_offsets: vec![0, 0, 0]
         }
     }
 
+    /*
     pub fn update_cluster_offsets(&mut self, id: usize, offset: u64) {
         if let Some(position) = self.cluster_offsets.get_mut(id) {
             *position = offset
@@ -597,6 +598,7 @@ impl Watermarks {
             panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
         }
     }
+     */
 
     pub fn update_pkid_offset_map(&mut self, id: usize, pkid: u16, offset: u64) {
         // connection ids which are greater than supported count should be rejected during
