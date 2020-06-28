@@ -275,7 +275,7 @@ mod tests {
         let reply = AcksReply {
             topic: topic.to_owned(),
             pkids: vec![],
-            offset: vec![1, 2, 3],
+            offset: 3,
         };
 
         reply

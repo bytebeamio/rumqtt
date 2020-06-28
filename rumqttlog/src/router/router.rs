@@ -796,7 +796,7 @@ mod test {
         // Second data request from replicator implies that previous request has been replicated
         new_data_request(replicator_id, &mut router_tx, "hello/world", 3, 0);
         let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.offset, vec![3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(reply.offset, 3);
     }
 
     // ---------------- All helper methods to make tests clean and readable ------------------
@@ -911,7 +911,7 @@ mod test {
             id,
             RouterInMessage::WatermarksRequest(AcksRequest {
                 topic: topic.to_owned(),
-                offset: vec![],
+                offset: 0,
             }),
         );
         router_tx.try_send(message).unwrap();
