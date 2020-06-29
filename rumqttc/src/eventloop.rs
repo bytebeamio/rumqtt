@@ -35,6 +35,14 @@ pub enum ConnectionError {
     Cancel,
 }
 
+#[derive(Eq, PartialEq)]
+enum NetworkType {
+    /// User provided Framed. No automatic reconnections
+    User,
+    /// Inbuilt. Automatic reconnections available
+    Inbuilt
+}
+
 /// Eventloop with all the state of a connection
 pub struct EventLoop {
     /// Options of the current mqtt connection
@@ -84,7 +92,8 @@ impl EventLoop {
             pending,
             buffered,
             network: None,
-            keepalive_timeout: time::delay_for(keepalive),
+            network_type: NetworkType::Inbuilt,
+            keepalive_timeout,
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
