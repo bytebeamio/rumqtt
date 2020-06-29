@@ -8,7 +8,7 @@ mod common;
 fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(250).unwrap();
-    let _o = start("rumqtt-sync", 100, 100000);
+    let _o = start("rumqtt-sync", 100, 1000000);
     // common::profile("bench.pb", guard);
 }
 
@@ -54,7 +54,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     let elapsed_ms = start.elapsed().as_millis();
     let throughput = acks_count as usize / elapsed_ms as usize;
     let acks_throughput = throughput * 1000;
-    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput = {} messages/s",
+    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
              id,
              count,
              payload_size,

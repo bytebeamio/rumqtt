@@ -1,8 +1,9 @@
 #!/bin/sh
 set -e
 
-cargo run -q --bin rumqttasync --release
-cargo run -q --bin rumqttsync --release
-cargo run -q --bin pahoasync --release
-#cargo run -q --bin pahosync --release
-go run paho.go
+cargo run --bin rumqttasync --release | tee benchmarks.txt
+cargo run --bin rumqttsync --release | tee -a benchmarks.txt
+# cargo run --bin pahoasync --release | tee -a benchmarks.txt
+cargo run -q --bin pahosync --release | tee -a benchmarks.txt
+go run paho.go | tee -a benchmarks.txt
+

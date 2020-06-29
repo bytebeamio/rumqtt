@@ -15,7 +15,7 @@ var opts struct {
 }
 
 func init() {
-	opts.Messages = 100000
+	opts.Messages = 1000000
 	opts.PayloadSize = 100
 
 	arg.MustParse(&opts)
@@ -67,12 +67,12 @@ func (c *Connection) Start() {
 	}
 
 	timeTaken := time.Since(start).Milliseconds()
-	throughputMillis := int64(c.total)/timeTaken
-	fmt.Println("Id =", c.id, " Messages =", c.total, "Payload (bytes) =", opts.PayloadSize, "Throughput =", throughputMillis * 1000, "messages/s")
+	throughputMillis := int64(c.total) / timeTaken
+	fmt.Println("Id =", c.id, ", Messages =", c.total, ", Payload (bytes) =", opts.PayloadSize, ", Throughput (messages/sec) =", throughputMillis*1000)
 }
 
 func main() {
 
-	connection := NewConnection("paho-client", opts.Messages)
+	connection := NewConnection("paho-go", opts.Messages)
 	connection.Start()
 }
