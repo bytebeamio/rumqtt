@@ -19,7 +19,7 @@ pub enum LinkError {
 }
 
 /// A link is a connection to another router
-pub struct Replicator {
+pub struct Replicator<S> {
     /// Id of the link. Id of the router this connection is with
     id: u8,
     /// Tracks the offsets and status of all the topic offsets
@@ -28,16 +28,23 @@ pub struct Replicator {
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handle to this link which router uses
     link_rx: Option<Receiver<RouterOutMessage>>,
+    /// Connections receiver in server mode
+    connections_rx: Receiver<Framed<S, MqttCodec>>,
     /// Client or server link
     is_client: bool,
 }
 
-impl Replicator {
+impl<S: IO> Replicator<S> {
     /// New mesh link. This task is always alive unlike a connection task event though the connection
     /// might have been down. When the connection is broken, this task informs supervisor about it
     /// which establishes a new connection on behalf of the link and forwards the connection to this
     /// task. If this link is a server, it waits for the other end to initiate the connection
-    pub async fn new(id: u8, router_tx: Sender<(ConnectionId, RouterInMessage)>, is_client: bool) -> Replicator {
+    pub async fn new(
+        id: u8,
+        router_tx: Sender<(ConnectionId, RouterInMessage)>,
+        connections_rx: Receiver<Framed<S, MqttCodec>>,
+        is_client: bool
+    ) -> Replicator<S> {
         // Register this link with router even though there is no network connection with other router yet.
         // Actual connection will be requested in `start`
         info!("Creating link {} with router. Client mode = {}", id, is_client);
@@ -49,6 +56,7 @@ impl Replicator {
             id,
             tracker,
             router_tx,
+            connections_rx,
             link_rx: None,
             is_client,
         };
@@ -71,17 +79,13 @@ impl Replicator {
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
-    async fn await_connection<S: IO>(
-        &mut self,
-        connections_rx: &Receiver<Framed<S, MqttCodec>>
-    ) -> EventLoop<Receiver<Request>> {
-        let framed = connections_rx.recv().await.unwrap();
-        info!("Link with {} successful!!", self.id);
+    async fn connect(&mut self) -> EventLoop<Receiver<Request>> {
+        if self.is_client {
+        }
         todo!()
     }
 
-    async fn start(&self) {
-
+    pub async fn start(&self) {
     }
 }
 

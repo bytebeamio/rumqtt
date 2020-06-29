@@ -3,24 +3,27 @@ use crate::{Config, MeshConfig, IO};
 
 mod link;
 
-use async_channel::{bounded, Receiver, Sender};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::select;
-use tokio::stream::StreamExt;
-use tokio::task;
-use tokio_util::codec::Framed;
+use async_channel::{bounded, Sender};
 use futures_util::SinkExt;
 use link::Replicator;
+use rumqttc::MqttCodec;
+use rumqttc::{ConnAck, Connect, ConnectReturnCode, Error as Mqtt4Error, Packet};
 use std::collections::HashMap;
 use std::io;
-use rumqttc::MqttCodec;
-use rumqttc::{Error as Mqtt4Error, Packet, Connect, ConnAck, ConnectReturnCode};
+use std::time::Duration;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::stream::StreamExt;
+use tokio::time::{self, Elapsed};
+use tokio::{select, task};
+use tokio_util::codec::Framed;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
 pub enum Error {
     Io(#[from] io::Error),
     Mqtt4(#[from] Mqtt4Error),
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
     StreamDone,
     ConnectionHandover,
     WrongPacket(Packet),
@@ -55,7 +58,6 @@ impl Mesh {
     #[tokio::main(core_threads = 1)]
     pub(crate) async fn start(&mut self) {
         let (head, this, tail) = self.extract_servers();
-        let this_id = this.id;
 
         // start outgoing (client) links and then incoming (server) links
         self.start_router_links(tail, true).await;
@@ -67,17 +69,20 @@ impl Mesh {
 
         // start the supervision
         loop {
-            select! {
-                o = listener.accept() => {
-                    let (stream, addr) = o.unwrap();
-                    debug!("Received a tcp connection from {}", addr);
-                    let mut framed = Framed::new(stream, MqttCodec::new(10 * 1024));
-                    let id = await_connect(&mut framed).await.unwrap();
-                    let handle = self.links.get_mut(&id).unwrap();
-                    if let Err(_e) = handle.connections_tx.send(framed).await {
-                        error!("Failed to send the connection to link");
-                    }
-                },
+            let (stream, addr) = listener.accept().await.unwrap();
+            debug!("Received a tcp connection from {}", addr);
+            let mut framed = Framed::new(stream, MqttCodec::new(10 * 1024));
+            let id = match await_connect(&mut framed).await {
+                Ok(id) => id,
+                Err(e) => {
+                    error!("Failed to await connect. Error = {:?}", e);
+                    continue;
+                }
+            };
+
+            let handle = self.links.get_mut(&id).unwrap();
+            if let Err(_e) = handle.connections_tx.send(framed).await {
+                error!("Failed to send the connection to link");
             }
         }
     }
@@ -98,11 +103,8 @@ impl Mesh {
         self.links.insert(id, link_handle);
 
         task::spawn(async move {
-            let mut link = Replicator::new(id, router_tx, is_client).await;
-            // match link.start(connections_rx).await {
-            //     Ok(_) => error!("Link with {} down", id),
-            //     Err(e) => error!("Link with {} down with error = {:?}", id, e),
-            // }
+            let replicator = Replicator::new(id, router_tx, connections_rx, is_client).await;
+            replicator.start().await;
         });
     }
 
@@ -125,20 +127,25 @@ impl Mesh {
 
 /// Await mqtt connect packet for incoming connections from a router
 async fn await_connect<S: IO>(framed: &mut Framed<S, MqttCodec>) -> Result<u8, Error> {
-    // wait for mesh connect packet with id
-    let packet = match framed.next().await {
-        Some(packet) => packet,
-        None => return Err(Error::StreamDone),
-    };
+    let id = time::timeout(Duration::from_secs(5), async {
+        // wait for mesh connect packet with id
+        let packet = match framed.next().await {
+            Some(packet) => packet,
+            None => return Err(Error::StreamDone),
+        };
 
-    let connect = match packet? {
-        Packet::Connect(connect) => connect,
-        packet => return Err(Error::WrongPacket(packet)),
-    };
+        let connect = match packet? {
+            Packet::Connect(connect) => connect,
+            packet => return Err(Error::WrongPacket(packet)),
+        };
 
-    let id: u8 = connect.client_id.parse().unwrap();
-    let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-    framed.send(Packet::ConnAck(connack)).await?;
+        let id: u8 = connect.client_id.parse().unwrap();
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+        framed.send(Packet::ConnAck(connack)).await?;
+        Ok::<_, Error>(id)
+    })
+    .await??;
+
     Ok(id)
 }
 
@@ -166,7 +173,6 @@ impl<S: IO> LinkHandle<S> {
         this_id: u8,
         mut framed: Framed<S, MqttCodec>,
     ) -> Result<(), Error> {
-
         let connect = Connect::new(this_id.to_string());
         framed.send(Packet::Connect(connect)).await?;
         let packet = match framed.next().await {
