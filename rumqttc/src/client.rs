@@ -95,7 +95,7 @@ impl Client {
 ///  MQTT connection. Maintains all the necessary state and automatically retries connections
 /// in flaky networks.
 pub struct Connection {
-    eventloop: EventLoop<Receiver<Request>>,
+    pub eventloop: EventLoop<Receiver<Request>>,
     runtime: Option<Runtime>,
 }
 

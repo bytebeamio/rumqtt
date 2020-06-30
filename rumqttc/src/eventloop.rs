@@ -108,6 +108,7 @@ impl<R: Requests> EventLoop<R> {
         // selected with other streams, can potentially do more internal polling (if the socket is ready)
         if self.network.is_none() {
             self.connect_or_cancel().await?;
+            return Ok((Some(Incoming::Connected), None))
         }
 
         let (incoming, outgoing) = match self.select().await {

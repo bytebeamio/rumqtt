@@ -45,8 +45,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
             Incoming::Puback(_puback) => {
                 acks_count += 1;
             }
-            notification => {
-                println!("Id = {}, Incoming = {:?}", id, notification);
+            _notification => {
                 continue;
             }
         };
