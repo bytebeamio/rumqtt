@@ -1,5 +1,4 @@
-use crate::packetbytes::*;
-use crate::{packet_type, Error, FixedHeader, PacketType};
+use crate::*;
 use bytes::BytesMut;
 
 /// Reads a stream of bytes and extracts MQTT packets

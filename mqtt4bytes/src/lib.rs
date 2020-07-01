@@ -10,7 +10,6 @@ extern crate std;
 
 #[cfg(feature = "std")]
 mod codec;
-mod packetbytes;
 mod packets;
 mod read;
 mod topic;
@@ -18,11 +17,11 @@ mod write;
 
 #[cfg(feature = "std")]
 pub use codec::*;
-pub use packetbytes::*;
 pub use packets::*;
 pub use read::*;
 pub use topic::*;
 pub use write::*;
+use bytes::{Buf};
 
 cfg_if! {
     if #[cfg(feature = "std")] {
@@ -83,6 +82,27 @@ cfg_if! {
         }
     }
 }
+
+/// Encapsulates all MQTT packet types
+#[derive(Debug, Clone)]
+pub enum Packet {
+    Connect(Connect),
+    ConnAck(ConnAck),
+    Publish(Publish),
+    PubAck(PubAck),
+    PubRec(PubRec),
+    PubRel(PubRel),
+    PubComp(PubComp),
+    Subscribe(Subscribe),
+    SubAck(SubAck),
+    Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
+    PingReq,
+    PingResp,
+    Disconnect,
+}
+
+
 
 /// MQTT packet type
 #[repr(u8)]
@@ -167,3 +187,4 @@ pub fn qos(num: u8) -> Result<QoS, Error> {
         qos => Err(Error::InvalidQoS(qos)),
     }
 }
+
