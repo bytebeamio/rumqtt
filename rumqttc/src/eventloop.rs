@@ -60,6 +60,8 @@ pub struct EventLoop<R: Requests> {
     cancel_tx: Option<Sender<()>>,
     /// Delay between reconnection (after a failure)
     reconnection_delay: Duration,
+    /// Delay between resending publish packtes wit QoS 1
+    resend_delay: Delay,
 }
 
 impl<R: Requests> EventLoop<R> {
@@ -71,6 +73,7 @@ impl<R: Requests> EventLoop<R> {
         let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
         let requests = time::throttle(options.throttle, requests);
+        let publish_resend_timeout = options.publish_resend_timeout;
 
         EventLoop {
             options,
@@ -84,6 +87,7 @@ impl<R: Requests> EventLoop<R> {
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
+            resend_delay: time::delay_for(publish_resend_timeout),
         }
     }
 
@@ -126,8 +130,10 @@ impl<R: Requests> EventLoop<R> {
     /// Last session might contain packets which aren't acked. MQTT says these packets should be
     /// republished in the next session. We save all such pending packets here.
     fn populate_pending(&mut self) {
-        let mut pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
-        self.pending_pub.append(&mut pending_pub);
+        let pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
+        for publish in pending_pub.iter() {
+            self.pending_pub.push_back(publish.0.clone());
+        }
 
         let mut pending_rel = mem::replace(&mut self.state.outgoing_rel, VecDeque::new());
         self.pending_rel.append(&mut pending_rel);
@@ -142,6 +148,20 @@ impl<R: Requests> EventLoop<R> {
         let network = &mut self.network.as_mut().unwrap();
 
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
+
+        // setup for resending publish packets
+        let inflight_not_empty = 
+        match self.state.outgoing_pub.get(0) {
+            Some(oldest_publish) => {
+                // reset the resend delay timeout. I don't know if it is bad to reset it
+                // to the the same value multiple times, but that should not happen
+                // very often in normal operation anyway
+                self.resend_delay.reset(oldest_publish.1 + self.options.publish_resend_timeout);
+                true
+            }
+            None => false,
+        };
+
         let (incoming, outpacket) = select! {
             // Pull next packet from network
             o = network.next() => match o {
@@ -175,6 +195,12 @@ impl<R: Requests> EventLoop<R> {
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
                 return Err(ConnectionError::Cancel)
+            }
+
+            // Resend publish packets if necessary
+            _ = &mut self.resend_delay, if inflight_not_empty => {
+                let publish_packet = self.state.resend_publish();
+                (None, publish_packet)
             }
         };
 

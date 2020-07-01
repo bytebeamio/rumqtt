@@ -2,6 +2,7 @@ use crate::Incoming;
 
 use std::{collections::VecDeque, result::Result, time::Instant};
 use mqtt4bytes::*;
+use tokio;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
@@ -47,7 +48,7 @@ pub struct MqttState {
     /// Packet id of the last outgoing packet
     pub last_pkid: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub outgoing_pub: VecDeque<Publish>,
+    pub outgoing_pub: VecDeque<(Publish, tokio::time::Instant)>,
     /// Packet ids of released QoS 2 publishes
     pub outgoing_rel: VecDeque<u16>,
     /// Packet ids on incoming QoS 2 publishes
@@ -140,7 +141,7 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     fn handle_incoming_puback(&mut self, puback: PubAck) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == puback.pkid) {
+        match self.outgoing_pub.iter().position(|x| x.0.pkid == puback.pkid) {
             Some(index) => {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
@@ -181,7 +182,7 @@ impl MqttState {
         &mut self,
         pubrec: PubRec,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == pubrec.pkid) {
+        match self.outgoing_pub.iter().position(|x| x.0.pkid == pubrec.pkid) {
             Some(index) => {
                 let _ = self.outgoing_pub.remove(index);
                 self.outgoing_rel.push_back(pubrec.pkid);
@@ -365,8 +366,21 @@ impl MqttState {
             _ => publish,
         };
 
-        self.outgoing_pub.push_back(publish.clone());
+        self.outgoing_pub.push_back((publish.clone(), tokio::time::Instant::now()));
         publish
+    }
+
+    /// when a publish packet with QoS 1 or 2 has not been acknowledged,
+    /// resend it 
+    pub fn resend_publish(&mut self) -> Option<Packet> {
+        // publish to resend
+        let (mut publish, _) = self.outgoing_pub.pop_front().unwrap();
+
+        publish.dup = true;
+
+        // save it to the end of outgoing pub queue.  
+        self.outgoing_pub.push_back((publish.clone(), tokio::time::Instant::now()));
+        Some(Packet::Publish(publish))
     }
 
     /// Increment the packet identifier from the state and roll it when it reaches its max
@@ -529,7 +543,7 @@ mod test {
         assert_eq!(mqtt.outgoing_pub.len(), 1);
 
         let backup = mqtt.outgoing_pub.get(0).clone();
-        assert_eq!(backup.unwrap().pkid, 2);
+        assert_eq!(backup.unwrap().0.pkid, 2);
 
         mqtt.handle_incoming_puback(PubAck::new(2)).unwrap();
         assert_eq!(mqtt.outgoing_pub.len(), 0);
@@ -550,7 +564,7 @@ mod test {
 
         // check if the remaining element's pkid is 1
         let backup = mqtt.outgoing_pub.get(0).clone();
-        assert_eq!(backup.unwrap().pkid, 1);
+        assert_eq!(backup.unwrap().0.pkid, 1);
 
         assert_eq!(mqtt.outgoing_rel.len(), 1);
 

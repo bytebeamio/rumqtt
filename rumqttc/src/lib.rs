@@ -213,6 +213,8 @@ pub struct MqttOptions {
     throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: usize,
+    /// delay between resends of publsh packets with QoS 1 and 2 
+    publish_resend_timeout: Duration,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
     /// Key type for TLS 
@@ -242,6 +244,7 @@ impl MqttOptions {
             notification_channel_capacity: 10,
             throttle: Duration::from_micros(0),
             inflight: 100,
+            publish_resend_timeout: Duration::from_secs(60),
             last_will: None,
             key_type: Key::RSA,
         }
@@ -302,6 +305,16 @@ impl MqttOptions {
     /// Keep alive time
     pub fn keep_alive(&self) -> Duration {
         self.keep_alive
+    }
+
+    /// timeout for resending publish packets with QoS 1 
+    pub fn set_publish_resend_timeout(&mut self, secs: u16) -> &mut Self {
+        self.publish_resend_timeout = Duration::from_secs(u64::from(secs));
+        self
+    }
+
+    pub fn publish_resend_timeout(&self) -> Duration {
+        self.publish_resend_timeout
     }
 
     /// Client identifier
