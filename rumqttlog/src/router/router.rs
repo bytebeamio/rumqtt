@@ -144,14 +144,11 @@ impl Router {
         };
 
         let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
-        if let Err(e) = connection.handle.try_send(message) {
-            error!("Failed to send connection ack. Error = {:?}", e.to_string());
-        }
+        // if let Err(e) = connection.handle.try_send(message) {
+        //     error!("Failed to send connection ack. Error = {:?}", e.to_string());
+        // }
 
-        info!(
-            "New Connection. Incoming ID = {:?}, Router assigned ID = {:?}",
-            connection.conn, id
-        );
+        info!("New Connection. In ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             warn!("Replacing an existing connection with same ID");
         }
@@ -420,9 +417,9 @@ impl Router {
         };
 
         let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
-        if let Err(e) = connection.handle.try_send(ack) {
-            error!("Failed to topics refresh reply. Error = {:?}", e);
-        }
+        // if let Err(e) = connection.handle.try_send(ack) {
+        //     error!("Failed to topics refresh reply. Error = {:?}", e);
+        // }
     }
 
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
@@ -569,9 +566,9 @@ impl Router {
             }
         };
 
-        if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to reply. Error = {:?}", e);
-        }
+        // if let Err(e) = connection.handle.try_send(reply) {
+        //     error!("Failed to reply. Error = {:?}", e);
+        // }
     }
 }
 

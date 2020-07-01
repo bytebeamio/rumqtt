@@ -60,8 +60,8 @@ impl Mesh {
         let (head, this, tail) = self.extract_servers();
 
         // start outgoing (client) links and then incoming (server) links
-        self.start_router_links(tail, true).await;
-        self.start_router_links(head, false).await;
+        self.start_replicators(tail, true).await;
+        self.start_replicators(head, false).await;
 
         let addr = format!("{}:{}", this.host, this.port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
@@ -71,41 +71,37 @@ impl Mesh {
         loop {
             let (stream, addr) = listener.accept().await.unwrap();
             debug!("Received a tcp connection from {}", addr);
-            let mut framed = Framed::new(stream, MqttCodec::new(10 * 1024));
-            let id = match await_connect(&mut framed).await {
-                Ok(id) => id,
-                Err(e) => {
-                    error!("Failed to await connect. Error = {:?}", e);
-                    continue;
-                }
-            };
+            // let mut framed = Framed::new(stream, MqttCodec::new(10 * 1024));
+            // let id = match await_connect(&mut framed).await {
+            //     Ok(id) => id,
+            //     Err(e) => {
+            //         error!("Failed to await connect. Error = {:?}", e);
+            //         continue;
+            //     }
+            // };
 
-            let handle = self.links.get_mut(&id).unwrap();
-            if let Err(_e) = handle.connections_tx.send(framed).await {
-                error!("Failed to send the connection to link");
-            }
+            // let handle = self.links.get_mut(&id).unwrap();
+            // if let Err(_e) = handle.connections_tx.send(framed).await {
+            //     error!("Failed to send the connection to link");
+            // }
         }
     }
 
-    async fn start_router_links(&mut self, config: Vec<MeshConfig>, is_client: bool) {
-        // launch the client links. We'll connect later
+    /// launch client replicators. We'll connect later
+    async fn start_replicators(&mut self, config: Vec<MeshConfig>, is_client: bool) {
         for server in config.iter() {
-            self.start_link(is_client, server.id, &server.host, server.port)
-                .await;
+            let (connections_tx, connections_rx) = bounded(1);
+            let router_tx = self.router_tx.clone();
+            let addr = format!("{}:{}", server.host, server.port);
+            let id = server.id;
+            let link_handle = LinkHandle::new(server.id, addr, connections_tx);
+            self.links.insert(id, link_handle);
+
+            task::spawn(async move {
+                let replicator = Replicator::new(id, router_tx, connections_rx, is_client).await;
+                replicator.start().await;
+            });
         }
-    }
-
-    async fn start_link(&mut self, is_client: bool, id: u8, host: &str, port: u16) {
-        let (connections_tx, connections_rx) = bounded(1);
-        let router_tx = self.router_tx.clone();
-        let addr = format!("{}:{}", host, port);
-        let link_handle = LinkHandle::new(id, addr, connections_tx);
-        self.links.insert(id, link_handle);
-
-        task::spawn(async move {
-            let replicator = Replicator::new(id, router_tx, connections_rx, is_client).await;
-            replicator.start().await;
-        });
     }
 
     /// Extract routers from the config. Returns
@@ -126,7 +122,7 @@ impl Mesh {
 }
 
 /// Await mqtt connect packet for incoming connections from a router
-async fn await_connect<S: IO>(framed: &mut Framed<S, MqttCodec>) -> Result<u8, Error> {
+async fn await_connect(framed: &mut Framed<Box<dyn IO>, MqttCodec>) -> Result<u8, Error> {
     let id = time::timeout(Duration::from_secs(5), async {
         // wait for mesh connect packet with id
         let packet = match framed.next().await {

@@ -8,7 +8,7 @@ use crate::mesh::ConnectionId;
 use crate::{RouterInMessage, RouterOutMessage, Connection, IO};
 use crate::router::ConnectionType;
 use tokio_util::codec::Framed;
-use rumqttc::{EventLoop, MqttCodec, Request};
+use rumqttc::{EventLoop, MqttCodec, MqttOptions, Request};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -27,7 +27,7 @@ pub struct Replicator<S> {
     /// Handle to send data to router
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handle to this link which router uses
-    link_rx: Option<Receiver<RouterOutMessage>>,
+    link_rx: Option<Receiver<Request>>,
     /// Connections receiver in server mode
     connections_rx: Receiver<Framed<S, MqttCodec>>,
     /// Client or server link
@@ -66,7 +66,7 @@ impl<S: IO> Replicator<S> {
         replicator
     }
 
-    async fn register_with_router(&self) -> Receiver<RouterOutMessage> {
+    async fn register_with_router(&self) -> Receiver<Request> {
         let (link_tx, link_rx) = bounded(4);
         let connection = Connection {
             conn: ConnectionType::Replicator(self.id as usize),
@@ -79,10 +79,17 @@ impl<S: IO> Replicator<S> {
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
-    async fn connect(&mut self) -> EventLoop<Receiver<Request>> {
+    async fn connect(&mut self, link_rx: Receiver<Request>) -> EventLoop<Receiver<Request>> {
         if self.is_client {
+            let options = MqttOptions::new(self.id.to_string(), "localhost", 1883);
+            return EventLoop::new(options, link_rx).await;
         }
-        todo!()
+
+        let framed = self.connections_rx.recv().await.unwrap();
+        let options = MqttOptions::new(self.id.to_string(), "localhost", 1883);
+        let mut eventloop = EventLoop::new(options, link_rx).await;
+        // eventloop.set_network(framed);
+        eventloop
     }
 
     pub async fn start(&self) {

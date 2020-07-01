@@ -9,6 +9,7 @@ pub use router::Router;
 
 use self::bytes::Bytes;
 use async_channel::{Sender, bounded, Receiver};
+use rumqttc::Request;
 use std::fmt;
 
 /// Messages going into router
@@ -215,11 +216,11 @@ pub struct Connection {
     pub(crate) conn: ConnectionType,
     /// Handle which is given to router to allow router to comminicate with
     /// this connection
-    pub handle: Sender<RouterOutMessage>,
+    pub handle: Sender<Request>,
 }
 
 impl Connection {
-    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<Request>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
