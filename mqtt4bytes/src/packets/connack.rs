@@ -7,8 +7,8 @@ use bytes::{Bytes, Buf};
 pub enum ConnectReturnCode {
     Accepted = 0,
     RefusedProtocolVersion,
-    RefusedIdentifierRejected,
-    ServerUnavailable,
+    BadClientId,
+    ServiceUnavailable,
     BadUsernamePassword,
     NotAuthorized,
 }
@@ -58,11 +58,11 @@ impl ConnAck {
 fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
     match num {
         0 => Ok(ConnectReturnCode::Accepted),
-        1 => Ok(ConnectReturnCode::BadUsernamePassword),
-        2 => Ok(ConnectReturnCode::NotAuthorized),
-        3 => Ok(ConnectReturnCode::RefusedIdentifierRejected),
-        4 => Ok(ConnectReturnCode::RefusedProtocolVersion),
-        5 => Ok(ConnectReturnCode::ServerUnavailable),
+        1 => Ok(ConnectReturnCode::RefusedProtocolVersion),
+        2 => Ok(ConnectReturnCode::BadClientId),
+        3 => Ok(ConnectReturnCode::ServiceUnavailable),
+        4 => Ok(ConnectReturnCode::BadUsernamePassword),
+        5 => Ok(ConnectReturnCode::NotAuthorized),
         num => Err(Error::InvalidConnectReturnCode(num)),
     }
 }
