@@ -26,6 +26,11 @@ pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 name = "rumqttasync"
 path = "rumqttasync.rs"
 
+
+[[bin]]
+name = "rumqttasyncqos0"
+path = "rumqttasyncqos0.rs"
+
 [[bin]]
 name = "rumqttsync"
 path = "rumqttsync.rs"
