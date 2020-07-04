@@ -106,9 +106,9 @@ impl<R: Requests> EventLoop<R> {
         // outgoing requests. Internal loops inside async functions are risky. Imagine this function
         // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
         // selected with other streams, can potentially do more internal polling (if the socket is ready)
-        if self.network.is_none() {
-            self.connect_or_cancel().await?;
-            return Ok((Some(Incoming::Connected), None))
+        if self.network.is_none(){
+            let connack = self.connect_or_cancel().await?;
+            return Ok((Some(connack), None))
         }
 
         let (incoming, outgoing) = match self.select().await {
@@ -190,7 +190,7 @@ impl<R: Requests> EventLoop<R> {
 }
 
 impl<R: Requests> EventLoop<R> {
-    async fn connect_or_cancel(&mut self) -> Result<(), ConnectionError> {
+    async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
@@ -207,7 +207,7 @@ impl<R: Requests> EventLoop<R> {
     /// the stream.
     /// This function (for convenience) includes internal delays for users to perform internal sleeps
     /// between re-connections so that cancel semantics can be used during this sleep
-    async fn connect(&mut self) -> Result<(), ConnectionError> {
+    async fn connect(&mut self) -> Result<Incoming, ConnectionError> {
         self.state.await_pingresp = false;
 
         // connect to the broker
@@ -220,14 +220,17 @@ impl<R: Requests> EventLoop<R> {
         };
 
         // make MQTT connection request (which internally awaits for ack)
-        if let Err(e) = self.mqtt_connect().await {
-            time::delay_for(self.reconnection_delay).await;
-            return Err(e);
-        }
+        let packet = match self.mqtt_connect().await {
+            Ok(p) => p,
+            Err(e) => {
+                time::delay_for(self.reconnection_delay).await;
+                return Err(e);
+            }
+        };
 
         // move pending messages from state to eventloop and create a pending stream of requests
         self.populate_pending();
-        Ok(())
+        Ok(packet)
     }
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
@@ -250,7 +253,7 @@ impl<R: Requests> EventLoop<R> {
         Ok(())
     }
 
-    async fn mqtt_connect(&mut self) -> Result<(), ConnectionError> {
+    async fn mqtt_connect(&mut self) -> Result<Packet, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         let state = &mut self.state;
         let id = self.options.client_id();
@@ -276,14 +279,14 @@ impl<R: Requests> EventLoop<R> {
         .await??;
 
         // wait for 'timeout' time to validate connack
-        time::timeout(Duration::from_secs(5), async {
+        let packet = time::timeout(Duration::from_secs(5), async {
             let packet = network.read().await?;
-            state.handle_incoming_connack(packet)?;
-            Ok::<_, ConnectionError>(())
+            state.handle_incoming_connack(packet.clone())?;
+            Ok::<_, ConnectionError>(packet)
         })
         .await??;
 
-        Ok(())
+        Ok(packet)
     }
 }
 

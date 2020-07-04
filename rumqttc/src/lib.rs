@@ -93,26 +93,7 @@ pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
 
-/// Includes incoming packets from the network and other interesting events happening in the eventloop
-#[derive(Debug)]
-pub enum Incoming {
-    /// Connection successful
-    Connected,
-    /// Incoming publish from the broker
-    Publish(Publish),
-    /// Incoming puback from the broker
-    Puback(PubAck),
-    /// Incoming pubrec from the broker
-    Pubrec(PubRec),
-    /// Incoming pubcomp from the broker
-    Pubcomp(PubComp),
-    /// Incoming suback from the broker
-    Suback(SubAck),
-    /// Incoming unsuback from the broker
-    Unsuback(UnsubAck),
-    /// Ping response
-    PingResp,
-}
+pub type Incoming = Packet;
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]

@@ -12,7 +12,7 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    let _o = start("rumqtt-async", 100, 1_000_000).await;
+    start("rumqtt-async", 100, 1_000_000).await.unwrap();
     // common::profile("bench.pb", guard);
 }
 
@@ -42,7 +42,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
         };
 
         match notification {
-            Incoming::Puback(_puback) => {
+            Incoming::PubAck(_puback) => {
                 acks_count += 1;
             }
             _notification => {

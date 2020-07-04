@@ -145,7 +145,7 @@ impl MqttState {
                 let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
 
                 let request = None;
-                let incoming = Some(Incoming::Puback(puback));
+                let incoming = Some(Incoming::PubAck(puback));
                 Ok((incoming, request))
             }
             None => {
@@ -159,7 +159,7 @@ impl MqttState {
         &mut self,
         suback: SubAck,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        let incoming = Some(Incoming::Suback(suback));
+        let incoming = Some(Incoming::SubAck(suback));
         let response = None;
         Ok((incoming, response))
     }
@@ -168,7 +168,7 @@ impl MqttState {
         &mut self,
         unsuback: UnsubAck,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        let incoming = Some(Incoming::Unsuback(unsuback));
+        let incoming = Some(Incoming::UnsubAck(unsuback));
         let response = None;
         Ok((incoming, response))
     }
@@ -187,7 +187,7 @@ impl MqttState {
                 self.outgoing_rel.push_back(pubrec.pkid);
 
                 let response = Some(Packet::PubRel(PubRel::new(pubrec.pkid)));
-                let incoming = Some(Incoming::Pubrec(pubrec));
+                let incoming = Some(Incoming::PubRec(pubrec));
                 Ok((incoming, response))
             }
             None => {
@@ -251,7 +251,7 @@ impl MqttState {
         match self.outgoing_rel.iter().position(|x| *x == pubcomp.pkid) {
             Some(index) => {
                 self.outgoing_rel.remove(index).expect("Wrong index");
-                let incoming = Some(Incoming::Pubcomp(pubcomp));
+                let incoming = Some(Incoming::PubComp(pubcomp));
                 let response = None;
                 Ok((incoming, response))
             }

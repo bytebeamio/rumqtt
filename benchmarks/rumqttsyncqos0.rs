@@ -14,7 +14,7 @@ fn main() {
 
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(20);
+    mqttoptions.set_keep_alive(1000);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
@@ -27,7 +27,6 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
         thread::sleep(Duration::from_secs(10));
     });
 
-    let mut acks_count = 0;
     let start = Instant::now();
     for o in connection.iter()  {
         let (notification, _) = o?;
@@ -37,21 +36,17 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
         };
 
         match notification {
-            Incoming::PubAck(_puback) => {
-                acks_count += 1;
+            Incoming::PingResp=> {
+                break;
             }
-            _notification => {
-                continue;
+            _ => {
+                continue
             }
         };
-
-        if acks_count == count {
-            break;
-        }
     }
 
     let elapsed_ms = start.elapsed().as_millis();
-    let throughput = acks_count as usize / elapsed_ms as usize;
+    let throughput =  count as usize / elapsed_ms as usize;
     let acks_throughput = throughput * 1000;
     println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
              id,
@@ -64,7 +59,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
 
 fn requests(payloads: Vec<Vec<u8>>, client: &mut Client) {
     for payload in payloads.into_iter() {
-        if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, false, payload) {
+        if let Err(e) = client.publish("hello/world", QoS::AtMostOnce, false, payload) {
             println!("Client error: {:?}", e);
             break;
         }
