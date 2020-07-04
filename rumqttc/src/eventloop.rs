@@ -169,7 +169,7 @@ impl<R: Requests> EventLoop<R> {
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = &mut self.keepalive_timeout => {
                 self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
-                self.state.handle_outgoing_packet(Packet::PingReq)?;
+                self.state.handle_outgoing_packet(Request::PingReq)?;
                 (None, Some(Packet::PingReq))
             }
             // cancellation requests to stop the polling
@@ -296,17 +296,17 @@ async fn next_pending(
     delay: Duration,
     pending_pub: &mut VecDeque<Publish>,
     pending_rel: &mut VecDeque<u16>,
-) -> Option<Packet> {
+) -> Option<Request> {
     time::delay_for(delay).await;
 
     // publishes are prioritized over releases
     // goto releases only after done with publishes
     if let Some(p) = pending_pub.pop_front() {
-        return Some(Packet::Publish(p));
+        return Some(Request::Publish(p));
     }
 
     if let Some(p) = pending_rel.pop_front() {
-        return Some(Packet::PubRel(PubRel::new(p)));
+        return Some(Request::PubRel(PubRel::new(p)));
     }
 
     None
@@ -333,7 +333,8 @@ impl From<Request> for Packet {
             Request::Disconnect => Packet::Disconnect,
             Request::Subscribe(subscribe) => Packet::Subscribe(subscribe),
             Request::Unsubscribe(unsubscribe) => Packet::Unsubscribe(unsubscribe),
-            _ => unimplemented!(),
+            Request::PingReq => Packet::PingReq,
+            _ => todo!()
         }
     }
 }

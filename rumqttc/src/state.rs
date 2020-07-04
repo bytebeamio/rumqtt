@@ -1,4 +1,4 @@
-use crate::Incoming;
+use crate::{Incoming, Request};
 
 use std::{collections::VecDeque, result::Result, time::Instant};
 use mqtt4bytes::*;
@@ -75,12 +75,12 @@ impl MqttState {
     /// be put on to the network by the eventloop
     pub(crate) fn handle_outgoing_packet(
         &mut self,
-        packet: Packet,
+        request: Request,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        let out = match packet {
-            Packet::Publish(publish) => self.handle_outgoing_publish(publish)?,
-            Packet::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
-            Packet::PingReq => self.handle_outgoing_ping()?,
+        let out = match request {
+            Request::Publish(publish) => self.handle_outgoing_publish(publish)?,
+            Request::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
+            Request::PingReq => self.handle_outgoing_ping()?,
             _ => unimplemented!(),
         };
 
@@ -384,7 +384,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttConnectionStatus, MqttState, Packet, StateError};
-    use crate::{Incoming, MqttOptions};
+    use crate::{Incoming, MqttOptions, Request};
     use mqtt4bytes::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
@@ -569,7 +569,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_pubrec(PubRec::new(1)).unwrap();
 
         match notification {
-            Some(Incoming::Pubrec(pubrec)) => assert_eq!(pubrec.pkid, 1),
+            Some(Incoming::PubRec(pubrec)) => assert_eq!(pubrec.pkid, 1),
             _ => panic!("Invalid notification"),
         }
 
@@ -622,7 +622,7 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_packet(Packet::Publish(publish))
+        mqtt.handle_outgoing_packet(Request::Publish(publish))
             .unwrap();
         mqtt.handle_incoming_packet(Packet::PubAck(PubAck::new(1)))
             .unwrap();

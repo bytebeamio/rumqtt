@@ -19,7 +19,7 @@ pub struct Network {
     /// Maximum packet size
     max_packet_size: usize,
     /// Maximum readv count
-    max_readv_count: usize,
+    _max_readv_count: usize,
 }
 
 impl Network {
@@ -31,11 +31,11 @@ impl Network {
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
             max_packet_size: 1 * 1024,
-            max_readv_count:10
+            _max_readv_count:10
         }
     }
 
-    pub fn with_capacity(socket: impl N + 'static, read: usize, write: usize) -> Network {
+    pub fn _with_capacity(socket: impl N + 'static, read: usize, write: usize) -> Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
@@ -43,17 +43,17 @@ impl Network {
             read: BytesMut::with_capacity(read),
             write: BytesMut::with_capacity(write),
             max_packet_size: 1 * 1024,
-            max_readv_count:10
+            _max_readv_count:10
         }
     }
 
-    pub fn set_max_packet_size(&mut self, size: usize) {
-        self.max_packet_size = size;
-    }
+    // pub fn set_max_packet_size(&mut self, size: usize) {
+    //     self.max_packet_size = size;
+    // }
 
-    pub fn set_readv_count(&mut self, count: usize) {
-        self.max_readv_count = count;
-    }
+    // pub fn set_readv_count(&mut self, count: usize) {
+    //     self.max_readv_count = count;
+    // }
 
     pub async fn read(&mut self) -> Result<Packet, io::Error> {
         loop {
@@ -78,13 +78,13 @@ impl Network {
     }
 
     /// Read packets in bulk. This allow replies to be in bulk
-    pub async fn readb(&mut self) -> Result<Vec<Packet>, io::Error> {
-        let mut out = Vec::with_capacity(self.max_readv_count);
+    pub async fn _readb(&mut self) -> Result<Vec<Packet>, io::Error> {
+        let mut out = Vec::with_capacity(self._max_readv_count);
         loop {
             match mqtt_read(&mut self.read, self.max_packet_size) {
                 Ok(packet) => {
                     out.push(packet);
-                    if out.len() >= self.max_readv_count { break }
+                    if out.len() >= self._max_readv_count { break }
                     continue;
                 }
                 Err(Error::InsufficientBytes(required)) => {
@@ -138,7 +138,7 @@ impl Network {
         Ok(())
     }
 
-    pub async fn writeb(&mut self, packets: Vec<Packet>) -> Result<(), io::Error> {
+    pub async fn _writeb(&mut self, packets: Vec<Packet>) -> Result<(), io::Error> {
         for packet in packets {
             if let Err(e) = mqtt_write(packet, &mut self.write) {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));

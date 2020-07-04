@@ -117,13 +117,18 @@ pub enum Outgoing {
 }
 
 /// Requests by the client to mqtt event loop. Request are
-/// handle one by one
+/// handled one by one. This is a duplicate of possible MQTT
+/// packets along with the ability to tag data and do bulk
+/// operations.
+/// Upcoming feature: When 'manual' feature is turned on
+/// provides the ability to reply with acks when the user sees fit
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
+    PubRel(PubRel),
+    PingReq,
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
-    Reconnect(Connect),
     Disconnect,
 }
 
