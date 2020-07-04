@@ -1,14 +1,14 @@
 use crate::state::{MqttState, StateError};
-use crate::{network, Incoming, Request};
+use crate::{tls, Incoming, Request};
 use crate::{MqttOptions, Outgoing};
+use crate::framed::Network;
 
 use async_channel::{bounded, Receiver, Sender};
-use futures_util::sink::{Sink, SinkExt};
-use futures_util::stream::{Stream, StreamExt};
-use mqtt4bytes::*;
 use tokio::select;
 use tokio::time::{self, Delay, Elapsed, Instant, Throttle};
-use tokio_util::codec::Framed;
+use tokio::net::TcpStream;
+use tokio::stream::{Stream, StreamExt};
+use mqtt4bytes::*;
 
 use std::collections::VecDeque;
 use std::io;
@@ -22,10 +22,10 @@ pub enum ConnectionError {
     MqttState(#[from] StateError),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
-    #[error("Rumq")]
-    Mqtt4Bytes(#[from] mqtt4bytes::Error),
+    #[error("Packet parsing error")]
+    Mqtt4Bytes(mqtt4bytes::Error),
     #[error("Network")]
-    Network(#[from] network::Error),
+    Network(#[from] tls::Error),
     #[error("I/O")]
     Io(#[from] io::Error),
     #[error("Stream done")]
@@ -51,7 +51,7 @@ pub struct EventLoop<R: Requests> {
     /// Flag to disable pending branch while polling
     has_pending: bool,
     /// Network connection to the broker
-    network: Option<Framed<Box<dyn N>, MqttCodec>>,
+    network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Delay,
     /// Handle to read cancellation requests
@@ -144,9 +144,9 @@ impl<R: Requests> EventLoop<R> {
         let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
         let (incoming, outpacket) = select! {
             // Pull next packet from network
-            o = network.next() => match o {
-                Some(packet) => self.state.handle_incoming_packet(packet?)?,
-                None => return Err(ConnectionError::StreamDone)
+            o = network.read() => match o {
+                Ok(packet) => self.state.handle_incoming_packet(packet)?,
+                Err(e) => return Err(ConnectionError::Io(e))
             },
             // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
@@ -181,7 +181,7 @@ impl<R: Requests> EventLoop<R> {
         // write the reply back to the network. flush??
         if let Some(packet) = outpacket {
             let outgoing = Some(outgoing(&packet));
-            network.send(packet).await?;
+            network.write(packet).await?;
             return Ok((incoming, outgoing))
         }
 
@@ -211,7 +211,7 @@ impl<R: Requests> EventLoop<R> {
         self.state.await_pingresp = false;
 
         // connect to the broker
-        let mut network = match self.network_connect().await {
+        match self.network_connect().await {
             Ok(network) => network,
             Err(e) => {
                 time::delay_for(self.reconnection_delay).await;
@@ -220,37 +220,39 @@ impl<R: Requests> EventLoop<R> {
         };
 
         // make MQTT connection request (which internally awaits for ack)
-        if let Err(e) = self.mqtt_connect(&mut network).await {
+        if let Err(e) = self.mqtt_connect().await {
             time::delay_for(self.reconnection_delay).await;
             return Err(e);
         }
 
         // move pending messages from state to eventloop and create a pending stream of requests
-        self.network = Some(network);
         self.populate_pending();
         Ok(())
     }
 
-    async fn network_connect(&self) -> Result<Framed<Box<dyn N>, MqttCodec>, ConnectionError> {
+    async fn network_connect(&mut self) -> Result<(), ConnectionError> {
         let network = time::timeout(Duration::from_secs(5), async {
             let network = if self.options.ca.is_some() {
-                let o = network::tls_connect(&self.options).await?;
-                let o = Box::new(o) as Box<dyn N>;
-                Framed::new(o, MqttCodec::new(self.options.max_packet_size))
+                let socket = tls::tls_connect(&self.options).await?;
+                Network::new(socket)
             } else {
-                let o = network::tcp_connect(&self.options).await?;
-                let o = Box::new(o) as Box<dyn N>;
-                Framed::new(o, MqttCodec::new(self.options.max_packet_size))
+                let addr = self.options.broker_addr.as_str();
+                let port = self.options.port;
+                let socket = TcpStream::connect((addr, port)).await?;
+                Network::new(socket)
             };
 
-            Ok::<Framed<Box<dyn N>, MqttCodec>, ConnectionError>(network)
+            Ok::<_, ConnectionError>(network)
         })
         .await??;
 
-        Ok(network)
+        self.network = Some(network);
+        Ok(())
     }
 
-    async fn mqtt_connect(&mut self, mut network: impl Network) -> Result<(), ConnectionError> {
+    async fn mqtt_connect(&mut self) -> Result<(), ConnectionError> {
+        let network = self.network.as_mut().unwrap();
+        let state = &mut self.state;
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
         let clean_session = self.options.clean_session();
@@ -267,19 +269,16 @@ impl<R: Requests> EventLoop<R> {
 
         // mqtt connection with timeout
         time::timeout(Duration::from_secs(5), async {
-            network.send(Packet::Connect(connect)).await?;
-            self.state.handle_outgoing_connect()?;
+            network.write(Packet::Connect(connect)).await?;
+            state.handle_outgoing_connect()?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
 
         // wait for 'timeout' time to validate connack
         time::timeout(Duration::from_secs(5), async {
-            let packet = match network.next().await {
-                Some(o) => o?,
-                None => return Err(ConnectionError::StreamDone),
-            };
-            self.state.handle_incoming_connack(packet)?;
+            let packet = network.read().await?;
+            state.handle_incoming_connack(packet)?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
@@ -336,22 +335,6 @@ impl From<Request> for Packet {
     }
 }
 
-use tokio::io::{AsyncRead, AsyncWrite};
-
-pub trait N: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
-impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
-
-pub trait Network:
-    Stream<Item = Result<Packet, mqtt4bytes::Error>> + Sink<Packet, Error = mqtt4bytes::Error> + Unpin + Send
-{
-}
-impl<T> Network for T where
-    T: Stream<Item = Result<Packet, mqtt4bytes::Error>>
-        + Sink<Packet, Error = mqtt4bytes::Error>
-        + Unpin
-        + Send
-{
-}
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
@@ -360,7 +343,7 @@ impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
 mod test {
     use super::broker::*;
     use crate::state::StateError;
-    use crate::{ConnectionError, MqttOptions, Outgoing, Request};
+    use crate::{ConnectionError, MqttOptions, Request};
     use async_channel::{bounded, Receiver, Sender};
     use mqtt4bytes::*;
     use std::time::{Duration, Instant};
@@ -565,12 +548,11 @@ mod test {
         let start = Instant::now();
         let mut eventloop = super::EventLoop::new(options, requests_rx).await;
         loop {
-            match eventloop.poll().await {
-                Err(e) => match e {
+            if let Err(e) = eventloop.poll().await {
+                match e {
                     ConnectionError::MqttState(StateError::AwaitPingResp) => break,
-                    v => panic!("Expecting  pingresp error. Found = {:?}", v),
-                },
-                Ok((_, outgoing)) => assert_eq!(Some(Outgoing::PingReq), outgoing),
+                    v => panic!("Expecting pingresp error. Found = {:?}", v),
+                }
             }
         }
 
@@ -717,17 +699,16 @@ mod test {
 
 #[cfg(test)]
 mod broker {
-    use futures_util::sink::SinkExt;
     use mqtt4bytes::*;
     use std::time::Duration;
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::net::TcpListener;
     use tokio::select;
     use tokio::stream::StreamExt;
     use tokio::time;
-    use tokio_util::codec::Framed;
+    use crate::framed::Network;
 
     pub struct Broker {
-        framed: Framed<TcpStream, MqttCodec>,
+        framed: Network,
     }
 
     impl Broker {
@@ -736,14 +717,14 @@ mod broker {
             let addr = format!("127.0.0.1:{}", port);
             let mut listener = TcpListener::bind(&addr).await.unwrap();
             let (stream, _) = listener.accept().await.unwrap();
-            let mut framed = Framed::new(stream,MqttCodec::new(1024 * 1024));
+            let mut framed = Network::new(stream);
 
-            let packet = framed.next().await.unwrap().unwrap();
+            let packet = framed.read().await.unwrap();
             if let Packet::Connect(_) = packet {
                 if send_connack {
                     let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
                     let packet = Packet::ConnAck(connack);
-                    framed.send(packet).await.unwrap();
+                    framed.write(packet).await.unwrap();
                 }
             } else {
                 panic!("Expecting connect packet");
@@ -755,7 +736,7 @@ mod broker {
         // Reads a publish packet from the stream with 2 second timeout
         pub async fn read_publish(&mut self) -> Option<u16> {
             let packet = time::timeout(Duration::from_secs(2), async {
-                self.framed.next().await.unwrap()
+                self.framed.read().await
             });
             match packet.await {
                 Ok(Ok(Packet::Publish(publish))) => Some(publish.pkid),
@@ -769,18 +750,18 @@ mod broker {
         /// Reads next packet from the stream
         pub async fn read_packet(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(30), async {
-                let p = self.framed.next().await;
+                let p = self.framed.read().await;
                 println!("Broker read = {:?}", p);
                 p.unwrap()
             });
 
-            let packet = packet.await.unwrap().unwrap();
+            let packet = packet.await.unwrap();
             packet
         }
 
         pub async fn read_packet_and_respond(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(30), async {
-                self.framed.next().await.unwrap()
+                self.framed.read().await
             });
             let packet = packet.await.unwrap().unwrap();
 
@@ -788,7 +769,7 @@ mod broker {
                 Packet::Publish(publish) => {
                     if publish.pkid > 0 {
                         let packet = PubAck::new(publish.pkid);
-                        self.framed.send(Packet::PubAck(packet)).await.unwrap();
+                        self.framed.write(Packet::PubAck(packet)).await.unwrap();
                     }
                 }
                 _ => (),
@@ -800,15 +781,14 @@ mod broker {
         /// Reads next packet from the stream
         pub async fn blackhole(&mut self) -> Packet {
             loop {
-                let _packet = self.framed.next().await.unwrap().unwrap();
+                let _packet = self.framed.read().await.unwrap();
             }
         }
 
         /// Sends an acknowledgement
         pub async fn ack(&mut self, pkid: u16) {
             let packet = Packet::PubAck(PubAck::new(pkid));
-            self.framed.send(packet).await.unwrap();
-            self.framed.flush().await.unwrap();
+            self.framed.write(packet).await.unwrap();
         }
 
         /// Send a bunch of publishes and ping response
@@ -821,10 +801,10 @@ mod broker {
                         let payload = vec![1, 2, 3, i];
                         let publish = Publish::new(topic, qos, payload);
                         let packet = Packet::Publish(publish);
-                        self.framed.send(packet).await.unwrap();
+                        self.framed.write(packet).await.unwrap();
                     }
-                    packet = self.framed.next() => match packet.unwrap().unwrap() {
-                        Packet::PingReq => self.framed.send(Packet::PingResp).await.unwrap(),
+                    packet = self.framed.read() => match packet.unwrap() {
+                        Packet::PingReq => self.framed.write(Packet::PingResp).await.unwrap(),
                         _ => ()
                     }
                 }

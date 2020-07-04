@@ -24,7 +24,7 @@ fn publish_encode_and_decode_works_as_expected() {
         let bytes = stream.split_to(split_len);
         read_stream.put(bytes);
         let packet = match mqtt_read(&mut read_stream, 10 * 1024) {
-            Err(mqtt4bytes::Error::UnexpectedEof) => continue,
+            Err(mqtt4bytes::Error::InsufficientBytes(_)) => continue,
             Err(e) => panic!(e),
             Ok(packet) => packet,
         };
@@ -75,7 +75,7 @@ fn pubacks_encode_and_decode_works_as_expected() {
         let bytes = stream.split_to(split_len);
         read_stream.put(bytes);
         let packet = match mqtt_read(&mut read_stream, 10 * 1024) {
-            Err(mqtt4bytes::Error::UnexpectedEof) => continue,
+            Err(mqtt4bytes::Error::InsufficientBytes(_)) => continue,
             Err(e) => panic!(e),
             Ok(packet) => packet,
         };

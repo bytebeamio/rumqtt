@@ -15,7 +15,9 @@ pub use topic::*;
 pub use write::*;
 use bytes::Buf;
 use core::fmt;
+use core::fmt::{Display, Formatter};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     InvalidConnectReturnCode(u8),
     InvalidProtocol,
@@ -31,7 +33,7 @@ pub enum Error {
     TopicNotUtf8,
     BoundaryCrossed,
     MalformedRemainingLength,
-    UnexpectedEof,
+    InsufficientBytes(usize),
 }
 
 /// Encapsulates all MQTT packet types
@@ -139,8 +141,8 @@ pub fn qos(num: u8) -> Result<QoS, Error> {
     }
 }
 
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Error = {:?}", self)
     }
 }

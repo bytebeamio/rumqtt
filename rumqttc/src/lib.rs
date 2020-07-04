@@ -84,7 +84,8 @@ use std::time::Duration;
 
 mod client;
 mod eventloop;
-mod network;
+mod tls;
+mod framed;
 mod state;
 
 pub use client::{Client, Connection, ClientError};
