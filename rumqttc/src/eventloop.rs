@@ -646,6 +646,12 @@ mod test {
             broker.ack(packet.unwrap()).await;
         }
 
+        // NOTE: An interesting thing to notice here is that reassigning a new broker
+        // is behaving like a half-open connection instead of cleanly closing the socket
+        // and returning error immediately
+        // Manually dropping (`drop(broker.framed)`) the connection or adding
+        // a block around broker with {} is closing the connection as expected
+
         // broker connection 2
         let mut broker = Broker::new(1889, true).await;
         for i in 3..=4 {
@@ -699,7 +705,7 @@ mod broker {
     use crate::framed::Network;
 
     pub struct Broker {
-        framed: Network,
+        pub(crate) framed: Network,
     }
 
     impl Broker {
