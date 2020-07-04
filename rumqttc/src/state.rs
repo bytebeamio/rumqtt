@@ -1,7 +1,8 @@
 use crate::{Incoming, Request};
 
-use std::{collections::VecDeque, result::Result, time::Instant};
+use std::{time::Instant, mem};
 use mqtt4bytes::*;
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttConnectionStatus {
@@ -31,9 +32,11 @@ pub enum StateError {
 }
 
 /// State of the mqtt connection.
-// Methods will just modify the state of the object without doing any network operations
-// This abstracts the functionality better so that it's easy to switch between synchronous code,
-// tokio (or) async/await
+// Design: Methods will just modify the state of the object without doing any network operations
+// Design: All inflight queues are maintained in a pre initialized vec with index as packet id.
+// This is done for 2 reasons
+// Bad acks or out of order acks aren't O(n) causing cpu spikes
+// Any missing acks from the broker are detected during the next recycled use of packet ids
 #[derive(Debug, Clone)]
 pub struct MqttState {
     /// Connection status
@@ -41,17 +44,19 @@ pub struct MqttState {
     /// Status of last ping
     pub await_pingresp: bool,
     /// Last incoming packet time
-    pub last_incoming: Instant,
+    last_incoming: Instant,
     /// Last outgoing packet time
-    pub last_outgoing: Instant,
+    last_outgoing: Instant,
     /// Packet id of the last outgoing packet
-    pub last_pkid: u16,
+    last_pkid: u16,
+    /// Number of outgoin inflight publishes
+    pub(crate) inflight: usize,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub outgoing_pub: VecDeque<Publish>,
+    pub(crate) outgoing_pub: Vec<Option<Publish>>,
     /// Packet ids of released QoS 2 publishes
-    pub outgoing_rel: VecDeque<u16>,
+    pub(crate) outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
-    pub incoming_pub: VecDeque<u16>,
+    pub incoming_pub: Vec<Option<u16>>,
 }
 
 impl MqttState {
@@ -65,10 +70,39 @@ impl MqttState {
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: 0,
-            outgoing_pub: VecDeque::new(),
-            outgoing_rel: VecDeque::new(),
-            incoming_pub: VecDeque::new(),
+            inflight: 0,
+            outgoing_pub: vec![None; u16::MAX as usize + 1],
+            outgoing_rel: vec![None; u16::MAX as usize + 1],
+            incoming_pub: vec![None; u16::MAX as usize + 1],
         }
+    }
+
+    /// Returns inflight outgoing packets and clears internal queues
+    pub fn clean(&mut self) -> (VecDeque<Publish>, VecDeque<u16>) {
+        let mut pending_publishes = VecDeque::with_capacity(100);
+        // remove and collect pending publishes
+        for publish in self.outgoing_pub.iter_mut() {
+            if let Some(p) = publish.take() {
+                pending_publishes.push_back(p);
+            }
+        }
+
+        // remove and collect pending releases
+        let mut pending_rel = VecDeque::with_capacity(100);
+        for rel in self.outgoing_rel.iter_mut() {
+            if let Some(p) = rel.take() {
+                pending_rel.push_back(p);
+            }
+        }
+
+        // remove packed ids of incoming qos2 publishes
+        for id in self.incoming_pub.iter_mut() {
+            id.take();
+        }
+
+        self.await_pingresp = false;
+        self.inflight = 0;
+        (pending_publishes, pending_rel)
     }
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
@@ -140,10 +174,9 @@ impl MqttState {
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     fn handle_incoming_puback(&mut self, puback: PubAck) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == puback.pkid) {
-            Some(index) => {
-                let _publish = self.outgoing_pub.remove(index).expect("Wrong index");
-
+        match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
+            Some(_) => {
+                self.inflight -= 1;
                 let request = None;
                 let incoming = Some(Incoming::PubAck(puback));
                 Ok((incoming, request))
@@ -173,19 +206,14 @@ impl MqttState {
         Ok((incoming, response))
     }
 
-    /// Iterates through the list of stored publishes and removes the publish with the
-    /// matching packet identifier. Removal is now a O(n) operation. This should be
-    /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
-    /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     fn handle_incoming_pubrec(
         &mut self,
         pubrec: PubRec,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        match self.outgoing_pub.iter().position(|x| x.pkid == pubrec.pkid) {
-            Some(index) => {
-                let _ = self.outgoing_pub.remove(index);
-                self.outgoing_rel.push_back(pubrec.pkid);
-
+        match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
+            Some(_) => {
+                self.inflight -= 1;
+                mem::replace(&mut self.outgoing_rel[pubrec.pkid as usize], Some(pubrec.pkid));
                 let response = Some(Packet::PubRel(PubRel::new(pubrec.pkid)));
                 let incoming = Some(Incoming::PubRec(pubrec));
                 Ok((incoming, response))
@@ -220,8 +248,7 @@ impl MqttState {
                 let pkid = publish.pkid;
                 let response = Packet::PubRec(PubRec::new(pkid));
                 let incoming = Incoming::Publish(publish);
-
-                self.incoming_pub.push_back(pkid);
+                mem::replace(&mut self.incoming_pub[pkid as usize], Some(pkid));
                 Ok((Some(incoming), Some(response)))
             }
         }
@@ -231,9 +258,8 @@ impl MqttState {
         &mut self,
         pubrel: PubRel,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        match self.incoming_pub.iter().position(|x| *x == pubrel.pkid) {
-            Some(index) => {
-                let _ = self.incoming_pub.remove(index);
+        match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
+            Some(_) => {
                 let response = Packet::PubComp(PubComp::new(pubrel.pkid));
                 Ok((None, Some(response)))
             }
@@ -248,14 +274,13 @@ impl MqttState {
         &mut self,
         pubcomp: PubComp,
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
-        match self.outgoing_rel.iter().position(|x| *x == pubcomp.pkid) {
-            Some(index) => {
-                self.outgoing_rel.remove(index).expect("Wrong index");
+        match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
+            Some(_) => {
                 let incoming = Some(Incoming::PubComp(pubcomp));
                 let response = None;
                 Ok((incoming, response))
             }
-            _ => {
+            None => {
                 error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
                 Err(StateError::Unsolicited)
             }
@@ -365,7 +390,8 @@ impl MqttState {
             _ => publish,
         };
 
-        self.outgoing_pub.push_back(publish.clone());
+        mem::replace(&mut self.outgoing_pub[publish.pkid as usize], Some(publish.clone()));
+        self.inflight += 1;
         publish
     }
 
@@ -422,7 +448,7 @@ mod test {
     }
 
     #[test]
-    fn outgoing_publish_handle_should_set_pkid_correctly_and_add_publish_to_queue_correctly() {
+    fn outgoing_publish_should_set_pkid_correctly_and_add_publish_to_queue_correctly() {
         let mut mqtt = build_mqttstate();
 
         // QoS0 Publish
@@ -434,7 +460,7 @@ mod test {
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 0);
-        assert_eq!(mqtt.outgoing_pub.len(), 0);
+        assert_eq!(mqtt.inflight, 0);
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
@@ -445,7 +471,7 @@ mod test {
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 1);
-        assert_eq!(mqtt.outgoing_pub.len(), 1);
+        assert_eq!(mqtt.inflight, 1);
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
@@ -453,7 +479,7 @@ mod test {
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 2);
-        assert_eq!(mqtt.outgoing_pub.len(), 2);
+        assert_eq!(mqtt.inflight, 2);
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
@@ -464,7 +490,7 @@ mod test {
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 3);
-        assert_eq!(mqtt.outgoing_pub.len(), 3);
+        assert_eq!(mqtt.inflight, 3);
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
@@ -472,7 +498,7 @@ mod test {
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 4);
-        assert_eq!(mqtt.outgoing_pub.len(), 4);
+        assert_eq!(mqtt.inflight, 4);
     }
 
     #[test]
@@ -488,10 +514,9 @@ mod test {
         mqtt.handle_incoming_publish(publish2).unwrap();
         mqtt.handle_incoming_publish(publish3).unwrap();
 
-        let pkid = *mqtt.incoming_pub.get(0).unwrap();
+        let pkid = mqtt.incoming_pub[3].unwrap();
 
         // only qos2 publish should be add to queue
-        assert_eq!(mqtt.incoming_pub.len(), 1);
         assert_eq!(pkid, 3);
     }
 
@@ -524,15 +549,16 @@ mod test {
 
         mqtt.handle_outgoing_publish(publish1).unwrap();
         mqtt.handle_outgoing_publish(publish2).unwrap();
+        assert_eq!(mqtt.inflight, 2);
 
         mqtt.handle_incoming_puback(PubAck::new(1)).unwrap();
-        assert_eq!(mqtt.outgoing_pub.len(), 1);
-
-        let backup = mqtt.outgoing_pub.get(0).clone();
-        assert_eq!(backup.unwrap().pkid, 2);
+        assert_eq!(mqtt.inflight, 1);
 
         mqtt.handle_incoming_puback(PubAck::new(2)).unwrap();
-        assert_eq!(mqtt.outgoing_pub.len(), 0);
+        assert_eq!(mqtt.inflight, 0);
+
+        assert!(mqtt.outgoing_pub[1].is_none());
+        assert!(mqtt.outgoing_pub[2].is_none());
     }
 
     #[test]
@@ -546,17 +572,14 @@ mod test {
         let _publish_out = mqtt.handle_outgoing_publish(publish2);
 
         mqtt.handle_incoming_pubrec(PubRec::new(2)).unwrap();
-        assert_eq!(mqtt.outgoing_pub.len(), 1);
+        assert_eq!(mqtt.inflight, 1);
 
         // check if the remaining element's pkid is 1
-        let backup = mqtt.outgoing_pub.get(0).clone();
+        let backup = mqtt.outgoing_pub[1].clone();
         assert_eq!(backup.unwrap().pkid, 1);
 
-        assert_eq!(mqtt.outgoing_rel.len(), 1);
-
-        // check if the  element's pkid is 2
-        let pkid = *mqtt.outgoing_rel.get(0).unwrap();
-        assert_eq!(pkid, 2);
+        // check if the qos2 element's release pkid is 2
+        assert_eq!(mqtt.outgoing_rel[2].unwrap(), 2);
     }
 
     #[test]
@@ -585,7 +608,6 @@ mod test {
         let publish = build_incoming_publish(QoS::ExactlyOnce, 1);
 
         mqtt.handle_incoming_publish(publish).unwrap();
-        println!("{:?}", mqtt);
         let (notification, request) = mqtt.handle_incoming_pubrel(PubRel::new(1)).unwrap();
 
         match notification {
@@ -606,10 +628,9 @@ mod test {
 
         mqtt.handle_outgoing_publish(publish).unwrap();
         mqtt.handle_incoming_pubrec(PubRec::new(1)).unwrap();
-        println!("{:?}", mqtt);
 
         mqtt.handle_incoming_pubcomp(PubComp::new(1)).unwrap();
-        assert_eq!(mqtt.outgoing_pub.len(), 0);
+        assert_eq!(mqtt.inflight, 0);
     }
 
     #[test]

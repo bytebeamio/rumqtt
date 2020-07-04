@@ -11,8 +11,7 @@ use tokio::stream::{Stream, StreamExt};
 use mqtt4bytes::*;
 
 use std::collections::VecDeque;
-use std::io;
-use std::mem;
+use std::{io, mem};
 use std::time::Duration;
 
 /// Critical errors during eventloop polling
@@ -123,25 +122,11 @@ impl<R: Requests> EventLoop<R> {
         Ok((incoming, outgoing))
     }
 
-    /// Last session might contain packets which aren't acked. MQTT says these packets should be
-    /// republished in the next session. We save all such pending packets here.
-    fn populate_pending(&mut self) {
-        let mut pending_pub = mem::replace(&mut self.state.outgoing_pub, VecDeque::new());
-        self.pending_pub.append(&mut pending_pub);
-
-        let mut pending_rel = mem::replace(&mut self.state.outgoing_rel, VecDeque::new());
-        self.pending_rel.append(&mut pending_rel);
-
-        if !self.pending_pub.is_empty() || !self.pending_rel.is_empty() {
-            self.has_pending = true;
-        }
-    }
 
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let network = &mut self.network.as_mut().unwrap();
-
-        let inflight_full = self.state.outgoing_pub.len() >= self.options.inflight;
+        let inflight_full = self.state.inflight >= self.options.inflight;
         let (incoming, outpacket) = select! {
             // Pull next packet from network
             o = network.read() => match o {
@@ -228,8 +213,13 @@ impl<R: Requests> EventLoop<R> {
             }
         };
 
-        // move pending messages from state to eventloop and create a pending stream of requests
-        self.populate_pending();
+        // Last session might contain packets which aren't acked. MQTT says these packets should be
+        // republished in the next session
+        // move pending messages from state to eventloop
+        let (pending_pub, pending_rel) = self.state.clean();
+        mem::replace(&mut self.pending_pub, pending_pub);
+        mem::replace(&mut self.pending_rel, pending_rel);
+        self.has_pending = true;
         Ok(packet)
     }
 
@@ -338,7 +328,6 @@ impl From<Request> for Packet {
         }
     }
 }
-
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send {}
 impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}
@@ -458,7 +447,6 @@ mod test {
 
         for _ in 0..10 {
             let packet = broker.read_packet().await;
-            println!("packet = {:?}", packet);
             let elapsed = start.elapsed();
             match packet {
                 Packet::PingReq => {
@@ -638,8 +626,7 @@ mod test {
     async fn reconnection_resumes_from_the_previous_state() {
         let options = MqttOptions::new("dummy", "127.0.0.1", 1889);
 
-        // start sending qos0 publishes. this makes sure that there is
-        // outgoing activity but no incomin activity
+        // start sending qos0 publishes. Makes sure that there is out activity but no in activity
         let (requests_tx, requests_rx) = bounded(5);
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -755,7 +742,7 @@ mod broker {
         pub async fn read_packet(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(30), async {
                 let p = self.framed.read().await;
-                println!("Broker read = {:?}", p);
+                // println!("Broker read = {:?}", p);
                 p.unwrap()
             });
 
