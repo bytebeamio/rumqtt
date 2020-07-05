@@ -245,7 +245,6 @@ impl<R: Requests> EventLoop<R> {
 
     async fn mqtt_connect(&mut self) -> Result<Packet, ConnectionError> {
         let network = self.network.as_mut().unwrap();
-        let state = &mut self.state;
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
         let clean_session = self.options.clean_session();
@@ -263,7 +262,6 @@ impl<R: Requests> EventLoop<R> {
         // mqtt connection with timeout
         time::timeout(Duration::from_secs(5), async {
             network.write(Packet::Connect(connect)).await?;
-            state.handle_outgoing_connect()?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
@@ -271,7 +269,6 @@ impl<R: Requests> EventLoop<R> {
         // wait for 'timeout' time to validate connack
         let packet = time::timeout(Duration::from_secs(5), async {
             let packet = network.read().await?;
-            state.handle_incoming_connack(packet.clone())?;
             Ok::<_, ConnectionError>(packet)
         })
         .await??;

@@ -4,14 +4,6 @@ use std::{time::Instant, mem};
 use mqtt4bytes::*;
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MqttConnectionStatus {
-    Handshake,
-    Connected,
-    Disconnecting,
-    Disconnected,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
     /// Broker's error reply to client's connect packet
@@ -39,8 +31,6 @@ pub enum StateError {
 // Any missing acks from the broker are detected during the next recycled use of packet ids
 #[derive(Debug, Clone)]
 pub struct MqttState {
-    /// Connection status
-    pub connection_status: MqttConnectionStatus,
     /// Status of last ping
     pub await_pingresp: bool,
     /// Last incoming packet time
@@ -49,7 +39,7 @@ pub struct MqttState {
     last_outgoing: Instant,
     /// Packet id of the last outgoing packet
     last_pkid: u16,
-    /// Number of outgoin inflight publishes
+    /// Number of outgoing inflight publishes
     pub(crate) inflight: usize,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
     pub(crate) outgoing_pub: Vec<Option<Publish>>,
@@ -65,7 +55,6 @@ impl MqttState {
     /// instantiated for clean sessions
     pub fn new() -> Self {
         MqttState {
-            connection_status: MqttConnectionStatus::Disconnected,
             await_pingresp: false,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
@@ -142,7 +131,7 @@ impl MqttState {
             Packet::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
             Packet::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
             _ => {
-                error!("Invalid incoming paket = {:?}", packet);
+                error!("Invalid incoming packet = {:?}", packet);
                 Ok((None, None))
             }
         };
@@ -335,47 +324,6 @@ impl MqttState {
         Ok(Packet::Subscribe(subscription))
     }
 
-    pub fn handle_outgoing_connect(&mut self) -> Result<(), StateError> {
-        self.connection_status = MqttConnectionStatus::Handshake;
-        Ok(())
-    }
-
-    pub fn handle_incoming_connack(&mut self, packet: Packet) -> Result<(), StateError> {
-        let connack = match packet {
-            Packet::ConnAck(connack) => connack,
-            packet => {
-                error!("Invalid packet. Expecting connack. Received = {:?}", packet);
-                self.connection_status = MqttConnectionStatus::Disconnected;
-                return Err(StateError::WrongPacket);
-            }
-        };
-
-        match connack.code {
-            ConnectReturnCode::Accepted
-                if self.connection_status == MqttConnectionStatus::Handshake =>
-            {
-                self.connection_status = MqttConnectionStatus::Connected;
-                Ok(())
-            }
-            ConnectReturnCode::Accepted
-                if self.connection_status != MqttConnectionStatus::Handshake =>
-            {
-                error!(
-                    "Invalid state. Expected = {:?}, Current = {:?}",
-                    MqttConnectionStatus::Handshake,
-                    self.connection_status
-                );
-                self.connection_status = MqttConnectionStatus::Disconnected;
-                Err(StateError::InvalidState)
-            }
-            code => {
-                error!("Connection failed. Connection error = {:?}", code);
-                self.connection_status = MqttConnectionStatus::Disconnected;
-                Err(StateError::Connect(code))
-            }
-        }
-    }
-
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
     /// TODO Measure Arc vs copy perf and take a call regarding clones
@@ -409,7 +357,7 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use super::{MqttConnectionStatus, MqttState, Packet, StateError};
+    use super::{MqttState, Packet, StateError};
     use crate::{Incoming, MqttOptions, Request};
     use mqtt4bytes::*;
 
@@ -638,7 +586,6 @@ mod test {
         let mut mqtt = build_mqttstate();
         let mut opts = MqttOptions::new("test", "localhost", 1883);
         opts.set_keep_alive(10);
-        mqtt.connection_status = MqttConnectionStatus::Connected;
         mqtt.handle_outgoing_ping().unwrap();
 
         // network activity other than pingresp
@@ -662,8 +609,6 @@ mod test {
 
         let mut opts = MqttOptions::new("test", "localhost", 1883);
         opts.set_keep_alive(10);
-
-        mqtt.connection_status = MqttConnectionStatus::Connected;
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();
