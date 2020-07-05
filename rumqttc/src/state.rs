@@ -123,7 +123,7 @@ impl MqttState {
     ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
         let out = match packet {
             Packet::PingResp => self.handle_incoming_pingresp(),
-            Packet::Publish(publish) => self.handle_incoming_publish(publish.clone()),
+            Packet::Publish(publish) => self.handle_incoming_publish(publish),
             Packet::SubAck(suback) => self.handle_incoming_suback(suback),
             Packet::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback),
             Packet::PubAck(puback) => self.handle_incoming_puback(puback),
