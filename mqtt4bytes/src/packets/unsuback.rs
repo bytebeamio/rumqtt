@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf};
+use bytes::{Bytes, Buf, BufMut, BytesMut};
 
 
 
@@ -21,5 +21,11 @@ impl UnsubAck {
         let unsuback = UnsubAck { pkid };
 
         Ok(unsuback)
+    }
+
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        payload.put_slice(&[0xB0, 0x02]);
+        payload.put_u16(self.pkid);
+        Ok(4)
     }
 }

@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf};
+use bytes::{Bytes, Buf, BytesMut, BufMut};
 
 /// Acknowledgement to pubrec
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +23,13 @@ impl PubRel {
         let pubrel = PubRel { pkid };
 
         Ok(pubrel)
+    }
+
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        let o: &[u8] = &[0x62, 0x02];
+        payload.put_slice(o);
+        payload.put_u16(self.pkid);
+        Ok(4)
     }
 }
 

@@ -1,5 +1,5 @@
 use bytes::{BufMut, BytesMut};
-use mqtt4bytes::{mqtt_read, mqtt_write, Packet, PubAck, Publish, QoS};
+use mqtt4bytes::{mqtt_read, Packet, PubAck, Publish, QoS};
 use rand::Rng;
 
 #[test]
@@ -46,8 +46,7 @@ pub fn publishes(size: usize, count: usize) -> BytesMut {
         let payload = vec![i as u8; size];
         let mut packet = Publish::new("hello/mqtt/topic/bytes", QoS::AtLeastOnce, payload);
         packet.set_pkid((i % 65000) as u16 + 1);
-        let packet = Packet::Publish(packet);
-        mqtt_write(packet, &mut stream).unwrap();
+        packet.write(&mut stream).unwrap();
     }
 
     stream
@@ -95,8 +94,7 @@ pub fn pubacks(count: usize) -> BytesMut {
 
     for i in 0..count {
         let packet = PubAck::new((i % 65000) as u16 + 1);
-        let packet = Packet::PubAck(packet);
-        mqtt_write(packet, &mut stream).unwrap();
+        packet.write(&mut stream).unwrap();
     }
 
     stream

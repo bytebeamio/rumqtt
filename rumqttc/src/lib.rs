@@ -125,8 +125,12 @@ pub enum Outgoing {
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
+    PubAck(PubAck),
+    PubRec(PubRec),
+    PubComp(PubComp),
     PubRel(PubRel),
     PingReq,
+    PingResp,
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
     Disconnect,

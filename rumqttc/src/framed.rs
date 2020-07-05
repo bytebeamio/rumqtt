@@ -3,6 +3,7 @@ use bytes::BytesMut;
 use mqtt4bytes::*;
 
 use std::io;
+use crate::Request;
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -67,7 +68,7 @@ impl Network {
             // can be created. Use this in a select! branch
             let mut total_read = 0;
             loop {
-                let read = self.fill().await?;
+                let read = self.read_fill().await?;
                 total_read += read;
                 if total_read >= self.pending {
                     self.pending = 0;
@@ -96,7 +97,7 @@ impl Network {
 
             let mut total_read = 0;
             loop {
-                let read = self.fill().await?;
+                let read = self.read_fill().await?;
                 total_read += read;
                 if total_read >= self.pending {
                     self.pending = 0;
@@ -109,7 +110,7 @@ impl Network {
     }
 
     /// Fills the read buffer with more bytes
-    async fn fill(&mut self) -> Result<usize, io::Error> {
+    async fn read_fill(&mut self) -> Result<usize, io::Error> {
         let read = self.socket.read_buf(&mut self.read).await?;
         if 0 == read {
             return if self.read.is_empty() {
@@ -122,14 +123,61 @@ impl Network {
         Ok(read)
     }
 
-    /// Write packet to network
-    pub async fn write(&mut self, packet: Packet) -> Result<(), io::Error> {
-        if let Err(e) = mqtt_write(packet, &mut self.write) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
+    fn write_fill(&mut self, request: Request) -> Result<usize, io::Error> {
+        let ret = match request {
+            Request::Publish(packet) => packet.write(&mut self.write),
+            Request::PubRel(packet) => packet.write(&mut self.write),
+            Request::PingReq => {
+                let packet = PingReq;
+                packet.write(&mut self.write)
+            },
+            Request::PingResp => {
+                let packet = PingResp;
+                packet.write(&mut self.write)
+            }
+            Request::Subscribe(packet) => packet.write(&mut self.write),
+            Request::Unsubscribe(packet) => packet.write(&mut self.write),
+            Request::Disconnect => {
+                let packet = Disconnect;
+                packet.write(&mut self.write)
+            },
+            Request::PubAck(packet) => packet.write(&mut self.write),
+            Request::PubRec(packet) => packet.write(&mut self.write),
+            Request::PubComp(packet) => packet.write(&mut self.write),
+        };
+
+        match ret {
+            Ok(size) => Ok(size),
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
         }
+    }
+
+    pub async fn connect(&mut self, connect: Connect) -> Result<usize, io::Error> {
+        let len = match connect.write(&mut self.write) {
+            Ok(size) => size,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        };
 
         self.flush().await?;
-        Ok(())
+        Ok(len)
+    }
+
+    #[cfg(test)]
+    pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {
+        let len = match connack.write(&mut self.write) {
+            Ok(size) => size,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        };
+
+        self.flush().await?;
+        Ok(len)
+    }
+
+    /// Write packet to network
+    pub async fn write(&mut self, request: Request) -> Result<usize, io::Error> {
+        let len = self.write_fill(request)?;
+        self.flush().await?;
+        Ok(len)
     }
 
     pub async fn flush(&mut self) -> Result<(), io::Error> {
@@ -138,11 +186,9 @@ impl Network {
         Ok(())
     }
 
-    pub async fn _writeb(&mut self, packets: Vec<Packet>) -> Result<(), io::Error> {
-        for packet in packets {
-            if let Err(e) = mqtt_write(packet, &mut self.write) {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
-            }
+    pub async fn _writeb(&mut self, requests: Vec<Request>) -> Result<(), io::Error> {
+        for request in requests {
+            self.write_fill(request)?;
         }
 
         self.flush().await?;

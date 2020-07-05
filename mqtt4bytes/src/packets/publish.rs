@@ -68,6 +68,33 @@ impl Publish {
 
         Ok(publish)
     }
+
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        let dup = self.dup as u8;
+        let qos = self.qos as u8;
+        let retain = self.retain as u8;
+        payload.put_u8(0b0011_0000 | retain | qos << 1 | dup << 3);
+
+        // for publish, variable header = 2 + topic + packet id (optional) + payload
+        let mut remaining_len = self.topic.len() + 2 + self.payload.len();
+        if self.qos != QoS::AtMostOnce && self.pkid != 0 {
+            remaining_len += 2;
+        }
+
+        let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
+        write_mqtt_string(payload, self.topic.as_str());
+        if self.qos != QoS::AtMostOnce {
+            let pkid = self.pkid;
+            if pkid == 0 {
+                return Err(Error::PacketIdZero);
+            }
+
+            payload.put_u16(pkid);
+        }
+
+        payload.extend_from_slice(&self.payload);
+        Ok(1 + remaining_len_bytes + remaining_len)
+    }
 }
 
 impl fmt::Debug for Publish {
@@ -91,6 +118,7 @@ mod test {
     use alloc::borrow::ToOwned;
     use bytes::{Bytes, BytesMut};
     use pretty_assertions::assert_eq;
+    use alloc::vec;
 
     #[test]
     fn qos1_publish_stitching_works_correctly() {
@@ -202,6 +230,74 @@ mod test {
                 payload: Bytes::from(&[0x01, 0x02][..]),
                 bytes
             }
+        );
+    }
+
+    #[test]
+    fn write_packet_publish_at_least_once_works() {
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtLeastOnce,
+            retain: false,
+            topic: "a/b".to_owned(),
+            pkid: 10,
+            payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
+            bytes: Bytes::new(),
+        };
+
+        let mut buf = BytesMut::new();
+        publish.write(&mut buf).unwrap();
+
+        assert_eq!(
+            buf,
+            vec![
+                0b0011_0010,
+                11,
+                0x00,
+                0x03,
+                b'a',
+                b'/',
+                b'b',
+                0x00,
+                0x0a,
+                0xF1,
+                0xF2,
+                0xF3,
+                0xF4
+            ]
+        );
+    }
+
+    #[test]
+    fn write_packet_publish_at_most_once_works() {
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            topic: "a/b".to_owned(),
+            pkid: 0,
+            payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
+            bytes: Bytes::new(),
+        };
+
+        let mut buf = BytesMut::new();
+        publish.write(&mut buf).unwrap();
+
+        assert_eq!(
+            buf,
+            vec![
+                0b0011_0000,
+                9,
+                0x00,
+                0x03,
+                b'a',
+                b'/',
+                b'b',
+                0xE1,
+                0xE2,
+                0xE3,
+                0xE4
+            ]
         );
     }
 }

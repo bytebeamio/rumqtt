@@ -28,4 +28,19 @@ impl Unsubscribe {
         let unsubscribe = Unsubscribe { pkid, topics };
         Ok(unsubscribe)
     }
+
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        let remaining_len = 2 + self
+            .topics
+            .iter()
+            .fold(0, |s, ref topic| s + topic.len() + 2);
+        payload.reserve(remaining_len + 8);
+        payload.put_u8(0xA2);
+        let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
+        payload.put_u16(self.pkid);
+        for topic in self.topics.iter() {
+            write_mqtt_string(payload, topic.as_str());
+        }
+        Ok(1 + remaining_len_bytes + remaining_len)
+    }
 }

@@ -7,12 +7,10 @@ extern crate alloc;
 mod packets;
 mod read;
 mod topic;
-mod write;
 
 pub use packets::*;
 pub use read::*;
 pub use topic::*;
-pub use write::*;
 use bytes::Buf;
 use core::fmt;
 use core::fmt::{Display, Formatter};

@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf};
+use bytes::{Bytes, Buf, BufMut, BytesMut};
 
 /// Acknowledgement to pubrel
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +23,13 @@ impl PubComp {
         let pubcomp = PubComp { pkid };
 
         Ok(pubcomp)
+    }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let o: &[u8] = &[0x70, 0x02];
+        buffer.put_slice(o);
+        buffer.put_u16(self.pkid);
+        Ok(4)
     }
 }
 

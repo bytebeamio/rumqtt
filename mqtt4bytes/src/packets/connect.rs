@@ -102,6 +102,52 @@ impl Connect {
 
         len
     }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let len = self.len();
+        buffer.reserve(len);
+        buffer.put_u8(0b0001_0000);
+        write_remaining_length(buffer, len)?;
+        write_mqtt_string(buffer, "MQTT");
+        buffer.put_u8(0x04);
+
+        let mut connect_flags = 0;
+        if self.clean_session {
+            connect_flags |= 0x02;
+        }
+
+        match &self.last_will {
+            Some(w) if w.retain => connect_flags |= 0x04 | (w.qos as u8) << 3 | 0x20,
+            Some(w) => connect_flags |= 0x04 | (w.qos as u8) << 3,
+            None => (),
+        }
+
+        if self.password.is_some() {
+            connect_flags |= 0x40;
+        }
+
+        if self.username.is_some() {
+            connect_flags |= 0x80;
+        }
+
+        buffer.put_u8(connect_flags);
+        buffer.put_u16( self.keep_alive);
+        write_mqtt_string(buffer, &self.client_id);
+
+        if let Some(ref last_will) = self.last_will {
+            write_mqtt_string(buffer, &last_will.topic);
+            write_mqtt_string(buffer, &last_will.message);
+        }
+
+        if let Some(ref username) = self.username {
+            write_mqtt_string(buffer, username);
+        }
+        if let Some(ref password) = self.password {
+            write_mqtt_string(buffer, password);
+        }
+
+        Ok(len)
+    }
 }
 
 /// LastWill that broker forwards on behalf of the client
@@ -165,8 +211,10 @@ impl fmt::Debug for Connect {
 #[cfg(test)]
 mod test {
     use crate::*;
+    use alloc::vec;
     use alloc::borrow::ToOwned;
     use pretty_assertions::assert_eq;
+    use bytes::BytesMut;
 
     #[test]
     fn connect_stitching_works_correctlyl() {
@@ -272,6 +320,74 @@ mod test {
                 session_present: true,
                 code: ConnectReturnCode::Accepted
             }
+        );
+    }
+
+    #[test]
+    fn write_connect_mqtt_packet_works() {
+        let connect = Connect {
+            protocol: Protocol::MQTT(4),
+            keep_alive: 10,
+            client_id: "test".to_owned(),
+            clean_session: true,
+            last_will: Some(LastWill {
+                topic: "/a".to_owned(),
+                message: "offline".to_owned(),
+                retain: false,
+                qos: QoS::AtLeastOnce,
+            }),
+            username: Some("rust".to_owned()),
+            password: Some("mq".to_owned()),
+        };
+
+        let mut buf = BytesMut::new();
+        connect.write(&mut buf).unwrap();
+
+        assert_eq!(
+            buf,
+            vec![
+                0x10,
+                39,
+                0x00,
+                0x04,
+                b'M',
+                b'Q',
+                b'T',
+                b'T',
+                0x04,
+                0b1100_1110, // +username, +password, -will retain, will qos=1, +last_will, +clean_session
+                0x00,
+                0x0a, // 10 sec
+                0x00,
+                0x04,
+                b't',
+                b'e',
+                b's',
+                b't', // client_id
+                0x00,
+                0x02,
+                b'/',
+                b'a', // will topic = '/a'
+                0x00,
+                0x07,
+                b'o',
+                b'f',
+                b'f',
+                b'l',
+                b'i',
+                b'n',
+                b'e', // will msg = 'offline'
+                0x00,
+                0x04,
+                b'r',
+                b'u',
+                b's',
+                b't', // username = 'rust'
+                0x00,
+                0x02,
+                b'm',
+                b'q' // password = 'mq'
+            ]
         );
     }
 }

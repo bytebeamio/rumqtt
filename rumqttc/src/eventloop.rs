@@ -143,7 +143,7 @@ impl<R: Requests> EventLoop<R> {
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             o = next_pending(self.options.throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
-                Some(packet) => self.state.handle_outgoing_packet(packet)?,
+                Some(request) => self.state.handle_outgoing_packet(request)?,
                 None => {
                     self.has_pending = false;
                     // this is the only place where poll returns a spurious (None, None)
@@ -155,7 +155,7 @@ impl<R: Requests> EventLoop<R> {
             _ = &mut self.keepalive_timeout => {
                 self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
                 self.state.handle_outgoing_packet(Request::PingReq)?;
-                (None, Some(Packet::PingReq))
+                (None, Some(Request::PingReq))
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
@@ -261,7 +261,7 @@ impl<R: Requests> EventLoop<R> {
 
         // mqtt connection with timeout
         time::timeout(Duration::from_secs(5), async {
-            network.write(Packet::Connect(connect)).await?;
+            network.connect(connect).await?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
@@ -299,16 +299,16 @@ async fn next_pending(
     None
 }
 
-fn outgoing(packet: &Packet) -> Outgoing {
+fn outgoing(packet: &Request) -> Outgoing {
     match packet {
-        Packet::Publish(publish) => Outgoing::Publish(publish.pkid),
-        Packet::PubAck(puback) => Outgoing::PubAck(puback.pkid),
-        Packet::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
-        Packet::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
-        Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
-        Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
-        Packet::PingReq => Outgoing::PingReq,
-        Packet::Disconnect => Outgoing::Disconnect,
+        Request::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Request::PubAck(puback) => Outgoing::PubAck(puback.pkid),
+        Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
+        Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
+        Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
+        Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
+        Request::PingReq => Outgoing::PingReq,
+        Request::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
 }
@@ -700,6 +700,7 @@ mod broker {
     use tokio::stream::StreamExt;
     use tokio::time;
     use crate::framed::Network;
+    use crate::Request;
 
     pub struct Broker {
         pub(crate) framed: Network,
@@ -717,8 +718,7 @@ mod broker {
             if let Packet::Connect(_) = packet {
                 if send_connack {
                     let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-                    let packet = Packet::ConnAck(connack);
-                    framed.write(packet).await.unwrap();
+                    framed.connack(connack).await.unwrap();
                 }
             } else {
                 panic!("Expecting connect packet");
@@ -763,7 +763,7 @@ mod broker {
                 Packet::Publish(publish) => {
                     if publish.pkid > 0 {
                         let packet = PubAck::new(publish.pkid);
-                        self.framed.write(Packet::PubAck(packet)).await.unwrap();
+                        self.framed.write(Request::PubAck(packet)).await.unwrap();
                     }
                 }
                 _ => (),
@@ -781,7 +781,7 @@ mod broker {
 
         /// Sends an acknowledgement
         pub async fn ack(&mut self, pkid: u16) {
-            let packet = Packet::PubAck(PubAck::new(pkid));
+            let packet = Request::PubAck(PubAck::new(pkid));
             self.framed.write(packet).await.unwrap();
         }
 
@@ -794,11 +794,13 @@ mod broker {
                         let topic = "hello/world".to_owned();
                         let payload = vec![1, 2, 3, i];
                         let publish = Publish::new(topic, qos, payload);
-                        let packet = Packet::Publish(publish);
+                        let packet = Request::Publish(publish);
                         self.framed.write(packet).await.unwrap();
                     }
                     packet = self.framed.read() => match packet.unwrap() {
-                        Packet::PingReq => self.framed.write(Packet::PingResp).await.unwrap(),
+                        Packet::PingReq => {
+                            self.framed.write(Request::PingResp).await.unwrap();
+                        }
                         _ => ()
                     }
                 }

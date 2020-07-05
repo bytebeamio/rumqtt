@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf};
+use bytes::{Bytes, Buf, BytesMut, BufMut};
 
 /// Acknowledgement to QoS1 publish
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +23,13 @@ impl PubAck {
         let puback = PubAck { pkid };
 
         Ok(puback)
+    }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let o: &[u8] = &[0x40, 0x02];
+        buffer.put_slice(o);
+        buffer.put_u16(self.pkid);
+        Ok(4)
     }
 }
 

@@ -8,7 +8,7 @@ mod common;
 fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(250).unwrap();
-    start("rumqtt-sync", 100, 1000000).unwrap();
+    start("rumqtt-sync", 100, 1_000_000).unwrap();
     // common::profile("bench.pb", guard);
 }
 

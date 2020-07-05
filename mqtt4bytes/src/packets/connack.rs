@@ -1,5 +1,5 @@
 use crate::{FixedHeader, Error};
-use bytes::{Bytes, Buf};
+use bytes::{Bytes, Buf, BytesMut, BufMut};
 
 /// Return code in connack
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,6 +52,14 @@ impl ConnAck {
 
         Ok(connack)
     }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let session_present = self.session_present as u8;
+        let code = self.code as u8;
+        let o: &[u8] = &[0x20, 0x02, session_present, code];
+        buffer.put_slice(o);
+        Ok(4)
+    }
 }
 
 /// Connection return code type
@@ -64,5 +72,25 @@ fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
         4 => Ok(ConnectReturnCode::BadUsernamePassword),
         5 => Ok(ConnectReturnCode::NotAuthorized),
         num => Err(Error::InvalidConnectReturnCode(num)),
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use crate::{ConnAck, ConnectReturnCode};
+    use bytes::BytesMut;
+    use alloc::vec;
+
+    #[test]
+    fn write_packet_connack_works() {
+        let connack = ConnAck {
+            session_present: true,
+            code: ConnectReturnCode::Accepted,
+        };
+
+        let mut buf = BytesMut::new();
+        connack.write(&mut buf).unwrap();
+        assert_eq!(buf, vec![0b0010_0000, 0x02, 0x01, 0x00]);
     }
 }

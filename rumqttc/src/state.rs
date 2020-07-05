@@ -99,7 +99,7 @@ impl MqttState {
     pub(crate) fn handle_outgoing_packet(
         &mut self,
         request: Request,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let out = match request {
             Request::Publish(publish) => self.handle_outgoing_publish(publish)?,
             Request::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
@@ -120,7 +120,7 @@ impl MqttState {
     pub(crate) fn handle_incoming_packet(
         &mut self,
         packet: Packet,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let out = match packet {
             Packet::PingResp => self.handle_incoming_pingresp(),
             Packet::Publish(publish) => self.handle_incoming_publish(publish),
@@ -142,7 +142,7 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Packet, StateError> {
+    fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Request, StateError> {
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
@@ -155,14 +155,14 @@ impl MqttState {
             publish.payload.len()
         );
 
-        Ok(Packet::Publish(publish))
+        Ok(Request::Publish(publish))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    fn handle_incoming_puback(&mut self, puback: PubAck) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    fn handle_incoming_puback(&mut self, puback: PubAck) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
@@ -180,7 +180,7 @@ impl MqttState {
     fn handle_incoming_suback(
         &mut self,
         suback: SubAck,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let incoming = Some(Incoming::SubAck(suback));
         let response = None;
         Ok((incoming, response))
@@ -189,7 +189,7 @@ impl MqttState {
     fn handle_incoming_unsuback(
         &mut self,
         unsuback: UnsubAck,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let incoming = Some(Incoming::UnsubAck(unsuback));
         let response = None;
         Ok((incoming, response))
@@ -198,12 +198,12 @@ impl MqttState {
     fn handle_incoming_pubrec(
         &mut self,
         pubrec: PubRec,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
                 mem::replace(&mut self.outgoing_rel[pubrec.pkid as usize], Some(pubrec.pkid));
-                let response = Some(Packet::PubRel(PubRel::new(pubrec.pkid)));
+                let response = Some(Request::PubRel(PubRel::new(pubrec.pkid)));
                 let incoming = Some(Incoming::PubRec(pubrec));
                 Ok((incoming, response))
             }
@@ -219,7 +219,7 @@ impl MqttState {
     fn handle_incoming_publish(
         &mut self,
         publish: Publish,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let qos = publish.qos;
 
         match qos {
@@ -229,13 +229,13 @@ impl MqttState {
             }
             QoS::AtLeastOnce => {
                 let pkid = publish.pkid;
-                let response = Packet::PubAck(PubAck::new(pkid));
+                let response = Request::PubAck(PubAck::new(pkid));
                 let incoming = Incoming::Publish(publish);
                 Ok((Some(incoming), Some(response)))
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
-                let response = Packet::PubRec(PubRec::new(pkid));
+                let response = Request::PubRec(PubRec::new(pkid));
                 let incoming = Incoming::Publish(publish);
                 mem::replace(&mut self.incoming_pub[pkid as usize], Some(pkid));
                 Ok((Some(incoming), Some(response)))
@@ -246,10 +246,10 @@ impl MqttState {
     fn handle_incoming_pubrel(
         &mut self,
         pubrel: PubRel,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
-                let response = Packet::PubComp(PubComp::new(pubrel.pkid));
+                let response = Request::PubComp(PubComp::new(pubrel.pkid));
                 Ok((None, Some(response)))
             }
             None => {
@@ -262,7 +262,7 @@ impl MqttState {
     fn handle_incoming_pubcomp(
         &mut self,
         pubcomp: PubComp,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
             Some(_) => {
                 let incoming = Some(Incoming::PubComp(pubcomp));
@@ -279,7 +279,7 @@ impl MqttState {
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    fn handle_outgoing_ping(&mut self) -> Result<Packet, StateError> {
+    fn handle_outgoing_ping(&mut self) -> Result<Request, StateError> {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
@@ -299,12 +299,12 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        Ok(Packet::PingReq)
+        Ok(Request::PingReq)
     }
 
     fn handle_incoming_pingresp(
         &mut self,
-    ) -> Result<(Option<Incoming>, Option<Packet>), StateError> {
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         self.await_pingresp = false;
         let incoming = Some(Incoming::PingResp);
         Ok((incoming, None))
@@ -313,7 +313,7 @@ impl MqttState {
     fn handle_outgoing_subscribe(
         &mut self,
         mut subscription: Subscribe,
-    ) -> Result<Packet, StateError> {
+    ) -> Result<Request, StateError> {
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
 
@@ -321,7 +321,7 @@ impl MqttState {
             "Subscribe. Topics = {:?}, Pkid = {:?}",
             subscription.topics, subscription.pkid
         );
-        Ok(Packet::Subscribe(subscription))
+        Ok(Request::Subscribe(subscription))
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
@@ -404,7 +404,7 @@ mod test {
 
         // Packet id shouldn't be set and publish shouldn't be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish) {
-            Ok(Packet::Publish(p)) => p,
+            Ok(Request::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 0);
@@ -415,7 +415,7 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Packet::Publish(p)) => p,
+            Ok(Request::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 1);
@@ -423,7 +423,7 @@ mod test {
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Packet::Publish(p)) => p,
+            Ok(Request::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 2);
@@ -434,7 +434,7 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Packet::Publish(p)) => p,
+            Ok(Request::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 3);
@@ -442,7 +442,7 @@ mod test {
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Packet::Publish(p)) => p,
+            Ok(Request::Publish(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 4);
@@ -483,7 +483,7 @@ mod test {
         }
 
         match request {
-            Some(Packet::PubRec(pubrec)) => assert_eq!(pubrec.pkid, 1),
+            Some(Request::PubRec(pubrec)) => assert_eq!(pubrec.pkid, 1),
             _ => panic!("Invalid network request: {:?}", request),
         }
     }
@@ -545,7 +545,7 @@ mod test {
         }
 
         match request {
-            Some(Packet::PubRel(pubrel)) => assert_eq!(pubrel.pkid, 1),
+            Some(Request::PubRel(pubrel)) => assert_eq!(pubrel.pkid, 1),
             _ => panic!("Invalid network request: {:?}", request),
         }
     }
@@ -564,7 +564,7 @@ mod test {
         }
 
         match request {
-            Some(Packet::PubComp(pubcomp)) => assert_eq!(pubcomp.pkid, 1),
+            Some(Request::PubComp(pubcomp)) => assert_eq!(pubcomp.pkid, 1),
             _ => panic!("Invalid network request: {:?}", request),
         }
     }

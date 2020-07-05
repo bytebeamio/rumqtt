@@ -1,6 +1,7 @@
 use crate::*;
+use super::*;
 use alloc::vec::Vec;
-use bytes::{Bytes, Buf};
+use bytes::{Bytes, Buf, BytesMut, BufMut};
 
 
 /// Acknowledgement to subscribe
@@ -36,6 +37,24 @@ impl SubAck {
         let suback = SubAck { pkid, return_codes };
 
         Ok(suback)
+    }
+
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        payload.put_u8(0x90);
+        let remaining_len = self.return_codes.len() + 2;
+        let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
+        payload.put_u16(self.pkid);
+        let p: Vec<u8> = self
+            .return_codes
+            .iter()
+            .map(|&code| match code {
+                SubscribeReturnCodes::Success(qos) => qos as u8,
+                SubscribeReturnCodes::Failure => 0x80,
+            })
+            .collect();
+
+        payload.extend_from_slice(&p);
+        Ok(1 + remaining_len_bytes + remaining_len)
     }
 }
 

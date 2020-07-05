@@ -66,6 +66,22 @@ impl Subscribe {
         self.topics.push(topic);
         self
     }
+
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        let remaining_len = 2 + self
+            .topics
+            .iter()
+            .fold(0, |s, ref t| s + t.topic_path.len() + 3);
+        payload.put_u8(0x82);
+        let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
+        payload.put_u16(self.pkid);
+        for topic in self.topics.iter() {
+            write_mqtt_string(payload, topic.topic_path.as_str());
+            payload.put_u8(topic.qos as u8);
+        }
+
+        Ok(1 + remaining_len_bytes + remaining_len)
+    }
 }
 
 ///  Subscription filter
@@ -157,6 +173,57 @@ mod test {
                     }
                 ]
             }
+        );
+    }
+
+    #[test]
+    fn write_packet_subscribe_works() {
+        let subscribe = Subscribe {
+            pkid: 260,
+            topics: vec![
+                SubscribeTopic {
+                    topic_path: "a/+".to_owned(),
+                    qos: QoS::AtMostOnce,
+                },
+                SubscribeTopic {
+                    topic_path: "#".to_owned(),
+                    qos: QoS::AtLeastOnce,
+                },
+                SubscribeTopic {
+                    topic_path: "a/b/c".to_owned(),
+                    qos: QoS::ExactlyOnce,
+                },
+            ],
+        };
+
+        let mut buf = BytesMut::new();
+        subscribe.write(&mut buf).unwrap();
+        assert_eq!(
+            buf,
+            vec![
+                0b1000_0010,
+                20,
+                0x01,
+                0x04, // pkid = 260
+                0x00,
+                0x03,
+                b'a',
+                b'/',
+                b'+', // topic filter = 'a/+'
+                0x00, // qos = 0
+                0x00,
+                0x01,
+                b'#', // topic filter = '#'
+                0x01, // qos = 1
+                0x00,
+                0x05,
+                b'a',
+                b'/',
+                b'b',
+                b'/',
+                b'c', // topic filter = 'a/b/c'
+                0x02  // qos = 2
+            ]
         );
     }
 }
