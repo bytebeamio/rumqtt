@@ -3,7 +3,7 @@ use bytes::BytesMut;
 use mqtt4bytes::*;
 
 use std::io;
-use crate::Request;
+use crate::{Request, Outgoing};
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -20,7 +20,7 @@ pub struct Network {
     /// Maximum packet size
     max_packet_size: usize,
     /// Maximum readv count
-    _max_readv_count: usize,
+    max_readb_count: usize,
 }
 
 impl Network {
@@ -32,7 +32,7 @@ impl Network {
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
             max_packet_size: 1 * 1024,
-            _max_readv_count:10
+            max_readb_count:10
         }
     }
 
@@ -44,7 +44,7 @@ impl Network {
             read: BytesMut::with_capacity(read),
             write: BytesMut::with_capacity(write),
             max_packet_size: 1 * 1024,
-            _max_readv_count:10
+            max_readb_count:10
         }
     }
 
@@ -79,13 +79,13 @@ impl Network {
     }
 
     /// Read packets in bulk. This allow replies to be in bulk
-    pub async fn _readb(&mut self) -> Result<Vec<Packet>, io::Error> {
-        let mut out = Vec::with_capacity(self._max_readv_count);
+    pub async fn readb(&mut self) -> Result<Vec<Packet>, io::Error> {
+        let mut out = Vec::with_capacity(self.max_readb_count);
         loop {
             match mqtt_read(&mut self.read, self.max_packet_size) {
                 Ok(packet) => {
                     out.push(packet);
-                    if out.len() >= self._max_readv_count { break }
+                    if out.len() >= self.max_readb_count { break }
                     continue;
                 }
                 Err(Error::InsufficientBytes(required)) => {
@@ -174,10 +174,11 @@ impl Network {
     }
 
     /// Write packet to network
-    pub async fn write(&mut self, request: Request) -> Result<usize, io::Error> {
-        let len = self.write_fill(request)?;
+    pub async fn write(&mut self, request: Request) -> Result<Outgoing, io::Error> {
+        let outgoing = outgoing(&request);
+        self.write_fill(request)?;
         self.flush().await?;
-        Ok(len)
+        Ok(outgoing)
     }
 
     pub async fn flush(&mut self) -> Result<(), io::Error> {
@@ -186,13 +187,30 @@ impl Network {
         Ok(())
     }
 
-    pub async fn _writeb(&mut self, requests: Vec<Request>) -> Result<(), io::Error> {
+    pub async fn writeb(&mut self, requests: Vec<Request>) -> Result<Vec<Outgoing>, io::Error> {
+        let mut out = Vec::new();
         for request in requests {
+            let o = outgoing(&request);
+            out.push(o);
             self.write_fill(request)?;
         }
 
         self.flush().await?;
-        Ok(())
+        Ok(out)
+    }
+}
+
+fn outgoing(packet: &Request) -> Outgoing {
+    match packet {
+        Request::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Request::PubAck(puback) => Outgoing::PubAck(puback.pkid),
+        Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
+        Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
+        Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
+        Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
+        Request::PingReq => Outgoing::PingReq,
+        Request::Disconnect => Outgoing::Disconnect,
+        packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
 }
 

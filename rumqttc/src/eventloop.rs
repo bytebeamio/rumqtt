@@ -117,8 +117,68 @@ impl<R: Requests> EventLoop<R> {
             }
         };
 
+        Ok((incoming, outgoing))
+    }
+
+    /// Next notification or outgoing request
+    pub async fn pollv(&mut self) -> Result<(Vec<Incoming>, Vec<Outgoing>), ConnectionError> {
+        // This method used to return only incoming network notification while silently looping through
+        // outgoing requests. Internal loops inside async functions are risky. Imagine this function
+        // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
+        // selected with other streams, can potentially do more internal polling (if the socket is ready)
+        if self.network.is_none(){
+            let connack = self.connect_or_cancel().await?;
+            return Ok((vec![connack], vec![]))
+        }
+
+        let (incoming, outgoing) = match self.selectv().await {
+            Ok((i, o)) => (i, o),
+            Err(e) => {
+                self.network = None;
+                return Err(e)
+            }
+        };
 
         Ok((incoming, outgoing))
+    }
+
+
+    /// Select on network and requests and generate keepalive pings when necessary
+    async fn selectv(&mut self) -> Result<(Vec<Incoming>, Vec<Outgoing>), ConnectionError> {
+        let network = &mut self.network.as_mut().unwrap();
+        let inflight_full = self.state.inflight >= self.options.inflight;
+        let (incoming, out) = select! {
+            // Pull next packet from network
+            o = network.readb() => match o {
+                Ok(packets) => self.state.handle_incoming_packets(packets)?,
+                Err(e) => return Err(ConnectionError::Io(e))
+            },
+            // Pull next request from user requests channel.
+            // we read user requests only when we are done sending pending
+            // packets and inflight queue has space (for flow control)
+            o = next_requestv(&mut self.requests, 1000) => match o {
+                Some(requests) => {
+                    dbg!(requests.len());
+                    let requests = self.state.handle_outgoing_packets(requests)?;
+                    (Vec::new(), requests)
+                }
+                None => return Err(ConnectionError::RequestsDone),
+            },
+            // cancellation requests to stop the polling
+            _ = self.cancel_rx.next() => {
+                return Err(ConnectionError::Cancel)
+            }
+        };
+
+        // write the reply back to the network. flush??
+        if !out.is_empty() {
+            dbg!();
+            let outgoing = network.writeb(out).await?;
+            dbg!();
+            return Ok((incoming, outgoing))
+        }
+
+        Ok((incoming, Vec::new()))
     }
 
 
@@ -136,13 +196,19 @@ impl<R: Requests> EventLoop<R> {
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
             o = self.requests.next(), if !inflight_full && !self.has_pending => match o {
-                Some(request) => self.state.handle_outgoing_packet(request.into())?,
+                Some(request) => {
+                    let request = self.state.handle_outgoing_packet(request.into())?;
+                    (None, Some(request))
+                }
                 None => return Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             o = next_pending(self.options.pending_throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
-                Some(request) => self.state.handle_outgoing_packet(request)?,
+                Some(request) => {
+                    let request = self.state.handle_outgoing_packet(request)?;
+                    (None, Some(request))
+                }
                 None => {
                     self.has_pending = false;
                     // this is the only place where poll returns a spurious (None, None)
@@ -164,9 +230,8 @@ impl<R: Requests> EventLoop<R> {
 
         // write the reply back to the network. flush??
         if let Some(packet) = outpacket {
-            let outgoing = Some(outgoing(&packet));
-            network.write(packet).await?;
-            return Ok((incoming, outgoing))
+            let outgoing = network.write(packet).await?;
+            return Ok((incoming, Some(outgoing)))
         }
 
         Ok((incoming, None))
@@ -276,6 +341,28 @@ impl<R: Requests> EventLoop<R> {
     }
 }
 
+async fn next_requestv<R: Requests>(requests: &mut R, max: usize) -> Option<Vec<Request>> {
+    let mut out = Vec::with_capacity(max);
+    dbg!("readv");
+    for i in 0..max {
+        dbg!(i);
+        match requests.next().await {
+            Some(request) => out.push(request),
+            None => {
+                dbg!("done");
+                break
+            }
+        }
+        dbg!(i);
+    }
+
+    if !out.is_empty() {
+        Some(out)
+    } else {
+        None
+    }
+}
+
 /// Returns the next pending packet asyncronously to be used in select!
 /// This is a synchronous function but made async to make it fit in select!
 async fn next_pending(
@@ -296,20 +383,6 @@ async fn next_pending(
     }
 
     None
-}
-
-fn outgoing(packet: &Request) -> Outgoing {
-    match packet {
-        Request::Publish(publish) => Outgoing::Publish(publish.pkid),
-        Request::PubAck(puback) => Outgoing::PubAck(puback.pkid),
-        Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
-        Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
-        Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
-        Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
-        Request::PingReq => Outgoing::PingReq,
-        Request::Disconnect => Outgoing::Disconnect,
-        packet => panic!("Invalid outgoing packet = {:?}", packet),
-    }
 }
 
 impl From<Request> for Packet {

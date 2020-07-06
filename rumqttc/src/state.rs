@@ -94,12 +94,19 @@ impl MqttState {
         (pending_publishes, pending_rel)
     }
 
+    pub(crate) fn handle_outgoing_packets(&mut self, requests: Vec<Request>) -> Result<Vec<Request>, StateError> {
+        let mut out = Vec::with_capacity(10);
+        for request in requests {
+            let o = self.handle_outgoing_packet(request)?;
+            out.push(o);
+        }
+
+        Ok(out)
+    }
+
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub(crate) fn handle_outgoing_packet(
-        &mut self,
-        request: Request,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    pub(crate) fn handle_outgoing_packet(&mut self, request: Request,) -> Result<Request, StateError> {
         let out = match request {
             Request::Publish(publish) => self.handle_outgoing_publish(publish)?,
             Request::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
@@ -108,9 +115,27 @@ impl MqttState {
         };
 
         self.last_outgoing = Instant::now();
-        let request = Some(out);
-        let notification = None;
-        Ok((notification, request))
+        Ok(out)
+    }
+
+    pub(crate) fn handle_incoming_packets(
+        &mut self,
+        packets: Vec<Packet>
+    ) -> Result<(Vec<Incoming>, Vec<Request>), StateError> {
+        let mut incoming = Vec::with_capacity(10);
+        let mut outgoing = Vec::with_capacity(10);
+        for packet in packets {
+            let (i, o) = self.handle_incoming_packet(packet)?;
+            if let Some(i) = i {
+                incoming.push(i);
+            }
+
+            if let Some(o) = o {
+                outgoing.push(o);
+            }
+        }
+
+        Ok((incoming, outgoing))
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Notification` which for the
