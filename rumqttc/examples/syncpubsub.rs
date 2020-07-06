@@ -6,9 +6,7 @@ fn main() {
     pretty_env_logger::init();
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions
-        .set_keep_alive(5)
-        .set_throttle(Duration::from_secs(1));
+    mqttoptions.set_keep_alive(5);
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
     thread::spawn(move || publish(client));

@@ -12,10 +12,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let throttle = Duration::from_secs(1);
     let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions.set_keep_alive(5).set_throttle(throttle);
+    mqttoptions.set_keep_alive(5);
 
 
     let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;

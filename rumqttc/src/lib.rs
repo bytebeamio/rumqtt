@@ -14,7 +14,7 @@
 //!
 //! fn main() {
 //!     let mut mqttoptions = MqttOptions::new("rumqtt-sync-client", "test.mosquitto.org", 1883);
-//!     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
+//!     mqttoptions.set_keep_alive(5);
 //!
 //!     let (mut client, mut connection) = Client::new(mqttoptions, 10);
 //!     client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
@@ -198,10 +198,9 @@ pub struct MqttOptions {
     max_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
-    /// notification channel capacity
-    notification_channel_capacity: usize,
     /// Minimum delay time between consecutive outgoing packets
-    throttle: Duration,
+    /// while retransmitting pending packets
+    pending_throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: usize,
     /// Last will that will be issued on unexpected disconnect
@@ -230,8 +229,7 @@ impl MqttOptions {
             credentials: None,
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
-            notification_channel_capacity: 10,
-            throttle: Duration::from_micros(0),
+            pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
             key_type: Key::RSA,
@@ -338,17 +336,6 @@ impl MqttOptions {
         self.credentials.clone()
     }
 
-    /// Set notification channel capacity
-    pub fn set_notification_channel_capacity(&mut self, capacity: usize) -> &mut Self {
-        self.notification_channel_capacity = capacity;
-        self
-    }
-
-    /// Notification channel capacity
-    pub fn notification_channel_capacity(&self) -> usize {
-        self.notification_channel_capacity
-    }
-
     /// Set request channel capacity
     pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.request_channel_capacity = capacity;
@@ -361,14 +348,14 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_throttle(&mut self, duration: Duration) -> &mut Self {
-        self.throttle = duration;
+    pub fn set_pending_throttle(&mut self, duration: Duration) -> &mut Self {
+        self.pending_throttle = duration;
         self
     }
 
     /// Outgoing message rate
-    pub fn throttle(&self) -> Duration {
-        self.throttle
+    pub fn pending_throttle(&self) -> Duration {
+        self.pending_throttle
     }
 
     /// Set number of concurrent in flight messages

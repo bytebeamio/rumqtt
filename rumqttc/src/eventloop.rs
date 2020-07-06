@@ -5,7 +5,7 @@ use crate::framed::Network;
 
 use async_channel::{bounded, Receiver, Sender};
 use tokio::select;
-use tokio::time::{self, Delay, Elapsed, Instant, Throttle};
+use tokio::time::{self, Delay, Elapsed, Instant};
 use tokio::net::TcpStream;
 use tokio::stream::{Stream, StreamExt};
 use mqtt4bytes::*;
@@ -42,7 +42,7 @@ pub struct EventLoop<R: Requests> {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    pub requests: Throttle<R>,
+    pub requests: R,
     /// Pending publishes from last session
     pending_pub: VecDeque<Publish>,
     /// Pending releases from last session
@@ -69,7 +69,6 @@ impl<R: Requests> EventLoop<R> {
     pub async fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
         let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
-        let requests = time::throttle(options.throttle, requests);
 
         EventLoop {
             options,
@@ -142,7 +141,7 @@ impl<R: Requests> EventLoop<R> {
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
-            o = next_pending(self.options.throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
+            o = next_pending(self.options.pending_throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
                 Some(request) => self.state.handle_outgoing_packet(request)?,
                 None => {
                     self.has_pending = false;
@@ -390,37 +389,6 @@ mod test {
         }
 
         assert_eq!(elapsed.as_secs(), 5);
-    }
-
-    #[tokio::test]
-    async fn throttled_requests_works_with_correct_delays_between_requests() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1882);
-        options.set_throttle(Duration::from_secs(1));
-        let options2 = options.clone();
-
-        // start sending requests
-        let (requests_tx, requests_rx) = bounded(5);
-        task::spawn(async move {
-            start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
-        });
-
-        // start the eventloop
-        task::spawn(async move {
-            eventloop(options, requests_rx, false).await;
-        });
-
-        let mut broker = Broker::new(1882, true).await;
-        // check incoming rate at th broker
-        for i in 0..10 {
-            let start = Instant::now();
-            let _ = broker.read_packet().await;
-            let elapsed = start.elapsed();
-
-            if i > 0 {
-                dbg!(elapsed.as_millis());
-                assert_eq!(elapsed.as_secs(), options2.throttle.as_secs())
-            }
-        }
     }
 
     #[tokio::test]
