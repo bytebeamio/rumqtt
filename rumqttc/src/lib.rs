@@ -100,6 +100,8 @@ pub type Incoming = Packet;
 pub enum Outgoing {
     /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
+    /// Publishes
+    Publishes(Vec<u16>),
     /// Subscribe packet with packet identifier
     Subscribe(u16),
     /// Unsubscribe packet with packet identifier

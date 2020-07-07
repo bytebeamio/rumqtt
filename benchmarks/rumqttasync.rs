@@ -12,7 +12,7 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    start("rumqtt-async", 100, 1_000_000).await.unwrap();
+    start("rumqtt-async", 100, 1_000_00).await.unwrap();
     // common::profile("bench.pb", guard);
 }
 

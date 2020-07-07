@@ -156,11 +156,10 @@ impl<R: Requests> EventLoop<R> {
             // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
-            o = next_requestv(&mut self.requests, 1000) => match o {
-                Some(requests) => {
-                    dbg!(requests.len());
-                    let requests = self.state.handle_outgoing_packets(requests)?;
-                    (Vec::new(), requests)
+            o = self.requests.next() => match o {
+                Some(request) => {
+                    let request = self.state.handle_outgoing_packet(request)?;
+                    todo!();
                 }
                 None => return Err(ConnectionError::RequestsDone),
             },
@@ -172,9 +171,7 @@ impl<R: Requests> EventLoop<R> {
 
         // write the reply back to the network. flush??
         if !out.is_empty() {
-            dbg!();
             let outgoing = network.writeb(out).await?;
-            dbg!();
             return Ok((incoming, outgoing))
         }
 
@@ -210,8 +207,8 @@ impl<R: Requests> EventLoop<R> {
                     (None, Some(request))
                 }
                 None => {
-                    self.has_pending = false;
                     // this is the only place where poll returns a spurious (None, None)
+                    self.has_pending = false;
                     (None, None)
                 }
             },
@@ -338,28 +335,6 @@ impl<R: Requests> EventLoop<R> {
         .await??;
 
         Ok(packet)
-    }
-}
-
-async fn next_requestv<R: Requests>(requests: &mut R, max: usize) -> Option<Vec<Request>> {
-    let mut out = Vec::with_capacity(max);
-    dbg!("readv");
-    for i in 0..max {
-        dbg!(i);
-        match requests.next().await {
-            Some(request) => out.push(request),
-            None => {
-                dbg!("done");
-                break
-            }
-        }
-        dbg!(i);
-    }
-
-    if !out.is_empty() {
-        Some(out)
-    } else {
-        None
     }
 }
 
