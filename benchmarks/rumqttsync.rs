@@ -7,9 +7,9 @@ mod common;
 
 fn main() {
     pretty_env_logger::init();
-    // let guard = pprof::ProfilerGuard::new(250).unwrap();
+    let guard = pprof::ProfilerGuard::new(250).unwrap();
     start("rumqtt-sync", 100, 1_000_000).unwrap();
-    // common::profile("bench.pb", guard);
+    common::profile("bench.pb", guard);
 }
 
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {

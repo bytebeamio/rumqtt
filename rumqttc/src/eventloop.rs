@@ -13,6 +13,7 @@ use mqtt4bytes::*;
 use std::collections::VecDeque;
 use std::{io, mem};
 use std::time::Duration;
+use std::vec::IntoIter;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +50,10 @@ pub struct EventLoop {
     pub pending_pub: VecDeque<Publish>,
     /// Pending releases from last session
     pub pending_rel: VecDeque<u16>,
+    /// Buffered packets
+    pub buffered: IntoIter<Incoming>,
+    /// Tries to do everything in bulk mode
+    pub(crate) bulk_io: bool,
     /// Flag to disable pending branch while polling
     pub(crate) has_pending: bool,
     /// Network connection to the broker
@@ -72,6 +77,8 @@ impl EventLoop {
         let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
+        let buffered = Vec::new();
+        let buffered = buffered.into_iter();
 
         EventLoop {
             options,
@@ -80,6 +87,8 @@ impl EventLoop {
             requests_rx,
             pending_pub: VecDeque::new(),
             pending_rel: VecDeque::new(),
+            buffered,
+            bulk_io: false,
             has_pending: false,
             network: None,
             keepalive_timeout: time::delay_for(keepalive),
@@ -134,19 +143,29 @@ impl EventLoop {
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let network = &mut self.network.as_mut().unwrap();
         let inflight_full = self.state.inflight >= self.options.inflight;
-        let (incoming, outpacket) = select! {
-            // Pull next packet from network
-            o = network.read() => match o {
-                Ok(packet) => self.state.handle_incoming_packet(packet)?,
+        select! {
+            // Pull a bunch of packets from network, reply in bunch and yield the first item
+            o = network.readb(), if self.buffered.len() == 0 => match o {
+                Ok(packets) => {
+                    let (incoming, outgoing) = self.state.handle_incoming_packets(packets)?;
+                    self.buffered = incoming.into_iter();
+                    network.writeb(outgoing).await?;
+                    return Ok((self.buffered.next(), None))
+                }
                 Err(e) => return Err(ConnectionError::Io(e))
             },
+            // yield the next incoming packet of already (handled) buffered incoming packets
+            o = next_buffered(&mut self.buffered), if self.buffered.len() > 0 => {
+                    return Ok((o, None))
+            }
             // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
             o = self.requests_rx.next(), if !inflight_full && !self.has_pending => match o {
                 Some(request) => {
-                    let request = self.state.handle_outgoing_packet(request.into())?;
-                    (None, Some(request))
+                    let request = self.state.handle_outgoing_packet(request)?;
+                    let outgoing = network.write(request).await?;
+                    return Ok((None, Some(outgoing)))
                 }
                 None => return Err(ConnectionError::RequestsDone),
             },
@@ -155,34 +174,28 @@ impl EventLoop {
             o = next_pending(self.options.pending_throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
-                    (None, Some(request))
+                    let outgoing = network.write(request).await?;
+                    Ok((None, Some(outgoing)))
                 }
                 None => {
                     // this is the only place where poll returns a spurious (None, None)
                     self.has_pending = false;
-                    (None, None)
+                    Ok((None, None))
                 }
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = &mut self.keepalive_timeout => {
                 self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
-                self.state.handle_outgoing_packet(Request::PingReq)?;
-                (None, Some(Request::PingReq))
+                let request = self.state.handle_outgoing_packet(Request::PingReq)?;
+                let outgoing = network.write(request).await?;
+                Ok((None, Some(outgoing)))
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
                 return Err(ConnectionError::Cancel)
             }
-        };
-
-        // write the reply back to the network. flush??
-        if let Some(packet) = outpacket {
-            let outgoing = network.write(packet).await?;
-            return Ok((incoming, Some(outgoing)))
         }
-
-        Ok((incoming, None))
     }
 }
 
@@ -311,6 +324,10 @@ async fn next_pending(
     None
 }
 
+async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {
+    incoming.next()
+}
+
 impl From<Request> for Packet {
     fn from(item: Request) -> Self {
         match item {
@@ -333,8 +350,7 @@ mod test {
     use super::*;
     use crate::state::StateError;
     use crate::{ConnectionError, MqttOptions, Request};
-    use async_channel::{bounded, Receiver, Sender};
-    use mqtt4bytes::*;
+    use async_channel::Sender;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
 
@@ -395,7 +411,7 @@ mod test {
         let keep_alive = options.keep_alive();
 
         // start sending requests
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         // start the eventloop
         task::spawn(async move {
             run(eventloop, false).await;
@@ -431,7 +447,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incomin activity
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
@@ -469,7 +485,7 @@ mod test {
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         task::spawn(async move {
             run(eventloop, false).await;
         });
@@ -521,7 +537,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incoming activity
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -547,7 +563,7 @@ mod test {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
         options.set_inflight(3);
 
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         let requests_tx = eventloop.handle();
 
         task::spawn(async move {
@@ -593,7 +609,7 @@ mod test {
         options.set_keep_alive(5);
 
         // start sending qos0 publishes. Makes sure that there is out activity but no in activity
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -635,7 +651,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incoming activity
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5).await;
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
