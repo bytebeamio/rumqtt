@@ -3,7 +3,7 @@
 
 use crate::{ConnectionError, EventLoop, Incoming, MqttOptions, Outgoing, Request};
 
-use async_channel::{bounded, Receiver, SendError, Sender};
+use async_channel::{SendError, Sender};
 use mqtt4bytes::*;
 use std::mem;
 use std::time::Duration;
