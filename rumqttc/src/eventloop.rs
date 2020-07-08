@@ -10,8 +10,7 @@ use tokio::net::TcpStream;
 use tokio::stream::{Stream, StreamExt};
 use mqtt4bytes::*;
 
-use std::collections::VecDeque;
-use std::{io, mem};
+use std::io;
 use std::time::Duration;
 use std::vec::IntoIter;
 
@@ -46,10 +45,8 @@ pub struct EventLoop {
     pub requests_rx: Receiver<Request>,
     /// Requests handle to send requests
     pub requests_tx: Sender<Request>,
-    /// Pending publishes from last session
-    pub pending_pub: VecDeque<Publish>,
-    /// Pending releases from last session
-    pub pending_rel: VecDeque<u16>,
+    /// Pending packets from last session
+    pub pending: IntoIter<Request>,
     /// Buffered packets
     pub buffered: IntoIter<Incoming>,
     /// Tries to do everything in bulk mode
@@ -79,14 +76,15 @@ impl EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let buffered = Vec::new();
         let buffered = buffered.into_iter();
+        let pending = Vec::new();
+        let pending = pending.into_iter();
 
         EventLoop {
             options,
             state: MqttState::new(),
             requests_tx,
             requests_rx,
-            pending_pub: VecDeque::new(),
-            pending_rel: VecDeque::new(),
+            pending,
             buffered,
             bulk_io: false,
             has_pending: false,
@@ -171,7 +169,7 @@ impl EventLoop {
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
-            o = next_pending(self.options.pending_throttle, &mut self.pending_pub, &mut self.pending_rel), if self.has_pending => match o {
+            o = next_pending(self.options.pending_throttle, &mut self.pending), if self.pending.len() != 0 => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
                     let outgoing = network.write(request).await?;
@@ -241,10 +239,8 @@ impl EventLoop {
         // Last session might contain packets which aren't acked. MQTT says these packets should be
         // republished in the next session
         // move pending messages from state to eventloop
-        let (pending_pub, pending_rel) = self.state.clean();
-        mem::replace(&mut self.pending_pub, pending_pub);
-        mem::replace(&mut self.pending_rel, pending_rel);
-        self.has_pending = true;
+        let pending = self.state.clean();
+        self.pending = pending.into_iter();
         Ok(packet)
     }
 
@@ -306,22 +302,11 @@ impl EventLoop {
 /// This is a synchronous function but made async to make it fit in select!
 async fn next_pending(
     delay: Duration,
-    pending_pub: &mut VecDeque<Publish>,
-    pending_rel: &mut VecDeque<u16>,
+    pending: &mut IntoIter<Request>,
 ) -> Option<Request> {
+    // return next packet with a delay
     time::delay_for(delay).await;
-
-    // publishes are prioritized over releases
-    // goto releases only after done with publishes
-    if let Some(p) = pending_pub.pop_front() {
-        return Some(Request::Publish(p));
-    }
-
-    if let Some(p) = pending_rel.pop_front() {
-        return Some(Request::PubRel(PubRel::new(p)));
-    }
-
-    None
+    pending.next()
 }
 
 async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {

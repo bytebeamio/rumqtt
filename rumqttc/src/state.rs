@@ -2,7 +2,6 @@ use crate::{Incoming, Request};
 
 use std::{time::Instant, mem};
 use mqtt4bytes::*;
-use std::collections::VecDeque;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
@@ -67,20 +66,21 @@ impl MqttState {
     }
 
     /// Returns inflight outgoing packets and clears internal queues
-    pub fn clean(&mut self) -> (VecDeque<Publish>, VecDeque<u16>) {
-        let mut pending_publishes = VecDeque::with_capacity(100);
+    pub fn clean(&mut self) -> Vec<Request> {
+        let mut pending = Vec::with_capacity(100);
         // remove and collect pending publishes
         for publish in self.outgoing_pub.iter_mut() {
-            if let Some(p) = publish.take() {
-                pending_publishes.push_back(p);
+            if let Some(publish) = publish.take() {
+                let request = Request::Publish(publish);
+                pending.push(request);
             }
         }
 
         // remove and collect pending releases
-        let mut pending_rel = VecDeque::with_capacity(100);
         for rel in self.outgoing_rel.iter_mut() {
-            if let Some(p) = rel.take() {
-                pending_rel.push_back(p);
+            if let Some(pkid) = rel.take() {
+                let request = Request::PubRel(PubRel::new(pkid));
+                pending.push(request);
             }
         }
 
@@ -91,7 +91,7 @@ impl MqttState {
 
         self.await_pingresp = false;
         self.inflight = 0;
-        (pending_publishes, pending_rel)
+        pending
     }
 
     pub(crate) fn _handle_outgoing_packets(&mut self, requests: Vec<Request>) -> Result<Vec<Request>, StateError> {
