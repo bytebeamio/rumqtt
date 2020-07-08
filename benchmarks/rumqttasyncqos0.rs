@@ -33,21 +33,20 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
     });
 
     let start = Instant::now();
-    loop {
-        let (notification, _) = eventloop.poll().await?;
-        let notification = match notification {
-            Some(n) => n,
-            None => continue
-        };
+    'main: loop {
+        let (notifications, _) = eventloop.poll().await?;
+        for notification in notifications {
+            match notification {
+                Incoming::PingResp => {
+                    break 'main
+                }
+                _notification => {
+                    continue;
+                }
+            };
 
-        match notification {
-            Incoming::PingResp => {
-                break
-            }
-            _notification => {
-                continue;
-            }
-        };
+        }
+
     }
 
     let elapsed_ms = start.elapsed().as_millis();

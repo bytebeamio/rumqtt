@@ -83,10 +83,12 @@ extern crate log;
 use std::time::Duration;
 
 mod client;
-mod eventloop;
 mod tls;
 mod framed;
 mod state;
+mod eventloop;
+#[cfg(feature = "bulkio")]
+mod eventloop2;
 
 pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
@@ -108,6 +110,8 @@ pub enum Outgoing {
     Unsubscribe(u16),
     /// PubAck packet
     PubAck(u16),
+    /// PubAck packet
+    PubAcks(Vec<u16>),
     /// PubRec packet
     PubRec(u16),
     /// PubComp packet
@@ -127,7 +131,9 @@ pub enum Outgoing {
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
+    Publishes(Vec<Publish>),
     PubAck(PubAck),
+    PubAcks(Vec<PubAck>),
     PubRec(PubRec),
     PubComp(PubComp),
     PubRel(PubRel),

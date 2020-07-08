@@ -123,33 +123,44 @@ impl Network {
         Ok(read)
     }
 
-    fn write_fill(&mut self, request: Request) -> Result<usize, io::Error> {
-        let ret = match request {
-            Request::Publish(packet) => packet.write(&mut self.write),
-            Request::PubRel(packet) => packet.write(&mut self.write),
+    fn write_fill(&mut self, request: Request) -> Result<usize, Error> {
+        let size = match request {
+            Request::Publish(packet) => packet.write(&mut self.write)?,
+            Request::Publishes(packets) => {
+                let mut size = 0;
+                for packet in packets {
+                    size += packet.write(&mut self.write)?;
+                }
+                size
+            }
+            Request::PubRel(packet) => packet.write(&mut self.write)?,
             Request::PingReq => {
                 let packet = PingReq;
-                packet.write(&mut self.write)
+                packet.write(&mut self.write)?
             },
             Request::PingResp => {
                 let packet = PingResp;
-                packet.write(&mut self.write)
+                packet.write(&mut self.write)?
             }
-            Request::Subscribe(packet) => packet.write(&mut self.write),
-            Request::Unsubscribe(packet) => packet.write(&mut self.write),
+            Request::Subscribe(packet) => packet.write(&mut self.write)?,
+            Request::Unsubscribe(packet) => packet.write(&mut self.write)?,
             Request::Disconnect => {
                 let packet = Disconnect;
-                packet.write(&mut self.write)
+                packet.write(&mut self.write)?
             },
-            Request::PubAck(packet) => packet.write(&mut self.write),
-            Request::PubRec(packet) => packet.write(&mut self.write),
-            Request::PubComp(packet) => packet.write(&mut self.write),
+            Request::PubAck(packet) => packet.write(&mut self.write)?,
+            Request::PubAcks(packets) => {
+                let mut size = 0;
+                for packet in packets {
+                    size += packet.write(&mut self.write)?;
+                }
+                size
+            }
+            Request::PubRec(packet) => packet.write(&mut self.write)?,
+            Request::PubComp(packet) => packet.write(&mut self.write)?,
         };
 
-        match ret {
-            Ok(size) => Ok(size),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
-        }
+        Ok(size)
     }
 
     pub async fn connect(&mut self, connect: Connect) -> Result<usize, io::Error> {
@@ -176,34 +187,56 @@ impl Network {
     /// Write packet to network
     pub async fn write(&mut self, request: Request) -> Result<Outgoing, io::Error> {
         let outgoing = outgoing(&request);
-        self.write_fill(request)?;
+        let _ = match self.write_fill(request) {
+            Ok(size) => Ok(size),
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        };
+
         self.flush().await?;
         Ok(outgoing)
     }
 
     pub async fn flush(&mut self) -> Result<(), io::Error> {
+        if self.write.len() == 0 {
+            return Ok(())
+        }
+
         self.socket.write_all(&self.write[..]).await?;
         self.write.clear();
         Ok(())
     }
 
-    pub async fn writeb(&mut self, requests: Vec<Request>) -> Result<Vec<Outgoing>, io::Error> {
-        let mut out = Vec::new();
+    pub async fn writeb(&mut self, requests: Vec<Request>) -> Result<(), io::Error> {
         for request in requests {
-            let o = outgoing(&request);
-            out.push(o);
-            self.write_fill(request)?;
+            match self.write_fill(request) {
+                Ok(_) => (),
+                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+            };
         }
 
         self.flush().await?;
-        Ok(out)
+        Ok(())
     }
 }
 
 fn outgoing(packet: &Request) -> Outgoing {
     match packet {
         Request::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Request::Publishes(publishes) => {
+            let mut out = Vec::with_capacity(publishes.len());
+            for publish in publishes {
+                out.push(publish.pkid)
+            }
+            Outgoing::Publishes(out)
+        }
         Request::PubAck(puback) => Outgoing::PubAck(puback.pkid),
+        Request::PubAcks(pubacks) => {
+            let mut out = Vec::with_capacity(pubacks.len());
+            for puback in pubacks {
+                out.push(puback.pkid)
+            }
+            Outgoing::PubAcks(out)
+        },
         Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
         Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),

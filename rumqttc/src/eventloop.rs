@@ -36,44 +36,48 @@ pub enum ConnectionError {
 }
 
 /// Eventloop with all the state of a connection
-pub struct EventLoop<R: Requests> {
+pub struct EventLoop {
     /// Options of the current mqtt connection
     pub options: MqttOptions,
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    pub requests: R,
+    pub requests_rx: Receiver<Request>,
+    /// Requests handle to send requests
+    pub requests_tx: Sender<Request>,
     /// Pending publishes from last session
-    pending_pub: VecDeque<Publish>,
+    pub pending_pub: VecDeque<Publish>,
     /// Pending releases from last session
-    pending_rel: VecDeque<u16>,
+    pub pending_rel: VecDeque<u16>,
     /// Flag to disable pending branch while polling
-    has_pending: bool,
+    pub(crate) has_pending: bool,
     /// Network connection to the broker
-    network: Option<Network>,
+    pub(crate) network: Option<Network>,
     /// Keep alive time
-    keepalive_timeout: Delay,
+    pub(crate) keepalive_timeout: Delay,
     /// Handle to read cancellation requests
-    cancel_rx: Receiver<()>,
+    pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
-    cancel_tx: Option<Sender<()>>,
+    pub(crate) cancel_tx: Option<Sender<()>>,
     /// Delay between reconnection (after a failure)
-    reconnection_delay: Duration,
+    pub(crate) reconnection_delay: Duration,
 }
 
-impl<R: Requests> EventLoop<R> {
+impl EventLoop {
     /// New MQTT `EventLoop`
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub async fn new(options: MqttOptions, requests: R) -> EventLoop<R> {
+    pub async fn new(options: MqttOptions, cap: usize) -> EventLoop {
         let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
+        let (requests_tx, requests_rx) = bounded(cap);
 
         EventLoop {
             options,
             state: MqttState::new(),
-            requests,
+            requests_tx,
+            requests_rx,
             pending_pub: VecDeque::new(),
             pending_rel: VecDeque::new(),
             has_pending: false,
@@ -83,6 +87,11 @@ impl<R: Requests> EventLoop<R> {
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
         }
+    }
+
+    /// Returns a handle to communicate with this eventloop
+    pub fn handle(&self) -> Sender<Request> {
+        self.requests_tx.clone()
     }
 
     /// Set delay between (automatic) reconnections
@@ -120,64 +129,6 @@ impl<R: Requests> EventLoop<R> {
         Ok((incoming, outgoing))
     }
 
-    /// Next notification or outgoing request
-    pub async fn pollv(&mut self) -> Result<(Vec<Incoming>, Vec<Outgoing>), ConnectionError> {
-        // This method used to return only incoming network notification while silently looping through
-        // outgoing requests. Internal loops inside async functions are risky. Imagine this function
-        // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
-        // selected with other streams, can potentially do more internal polling (if the socket is ready)
-        if self.network.is_none(){
-            let connack = self.connect_or_cancel().await?;
-            return Ok((vec![connack], vec![]))
-        }
-
-        let (incoming, outgoing) = match self.selectv().await {
-            Ok((i, o)) => (i, o),
-            Err(e) => {
-                self.network = None;
-                return Err(e)
-            }
-        };
-
-        Ok((incoming, outgoing))
-    }
-
-
-    /// Select on network and requests and generate keepalive pings when necessary
-    async fn selectv(&mut self) -> Result<(Vec<Incoming>, Vec<Outgoing>), ConnectionError> {
-        let network = &mut self.network.as_mut().unwrap();
-        let inflight_full = self.state.inflight >= self.options.inflight;
-        let (incoming, out) = select! {
-            // Pull next packet from network
-            o = network.readb() => match o {
-                Ok(packets) => self.state.handle_incoming_packets(packets)?,
-                Err(e) => return Err(ConnectionError::Io(e))
-            },
-            // Pull next request from user requests channel.
-            // we read user requests only when we are done sending pending
-            // packets and inflight queue has space (for flow control)
-            o = self.requests.next() => match o {
-                Some(request) => {
-                    let request = self.state.handle_outgoing_packet(request)?;
-                    todo!();
-                }
-                None => return Err(ConnectionError::RequestsDone),
-            },
-            // cancellation requests to stop the polling
-            _ = self.cancel_rx.next() => {
-                return Err(ConnectionError::Cancel)
-            }
-        };
-
-        // write the reply back to the network. flush??
-        if !out.is_empty() {
-            let outgoing = network.writeb(out).await?;
-            return Ok((incoming, outgoing))
-        }
-
-        Ok((incoming, Vec::new()))
-    }
-
 
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
@@ -192,7 +143,7 @@ impl<R: Requests> EventLoop<R> {
             // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
-            o = self.requests.next(), if !inflight_full && !self.has_pending => match o {
+            o = self.requests_rx.next(), if !inflight_full && !self.has_pending => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request.into())?;
                     (None, Some(request))
@@ -235,8 +186,8 @@ impl<R: Requests> EventLoop<R> {
     }
 }
 
-impl<R: Requests> EventLoop<R> {
-    async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
+impl EventLoop {
+    pub(crate) async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously

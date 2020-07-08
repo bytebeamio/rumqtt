@@ -12,13 +12,13 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    start("rumqtt-async", 100, 1_000_0).await.unwrap();
+    start("rumqtt-async", 100, 1_000_000).await.unwrap();
     // common::profile("bench.pb", guard);
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let (requests_tx, requests_rx) = channel(10);
-    let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new(id, "localhost", 8080);
     mqttoptions.set_keep_alive(20);
 
     // NOTE More the inflight size, better the perf
