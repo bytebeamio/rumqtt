@@ -123,6 +123,7 @@ impl Network {
         Ok(read)
     }
 
+    #[inline]
     fn write_fill(&mut self, request: Request) -> Result<usize, Error> {
         let size = match request {
             Request::Publish(packet) => packet.write(&mut self.write)?,
@@ -184,14 +185,18 @@ impl Network {
         Ok(len)
     }
 
-    /// Write packet to network
-    pub async fn write(&mut self, request: Request) -> Result<Outgoing, io::Error> {
+    pub fn fill(&mut self, request: Request) -> Result<Outgoing, io::Error> {
         let outgoing = outgoing(&request);
-        let _ = match self.write_fill(request) {
-            Ok(size) => Ok(size),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        if let Err(e) =  self.write_fill(request) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
         };
 
+        Ok(outgoing)
+    }
+
+    /// Write packet to network
+    pub async fn write(&mut self, request: Request) -> Result<Outgoing, io::Error> {
+        let outgoing = self.fill(request)?;
         self.flush().await?;
         Ok(outgoing)
     }
@@ -208,10 +213,7 @@ impl Network {
 
     pub async fn writeb(&mut self, requests: Vec<Request>) -> Result<(), io::Error> {
         for request in requests {
-            match self.write_fill(request) {
-                Ok(_) => (),
-                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
-            };
+            self.fill(request)?;
         }
 
         self.flush().await?;

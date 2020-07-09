@@ -49,10 +49,6 @@ pub struct EventLoop {
     pub pending: IntoIter<Request>,
     /// Buffered packets
     pub buffered: IntoIter<Incoming>,
-    /// Tries to do everything in bulk mode
-    pub(crate) bulk_io: bool,
-    /// Flag to disable pending branch while polling
-    pub(crate) has_pending: bool,
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
@@ -86,8 +82,6 @@ impl EventLoop {
             requests_rx,
             pending,
             buffered,
-            bulk_io: false,
-            has_pending: false,
             network: None,
             keepalive_timeout: time::delay_for(keepalive),
             cancel_rx,
@@ -141,6 +135,9 @@ impl EventLoop {
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let network = &mut self.network.as_mut().unwrap();
         let inflight_full = self.state.inflight >= self.options.inflight;
+        let throttle = self.options.pending_throttle;
+        let pending = self.pending.len() > 0;
+
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
             o = network.readb(), if self.buffered.len() == 0 => match o {
@@ -159,27 +156,31 @@ impl EventLoop {
             // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
-            o = self.requests_rx.next(), if !inflight_full && !self.has_pending => match o {
+            o = self.requests_rx.next(), if !inflight_full && !pending => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
-                    let outgoing = network.write(request).await?;
+                    let outgoing = network.fill(request)?;
+
+                    // bulk up publish requests
+                    if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
+                        bulk_fill(&self.options, &mut self.state, &self.requests_rx, network)?;
+                        network.flush().await?;
+                        // Ids are not available when individual request batching is enabled
+                        return Ok((None, Some(Outgoing::Batch)))
+                    }
+
+
+                    network.flush().await?;
                     return Ok((None, Some(outgoing)))
                 }
                 None => return Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
-            o = next_pending(self.options.pending_throttle, &mut self.pending), if self.pending.len() != 0 => match o {
-                Some(request) => {
-                    let request = self.state.handle_outgoing_packet(request)?;
-                    let outgoing = network.write(request).await?;
-                    Ok((None, Some(outgoing)))
-                }
-                None => {
-                    // this is the only place where poll returns a spurious (None, None)
-                    self.has_pending = false;
-                    Ok((None, None))
-                }
+            Some(request) = next_pending(throttle, &mut self.pending), if pending => {
+                let request = self.state.handle_outgoing_packet(request)?;
+                let outgoing = network.write(request).await?;
+                Ok((None, Some(outgoing)))
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
@@ -195,6 +196,8 @@ impl EventLoop {
             }
         }
     }
+
+
 }
 
 impl EventLoop {
@@ -236,6 +239,7 @@ impl EventLoop {
             }
         };
 
+        // let packet = Packet::ConnAck(ConnAck::new(ConnectReturnCode::Accepted, false));
         // Last session might contain packets which aren't acked. MQTT says these packets should be
         // republished in the next session
         // move pending messages from state to eventloop
@@ -298,32 +302,41 @@ impl EventLoop {
     }
 }
 
-/// Returns the next pending packet asyncronously to be used in select!
+/// Returns the next pending packet asynchronously to be used in select!
 /// This is a synchronous function but made async to make it fit in select!
-async fn next_pending(
-    delay: Duration,
-    pending: &mut IntoIter<Request>,
-) -> Option<Request> {
+async fn next_pending(delay: Duration, pending: &mut IntoIter<Request>) -> Option<Request> {
     // return next packet with a delay
     time::delay_for(delay).await;
     pending.next()
 }
 
+/// Returns the next buffered packet from last buffered read
 async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {
     incoming.next()
 }
 
-impl From<Request> for Packet {
-    fn from(item: Request) -> Self {
-        match item {
-            Request::Publish(publish) => Packet::Publish(publish),
-            Request::Disconnect => Packet::Disconnect,
-            Request::Subscribe(subscribe) => Packet::Subscribe(subscribe),
-            Request::Unsubscribe(unsubscribe) => Packet::Unsubscribe(unsubscribe),
-            Request::PingReq => Packet::PingReq,
-            _ => todo!()
+fn bulk_fill(
+    options: &MqttOptions,
+    state: &mut MqttState,
+    requests: &Receiver<Request>,
+    network: &mut Network,
+) -> Result<(), ConnectionError> {
+    // Be eager in reading more data till inflight buffers are full.
+    // Make sure size of total inflight messages isn't greater than
+    // OS tcp write buffer size to prevent bounded buffer deadlocks
+    for _i in 0..options.max_request_batch {
+        let request = match requests.try_recv() {
+            Ok(r) => r,
+            Err(_) => break
+        };
+        let request = state.handle_outgoing_packet(request)?;
+        let _outgoing = network.fill(request);
+        if state.inflight >= options.inflight {
+            break
         }
     }
+
+    Ok(())
 }
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send {}

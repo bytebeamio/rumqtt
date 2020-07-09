@@ -115,6 +115,8 @@ pub enum Outgoing {
     PingReq,
     /// Disconnect packet
     Disconnect,
+    /// Notification if requests are internally batched
+    Batch
 }
 
 /// Requests by the client to mqtt event loop. Request are
@@ -201,6 +203,8 @@ pub struct MqttOptions {
     max_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
+    /// Max internal request batching
+    max_request_batch: usize,
     /// Minimum delay time between consecutive outgoing packets
     /// while retransmitting pending packets
     pending_throttle: Duration,
@@ -232,6 +236,7 @@ impl MqttOptions {
             credentials: None,
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
+            max_request_batch: 0,
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
@@ -310,6 +315,12 @@ impl MqttOptions {
     /// Maximum packet size
     pub fn max_packet_size(&self) -> usize {
         self.max_packet_size
+    }
+
+    /// Maximum internal batching of requests
+    pub fn set_max_request_batch(&mut self, max: usize) -> &mut Self {
+        self.max_request_batch = max;
+        self
     }
 
     /// `clean_session = true` removes all the state from queues & instructs the broker
