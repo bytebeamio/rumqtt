@@ -1,6 +1,7 @@
 use crate::{EventLoop, Outgoing, ConnectionError, Incoming};
 
 use tokio::select;
+use tokio::stream::StreamExt;
 
 impl EventLoop {
     /// Next notification or outgoing request
@@ -29,23 +30,20 @@ impl EventLoop {
     /// Select on network and requests and generate keepalive pings when necessary
     async fn selectv(&mut self) -> Result<(Vec<Incoming>, Option<Outgoing>), ConnectionError> {
         let network = &mut self.network.as_mut().unwrap();
-        let inflight_full = self.state.inflight >= self.options.inflight;
+
         select! {
             // Pull next packet from network
             o = network.readb() => match o {
                 Ok(packets) => {
-                    let (incoming, outgoing) = self.state.handle_incoming_packets(packets)?;
-                    network.writeb(outgoing).await?;
-                    return Ok((incoming, None))
+                    return Ok((packets, None))
                 }
                 Err(e) => return Err(ConnectionError::Io(e))
             },
             // Pull next request from user requests channel.
             // we read user requests only when we are done sending pending
             // packets and inflight queue has space (for flow control)
-            o = self.requests.next() => match o {
+            o = self.requests_rx.next() => match o {
                 Some(request) => {
-                    let request = self.state.handle_outgoing_packet(request)?;
                     let outgoing = network.write(request).await?;
                     return Ok((Vec::new(), Some(outgoing)))
                 }

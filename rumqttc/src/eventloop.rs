@@ -304,14 +304,14 @@ impl EventLoop {
 
 /// Returns the next pending packet asynchronously to be used in select!
 /// This is a synchronous function but made async to make it fit in select!
-async fn next_pending(delay: Duration, pending: &mut IntoIter<Request>) -> Option<Request> {
+pub(crate) async fn next_pending(delay: Duration, pending: &mut IntoIter<Request>) -> Option<Request> {
     // return next packet with a delay
     time::delay_for(delay).await;
     pending.next()
 }
 
 /// Returns the next buffered packet from last buffered read
-async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {
+pub(crate) async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {
     incoming.next()
 }
 
