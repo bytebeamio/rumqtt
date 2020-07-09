@@ -1,4 +1,4 @@
-use tokio::sync::mpsc::{channel, Sender};
+use async_channel::{bounded, Sender};
 use tokio::{task, time};
 
 use rumqttc::{
@@ -12,13 +12,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let throttle = Duration::from_secs(1);
-    let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions.set_keep_alive(5).set_throttle(throttle);
+    mqttoptions.set_keep_alive(5);
 
 
-    let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;
+    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+    let requests_tx = eventloop.handle();
     task::spawn(async move {
         requests(requests_tx).await;
         time::delay_for(Duration::from_secs(3)).await;
@@ -31,7 +30,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 
-async fn requests(mut requests_tx: Sender<Request>) {
+async fn requests(requests_tx: Sender<Request>) {
     let subscription = Subscribe::new("hello/world", QoS::AtMostOnce);
     let _ = requests_tx.send(Request::Subscribe(subscription)).await;
 

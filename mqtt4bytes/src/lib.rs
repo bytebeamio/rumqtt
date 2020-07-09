@@ -1,88 +1,59 @@
 //! This is a low level (no_std) crate with the ability to assemble and disassemble MQTT 3.1.1
 //! packets and is used by both client and broker. Uses 'bytes' crate internally
-
 #![no_std]
-use cfg_if::cfg_if;
 
 extern crate alloc;
-#[cfg(feature = "std")]
-extern crate std;
 
-#[cfg(feature = "std")]
-mod codec;
-mod packetbytes;
 mod packets;
 mod read;
 mod topic;
-mod write;
 
-#[cfg(feature = "std")]
-pub use codec::*;
-pub use packetbytes::*;
 pub use packets::*;
 pub use read::*;
 pub use topic::*;
-pub use write::*;
+use bytes::Buf;
+use core::fmt;
+use core::fmt::{Display, Formatter};
 
-cfg_if! {
-    if #[cfg(feature = "std")] {
-        /// Serialization and deserialization errors
-        #[derive(Debug, thiserror::Error)]
-        pub enum Error {
-            #[error("Invalid connect return code `{0}`")]
-            InvalidConnectReturnCode(u8),
-            #[error("Invalid protocol. Expecting 'MQTT' in payload")]
-            InvalidProtocol,
-            #[error("Invalid protocol level `{0}`")]
-            InvalidProtocolLevel(u8),
-            #[error("Incorrect packet format")]
-            IncorrectPacketFormat,
-            #[error("Unsupported Packet type `{0}`")]
-            InvalidPacketType(u8),
-            #[error("Unsupported QoS `{0}`")]
-            InvalidQoS(u8),
-            #[error("Invalid packet identifier = 0")]
-            PacketIdZero,
-            #[error("Payload size incorrect")]
-            PayloadSizeIncorrect,
-            #[error("Payload too long")]
-            PayloadTooLong,
-            #[error("Payload size limit exceeded")]
-            PayloadSizeLimitExceeded,
-            #[error("Payload required")]
-            PayloadRequired,
-            #[error("Topic name must only contain valid UTF-8")]
-            TopicNotUtf8,
-            #[error("Malformed remaining length")]
-            MalformedRemainingLength,
-            #[error("Trying to access wrong boundary")]
-            BoundaryCrossed,
-            #[error("EOF. Not enough data in buffer")]
-            UnexpectedEof,
-            #[error("I/O")]
-            Io(#[from] std::io::Error),
-        }
-    } else {
-        /// Serialization and deserialization errors
-        pub enum Error {
-            InvalidConnectReturnCode(u8),
-            InvalidProtocol,
-            InvalidProtocolLevel(u8),
-            IncorrectPacketFormat,
-            InvalidPacketType(u8),
-            InvalidQoS(u8),
-            PacketIdZero,
-            PayloadSizeIncorrect,
-            PayloadTooLong,
-            PayloadSizeLimitExceeded,
-            PayloadRequired,
-            TopicNotUtf8,
-            BoundaryCrossed,
-            MalformedRemainingLength,
-            UnexpectedEof,
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    InvalidConnectReturnCode(u8),
+    InvalidProtocol,
+    InvalidProtocolLevel(u8),
+    IncorrectPacketFormat,
+    InvalidPacketType(u8),
+    InvalidQoS(u8),
+    PacketIdZero,
+    PayloadSizeIncorrect,
+    PayloadTooLong,
+    PayloadSizeLimitExceeded,
+    PayloadRequired,
+    TopicNotUtf8,
+    BoundaryCrossed,
+    MalformedRemainingLength,
+    InsufficientBytes(usize),
 }
+
+/// Encapsulates all MQTT packet types
+#[derive(Debug, Clone)]
+pub enum Packet {
+    Connect(Connect),
+    ConnAck(ConnAck),
+    Publish(Publish),
+    PubAck(PubAck),
+    PubRec(PubRec),
+    PubRel(PubRel),
+    PubComp(PubComp),
+    Subscribe(Subscribe),
+    SubAck(SubAck),
+    Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
+    PingReq,
+    PingResp,
+    Disconnect,
+}
+
+
 
 /// MQTT packet type
 #[repr(u8)]
@@ -167,3 +138,10 @@ pub fn qos(num: u8) -> Result<QoS, Error> {
         qos => Err(Error::InvalidQoS(qos)),
     }
 }
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Error = {:?}", self)
+    }
+}
+

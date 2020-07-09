@@ -14,7 +14,7 @@
 //!
 //! fn main() {
 //!     let mut mqttoptions = MqttOptions::new("rumqtt-sync-client", "test.mosquitto.org", 1883);
-//!     mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
+//!     mqttoptions.set_keep_alive(5);
 //!
 //!     let (mut client, mut connection) = Client::new(mqttoptions, 10);
 //!     client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
@@ -54,8 +54,8 @@
 //! #[tokio::main(core_threads = 1)]
 //! async fn main() {
 //!     let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//!     let requests_rx = tokio::stream::iter(Vec::new());;
-//!     let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;
+//!     let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+//!     let requests_tx = eventloop.handle();
 //!
 //!     loop {
 //!         let notification = eventloop.poll().await.unwrap();
@@ -65,12 +65,7 @@
 //! }
 //! ```
 //! - Reconnects if polled again after an error
-//! - Takes any `Stream` for requests and hence offers a lot of customization
-//!
-//! **Few of our real world use cases**
-//! - Bounded or unbounded requests
-//! - A stream which orchestrates data between disk and memory by detecting backpressure and never (practically) loose data
-//! - A stream which juggles data between several channels based on priority of the data
+//! - User handle to send requests is just a channel
 //!
 //! Since eventloop is externally polled (with `iter()/poll()`) out side the library, users can
 //! - Distribute incoming messages based on topics
@@ -83,47 +78,35 @@ extern crate log;
 use std::time::Duration;
 
 mod client;
-mod eventloop;
-mod network;
+mod tls;
+mod framed;
 mod state;
+mod eventloop;
+#[cfg(feature = "passthrough")]
+mod eventloop2;
 
 pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
 
-/// Includes incoming packets from the network and other interesting events happening in the eventloop
-#[derive(Debug)]
-pub enum Incoming {
-    /// Connection successful
-    Connected,
-    /// Incoming publish from the broker
-    Publish(Publish),
-    /// Incoming puback from the broker
-    Puback(PubAck),
-    /// Incoming pubrec from the broker
-    Pubrec(PubRec),
-    /// Incoming pubcomp from the broker
-    Pubcomp(PubComp),
-    /// Incoming suback from the broker
-    Suback(SubAck),
-    /// Incoming unsuback from the broker
-    Unsuback(UnsubAck),
-    /// Ping response
-    PingResp,
-}
+pub type Incoming = Packet;
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Outgoing {
     /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
+    /// Publishes
+    Publishes(Vec<u16>),
     /// Subscribe packet with packet identifier
     Subscribe(u16),
     /// Unsubscribe packet with packet identifier
     Unsubscribe(u16),
     /// PubAck packet
     PubAck(u16),
+    /// PubAck packet
+    PubAcks(Vec<u16>),
     /// PubRec packet
     PubRec(u16),
     /// PubComp packet
@@ -132,16 +115,29 @@ pub enum Outgoing {
     PingReq,
     /// Disconnect packet
     Disconnect,
+    /// Notification if requests are internally batched
+    Batch
 }
 
 /// Requests by the client to mqtt event loop. Request are
-/// handle one by one
+/// handled one by one. This is a duplicate of possible MQTT
+/// packets along with the ability to tag data and do bulk
+/// operations.
+/// Upcoming feature: When 'manual' feature is turned on
+/// provides the ability to reply with acks when the user sees fit
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
+    Publishes(Vec<Publish>),
+    PubAck(PubAck),
+    PubAcks(Vec<PubAck>),
+    PubRec(PubRec),
+    PubComp(PubComp),
+    PubRel(PubRel),
+    PingReq,
+    PingResp,
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
-    Reconnect(Connect),
     Disconnect,
 }
 
@@ -207,10 +203,11 @@ pub struct MqttOptions {
     max_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
-    /// notification channel capacity
-    notification_channel_capacity: usize,
+    /// Max internal request batching
+    max_request_batch: usize,
     /// Minimum delay time between consecutive outgoing packets
-    throttle: Duration,
+    /// while retransmitting pending packets
+    pending_throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: usize,
     /// Last will that will be issued on unexpected disconnect
@@ -239,8 +236,8 @@ impl MqttOptions {
             credentials: None,
             max_packet_size: 256 * 1024,
             request_channel_capacity: 10,
-            notification_channel_capacity: 10,
-            throttle: Duration::from_micros(0),
+            max_request_batch: 0,
+            pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
             key_type: Key::RSA,
@@ -320,6 +317,12 @@ impl MqttOptions {
         self.max_packet_size
     }
 
+    /// Maximum internal batching of requests
+    pub fn set_max_request_batch(&mut self, max: usize) -> &mut Self {
+        self.max_request_batch = max;
+        self
+    }
+
     /// `clean_session = true` removes all the state from queues & instructs the broker
     /// to clean all the client state when client disconnects.
     ///
@@ -347,17 +350,6 @@ impl MqttOptions {
         self.credentials.clone()
     }
 
-    /// Set notification channel capacity
-    pub fn set_notification_channel_capacity(&mut self, capacity: usize) -> &mut Self {
-        self.notification_channel_capacity = capacity;
-        self
-    }
-
-    /// Notification channel capacity
-    pub fn notification_channel_capacity(&self) -> usize {
-        self.notification_channel_capacity
-    }
-
     /// Set request channel capacity
     pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.request_channel_capacity = capacity;
@@ -370,14 +362,14 @@ impl MqttOptions {
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_throttle(&mut self, duration: Duration) -> &mut Self {
-        self.throttle = duration;
+    pub fn set_pending_throttle(&mut self, duration: Duration) -> &mut Self {
+        self.pending_throttle = duration;
         self
     }
 
     /// Outgoing message rate
-    pub fn throttle(&self) -> Duration {
-        self.throttle
+    pub fn pending_throttle(&self) -> Duration {
+        self.pending_throttle
     }
 
     /// Set number of concurrent in flight messages

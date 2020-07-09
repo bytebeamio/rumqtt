@@ -3,7 +3,7 @@
 
 use crate::{ConnectionError, EventLoop, Incoming, MqttOptions, Outgoing, Request};
 
-use async_channel::{bounded, Receiver, SendError, Sender};
+use async_channel::{SendError, Sender};
 use mqtt4bytes::*;
 use std::mem;
 use std::time::Duration;
@@ -32,16 +32,15 @@ pub struct Client {
 impl Client {
     /// Create a new `Client`
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
-        let (request_tx, request_rx) = bounded(cap);
-
-        // create mqtt eventloop and take cancellation handle
+        // create MQTT eventloop and take cancellation handle
         let mut runtime = runtime::Builder::new()
             .basic_scheduler()
             .enable_all()
             .build()
             .unwrap();
-        let eventloop = EventLoop::new(options, request_rx);
+        let eventloop = EventLoop::new(options, cap);
         let mut eventloop = runtime.block_on(eventloop);
+        let request_tx = eventloop.handle();
         let cancel_tx = eventloop.take_cancel_handle().unwrap();
 
         let client = Client {
@@ -95,12 +94,12 @@ impl Client {
 ///  MQTT connection. Maintains all the necessary state and automatically retries connections
 /// in flaky networks.
 pub struct Connection {
-    pub eventloop: EventLoop<Receiver<Request>>,
+    pub eventloop: EventLoop,
     runtime: Option<Runtime>,
 }
 
 impl Connection {
-    fn new(mut eventloop: EventLoop<Receiver<Request>>, runtime: Runtime) -> Connection {
+    fn new(mut eventloop: EventLoop, runtime: Runtime) -> Connection {
         eventloop.set_reconnection_delay(Duration::from_secs(1));
         Connection {
             eventloop,

@@ -35,8 +35,9 @@ impl From<()> for Error {
 }
 
 pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, Error> {
-    let addr = format!("{}:{}", options.broker_addr, options.port);
-    let tcp = TcpStream::connect(addr).await?;
+    let addr = options.broker_addr.as_str();
+    let port = options.port;
+    let tcp = TcpStream::connect((addr, port)).await?;
     let mut config = ClientConfig::new();
 
     // Add ca to root store if the connection is TLS
@@ -81,8 +82,4 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
     Ok(tls)
 }
 
-pub async fn tcp_connect(options: &MqttOptions) -> Result<TcpStream, Error> {
-    let addr = format!("{}:{}", options.broker_addr, options.port);
-    let tcp = TcpStream::connect(addr).await?;
-    Ok(tcp)
-}
+

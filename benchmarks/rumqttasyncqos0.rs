@@ -12,13 +12,13 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    start("rumqtt-async", 100, 1_000_00).await.unwrap();
+    start("rumqtt-async", 100, 1_000_000).await.unwrap();
     // common::profile("bench.pb", guard);
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(20);
+    mqttoptions.set_keep_alive(1000);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
@@ -32,38 +32,31 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
         time::delay_for(Duration::from_secs(10)).await;
     });
 
-    let mut acks_count = 0;
     let start = Instant::now();
-    loop {
-        let (notification, _) = eventloop.poll().await?;
-        let notification = match notification {
-            Some(n) => n,
-            None => continue
-        };
+    'main: loop {
+        let (notifications, _) = eventloop.poll().await?;
+        for notification in notifications {
+            match notification {
+                Incoming::PingResp => {
+                    break 'main
+                }
+                _notification => {
+                    continue;
+                }
+            };
 
-        match notification {
-            Incoming::PubAck(_puback) => {
-                acks_count += 1;
-            }
-            _notification => {
-                continue;
-            }
-        };
-
-        if acks_count == count {
-            break;
         }
+
     }
 
     let elapsed_ms = start.elapsed().as_millis();
-    let throughput = acks_count as usize / elapsed_ms as usize;
+    let throughput = count as usize / elapsed_ms as usize;
     let throughput = throughput * 1000;
     println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
-             id,
-             count,
-             payload_size,
-             throughput,
-    );
+    id,
+    count,
+    payload_size,
+    throughput);
     Ok(())
 }
 
@@ -72,13 +65,13 @@ async fn requests(id: &str, payloads: Vec<Vec<u8>>, requests_tx: Sender<Request>
     // let subscription = rumqttc::Subscribe::new(&topic, QoS::AtLeastOnce);
     // let _ = requests_tx.send(Request::Subscribe(subscription)).await;
     for payload in payloads.into_iter() {
-        let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
+        let publish = Publish::new(&topic, QoS::AtMostOnce, payload);
         let publish = Request::Publish(publish);
-        if let Err(_) = requests_tx.send(publish).await {
-            break;
-        }
+        requests_tx.send(publish).await.unwrap();
     }
 
+    let ping = Request::PingReq;
+    requests_tx.send(ping).await.unwrap();
     time::delay_for(Duration::from_secs(5)).await;
 }
 

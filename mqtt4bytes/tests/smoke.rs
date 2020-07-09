@@ -1,5 +1,5 @@
 use bytes::{BufMut, BytesMut};
-use mqtt4bytes::{mqtt_read, mqtt_write, Packet, PubAck, Publish, QoS};
+use mqtt4bytes::{mqtt_read, Packet, PubAck, Publish, QoS};
 use rand::Rng;
 
 #[test]
@@ -24,7 +24,7 @@ fn publish_encode_and_decode_works_as_expected() {
         let bytes = stream.split_to(split_len);
         read_stream.put(bytes);
         let packet = match mqtt_read(&mut read_stream, 10 * 1024) {
-            Err(mqtt4bytes::Error::UnexpectedEof) => continue,
+            Err(mqtt4bytes::Error::InsufficientBytes(_)) => continue,
             Err(e) => panic!(e),
             Ok(packet) => packet,
         };
@@ -46,8 +46,7 @@ pub fn publishes(size: usize, count: usize) -> BytesMut {
         let payload = vec![i as u8; size];
         let mut packet = Publish::new("hello/mqtt/topic/bytes", QoS::AtLeastOnce, payload);
         packet.set_pkid((i % 65000) as u16 + 1);
-        let packet = Packet::Publish(packet);
-        mqtt_write(packet, &mut stream).unwrap();
+        packet.write(&mut stream).unwrap();
     }
 
     stream
@@ -75,7 +74,7 @@ fn pubacks_encode_and_decode_works_as_expected() {
         let bytes = stream.split_to(split_len);
         read_stream.put(bytes);
         let packet = match mqtt_read(&mut read_stream, 10 * 1024) {
-            Err(mqtt4bytes::Error::UnexpectedEof) => continue,
+            Err(mqtt4bytes::Error::InsufficientBytes(_)) => continue,
             Err(e) => panic!(e),
             Ok(packet) => packet,
         };
@@ -95,8 +94,7 @@ pub fn pubacks(count: usize) -> BytesMut {
 
     for i in 0..count {
         let packet = PubAck::new((i % 65000) as u16 + 1);
-        let packet = Packet::PubAck(packet);
-        mqtt_write(packet, &mut stream).unwrap();
+        packet.write(&mut stream).unwrap();
     }
 
     stream

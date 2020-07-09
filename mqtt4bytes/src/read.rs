@@ -1,5 +1,4 @@
-use crate::packetbytes::*;
-use crate::{packet_type, Error, FixedHeader, PacketType};
+use crate::*;
 use bytes::BytesMut;
 
 /// Reads a stream of bytes and extracts MQTT packets
@@ -18,8 +17,7 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
     // If the current call fails due to insufficient bytes in the stream, after calculating
     // remaining length, we extend the stream
     if stream.len() < len {
-        stream.reserve(remaining_len + 2);
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InsufficientBytes(len));
     }
 
     // Test with a stream with exactly the size to check border panics
@@ -72,8 +70,9 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
 
 /// Parses fixed header. Doesn't modify the source
 fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize), Error> {
-    if stream.is_empty() {
-        return Err(Error::UnexpectedEof);
+    let stream_len = stream.len();
+    if stream_len < 2 {
+        return Err(Error::InsufficientBytes(2));
     }
 
     let mut mult: usize = 1;
@@ -97,7 +96,7 @@ fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize), Error> {
     }
 
     if !done {
-        return Err(Error::UnexpectedEof);
+        return Err(Error::InsufficientBytes(stream_len + 1));
     }
 
     Ok((byte1, len))
@@ -413,7 +412,7 @@ mod test {
         s.truncate(0);
         match mqtt_read(&mut s.split_off(0), 100) {
             Ok(_) => panic!("should've panicked as there aren't enough bytes"),
-            Err(Error::UnexpectedEof) => (),
+            Err(Error::InsufficientBytes(_)) => (),
             Err(e) => panic!("Expecting EoF error. Received = {:?}", e),
         };
 
@@ -422,7 +421,7 @@ mod test {
         s.truncate(2);
         match mqtt_read(&mut s.split_off(0), 100) {
             Ok(_) => panic!("should've panicked as there aren't enough bytes"),
-            Err(Error::UnexpectedEof) => (),
+            Err(Error::InsufficientBytes(_)) => (),
             Err(e) => panic!("Expecting EoF error. Received = {:?}", e),
         };
 
@@ -431,7 +430,7 @@ mod test {
         s.truncate(4);
         match mqtt_read(&mut s.split_off(0), 100) {
             Ok(_) => panic!("should've panicked as there aren't enough bytes"),
-            Err(Error::UnexpectedEof) => (),
+            Err(Error::InsufficientBytes(_)) => (),
             Err(e) => panic!("Expecting EoF error. Received = {:?}", e),
         };
 

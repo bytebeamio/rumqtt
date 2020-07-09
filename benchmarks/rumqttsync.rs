@@ -7,14 +7,14 @@ mod common;
 
 fn main() {
     pretty_env_logger::init();
-    // let guard = pprof::ProfilerGuard::new(250).unwrap();
-    let _o = start("rumqtt-sync", 100, 1000000);
-    // common::profile("bench.pb", guard);
+    let guard = pprof::ProfilerGuard::new(250).unwrap();
+    start("rumqtt-sync", 100, 1_000_000).unwrap();
+    common::profile("bench.pb", guard);
 }
 
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(20);
+    mqttoptions.set_keep_alive(20).set_max_request_batch(0);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
@@ -37,7 +37,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
         };
 
         match notification {
-            Incoming::Puback(_puback) => {
+            Incoming::PubAck(_puback) => {
                 acks_count += 1;
             }
             _notification => {
