@@ -82,7 +82,7 @@ mod tls;
 mod framed;
 mod state;
 mod eventloop;
-#[cfg(feature = "bulkio")]
+#[cfg(feature = "passthrough")]
 mod eventloop2;
 
 pub use client::{Client, Connection, ClientError};

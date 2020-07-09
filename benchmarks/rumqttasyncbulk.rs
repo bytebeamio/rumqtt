@@ -4,7 +4,7 @@ use std::error::Error;
 
 use tokio::task;
 use tokio::time;
-use async_channel::{bounded as channel, Sender};
+use async_channel::Sender;
 
 mod common;
 
@@ -17,14 +17,14 @@ async fn main() {
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
-    let (requests_tx, requests_rx) = channel(10);
     let mut mqttoptions = MqttOptions::new(id, "localhost", 8080);
     mqttoptions.set_keep_alive(20);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
 
-    let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;
+    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+    let requests_tx = eventloop.handle();
     let client_id = id.to_owned();
     let payloads = generate_payloads(count, payload_size);
     task::spawn(async move {
