@@ -4,8 +4,8 @@ use bytes::BytesMut;
 /// Reads a stream of bytes and extracts MQTT packets
 pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packet, Error> {
     // Read the initial bytes necessary from the stream with out mutating the stream cursor
-    let (byte1, remaining_len) = parse_fixed_header(stream)?;
-    let header_len = header_len(remaining_len);
+    let (byte1, remaining_len_len, remaining_len) = parse_fixed_header(stream)?;
+    let header_len = 1 + remaining_len_len;
     let len = header_len + remaining_len;
 
     // Don't let rogue connections attack with huge payloads. Disconnect them before reading all
@@ -40,11 +40,6 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
         remaining_len,
     };
 
-    // Always reserve size for next max possible payload
-    if stream.len() < 2 {
-        stream.reserve(6 + max_payload_size)
-    }
-
     let packet = packet.freeze();
     let packet = match control_type {
         PacketType::Connect => Packet::Connect(Connect::assemble(fixed_header, packet)?),
@@ -68,30 +63,39 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
     Ok(packet)
 }
 
+// pub fn check(stream: &mut BytesMut) -> Result<FixedHeader, Error> {
+//     todo!()
+// }
+
 /// Parses fixed header. Doesn't modify the source
-fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize), Error> {
+fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize, usize), Error> {
     let stream_len = stream.len();
     if stream_len < 2 {
         return Err(Error::InsufficientBytes(2));
     }
 
-    let mut mult: usize = 1;
-    let mut len: usize = 0;
+    let mut remaining_len: usize = 0;
+    let mut remaining_len_len = 0;
     let mut done = false;
     let mut stream = stream.iter();
 
     let byte1 = *stream.next().unwrap();
+    let mut shift = 0;
     for byte in stream {
+        remaining_len_len += 1;
         let byte = *byte as usize;
-        len += (byte & 0x7F) * mult;
-        mult *= 0x80;
-        if mult > 0x80 * 0x80 * 0x80 * 0x80 {
-            return Err(Error::MalformedRemainingLength);
-        }
+        remaining_len += (byte & 0x7F) << shift;
 
+        // stop when continue bit is 0
         done = (byte & 0x80) == 0;
         if done {
             break;
+        }
+
+
+        shift += 7;
+        if shift > 21 {
+            return Err(Error::MalformedRemainingLength);
         }
     }
 
@@ -99,11 +103,11 @@ fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize), Error> {
         return Err(Error::InsufficientBytes(stream_len + 1));
     }
 
-    Ok((byte1, len))
+    Ok((byte1, remaining_len_len, remaining_len))
 }
 
 /// Header length from remaining length.
-fn header_len(remaining_len: usize) -> usize {
+fn _header_len(remaining_len: usize) -> usize {
     if remaining_len >= 2_097_152 {
         4 + 1
     } else if remaining_len >= 16_384 {
@@ -124,21 +128,21 @@ mod test {
 
     #[test]
     fn fixed_header_is_parsed_as_expected() {
-        let (_, remaining_len) = parse_fixed_header(b"\x10\x00").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x00").unwrap();
         assert_eq!(remaining_len, 0);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\x7f").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x7f").unwrap();
         assert_eq!(remaining_len, 127);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\x80\x01").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x80\x01").unwrap();
         assert_eq!(remaining_len, 128);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\xff\x7f").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\xff\x7f").unwrap();
         assert_eq!(remaining_len, 16383);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x01").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x01").unwrap();
         assert_eq!(remaining_len, 16384);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\xff\xff\x7f").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\xff\xff\x7f").unwrap();
         assert_eq!(remaining_len, 2_097_151);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x80\x01").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x80\x01").unwrap();
         assert_eq!(remaining_len, 2_097_152);
-        let (_, remaining_len) = parse_fixed_header(b"\x10\xff\xff\xff\x7f").unwrap();
+        let (_, _, remaining_len) = parse_fixed_header(b"\x10\xff\xff\xff\x7f").unwrap();
         assert_eq!(remaining_len, 268_435_455);
     }
 
@@ -222,78 +226,6 @@ mod test {
         stream.extend_from_slice(&packetstream);
         let _packet = mqtt_read(&mut stream, 100).unwrap();
         assert_eq!(&stream[..], &[0xDE, 0xAD, 0xBE, 0xEF]);
-    }
-
-    #[test]
-    fn read_packet_publish_qos1_works() {
-        let mut stream = bytes::BytesMut::new();
-        let mut packetstream = vec![
-            0b0011_0010,
-            11, // packet type, flags and remaining len
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'b', // variable header. topic name = 'a/b'
-            0x00,
-            0x0a, // variable header. pkid = 10
-            0xF1,
-            0xF2,
-            0xF3,
-            0xF4, // publish payload
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-
-        stream.extend_from_slice(&packetstream);
-        let packet = mqtt_read(&mut stream, 100).unwrap();
-        assert_eq!(&stream[..], &[0xDE, 0xAD, 0xBE, 0xEF]);
-
-        let packet = match packet {
-            Packet::Publish(packet) => packet,
-            packet => panic!("Invalid packet = {:?}", packet),
-        };
-
-        assert_eq!(packet.bytes.len(), packetstream.len() - 4);
-        // remove extra packets from source packet stream and compare
-        packetstream.truncate(packetstream.len() - 4);
-        assert_eq!(&packet.bytes[..], &packetstream[..]);
-    }
-
-    #[test]
-    fn read_packet_publish_qos0_works() {
-        let mut stream = bytes::BytesMut::new();
-        let mut packetstream = vec![
-            0b0011_0000,
-            7, // packet type, flags and remaining len
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'b', // variable header. topic name = 'a/b'
-            0x01,
-            0x02, // payload
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-
-        stream.extend_from_slice(&packetstream);
-        let packet = mqtt_read(&mut stream, 100).unwrap();
-        assert_eq!(&stream[..], &[0xDE, 0xAD, 0xBE, 0xEF]);
-
-        let packet = match packet {
-            Packet::Publish(packet) => packet,
-            packet => panic!("Invalid packet = {:?}", packet),
-        };
-
-        assert_eq!(packet.bytes.len(), packetstream.len() - 4);
-        // remove extra packets from source packet stream and compare
-        packetstream.truncate(packetstream.len() - 4);
-        assert_eq!(&packet.bytes[..], &packetstream[..]);
     }
 
     #[test]
