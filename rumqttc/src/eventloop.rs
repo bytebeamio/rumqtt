@@ -133,7 +133,7 @@ impl EventLoop {
 
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
-        let network = &mut self.network.as_mut().unwrap();
+        let network = self.network.as_mut().unwrap();
         let inflight_full = self.state.inflight >= self.options.inflight;
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;

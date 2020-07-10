@@ -382,7 +382,7 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use super::{MqttState, Packet, StateError};
+    use super::{MqttState, StateError};
     use crate::{Incoming, MqttOptions, Request};
     use mqtt4bytes::*;
 
