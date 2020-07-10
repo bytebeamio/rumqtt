@@ -2,31 +2,15 @@ use crate::*;
 use bytes::BytesMut;
 
 /// Reads a stream of bytes and extracts MQTT packets
-pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packet, Error> {
-    // Read the initial bytes necessary from the stream with out mutating the stream cursor
-    let (byte1, remaining_len_len, remaining_len) = parse_fixed_header(stream)?;
-    let header_len = 1 + remaining_len_len;
-    let len = header_len + remaining_len;
-
-    // Don't let rogue connections attack with huge payloads. Disconnect them before reading all
-    // that data
-    if remaining_len > max_payload_size {
-        return Err(Error::PayloadSizeLimitExceeded);
-    }
-
-    // If the current call fails due to insufficient bytes in the stream, after calculating
-    // remaining length, we extend the stream
-    if stream.len() < len {
-        return Err(Error::InsufficientBytes(len));
-    }
-
+pub fn mqtt_read(stream: &mut BytesMut, max_packet_size: usize) -> Result<Packet, Error> {
+    let fixed_header = check(stream, max_packet_size)?;
     // Test with a stream with exactly the size to check border panics
-    let packet = stream.split_to(len);
-    let control_type = packet_type(byte1 >> 4)?;
+    let packet = stream.split_to(frame_length);
+    let packet_type = fixed_header.packet_type()?;
 
     if remaining_len == 0 {
         // no payload packets
-        return match control_type {
+        return match packet_type {
             PacketType::PingReq => Ok(Packet::PingReq),
             PacketType::PingResp => Ok(Packet::PingResp),
             PacketType::Disconnect => Ok(Packet::Disconnect),
@@ -34,14 +18,9 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
         };
     }
 
-    let fixed_header = FixedHeader {
-        byte1,
-        header_len,
-        remaining_len,
-    };
 
     let packet = packet.freeze();
-    let packet = match control_type {
+    let packet = match packet_type {
         PacketType::Connect => Packet::Connect(Connect::assemble(fixed_header, packet)?),
         PacketType::ConnAck => Packet::ConnAck(ConnAck::assemble(fixed_header, packet)?),
         PacketType::Publish => Packet::Publish(Publish::assemble(fixed_header, packet)?),
@@ -63,9 +42,27 @@ pub fn mqtt_read(stream: &mut BytesMut, max_payload_size: usize) -> Result<Packe
     Ok(packet)
 }
 
-// pub fn check(stream: &mut BytesMut) -> Result<FixedHeader, Error> {
-//     todo!()
-// }
+/// Checks if the stream has enough bytes to frame a packet and returns fixed header
+pub fn check(stream: &mut BytesMut, max_packet_size: usize) -> Result<FixedHeader, Error> {
+    // Read the initial bytes necessary from the stream with out mutating the stream cursor
+    let (byte1, remaining_len_len, remaining_len) = parse_fixed_header(stream)?;
+    let fixed_header = FixedHeader::new(byte1, remaining_len_len, remaining_len);
+
+    // Don't let rogue connections attack with huge payloads. Disconnect them before reading all
+    // that data
+    if fixed_header.remaining_len > max_packet_size {
+        return Err(Error::PayloadSizeLimitExceeded);
+    }
+
+    // If the current call fails due to insufficient bytes in the stream, after calculating
+    // remaining length, we extend the stream
+    let frame_length = fixed_header.frame_length();
+    if stream.len() < frame_length {
+        return Err(Error::InsufficientBytes(frame_length));
+    }
+
+    Ok(fixed_header)
+}
 
 /// Parses fixed header. Doesn't modify the source
 fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize, usize), Error> {

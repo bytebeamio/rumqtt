@@ -49,7 +49,7 @@ impl Publish {
         let dup = (fixed_header.byte1 & 0b1000) != 0;
         let retain = (fixed_header.byte1 & 0b0001) != 0;
 
-        let variable_header_index = fixed_header.header_len;
+        let variable_header_index = fixed_header.fixed_len;
         payload.advance(variable_header_index);
         let topic = read_mqtt_string(&mut payload)?;
 
