@@ -35,7 +35,7 @@ impl EventLoop {
             // Pull next packet from network
             o = network.readb() => match o {
                 Ok(packets) => {
-                    return Ok((packets, None))
+                    return Ok((packets.into(), None))
                 }
                 Err(e) => return Err(ConnectionError::Io(e))
             },

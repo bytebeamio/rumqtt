@@ -3,7 +3,7 @@ use bytes::BytesMut;
 use mqtt4bytes::*;
 
 use std::io;
-use crate::{Request, Outgoing};
+use crate::{Request, Outgoing, Incoming};
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -56,7 +56,8 @@ impl Network {
     //     self.max_readv_count = count;
     // }
 
-    pub async fn read(&mut self) -> Result<Packet, io::Error> {
+    // TODO make this equivalent to `mqtt_read` to frame `Incoming` directly
+    pub(crate) async fn read(&mut self) -> Result<Packet, io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_packet_size) {
                 Ok(packet) => return Ok(packet),
@@ -78,13 +79,18 @@ impl Network {
         }
     }
 
-    /// Read packets in bulk. This allow replies to be in bulk
-    pub async fn readb(&mut self) -> Result<Vec<Packet>, io::Error> {
+    /// Read packets in bulk. This allow replies to be in bulk. This method is used
+    /// after the connection is established to read a bunch of incoming packets
+    pub async fn readb(&mut self) -> Result<Vec<Incoming>, io::Error> {
         let mut out = Vec::with_capacity(self.max_readb_count);
         loop {
             match mqtt_read(&mut self.read, self.max_packet_size) {
+                // Connection is explicitly handled by other methods. This read is used after establishing
+                // the link. Ignore connection related packets
+                Ok(Packet::Connect(_)) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Not expecting connect")),
+                Ok(Packet::ConnAck(_)) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Not expecting connack")),
                 Ok(packet) => {
-                    out.push(packet);
+                    out.push(packet.into());
                     if out.len() >= self.max_readb_count { break }
                     continue;
                 }
@@ -185,6 +191,24 @@ impl Network {
         Ok(len)
     }
 
+    pub async fn read_connack(&mut self) -> Result<Incoming, io::Error> {
+        match self.read().await {
+            Ok(Packet::ConnAck(connack)) => {
+                if connack.code == ConnectReturnCode::Accepted {
+                    Ok(Incoming::Connected)
+                } else {
+                    let error = format!("Broker rejected connection. Reason = {:?}", connack.code);
+                    Err(io::Error::new(io::ErrorKind::InvalidData, error))
+                }
+            }
+            Ok(packet) => {
+                let error = format!("Expecting connack. Received = {:?}", packet);
+                Err(io::Error::new(io::ErrorKind::InvalidData, error))
+            }
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+        }
+    }
+
     pub fn fill(&mut self, request: Request) -> Result<Outgoing, io::Error> {
         let outgoing = outgoing(&request);
         if let Err(e) =  self.write_fill(request) {
@@ -246,6 +270,28 @@ fn outgoing(packet: &Request) -> Outgoing {
         Request::PingReq => Outgoing::PingReq,
         Request::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
+    }
+}
+
+// TODO Replace this by framing Incoming packets in this module direcly. Like what `write_fill` does
+impl From<Packet> for Incoming {
+    fn from(packet: Packet) -> Self {
+        match packet {
+            Packet::ConnAck(_) => Incoming::Connected,
+            Packet::Publish(publish) => Incoming::Publish(publish) ,
+            Packet::PubAck(ack) => Incoming::PubAck(ack),
+            Packet::PubRec(rec) => Incoming::PubRec(rec),
+            Packet::PubRel(rel) => Incoming::PubRel(rel),
+            Packet::PubComp(comp) => Incoming::PubComp(comp),
+            Packet::Subscribe(subscribe) => Incoming::Subscribe(subscribe),
+            Packet::SubAck(suback) => Incoming::SubAck(suback),
+            Packet::Unsubscribe(unsub) => Incoming::Unsubscribe(unsub),
+            Packet::UnsubAck(unsuback) => Incoming::UnsubAck(unsuback),
+            Packet::PingReq => Incoming::PingReq,
+            Packet::PingResp => Incoming::PingResp,
+            Packet::Disconnect => Incoming::Disconnect,
+            _ => todo!()
+        }
     }
 }
 

@@ -120,7 +120,7 @@ impl MqttState {
 
     pub(crate) fn handle_incoming_packets(
         &mut self,
-        packets: Vec<Packet>
+        packets: Vec<Incoming>
     ) -> Result<(Vec<Incoming>, Vec<Request>), StateError> {
         let mut incoming = Vec::with_capacity(10);
         let mut outgoing = Vec::with_capacity(10);
@@ -144,17 +144,17 @@ impl MqttState {
     /// be forwarded to user and Pubck packet will be written to network
     pub(crate) fn handle_incoming_packet(
         &mut self,
-        packet: Packet,
+        packet: Incoming,
     ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let out = match packet {
-            Packet::PingResp => self.handle_incoming_pingresp(),
-            Packet::Publish(publish) => self.handle_incoming_publish(publish),
-            Packet::SubAck(suback) => self.handle_incoming_suback(suback),
-            Packet::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback),
-            Packet::PubAck(puback) => self.handle_incoming_puback(puback),
-            Packet::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
-            Packet::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
-            Packet::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
+            Incoming::PingResp => self.handle_incoming_pingresp(),
+            Incoming::Publish(publish) => self.handle_incoming_publish(publish),
+            Incoming::SubAck(suback) => self.handle_incoming_suback(suback),
+            Incoming::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback),
+            Incoming::PubAck(puback) => self.handle_incoming_puback(puback),
+            Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
+            Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
+            Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
                 Ok((None, None))
@@ -617,7 +617,7 @@ mod test {
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_packet(Request::Publish(publish))
             .unwrap();
-        mqtt.handle_incoming_packet(Packet::PubAck(PubAck::new(1)))
+        mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1)))
             .unwrap();
 
         // should throw error because we didn't get pingresp for previous ping
@@ -637,7 +637,7 @@ mod test {
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();
-        mqtt.handle_incoming_packet(Packet::PingResp).unwrap();
+        mqtt.handle_incoming_packet(Incoming::PingResp).unwrap();
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();

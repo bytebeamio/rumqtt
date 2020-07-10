@@ -5,10 +5,10 @@ use bytes::BytesMut;
 pub fn mqtt_read(stream: &mut BytesMut, max_packet_size: usize) -> Result<Packet, Error> {
     let fixed_header = check(stream, max_packet_size)?;
     // Test with a stream with exactly the size to check border panics
-    let packet = stream.split_to(frame_length);
+    let packet = stream.split_to(fixed_header.frame_length());
     let packet_type = fixed_header.packet_type()?;
 
-    if remaining_len == 0 {
+    if fixed_header.remaining_len == 0 {
         // no payload packets
         return match packet_type {
             PacketType::PingReq => Ok(Packet::PingReq),

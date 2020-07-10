@@ -268,7 +268,7 @@ impl EventLoop {
         Ok(())
     }
 
-    async fn mqtt_connect(&mut self) -> Result<Packet, ConnectionError> {
+    async fn mqtt_connect(&mut self) -> Result<Incoming, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
@@ -293,7 +293,7 @@ impl EventLoop {
 
         // wait for 'timeout' time to validate connack
         let packet = time::timeout(Duration::from_secs(5), async {
-            let packet = network.read().await?;
+            let packet = network.read_connack().await?;
             Ok::<_, ConnectionError>(packet)
         })
         .await??;
