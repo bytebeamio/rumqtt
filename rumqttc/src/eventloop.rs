@@ -380,7 +380,7 @@ mod test {
         }
     }
 
-    async fn run(mut eventloop: EventLoop, reconnect: bool) {
+    async fn run(mut eventloop: EventLoop, reconnect: bool) -> Result<(), ConnectionError> {
         'reconnect: loop {
             loop {
                 let o = eventloop.poll().await;
@@ -388,7 +388,7 @@ mod test {
                 match o {
                     Ok(_) => continue,
                     Err(_) if reconnect => continue 'reconnect,
-                    Err(_) => break 'reconnect,
+                    Err(e) => return Err(e),
                 }
             }
         }
@@ -428,7 +428,7 @@ mod test {
         let eventloop = EventLoop::new(options, 5).await;
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1885, true).await;
@@ -469,7 +469,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1886, true).await;
@@ -501,7 +501,7 @@ mod test {
 
         let eventloop = EventLoop::new(options, 5).await;
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(2000, true).await;
@@ -559,7 +559,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1887, true).await;
@@ -587,7 +587,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, true).await;
+            run(eventloop, true).await.unwrap();
         });
 
         let mut broker = Broker::new(1888, true).await;
@@ -622,6 +622,40 @@ mod test {
     }
 
     #[tokio::test]
+    async fn packet_id_collisions_are_detected() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        options.set_inflight(4);
+
+        let eventloop = EventLoop::new(options, 5).await;
+        let requests_tx = eventloop.handle();
+
+        task::spawn(async move {
+            start_requests(5, QoS::AtLeastOnce, 1, requests_tx).await;
+            time::delay_for(Duration::from_secs(60)).await;
+        });
+
+        task::spawn(async move {
+            let mut broker = Broker::new(1888, true).await;
+            for _ in 1..=4 {
+                let packet = broker.read_publish().await;
+                assert!(packet.is_some());
+            }
+
+            // out of order ack
+            broker.ack(2).await;
+            time::delay_for(Duration::from_secs(1)).await;
+        });
+
+
+        // panics because of
+        time::delay_for(Duration::from_secs(1)).await;
+        match run(eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::Collision)) => (),
+            o => panic!("Expecting collision error. Found = {:?}", o),
+        }
+    }
+
+    #[tokio::test]
     async fn reconnection_resumes_from_the_previous_state() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1889);
         options.set_keep_alive(5);
@@ -636,7 +670,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, true).await;
+            run(eventloop, true).await.unwrap();
         });
 
         // broker connection 1
@@ -678,7 +712,7 @@ mod test {
 
         // start the client eventloop
         task::spawn(async move {
-            run(eventloop, true).await;
+            run(eventloop, true).await.unwrap();
         });
 
         // broker connection 1. receive but don't ack

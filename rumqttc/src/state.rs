@@ -20,6 +20,9 @@ pub enum StateError {
     /// Received a wrong packet while waiting for another packet
     #[error("Received a wrong packet while waiting for another packet")]
     WrongPacket,
+    /// Collision due to broker not acking in sequence
+    #[error("Broker not acking in order. Packet id collision")]
+    Collision,
 }
 
 /// State of the mqtt connection.
@@ -186,7 +189,7 @@ impl MqttState {
     fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Request, StateError> {
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
+            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
         };
 
         debug!(
@@ -367,7 +370,7 @@ impl MqttState {
 
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
+    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) and None as uninitialized packets
             0 => {
@@ -382,12 +385,14 @@ impl MqttState {
         // packet yet. Make this an error in future. This error is possible only when broker isn't
         // acking sequentially
         // TODO: Make this an error by storing replaced packet and returning an error
-        if let Some(v) = mem::replace(&mut self.outgoing_pub[publish.pkid as usize], Some(publish.clone())) {
-            error!("Replacing unacked packet {:?}", v)
+        let pkid = publish.pkid as usize;
+        if let Some(v) = mem::replace(&mut self.outgoing_pub[pkid], Some(publish.clone())) {
+            error!("Replacing unacked packet {:?}", v);
+            return Err(StateError::Collision)
         }
 
         self.inflight += 1;
-        publish
+        Ok(publish)
     }
 
     /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
