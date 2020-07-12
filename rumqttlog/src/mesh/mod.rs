@@ -4,10 +4,8 @@ use crate::{Config, MeshConfig, IO};
 mod link;
 
 use async_channel::{bounded, Sender};
-use futures_util::SinkExt;
 use link::Replicator;
-use rumqttc::MqttCodec;
-use rumqttc::{ConnAck, Connect, ConnectReturnCode, Error as Mqtt4Error, Packet};
+use rumqttc::{ConnAck, Connect, ConnectReturnCode, Packet};
 use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
@@ -15,13 +13,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::stream::StreamExt;
 use tokio::time::{self, Elapsed};
 use tokio::{select, task};
-use tokio_util::codec::Framed;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
 pub enum Error {
     Io(#[from] io::Error),
-    Mqtt4(#[from] Mqtt4Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     StreamDone,
@@ -122,40 +118,41 @@ impl Mesh {
 }
 
 /// Await mqtt connect packet for incoming connections from a router
-async fn await_connect(framed: &mut Framed<Box<dyn IO>, MqttCodec>) -> Result<u8, Error> {
-    let id = time::timeout(Duration::from_secs(5), async {
-        // wait for mesh connect packet with id
-        let packet = match framed.next().await {
-            Some(packet) => packet,
-            None => return Err(Error::StreamDone),
-        };
+async fn await_connect(framed: &mut Box<dyn IO>) -> Result<u8, Error> {
+    // let id = time::timeout(Duration::from_secs(5), async {
+    //     // wait for mesh connect packet with id
+    //     let packet = match framed.next().await {
+    //         Some(packet) => packet,
+    //         None => return Err(Error::StreamDone),
+    //     };
 
-        let connect = match packet? {
-            Packet::Connect(connect) => connect,
-            packet => return Err(Error::WrongPacket(packet)),
-        };
+        // let connect = match packet? {
+        //     Packet::Connect(connect) => connect,
+        //     packet => return Err(Error::WrongPacket(packet)),
+        // };
 
-        let id: u8 = connect.client_id.parse().unwrap();
-        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-        framed.send(Packet::ConnAck(connack)).await?;
-        Ok::<_, Error>(id)
-    })
-    .await??;
+    //     let id: u8 = connect.client_id.parse().unwrap();
+    //     let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+    //     framed.send(Packet::ConnAck(connack)).await?;
+    //     Ok::<_, Error>(id)
+    // })
+    // .await??;
 
-    Ok(id)
+    // Ok(id)
+    todo!()
 }
 
 pub struct LinkHandle<S> {
     pub id: u8,
     pub addr: String,
-    pub connections_tx: Sender<Framed<S, MqttCodec>>,
+    pub connections_tx: Sender<S>,
 }
 
 impl<S: IO> LinkHandle<S> {
     pub fn new(
         id: u8,
         addr: String,
-        connections_tx: Sender<Framed<S, MqttCodec>>,
+        connections_tx: Sender<S>,
     ) -> LinkHandle<S> {
         LinkHandle {
             id,
@@ -167,25 +164,26 @@ impl<S: IO> LinkHandle<S> {
     pub async fn connect(
         &mut self,
         this_id: u8,
-        mut framed: Framed<S, MqttCodec>,
+        mut framed: S,
     ) -> Result<(), Error> {
-        let connect = Connect::new(this_id.to_string());
-        framed.send(Packet::Connect(connect)).await?;
-        let packet = match framed.next().await {
-            Some(packet) => packet,
-            None => return Err(Error::StreamDone),
-        };
+        // let connect = Connect::new(this_id.to_string());
+        // framed.send(Packet::Connect(connect)).await?;
+        // let packet = match framed.next().await {
+        //     Some(packet) => packet,
+        //     None => return Err(Error::StreamDone),
+        // };
 
-        match packet? {
-            Packet::ConnAck(_ack) => (),
-            packet => return Err(Error::WrongPacket(packet)),
-        };
+        // match packet? {
+        //     Packet::ConnAck(_ack) => (),
+        //     packet => return Err(Error::WrongPacket(packet)),
+        // };
 
-        if let Err(_) = self.connections_tx.send(framed).await {
-            return Err(Error::ConnectionHandover);
-        }
+        // if let Err(_) = self.connections_tx.send(framed).await {
+        //     return Err(Error::ConnectionHandover);
+        // }
 
-        Ok(())
+        // Ok(())
+        todo!()
     }
 }
 

@@ -12,8 +12,8 @@ use crate::router::{
     TopicsRequest, AcksReply, AcksRequest,
 };
 use crate::Config;
-use futures_util::StreamExt;
 use thiserror::Error;
+use tokio::stream::StreamExt;
 
 #[derive(Error, Debug)]
 #[error("...")]

@@ -5,10 +5,9 @@ use std::io;
 use crate::tracker::Tracker;
 use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
 use crate::mesh::ConnectionId;
-use crate::{RouterInMessage, RouterOutMessage, Connection, IO};
+use crate::{RouterInMessage, Connection, IO};
 use crate::router::ConnectionType;
-use tokio_util::codec::Framed;
-use rumqttc::{EventLoop, MqttCodec, MqttOptions, Request};
+use rumqttc::{EventLoop, MqttOptions, Request};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -29,7 +28,7 @@ pub struct Replicator<S> {
     /// Handle to this link which router uses
     link_rx: Option<Receiver<Request>>,
     /// Connections receiver in server mode
-    connections_rx: Receiver<Framed<S, MqttCodec>>,
+    connections_rx: Receiver<S>,
     /// Client or server link
     is_client: bool,
 }
@@ -42,7 +41,7 @@ impl<S: IO> Replicator<S> {
     pub async fn new(
         id: u8,
         router_tx: Sender<(ConnectionId, RouterInMessage)>,
-        connections_rx: Receiver<Framed<S, MqttCodec>>,
+        connections_rx: Receiver<S>,
         is_client: bool
     ) -> Replicator<S> {
         // Register this link with router even though there is no network connection with other router yet.
@@ -79,15 +78,15 @@ impl<S: IO> Replicator<S> {
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
-    async fn connect(&mut self, link_rx: Receiver<Request>) -> EventLoop<Receiver<Request>> {
+    async fn connect(&mut self, cap: usize) -> EventLoop {
         if self.is_client {
             let options = MqttOptions::new(self.id.to_string(), "localhost", 1883);
-            return EventLoop::new(options, link_rx).await;
+            return EventLoop::new(options, cap).await;
         }
 
         let framed = self.connections_rx.recv().await.unwrap();
         let options = MqttOptions::new(self.id.to_string(), "localhost", 1883);
-        let mut eventloop = EventLoop::new(options, link_rx).await;
+        let mut eventloop = EventLoop::new(options, cap).await;
         // eventloop.set_network(framed);
         eventloop
     }
