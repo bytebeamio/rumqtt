@@ -367,7 +367,6 @@ impl MqttState {
 
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    /// TODO Measure Arc vs copy perf and take a call regarding clones
     fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) and None as uninitialized packets
@@ -379,7 +378,14 @@ impl MqttState {
             _ => publish,
         };
 
-        mem::replace(&mut self.outgoing_pub[publish.pkid as usize], Some(publish.clone()));
+        // if there is an existing publish at this pkid, this implies that broker hasn't acked this
+        // packet yet. Make this an error in future. This error is possible only when broker isn't
+        // acking sequentially
+        // TODO: Make this an error by storing replaced packet and returning an error
+        if let Some(v) = mem::replace(&mut self.outgoing_pub[publish.pkid as usize], Some(publish.clone())) {
+            error!("Replacing unacked packet {:?}", v)
+        }
+
         self.inflight += 1;
         publish
     }
@@ -396,10 +402,10 @@ impl MqttState {
         // are acked
         if next_pkid == self.max_inflight {
             self.await_acks = true;
+            self.last_pkid = 0;
+            return next_pkid
         }
 
-        // next packet id should always be less than max inflight
-        debug_assert!(next_pkid <= self.max_inflight);
         self.last_pkid = next_pkid;
         next_pkid
     }

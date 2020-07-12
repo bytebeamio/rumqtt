@@ -135,7 +135,8 @@ impl EventLoop {
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let network = self.network.as_mut().unwrap();
-        let await_acks = self.state.await_acks;
+        // let await_acks = self.state.await_acks;
+        let inflight_full = self.state.inflight >= self.options.inflight;
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
 
@@ -155,22 +156,27 @@ impl EventLoop {
                     return Ok((o, None))
             }
             // Pull next request from user requests channel.
-            // We read user requests only when we are done sending pending packets.
-            // Another aspect of reading next request is flow control. We read next
-            // request only when max inflight settings are honoured. We use packet id
-            // boundary instead of inflight count. This trick will make the client
-            // robust against brokers which doesn't ack sequentially. Consider an
-            // example with max inflight of 5. [1, 2, 3, 4, 5]. If 3 is acked instead
-            // of 1 first -> [1, 2, 4, 5]. If we depend on inflight < max_inflight
-            // setting for flow control, we would have to overwrite 1 during a pkid
-            // roll which is a bug. Instead if we flow control at boundary (5), this
-            // isn't a problem.
-            // Also note that, next_packet_id resets to 1 everytime inflight packets
-            // are acked
-            o = self.requests_rx.next(), if !await_acks && !pending => match o {
+            // If condition in the below branch if for flow control. We read next user request
+            // only when max inflight settings are honoured.
+            // Flow control is based on ack count. As long as number of inflight packets in buffer
+            // are less than max_inflight setting, next request will progress. For this
+            // to work correctly, broker should ack in sequence and any sane broker will do so
+            // If it doesn't, this will result in connection drop. Use should decide
+            // E.g If max inflight = 5, requests will be blocked when inflight queue looks like this
+            // [1, 2, 3, 4, 5]. Assume broker acking 2 instead of 1 -> [1, x, 3, 4, 5]. While
+            // rolling pkid, next packet will be written in 1 (which is unacked) and results in
+            // an error
+            // This can be fixed by using packet id boundary instead of count for flow control.
+            // This trick will make the client robust against brokers which doesn't ack sequentially
+            // at the cost of throughput. Consider an example with max inflight of 5.
+            // Full inflight queue will look like -> [1, 2, 3, 4, 5].
+            // If 3 is acked instead of 1 first -> [1, 2, 4, 5].
+            // If we flow control at boundary (5), Every ack should be received before rolling pkid
+            // and hence overwrites aren't a problem anymore
+            // Also note that, next_packet_id resets to 1 every time inflight packets are acked
+            o = self.requests_rx.next(), if !inflight_full && !pending => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
-                    dbg!(&request);
                     let outgoing = network.fill(request)?;
                     // bulk up publish requests
                     if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
@@ -179,7 +185,6 @@ impl EventLoop {
                         // Ids are not available when individual request batching is enabled
                         return Ok((None, Some(Outgoing::Batch)))
                     }
-
 
                     network.flush().await?;
                     return Ok((None, Some(outgoing)))
@@ -597,23 +602,23 @@ mod test {
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
 
-        // packet 4. client inflight full as there aren't acks yet
+        // no packet 4. client inflight full as there aren't acks yet
         let packet = broker.read_publish().await;
         assert!(packet.is_none());
 
-        // ack packet 1
-        // client would still not produce until all the inflight are acked
+        // ack packet 1 and client would produce packet 4
         broker.ack(1).await;
         let packet = broker.read_publish().await;
+        assert!(packet.is_some());
+        let packet = broker.read_publish().await;
         assert!(packet.is_none());
-        broker.ack(2).await;
-        broker.ack(3).await;
 
-        // client will now produce more
+        // ack packet 2 and client would produce packet 5
+        broker.ack(2).await;
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
         let packet = broker.read_publish().await;
-        assert!(packet.is_some());
+        assert!(packet.is_none());
     }
 
     #[tokio::test]
