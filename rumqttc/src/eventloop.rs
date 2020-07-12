@@ -74,10 +74,11 @@ impl EventLoop {
         let buffered = buffered.into_iter();
         let pending = Vec::new();
         let pending = pending.into_iter();
+        let max_inflight = options.inflight;
 
         EventLoop {
             options,
-            state: MqttState::new(),
+            state: MqttState::new(max_inflight),
             requests_tx,
             requests_rx,
             pending,
@@ -133,7 +134,8 @@ impl EventLoop {
 
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
-        let network = &mut self.network.as_mut().unwrap();
+        let network = self.network.as_mut().unwrap();
+        // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.options.inflight;
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
@@ -154,13 +156,28 @@ impl EventLoop {
                     return Ok((o, None))
             }
             // Pull next request from user requests channel.
-            // we read user requests only when we are done sending pending
-            // packets and inflight queue has space (for flow control)
+            // If condition in the below branch if for flow control. We read next user request
+            // only when max inflight settings are honoured.
+            // Flow control is based on ack count. As long as number of inflight packets in buffer
+            // are less than max_inflight setting, next request will progress. For this
+            // to work correctly, broker should ack in sequence and any sane broker will do so
+            // If it doesn't, this will result in connection drop. Use should decide
+            // E.g If max inflight = 5, requests will be blocked when inflight queue looks like this
+            // [1, 2, 3, 4, 5]. Assume broker acking 2 instead of 1 -> [1, x, 3, 4, 5]. While
+            // rolling pkid, next packet will be written in 1 (which is unacked) and results in
+            // an error
+            // This can be fixed by using packet id boundary instead of count for flow control.
+            // This trick will make the client robust against brokers which doesn't ack sequentially
+            // at the cost of throughput. Consider an example with max inflight of 5.
+            // Full inflight queue will look like -> [1, 2, 3, 4, 5].
+            // If 3 is acked instead of 1 first -> [1, 2, 4, 5].
+            // If we flow control at boundary (5), Every ack should be received before rolling pkid
+            // and hence overwrites aren't a problem anymore
+            // Also note that, next_packet_id resets to 1 every time inflight packets are acked
             o = self.requests_rx.next(), if !inflight_full && !pending => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
                     let outgoing = network.fill(request)?;
-
                     // bulk up publish requests
                     if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
                         bulk_fill(&self.options, &mut self.state, &self.requests_rx, network)?;
@@ -168,7 +185,6 @@ impl EventLoop {
                         // Ids are not available when individual request batching is enabled
                         return Ok((None, Some(Outgoing::Batch)))
                     }
-
 
                     network.flush().await?;
                     return Ok((None, Some(outgoing)))
@@ -268,7 +284,7 @@ impl EventLoop {
         Ok(())
     }
 
-    async fn mqtt_connect(&mut self) -> Result<Packet, ConnectionError> {
+    async fn mqtt_connect(&mut self) -> Result<Incoming, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         let id = self.options.client_id();
         let keep_alive = self.options.keep_alive().as_secs() as u16;
@@ -293,7 +309,7 @@ impl EventLoop {
 
         // wait for 'timeout' time to validate connack
         let packet = time::timeout(Duration::from_secs(5), async {
-            let packet = network.read().await?;
+            let packet = network.read_connack().await?;
             Ok::<_, ConnectionError>(packet)
         })
         .await??;
@@ -353,7 +369,7 @@ mod test {
     use tokio::{task, time};
 
     async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Request>) {
-        for i in 0..count {
+        for i in 1..=count {
             let topic = "hello/world".to_owned();
             let payload = vec![i, 1, 2, 3];
 
@@ -364,7 +380,7 @@ mod test {
         }
     }
 
-    async fn run(mut eventloop: EventLoop, reconnect: bool) {
+    async fn run(mut eventloop: EventLoop, reconnect: bool) -> Result<(), ConnectionError> {
         'reconnect: loop {
             loop {
                 let o = eventloop.poll().await;
@@ -372,7 +388,7 @@ mod test {
                 match o {
                     Ok(_) => continue,
                     Err(_) if reconnect => continue 'reconnect,
-                    Err(_) => break 'reconnect,
+                    Err(e) => return Err(e),
                 }
             }
         }
@@ -412,7 +428,7 @@ mod test {
         let eventloop = EventLoop::new(options, 5).await;
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1885, true).await;
@@ -453,7 +469,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1886, true).await;
@@ -485,7 +501,7 @@ mod test {
 
         let eventloop = EventLoop::new(options, 5).await;
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(2000, true).await;
@@ -543,7 +559,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await;
+            run(eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1887, true).await;
@@ -571,7 +587,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, true).await;
+            run(eventloop, true).await.unwrap();
         });
 
         let mut broker = Broker::new(1888, true).await;
@@ -585,20 +601,58 @@ mod test {
         // packet 3
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
-        // packet 4
+
+        // no packet 4. client inflight full as there aren't acks yet
         let packet = broker.read_publish().await;
         assert!(packet.is_none());
-        // ack packet 1 and we should receiver packet 4
+
+        // ack packet 1 and client would produce packet 4
         broker.ack(1).await;
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
-        // packet 5
         let packet = broker.read_publish().await;
         assert!(packet.is_none());
-        // ack packet 2 and we should receiver packet 5
+
+        // ack packet 2 and client would produce packet 5
         broker.ack(2).await;
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
+        let packet = broker.read_publish().await;
+        assert!(packet.is_none());
+    }
+
+    #[tokio::test]
+    async fn packet_id_collisions_are_detected() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        options.set_inflight(4);
+
+        let eventloop = EventLoop::new(options, 5).await;
+        let requests_tx = eventloop.handle();
+
+        task::spawn(async move {
+            start_requests(5, QoS::AtLeastOnce, 1, requests_tx).await;
+            time::delay_for(Duration::from_secs(60)).await;
+        });
+
+        task::spawn(async move {
+            let mut broker = Broker::new(1888, true).await;
+            for _ in 1..=4 {
+                let packet = broker.read_publish().await;
+                assert!(packet.is_some());
+            }
+
+            // out of order ack
+            broker.ack(2).await;
+            time::delay_for(Duration::from_secs(1)).await;
+        });
+
+
+        // panics because of
+        time::delay_for(Duration::from_secs(1)).await;
+        match run(eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::Collision)) => (),
+            o => panic!("Expecting collision error. Found = {:?}", o),
+        }
     }
 
     #[tokio::test]
@@ -616,15 +670,15 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, true).await;
+            run(eventloop, true).await.unwrap();
         });
 
         // broker connection 1
         let mut broker = Broker::new(1889, true).await;
         for i in 1..=2 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
-            broker.ack(packet.unwrap()).await;
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
+            broker.ack(packet.pkid).await;
         }
 
         // NOTE: An interesting thing to notice here is that reassigning a new broker
@@ -636,9 +690,9 @@ mod test {
         // broker connection 2
         let mut broker = Broker::new(1889, true).await;
         for i in 3..=4 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
-            broker.ack(packet.unwrap()).await;
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
+            broker.ack(packet.pkid).await;
         }
     }
 
@@ -658,21 +712,21 @@ mod test {
 
         // start the client eventloop
         task::spawn(async move {
-            run(eventloop, true).await;
+            run(eventloop, true).await.unwrap();
         });
 
         // broker connection 1. receive but don't ack
         let mut broker = Broker::new(1890, true).await;
         for i in 1..=2 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
         }
 
         // broker connection 2 receives from scratch
         let mut broker = Broker::new(1890, true).await;
         for i in 1..=6 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
         }
     }
 }
@@ -714,12 +768,13 @@ mod broker {
         }
 
         // Reads a publish packet from the stream with 2 second timeout
-        pub async fn read_publish(&mut self) -> Option<u16> {
+        pub async fn read_publish(&mut self) -> Option<Publish> {
             let packet = time::timeout(Duration::from_secs(2), async {
                 self.framed.read().await
             });
+
             match packet.await {
-                Ok(Ok(Packet::Publish(publish))) => Some(publish.pkid),
+                Ok(Ok(Packet::Publish(publish))) => Some(publish),
                 Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
                 Ok(Err(e)) => panic!("Error = {:?}", e),
                 // timedout

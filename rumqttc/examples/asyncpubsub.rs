@@ -1,4 +1,4 @@
-use async_channel::{bounded, Sender};
+use async_channel::Sender;
 use tokio::{task, time};
 
 use rumqttc::{

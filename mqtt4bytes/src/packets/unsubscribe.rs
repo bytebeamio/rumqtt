@@ -13,7 +13,7 @@ pub struct Unsubscribe {
 
 impl Unsubscribe {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
-        let variable_header_index = fixed_header.header_len;
+        let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let mut payload_bytes = fixed_header.remaining_len - 2;

@@ -27,7 +27,7 @@ pub struct Connect {
 
 impl Connect {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
-        let variable_header_index = fixed_header.header_len;
+        let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
         let protocol_name = read_mqtt_string(&mut bytes)?;
         let protocol_level = bytes.get_u8();

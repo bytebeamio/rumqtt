@@ -90,7 +90,38 @@ pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
 
-pub type Incoming = Packet;
+pub type Incoming2 = Packet;
+
+
+#[derive(Debug, Clone)]
+pub enum Incoming {
+    /// Connection successful
+    Connected,
+    /// Incoming publish from the broker
+    Publish(Publish),
+    /// Incoming puback from the broker
+    PubAck(PubAck),
+    /// Incoming pubrec from the broker
+    PubRec(PubRec),
+    /// Incoming pubrel
+    PubRel(PubRel),
+    /// Incoming pubcomp from the broker
+    PubComp(PubComp),
+    /// Incoming subscribe packet
+    Subscribe(Subscribe),
+    /// Incoming suback from the broker
+    SubAck(SubAck),
+    /// Incoming unsubscribe
+    Unsubscribe(Unsubscribe),
+    /// Incoming unsuback from the broker
+    UnsubAck(UnsubAck),
+    /// Ping request
+    PingReq,
+    /// Ping response
+    PingResp,
+    /// Disconnect packet
+    Disconnect,
+}
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -209,7 +240,7 @@ pub struct MqttOptions {
     /// while retransmitting pending packets
     pending_throttle: Duration,
     /// maximum number of outgoing inflight messages
-    inflight: usize,
+    inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
     /// Key type for TLS 
@@ -373,7 +404,7 @@ impl MqttOptions {
     }
 
     /// Set number of concurrent in flight messages
-    pub fn set_inflight(&mut self, inflight: usize) -> &mut Self {
+    pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
         if inflight == 0 {
             panic!("zero in flight is not allowed")
         }
@@ -383,7 +414,7 @@ impl MqttOptions {
     }
 
     /// Number of concurrent in flight messages
-    pub fn inflight(&self) -> usize {
+    pub fn inflight(&self) -> u16 {
         self.inflight
     }
 

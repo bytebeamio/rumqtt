@@ -15,7 +15,7 @@ impl UnsubAck {
             return Err(Error::PayloadSizeIncorrect);
         }
 
-        let variable_header_index = fixed_header.header_len;
+        let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
         let unsuback = UnsubAck { pkid };

@@ -14,11 +14,9 @@ pub struct Publish {
     pub payload: Bytes,
     pub dup: bool,
     pub retain: bool,
-    pub bytes: Bytes,
 }
 
 impl Publish {
-    // TODO Take AsRef slice instead?
     pub fn new<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
         Publish {
             dup: false,
@@ -26,13 +24,22 @@ impl Publish {
             retain: false,
             pkid: 0,
             topic: topic.into(),
-            payload: bytes::Bytes::from(payload.into()),
-            bytes: Bytes::new(),
+            payload: Bytes::from(payload.into()),
         }
     }
 
     pub fn set_pkid(&mut self, pkid: u16) -> &mut Self {
         self.pkid = pkid;
+        self
+    }
+
+    pub fn set_retain(&mut self, retain: bool) -> &mut Self {
+        self.retain = retain;
+        self
+    }
+
+    pub fn set_dup(&mut self, dup: bool) -> &mut Self {
+        self.dup = dup;
         self
     }
 
@@ -42,7 +49,7 @@ impl Publish {
         let dup = (fixed_header.byte1 & 0b1000) != 0;
         let retain = (fixed_header.byte1 & 0b0001) != 0;
 
-        let variable_header_index = fixed_header.header_len;
+        let variable_header_index = fixed_header.fixed_len;
         payload.advance(variable_header_index);
         let topic = read_mqtt_string(&mut payload)?;
 
@@ -63,7 +70,6 @@ impl Publish {
             payload,
             dup,
             retain,
-            bytes,
         };
 
         Ok(publish)
@@ -142,25 +148,7 @@ mod test {
             0xEF, // extra packets in the stream
         ];
 
-        let bytes = &[
-            0b0011_0010,
-            11, // packet type, flags and remaining len
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'b', // variable header. topic name = 'a/b'
-            0x00,
-            0x0a, // variable header. pkid = 10
-            0xF1,
-            0xF2,
-            0xF3,
-            0xF4, // publish payload
-        ];
-
         let mut stream = BytesMut::from(&stream[..]);
-        let bytes = Bytes::from(&bytes[..]);
-
         let packet = mqtt_read(&mut stream, 100).unwrap();
         let packet = match packet {
             Packet::Publish(packet) => packet,
@@ -177,7 +165,6 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 10,
                 payload: Bytes::from(&payload[..]),
-                bytes
             }
         );
     }
@@ -199,20 +186,8 @@ mod test {
             0xBE,
             0xEF, // extra packets in the stream
         ];
-        let bytes = &[
-            0b0011_0000,
-            7, // packet type, flags and remaining len
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'b', // variable header. topic name = 'a/b'
-            0x01,
-            0x02, // payloa/home/tekjar/.local/share/JetBrains/Toolbox/bin/cliond
-        ];
-        let mut stream = BytesMut::from(&stream[..]);
-        let bytes = Bytes::from(&bytes[..]);
 
+        let mut stream = BytesMut::from(&stream[..]);
         let packet = mqtt_read(&mut stream, 100).unwrap();
         let packet = match packet {
             Packet::Publish(packet) => packet,
@@ -228,7 +203,6 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 0,
                 payload: Bytes::from(&[0x01, 0x02][..]),
-                bytes
             }
         );
     }
@@ -242,7 +216,6 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 10,
             payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
-            bytes: Bytes::new(),
         };
 
         let mut buf = BytesMut::new();
@@ -277,7 +250,6 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 0,
             payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
-            bytes: Bytes::new(),
         };
 
         let mut buf = BytesMut::new();

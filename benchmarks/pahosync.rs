@@ -16,6 +16,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     let conn_opts = mqtt::ConnectOptionsBuilder::new()
         .keep_alive_interval(Duration::from_secs(5))
         .clean_session(true)
+        .max_inflight(1000)
         .finalize();
 
     // Connect and wait for it to complete or fail

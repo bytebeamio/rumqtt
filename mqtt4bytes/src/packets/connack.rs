@@ -33,7 +33,7 @@ impl ConnAck {
     }
 
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
-        let variable_header_index = fixed_header.header_len;
+        let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
 
         if fixed_header.remaining_len != 2 {

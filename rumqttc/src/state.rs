@@ -20,6 +20,9 @@ pub enum StateError {
     /// Received a wrong packet while waiting for another packet
     #[error("Received a wrong packet while waiting for another packet")]
     WrongPacket,
+    /// Collision due to broker not acking in sequence
+    #[error("Broker not acking in order. Packet id collision")]
+    Collision,
 }
 
 /// State of the mqtt connection.
@@ -32,14 +35,21 @@ pub enum StateError {
 pub struct MqttState {
     /// Status of last ping
     pub await_pingresp: bool,
+    /// Flag to indicate that inflight queue is full
+    /// and eventloop should not process new requests
+    pub await_acks: bool,
     /// Last incoming packet time
     last_incoming: Instant,
     /// Last outgoing packet time
     last_outgoing: Instant,
     /// Packet id of the last outgoing packet
-    last_pkid: u16,
+    pub(crate) last_pkid: u16,
     /// Number of outgoing inflight publishes
-    pub(crate) inflight: usize,
+    pub(crate) inflight: u16,
+    /// Maximum number of allowed inflight
+    pub(crate) max_inflight: u16,
+    /// Inflight queue full flag
+    pub(crate) recycle: bool,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
     pub(crate) outgoing_pub: Vec<Option<Publish>>,
     /// Packet ids of released QoS 2 publishes
@@ -52,15 +62,19 @@ impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new() -> Self {
+    pub fn new(max_inflight: u16) -> Self {
         MqttState {
             await_pingresp: false,
+            await_acks: false,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: 0,
             inflight: 0,
-            outgoing_pub: vec![None; u16::MAX as usize + 1],
-            outgoing_rel: vec![None; u16::MAX as usize + 1],
+            max_inflight,
+            recycle: false,
+            // index 0 is wasted as 0 not a valid packet id
+            outgoing_pub: vec![None; max_inflight as usize + 1],
+            outgoing_rel: vec![None; max_inflight as usize + 1],
             incoming_pub: vec![None; u16::MAX as usize + 1],
         }
     }
@@ -120,7 +134,7 @@ impl MqttState {
 
     pub(crate) fn handle_incoming_packets(
         &mut self,
-        packets: Vec<Packet>
+        packets: Vec<Incoming>
     ) -> Result<(Vec<Incoming>, Vec<Request>), StateError> {
         let mut incoming = Vec::with_capacity(10);
         let mut outgoing = Vec::with_capacity(10);
@@ -144,17 +158,17 @@ impl MqttState {
     /// be forwarded to user and Pubck packet will be written to network
     pub(crate) fn handle_incoming_packet(
         &mut self,
-        packet: Packet,
+        packet: Incoming,
     ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         let out = match packet {
-            Packet::PingResp => self.handle_incoming_pingresp(),
-            Packet::Publish(publish) => self.handle_incoming_publish(publish),
-            Packet::SubAck(suback) => self.handle_incoming_suback(suback),
-            Packet::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback),
-            Packet::PubAck(puback) => self.handle_incoming_puback(puback),
-            Packet::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
-            Packet::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
-            Packet::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
+            Incoming::PingResp => self.handle_incoming_pingresp(),
+            Incoming::Publish(publish) => self.handle_incoming_publish(publish),
+            Incoming::SubAck(suback) => self.handle_incoming_suback(suback),
+            Incoming::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback),
+            Incoming::PubAck(puback) => self.handle_incoming_puback(puback),
+            Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
+            Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
+            Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
                 Ok((None, None))
@@ -162,6 +176,11 @@ impl MqttState {
         };
 
         self.last_incoming = Instant::now();
+        if self.inflight == 0 {
+            self.await_acks = false;
+            self.last_pkid = 0;
+        }
+
         out
     }
 
@@ -170,7 +189,7 @@ impl MqttState {
     fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Request, StateError> {
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish),
+            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
         };
 
         debug!(
@@ -351,8 +370,7 @@ impl MqttState {
 
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    /// TODO Measure Arc vs copy perf and take a call regarding clones
-    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Publish {
+    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) and None as uninitialized packets
             0 => {
@@ -363,26 +381,44 @@ impl MqttState {
             _ => publish,
         };
 
-        mem::replace(&mut self.outgoing_pub[publish.pkid as usize], Some(publish.clone()));
+        // if there is an existing publish at this pkid, this implies that broker hasn't acked this
+        // packet yet. Make this an error in future. This error is possible only when broker isn't
+        // acking sequentially
+        // TODO: Make this an error by storing replaced packet and returning an error
+        let pkid = publish.pkid as usize;
+        if let Some(v) = mem::replace(&mut self.outgoing_pub[pkid], Some(publish.clone())) {
+            error!("Replacing unacked packet {:?}", v);
+            return Err(StateError::Collision)
+        }
+
         self.inflight += 1;
-        publish
+        Ok(publish)
     }
 
-    /// Increment the packet identifier from the state and roll it when it reaches its max
     /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
+    /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
+    ///
     fn next_pkid(&mut self) -> u16 {
-        let mut pkid = self.last_pkid;
-        if pkid == 65_535 {
-            pkid = 0;
+        let next_pkid = self.last_pkid + 1;
+
+        // When next packet id is at the edge of inflight queue,
+        // set await flag. This instructs eventloop to stop
+        // processing requests until all the inflight publishes
+        // are acked
+        if next_pkid == self.max_inflight {
+            self.await_acks = true;
+            self.last_pkid = 0;
+            return next_pkid
         }
-        self.last_pkid = pkid + 1;
-        self.last_pkid
+
+        self.last_pkid = next_pkid;
+        next_pkid
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{MqttState, Packet, StateError};
+    use super::{MqttState, StateError};
     use crate::{Incoming, MqttOptions, Request};
     use mqtt4bytes::*;
 
@@ -406,18 +442,58 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new()
+        MqttState::new(100)
     }
 
     #[test]
-    fn next_pkid_roll() {
+    fn next_pkid_increments_as_expected() {
         let mut mqtt = build_mqttstate();
-        let mut pkt_id = 0;
 
-        for _ in 0..65536 {
-            pkt_id = mqtt.next_pkid();
+        for i in 1..=100 {
+            let pkid = mqtt.next_pkid();
+
+            // loops between 0-99. % 100 == 0 implies border
+            let expected = i % 100;
+            if expected == 0 {
+                // await flag is set at the border
+                assert!(mqtt.await_acks);
+                break
+            }
+
+            assert_eq!(expected, pkid);
         }
-        assert_eq!(1, pkt_id);
+    }
+
+    #[test]
+    fn next_packet_id_resets_when_inflight_is_zero() {
+        let mut mqtt = build_mqttstate();
+        for i in 1..=10 {
+            let publish = build_outgoing_publish(QoS::AtLeastOnce);
+            let request = mqtt.handle_outgoing_publish(publish).unwrap();
+            let pkid = match request {
+                Request::Publish(publish) => publish.pkid,
+                request => panic!("Expecting a publish. Found = {:?}", request)
+            };
+
+            assert_eq!(i, pkid);
+        }
+
+        // all inflight publishes acked
+        for i in 1..=10 {
+            mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(i))).unwrap();
+        }
+
+        // packet id starts from 1 again
+        for i in 1..=10 {
+            let publish = build_outgoing_publish(QoS::AtLeastOnce);
+            let request = mqtt.handle_outgoing_publish(publish).unwrap();
+            let pkid = match request {
+                Request::Publish(publish) => publish.pkid,
+                request => panic!("Expecting a publish. Found = {:?}", request)
+            };
+
+            assert_eq!(i, pkid);
+        }
     }
 
     #[test]
@@ -617,7 +693,7 @@ mod test {
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_packet(Request::Publish(publish))
             .unwrap();
-        mqtt.handle_incoming_packet(Packet::PubAck(PubAck::new(1)))
+        mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1)))
             .unwrap();
 
         // should throw error because we didn't get pingresp for previous ping
@@ -637,7 +713,7 @@ mod test {
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();
-        mqtt.handle_incoming_packet(Packet::PingResp).unwrap();
+        mqtt.handle_incoming_packet(Incoming::PingResp).unwrap();
 
         // should ping
         mqtt.handle_outgoing_ping().unwrap();

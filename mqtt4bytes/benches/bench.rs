@@ -1,44 +1,46 @@
-#![feature(test)]
-extern crate test;
-use test::Bencher;
-
+use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize, Throughput};
 use bytes::BytesMut;
-use mqtt4bytes::{mqtt_read, mqtt_write, Packet, Publish, QoS};
+use mqtt4bytes::{Publish, QoS, mqtt_read};
 
 fn publishes(count: usize, size: usize) -> BytesMut {
     let payload = vec![1; size];
-    let mut out = BytesMut::new();
-    out.reserve(count * size);
+    let mut out = BytesMut::with_capacity(2 * count * size);
 
     for _ in 0..count {
         let mut p = Publish::new("hello/mqt4/bytes", QoS::AtLeastOnce, payload.clone());
         p.set_pkid(1);
-        mqtt_write(Packet::Publish(p), &mut out).unwrap();
+        p.write(&mut out).unwrap();
     }
 
     out
 }
 
-#[bench]
-fn serialize_publishes(b: &mut Bencher) {
-    let payload_size = 1024;
+fn publish(payload_size: usize) -> (Publish, BytesMut) {
     let payload = vec![1; payload_size];
-    let mut out = BytesMut::new();
-    b.iter(|| {
-        let mut p = Publish::new("hello/mqt4/bytes", QoS::AtLeastOnce, payload.clone());
-        p.set_pkid(1);
-        mqtt_write(Packet::Publish(p), &mut out).unwrap();
+    let mut publish = Publish::new("hello/mqt4/bytes", QoS::AtLeastOnce, payload);
+    publish.set_pkid(1);
+
+    let out = BytesMut::with_capacity(2 * payload_size);
+    (publish, out)
+}
+
+pub fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("encode and decode throughput");
+    group.throughput(Throughput::Bytes(1 * 1024));
+    group.bench_function("decode 1 packet, 1024 bytes", move |b| {
+        b.iter_batched(|| publishes(1, 1024), |mut stream| {
+            black_box(mqtt_read(&mut stream, 2 * 1024).unwrap())
+        }, BatchSize::SmallInput)
     });
 
-    b.bytes = payload_size as u64;
+
+    group.throughput(Throughput::Bytes(1 * 1024));
+    group.bench_function("encode 1 packet, 1024 bytes", move |b| {
+        b.iter_batched(|| publish(1024), |(publish, mut out)| {
+            black_box(publish.write(&mut out).unwrap())
+        }, BatchSize::SmallInput)
+    });
 }
 
-#[bench]
-fn deserialize_publishes(b: &mut Bencher) {
-    let count = 2 * 1024 * 1024;
-    let size = 1024;
-    let mut publishes = publishes(count, size);
-    b.iter(|| mqtt_read(&mut publishes, 100 * 1024).unwrap());
-
-    b.bytes = size as u64;
-}
+criterion_group!(benches, criterion_benchmark);
+criterion_main!(benches);
