@@ -240,7 +240,7 @@ pub struct MqttOptions {
     /// while retransmitting pending packets
     pending_throttle: Duration,
     /// maximum number of outgoing inflight messages
-    inflight: usize,
+    inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
     /// Key type for TLS 
@@ -404,7 +404,7 @@ impl MqttOptions {
     }
 
     /// Set number of concurrent in flight messages
-    pub fn set_inflight(&mut self, inflight: usize) -> &mut Self {
+    pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
         if inflight == 0 {
             panic!("zero in flight is not allowed")
         }
@@ -414,7 +414,7 @@ impl MqttOptions {
     }
 
     /// Number of concurrent in flight messages
-    pub fn inflight(&self) -> usize {
+    pub fn inflight(&self) -> u16 {
         self.inflight
     }
 

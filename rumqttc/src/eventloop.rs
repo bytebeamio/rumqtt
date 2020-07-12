@@ -74,10 +74,11 @@ impl EventLoop {
         let buffered = buffered.into_iter();
         let pending = Vec::new();
         let pending = pending.into_iter();
+        let max_inflight = options.inflight;
 
         EventLoop {
             options,
-            state: MqttState::new(),
+            state: MqttState::new(max_inflight),
             requests_tx,
             requests_rx,
             pending,
@@ -134,7 +135,7 @@ impl EventLoop {
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
         let network = self.network.as_mut().unwrap();
-        let inflight_full = self.state.inflight >= self.options.inflight;
+        let await_acks = self.state.await_acks;
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
 
@@ -154,13 +155,23 @@ impl EventLoop {
                     return Ok((o, None))
             }
             // Pull next request from user requests channel.
-            // we read user requests only when we are done sending pending
-            // packets and inflight queue has space (for flow control)
-            o = self.requests_rx.next(), if !inflight_full && !pending => match o {
+            // We read user requests only when we are done sending pending packets.
+            // Another aspect of reading next request is flow control. We read next
+            // request only when max inflight settings are honoured. We use packet id
+            // boundary instead of inflight count. This trick will make the client
+            // robust against brokers which doesn't ack sequentially. Consider an
+            // example with max inflight of 5. [1, 2, 3, 4, 5]. If 3 is acked instead
+            // of 1 first -> [1, 2, 4, 5]. If we depend on inflight < max_inflight
+            // setting for flow control, we would have to overwrite 1 during a pkid
+            // roll which is a bug. Instead if we flow control at boundary (5), this
+            // isn't a problem.
+            // Also note that, next_packet_id resets to 1 everytime inflight packets
+            // are acked
+            o = self.requests_rx.next(), if !await_acks && !pending => match o {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
+                    dbg!(&request);
                     let outgoing = network.fill(request)?;
-
                     // bulk up publish requests
                     if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
                         bulk_fill(&self.options, &mut self.state, &self.requests_rx, network)?;
@@ -353,7 +364,7 @@ mod test {
     use tokio::{task, time};
 
     async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Request>) {
-        for i in 0..count {
+        for i in 1..=count {
             let topic = "hello/world".to_owned();
             let payload = vec![i, 1, 2, 3];
 
@@ -585,18 +596,22 @@ mod test {
         // packet 3
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
-        // packet 4
+
+        // packet 4. client inflight full as there aren't acks yet
         let packet = broker.read_publish().await;
         assert!(packet.is_none());
-        // ack packet 1 and we should receiver packet 4
+
+        // ack packet 1
+        // client would still not produce until all the inflight are acked
         broker.ack(1).await;
         let packet = broker.read_publish().await;
-        assert!(packet.is_some());
-        // packet 5
-        let packet = broker.read_publish().await;
         assert!(packet.is_none());
-        // ack packet 2 and we should receiver packet 5
         broker.ack(2).await;
+        broker.ack(3).await;
+
+        // client will now produce more
+        let packet = broker.read_publish().await;
+        assert!(packet.is_some());
         let packet = broker.read_publish().await;
         assert!(packet.is_some());
     }
@@ -622,9 +637,9 @@ mod test {
         // broker connection 1
         let mut broker = Broker::new(1889, true).await;
         for i in 1..=2 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
-            broker.ack(packet.unwrap()).await;
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
+            broker.ack(packet.pkid).await;
         }
 
         // NOTE: An interesting thing to notice here is that reassigning a new broker
@@ -636,9 +651,9 @@ mod test {
         // broker connection 2
         let mut broker = Broker::new(1889, true).await;
         for i in 3..=4 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
-            broker.ack(packet.unwrap()).await;
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
+            broker.ack(packet.pkid).await;
         }
     }
 
@@ -664,15 +679,15 @@ mod test {
         // broker connection 1. receive but don't ack
         let mut broker = Broker::new(1890, true).await;
         for i in 1..=2 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
         }
 
         // broker connection 2 receives from scratch
         let mut broker = Broker::new(1890, true).await;
         for i in 1..=6 {
-            let packet = broker.read_publish().await;
-            assert_eq!(i, packet.unwrap());
+            let packet = broker.read_publish().await.unwrap();
+            assert_eq!(i, packet.payload[0]);
         }
     }
 }
@@ -714,12 +729,13 @@ mod broker {
         }
 
         // Reads a publish packet from the stream with 2 second timeout
-        pub async fn read_publish(&mut self) -> Option<u16> {
+        pub async fn read_publish(&mut self) -> Option<Publish> {
             let packet = time::timeout(Duration::from_secs(2), async {
                 self.framed.read().await
             });
+
             match packet.await {
-                Ok(Ok(Packet::Publish(publish))) => Some(publish.pkid),
+                Ok(Ok(Packet::Publish(publish))) => Some(publish),
                 Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
                 Ok(Err(e)) => panic!("Error = {:?}", e),
                 // timedout
