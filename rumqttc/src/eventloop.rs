@@ -35,14 +35,6 @@ pub enum ConnectionError {
     Cancel,
 }
 
-#[derive(Eq, PartialEq)]
-enum NetworkType {
-    /// User provided Framed. No automatic reconnections
-    User,
-    /// Inbuilt. Automatic reconnections available
-    Inbuilt
-}
-
 /// Eventloop with all the state of a connection
 pub struct EventLoop {
     /// Options of the current mqtt connection
@@ -92,8 +84,7 @@ impl EventLoop {
             pending,
             buffered,
             network: None,
-            network_type: NetworkType::Inbuilt,
-            keepalive_timeout,
+            keepalive_timeout: time::delay_for(keepalive),
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
@@ -632,7 +623,7 @@ mod test {
 
     #[tokio::test]
     async fn packet_id_collisions_are_detected() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
         options.set_inflight(4);
 
         let eventloop = EventLoop::new(options, 5).await;
@@ -644,7 +635,7 @@ mod test {
         });
 
         task::spawn(async move {
-            let mut broker = Broker::new(1888, true).await;
+            let mut broker = Broker::new(1891, true).await;
             for _ in 1..=4 {
                 let packet = broker.read_publish().await;
                 assert!(packet.is_some());
@@ -652,7 +643,7 @@ mod test {
 
             // out of order ack
             broker.ack(2).await;
-            time::delay_for(Duration::from_secs(1)).await;
+            time::delay_for(Duration::from_secs(5)).await;
         });
 
 

@@ -44,9 +44,9 @@ path = "rumqttsync.rs"
 name = "routernxn"
 path = "routernxn.rs"
 
-[[bin]]
-name = "pahosync"
-path = "pahosync.rs"
+# [[bin]]
+# name = "pahosync"
+# path = "pahosync.rs"
 
 # [[bin]]
 # name = "pahoasync"

@@ -179,22 +179,6 @@ pub enum Key{
     ECC,
 }
 
-/// Client authentication option for mqtt connect packet
-#[derive(Clone, Debug)]
-pub enum SecurityOptions {
-    /// No authentication.
-    None,
-    /// Use the specified `(username, password)` tuple to authenticate.
-    UsernamePassword(String, String),
-}
-
-#[repr(u8)]
-#[derive(Clone, Debug, Copy, Eq, PartialEq)]
-pub enum Mode {
-    Client = 0,
-    Server = 1,
-}
-
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
         return Request::Publish(publish);
@@ -213,7 +197,14 @@ impl From<Unsubscribe> for Request {
     }
 }
 
-
+/// Client authentication option for mqtt connect packet
+#[derive(Clone, Debug)]
+pub enum SecurityOptions {
+    /// No authentication.
+    None,
+    /// Use the specified `(username, password)` tuple to authenticate.
+    UsernamePassword(String, String),
+}
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -254,8 +245,6 @@ pub struct MqttOptions {
     last_will: Option<LastWill>,
     /// Key type for TLS 
     key_type: Key,
-    /// Mode of operation. Server mode is used in broker
-    mode: Mode
 }
 
 impl MqttOptions {
@@ -283,7 +272,6 @@ impl MqttOptions {
             inflight: 100,
             last_will: None,
             key_type: Key::RSA,
-            mode: Mode::Client
         }
     }
 
@@ -331,18 +319,11 @@ impl MqttOptions {
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
-        if self.mode == Mode::Server {
-            panic!("Can't set keep alive in server mode");
+        if secs < 5 {
+            panic!("Keep alives should be >= 5  secs");
         }
-        self.keep_alive = Duration::from_secs(u64::from(secs));
-        self
-    }
 
-    pub fn set_mode(&mut self, mode: Mode) -> &mut Self {
-        self.mode = mode;
-        if mode == Mode::Server {
-            self.keep_alive = Duration::from_secs(0);
-        }
+        self.keep_alive = Duration::from_secs(u64::from(secs));
         self
     }
 
