@@ -85,12 +85,12 @@ mod eventloop;
 #[cfg(feature = "passthrough")]
 mod eventloop2;
 
+#[cfg(feature = "passthrough")]
+pub use framed::Network;
 pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
-
-pub type Incoming2 = Packet;
 
 
 #[derive(Debug, Clone)]

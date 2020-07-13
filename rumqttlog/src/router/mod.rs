@@ -234,7 +234,7 @@ impl Connection {
 
 #[derive(Debug)]
 pub enum ConnectionAck {
-    /// Id assigned by the router for this connection
+    /// Id assigned by the router for this connectiobackn
     Success(usize),
     /// Failure and reason for failure string
     Failure(String),

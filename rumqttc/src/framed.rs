@@ -180,7 +180,6 @@ impl Network {
         Ok(len)
     }
 
-    #[cfg(test)]
     pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {
         let len = match connack.write(&mut self.write) {
             Ok(size) => size,
@@ -189,6 +188,18 @@ impl Network {
 
         self.flush().await?;
         Ok(len)
+    }
+
+    pub async fn read_connect(&mut self) -> Result<Connect, io::Error> {
+        let packet = self.read().await?;
+
+        match packet {
+            Packet::Connect(connect) => Ok(connect),
+            packet => {
+                let error = format!("Expecting connack. Received = {:?}", packet);
+                Err(io::Error::new(io::ErrorKind::InvalidData, error))
+            }
+        }
     }
 
     pub async fn read_connack(&mut self) -> Result<Incoming, io::Error> {

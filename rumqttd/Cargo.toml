@@ -10,11 +10,9 @@ edition = "2018"
 
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.1"}
+rumqttc = { path = "../rumqttc", version = "0.0.4"}
 tokio = { version = "0.2", features = ["full"]}
-futures-util = { version = "0.3", features = ["sink"]}
-tokio-util = { version = "0.3", features = ["codec"]}
 serde = { version = "1", features = ["derive"] }
-indexmap = "1"
 log = "0.4"
 thiserror = "1"
 

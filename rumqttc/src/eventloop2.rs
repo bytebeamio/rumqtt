@@ -1,9 +1,13 @@
-use crate::{EventLoop, Outgoing, ConnectionError, Incoming};
+use crate::{Network, EventLoop, Outgoing, ConnectionError, Incoming};
 
 use tokio::select;
 use tokio::stream::StreamExt;
 
 impl EventLoop {
+    pub fn set_network(&mut self, network: Network) {
+        self.network = Some(network)
+    }
+
     /// Next notification or outgoing request
     pub async fn pollv(&mut self) -> Result<(Vec<Incoming>, Option<Outgoing>), ConnectionError> {
         // This method used to return only incoming network notification while silently looping through
