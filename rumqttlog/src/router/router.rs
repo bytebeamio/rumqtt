@@ -5,7 +5,7 @@ use std::{io, mem, thread};
 use super::bytes::Bytes;
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
-use crate::mesh::Mesh;
+// use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
 use crate::router::{
     ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
@@ -92,10 +92,10 @@ impl Router {
     }
 
     fn enable_replication(&mut self) {
-        debug!("Enabling replication");
-        let mut replicator = Mesh::new(self.config.clone(), self.router_tx.clone());
+        // let mut replicator = Mesh::new(self.config.clone(), self.router_tx.clone());
         thread::spawn(move || {
-            replicator.start();
+             debug!("No replication yet!!");
+            // replicator.start();
         });
     }
 

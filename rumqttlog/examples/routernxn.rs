@@ -1,3 +1,4 @@
+/*
 use argh::FromArgs;
 use bytes::Bytes;
 use futures_util::future::join_all;
@@ -162,4 +163,9 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
 
     println!("Id = {}, Total size = {}", id, total_size);
     total_size
+}
+*/
+
+fn main() {
+    println!("hello world!!");
 }
