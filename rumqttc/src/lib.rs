@@ -158,17 +158,19 @@ pub enum Outgoing {
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
-    Publishes(Vec<Publish>),
     PubAck(PubAck),
-    PubAcks(Vec<PubAck>),
     PubRec(PubRec),
     PubComp(PubComp),
     PubRel(PubRel),
     PingReq,
     PingResp,
     Subscribe(Subscribe),
+    SubAck(SubAck),
     Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
     Disconnect,
+    Publishes(Vec<Publish>),
+    PubAcks(Vec<PubAck>),
 }
 
 /// Key type for TLS authentication

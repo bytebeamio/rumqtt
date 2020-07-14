@@ -7,14 +7,12 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 // use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{
-    ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
-    TopicsRequest, AcksReply, AcksRequest,
-};
+use crate::router::{ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
 
 use crate::Config;
 use thiserror::Error;
 use tokio::stream::StreamExt;
+use rumqttc::Publish;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -115,6 +113,9 @@ impl Router {
                 RouterInMessage::WatermarksRequest(request) => {
                     self.handle_acks_request(id, request)
                 }
+                RouterInMessage::Disconnect(request) => {
+                    self.handle_disconnection(id, request)
+                }
             }
         }
 
@@ -134,9 +135,9 @@ impl Router {
                     }
                 }
 
+                // TODO ack connection with failure as there are no empty slots
                 if id == 0 {
                     error!("No empty slots found for incoming connection = {:?}", did);
-                    // TODO ack connection with failure as there are no empty slots
                     return;
                 }
 
@@ -144,10 +145,10 @@ impl Router {
             }
         };
 
-        let _message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
-        // if let Err(e) = connection.handle.try_send(message) {
-        //     error!("Failed to send connection ack. Error = {:?}", e.to_string());
-        // }
+        let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
+        if let Err(e) = connection.handle.try_send(message) {
+            error!("Failed to send connection ack. Error = {:?}", e.to_string());
+        }
 
         info!("New Connection. In ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
@@ -155,46 +156,54 @@ impl Router {
         }
     }
 
+    fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
+        info!("Cleaning ID [{}] = {:?} from router", disconnect.id, id);
+        if mem::replace(&mut self.connections[id], None).is_none() {
+            warn!("Weird, removing a non existent connection")
+        }
+    }
+
     /// Handles new incoming data on a topic
-    fn handle_incoming_data(&mut self, id: ConnectionId, data: Data) {
-        if data.payload.len() == 0 {
-            error!(
-                "Empty publish. Ignoring. ID = {:?}, topic = {:?}",
-                id, data.topic
-            );
-            return;
+    fn handle_incoming_data(&mut self, id: ConnectionId, data: Vec<Publish>) {
+        for publish in data {
+            if publish.payload.len() == 0 {
+                error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
+                return;
+            }
+
+            let Publish {
+                pkid,
+                topic,
+                payload,
+                ..
+            } = publish;
+
+            // Acknowledge the connection after writing data to commitlog
+            if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
+                let watermarks = match self.watermarks.get_mut(&topic) {
+                    Some(w) => w,
+                    None => {
+                        self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                        self.watermarks.get_mut(&topic).unwrap()
+                    },
+                };
+
+                watermarks.update_pkid_offset_map(id, pkid, offset);
+            }
+
+            // If there is a new unique append, send it to connection/linker waiting
+            // on it. This is equivalent to hybrid of block and poll and we don't need
+            // timers. Connections/Replicator will make a request and request fails as
+            // there is no new data. Router caches the failed request on the topic.
+            // If there is new data on this topic, router fulfills the last failed request.
+            // This completely eliminates the need of polling
+            if self.topiclog.unique_append(&topic) {
+                self.fresh_topics_notification(id);
+            }
+
+            self.fresh_data_notification(id, &topic);
         }
 
-        let Data {
-            pkid,
-            topic,
-            payload,
-        } = data;
-
-        // Acknowledge the connection after writing data to commitlog
-        if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
-            let watermarks = match self.watermarks.get_mut(&topic) {
-                Some(w) => w,
-                None => {
-                    self.watermarks.insert(topic.clone(), Watermarks::new(0));
-                    self.watermarks.get_mut(&topic).unwrap()
-                },
-            };
-
-            watermarks.update_pkid_offset_map(id, pkid, offset);
-        }
-
-        // If there is a new unique append, send it to connection/linker waiting
-        // on it. This is equivalent to hybrid of block and poll and we don't need
-        // timers. Connections/Replicator will make a request and request fails as
-        // there is no new data. Router caches the failed request on the topic.
-        // If there is new data on this topic, router fulfills the last failed request.
-        // This completely eliminates the need of polling
-        if self.topiclog.unique_append(&topic) {
-            self.fresh_topics_notification(id);
-        }
-
-        self.fresh_data_notification(id, &topic);
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {

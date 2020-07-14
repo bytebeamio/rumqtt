@@ -1,7 +1,5 @@
 extern crate bytes;
 
-/// NOTE: Don't let mqtt4bytes creep in here. By keeping MQTT specifics outside,
-/// supporting mqtt4 and 5 with the same router becomes easy
 mod commitlog;
 mod router;
 
@@ -9,6 +7,7 @@ pub use router::Router;
 
 use self::bytes::Bytes;
 use async_channel::{Sender, bounded, Receiver};
+use rumqttc::Publish;
 use std::fmt;
 
 /// Messages going into router
@@ -17,13 +16,15 @@ pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
     /// Data which is written to commitlog
-    Data(Data),
+    Data(Vec<Publish>),
     /// Data request
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
     /// Watermarks request
     WatermarksRequest(AcksRequest),
+    /// Disconnection request
+    Disconnect(Disconnection)
 }
 
 /// Messages coming from router
@@ -242,5 +243,19 @@ pub enum ConnectionAck {
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.conn)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct Disconnection {
+    id: String,
+}
+
+impl Disconnection {
+    pub fn new(id: String) -> Disconnection {
+        Disconnection {
+            id
+        }
     }
 }

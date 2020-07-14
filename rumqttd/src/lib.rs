@@ -7,8 +7,8 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use tokio::time::Elapsed;
-use rumqttlog::{Router, RouterInMessage, Connection, Sender};
-use rumqttc::*;
+use rumqttlog::*;
+use rumqttc::{Packet, ConnAck, ConnectReturnCode, Network};
 
 pub use rumqttlog::Config as RouterConfig;
 use tokio::time;
@@ -18,6 +18,7 @@ use tokio::task;
 use crate::connection::Link;
 
 mod connection;
+mod state;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -26,6 +27,14 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
+    #[error("Channel recv error")]
+    Recv(#[from] RecvError),
+    #[error("Channel send error")]
+    Send(#[from] SendError<(Id, RouterInMessage)>),
+    #[error("Unexpected router message")]
+    RouterMessage(RouterOutMessage),
+    #[error("Connack error {0}")]
+    ConnAck(String),
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet)
@@ -164,7 +173,7 @@ impl Connector {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, _link_rx) = Connection::new(&client_id, 4);
+        let (connection, link_rx) = Connection::new(&client_id, 4);
         let message = (0, RouterInMessage::Connect(connection));
         let router_tx = self.router_tx.clone();
         router_tx.send(message).await.unwrap();
@@ -173,13 +182,23 @@ impl Connector {
         let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
         network.connack(connack).await?;
 
-        // Start the link
-        let mut link = Link::new(network).await;
-        let o = link.start(router_tx).await;
-        error!("Link stopped!! Result = {:?}", o);
-
         // TODO When a new connection request is sent to the router, router should ack with error
         // TODO if it exceeds maximum allowed active connections
+        let id = match link_rx.recv().await? {
+            RouterOutMessage::ConnectionAck(ack) =>  match ack {
+                ConnectionAck::Success(id) => id,
+                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason))
+            }
+            message => return Err(Error::RouterMessage(message))
+        };
+
+        // Start the link
+        let mut link = Link::new(id, client_id.clone(), network, router_tx.clone()).await;
+        let o = link.start().await;
+        error!("Link stopped!! Result = {:?}", o);
+        let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
+        let message = (id, disconnect);
+        self.router_tx.send(message).await?;
         Ok(())
     }
 }

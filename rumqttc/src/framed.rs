@@ -150,7 +150,9 @@ impl Network {
                 packet.write(&mut self.write)?
             }
             Request::Subscribe(packet) => packet.write(&mut self.write)?,
+            Request::SubAck(packet) => packet.write(&mut self.write)?,
             Request::Unsubscribe(packet) => packet.write(&mut self.write)?,
+            Request::UnsubAck(packet) => packet.write(&mut self.write)?,
             Request::Disconnect => {
                 let packet = Disconnect;
                 packet.write(&mut self.write)?
@@ -228,6 +230,16 @@ impl Network {
 
         Ok(outgoing)
     }
+
+
+    pub fn fill2(&mut self, request: Request) -> Result<(), io::Error> {
+        if let Err(e) =  self.write_fill(request) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        };
+
+        Ok(())
+    }
+
 
     /// Write packet to network
     pub async fn write(&mut self, request: Request) -> Result<Outgoing, io::Error> {
