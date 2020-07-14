@@ -92,7 +92,6 @@ pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
 
-
 #[derive(Debug, Clone)]
 pub enum Incoming {
     /// Connection successful

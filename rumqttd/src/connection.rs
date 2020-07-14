@@ -26,7 +26,7 @@ impl Link {
         }
     }
 
-    pub async fn start(&mut self, router_tx: Sender<(Id, RouterInMessage)>) -> Result<(), Error> {
+    pub async fn start(&mut self, _router_tx: Sender<(Id, RouterInMessage)>) -> Result<(), Error> {
         loop {
             let (notification, _) = self.eventloop.pollv().await?;
             println!("{:?}", notification);

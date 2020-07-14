@@ -11,6 +11,7 @@ use crate::router::{
     ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply,
     TopicsRequest, AcksReply, AcksRequest,
 };
+
 use crate::Config;
 use thiserror::Error;
 use tokio::stream::StreamExt;
@@ -143,7 +144,7 @@ impl Router {
             }
         };
 
-        let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
+        let _message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
         // if let Err(e) = connection.handle.try_send(message) {
         //     error!("Failed to send connection ack. Error = {:?}", e.to_string());
         // }
@@ -298,7 +299,7 @@ impl Router {
         let replication_data = id < 10;
         for (link_id, request) in waiters {
             // don't send replicated topic notifications to replication link
-            // id 0-10 are reserved for replicatiors which are linked to other routers in the mesh
+            // id 0-10 are reserved for replicators which are linked to other routers in the mesh
             if replication_data && link_id < 10 {
                 continue;
             }
@@ -417,9 +418,9 @@ impl Router {
         };
 
         let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
-        // if let Err(e) = connection.handle.try_send(ack) {
-        //     error!("Failed to topics refresh reply. Error = {:?}", e);
-        // }
+        if let Err(e) = connection.handle.try_send(ack) {
+            error!("Failed to topics refresh reply. Error = {:?}", e);
+        }
     }
 
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
@@ -566,9 +567,9 @@ impl Router {
             }
         };
 
-        // if let Err(e) = connection.handle.try_send(reply) {
-        //     error!("Failed to reply. Error = {:?}", e);
-        // }
+        if let Err(e) = connection.handle.try_send(reply) {
+            error!("Failed to reply. Error = {:?}", e);
+        }
     }
 }
 
@@ -609,6 +610,7 @@ impl Watermarks {
 
 #[cfg(test)]
 mod test {
+    /*
     use super::{ConnectionId, Router};
     use crate::router::{
         ConnectionAck, ConnectionType, Data, DataAck, TopicsReply, TopicsRequest, AcksReply,
@@ -950,4 +952,6 @@ mod test {
             }
         }
     }
+
+     */
 }

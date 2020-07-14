@@ -7,7 +7,7 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use tokio::time::Elapsed;
-use rumqttlog::{Router, RouterInMessage, Connection, Sender, bounded};
+use rumqttlog::{Router, RouterInMessage, Connection, Sender};
 use rumqttc::*;
 
 pub use rumqttlog::Config as RouterConfig;
@@ -86,7 +86,7 @@ impl Broker {
         Broker { config, router_tx, router: Some(router) }
     }
 
-    pub fn new_router_handle(&self) -> Sender<(Id, RouterInMessage)> {
+    pub fn router_handle(&self) -> Sender<(Id, RouterInMessage)> {
         self.router_tx.clone()
     }
 
@@ -164,7 +164,7 @@ impl Connector {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new(&client_id, 4);
+        let (connection, _link_rx) = Connection::new(&client_id, 4);
         let message = (0, RouterInMessage::Connect(connection));
         let router_tx = self.router_tx.clone();
         router_tx.send(message).await.unwrap();
