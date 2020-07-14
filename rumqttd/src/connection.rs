@@ -1,16 +1,20 @@
 use rumqttc::*;
 use rumqttlog::{Sender, RouterInMessage, tracker::Tracker};
+use tokio::{select, time};
 use std::io;
-use crate::Id;
+use crate::{Id, ServerSettings};
 use crate::state::{self, State};
+use std::sync::Arc;
+use tokio::time::{Instant, Duration};
 
 pub struct Link {
+    config: Arc<ServerSettings>,
+    connect: Connect,
     id: Id,
-    sid: String,
     network: Network,
     tracker: Tracker,
     state: State,
-    router_tx: Sender<(Id, RouterInMessage)>
+    router_tx: Sender<(Id, RouterInMessage)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -22,19 +26,23 @@ pub enum Error {
     #[error("Packet not supported yet")]
     UnsupportedPacket(Incoming),
     #[error("State error")]
-    State(#[from] state::Error)
+    State(#[from] state::Error),
+    #[error("Keep alive time exceeded")]
+    KeepAlive
  }
 
 impl Link {
     pub async fn new(
+        config: Arc<ServerSettings>,
+        connect: Connect,
         id: Id,
-        sid: String,
         network: Network,
         router_tx: Sender<(Id, RouterInMessage)>
     ) -> Link {
         Link {
+            config,
+            connect,
             id,
-            sid,
             network,
             tracker: Tracker::new(),
             state: State::new(100),
@@ -44,9 +52,20 @@ impl Link {
 
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
+        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
+        let mut timeout = time::delay_for(keep_alive);
+
         loop {
-            let v = self.network.readb().await?;
-            self.handle_network_data(v).await?;
+            let keep_alive2 = &mut timeout;
+            select! {
+                _ = keep_alive2 => return Err(Error::KeepAlive),
+                packets = self.network.readb() => {
+                    timeout.reset(Instant::now() + keep_alive);
+                    let packets = packets?;
+                    self.handle_network_data(packets).await?;
+                }
+            }
         }
     }
 
@@ -54,7 +73,7 @@ impl Link {
         let mut publishes = Vec::new();
 
         for packet in incoming {
-            debug!("Id = {:?}[{}], Incoming packet = {:?}", self.sid, self.id, packet);
+            debug!("Id = {}[{}], Incoming packet = {:?}", self.connect.client_id, self.id, packet);
             match packet {
                 Incoming::PubAck(ack) => {
                     self.state.handle_network_puback(ack)?;
@@ -73,6 +92,9 @@ impl Link {
                     let suback = SubAck::new(subscribe.pkid, return_codes);
                     let suback = Request::SubAck(suback);
                     self.network.fill2(suback)?;
+                }
+                Incoming::PingReq => {
+                    self.network.fill2(Request::PingResp)?;
                 }
                 packet => {
                     return Err(Error::UnsupportedPacket(packet))

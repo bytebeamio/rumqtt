@@ -193,7 +193,7 @@ impl Connector {
         };
 
         // Start the link
-        let mut link = Link::new(id, client_id.clone(), network, router_tx.clone()).await;
+        let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone()).await;
         let o = link.start().await;
         error!("Link stopped!! Result = {:?}", o);
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
