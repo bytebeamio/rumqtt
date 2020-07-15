@@ -80,8 +80,10 @@ pub struct DataRequest {
     pub native_offset: u64,
     /// This is where sweeps start from for replication data
     pub replica_offset: u64,
-    /// Request Size / Reply size
-    pub size: u64,
+    /// Maximum size of payload buffer
+    pub max_size: u64,
+    /// Maximum count of payload buffer
+    pub max_count: usize
 }
 
 impl DataRequest {
@@ -93,7 +95,20 @@ impl DataRequest {
             replica_segment: 0,
             native_offset: 0,
             replica_offset: 0,
-            size: 1024 * 1024,
+            max_size: 100 * 1024,
+            max_count: 100
+        }
+    }
+
+    pub fn with(topic: String, max_size: u64, max_count: usize) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment: 0,
+            replica_segment: 0,
+            native_offset: 0,
+            replica_offset: 0,
+            max_size,
+            max_count
         }
     }
 
@@ -110,7 +125,29 @@ impl DataRequest {
             replica_segment,
             native_offset,
             replica_offset,
-            size: 1024 * 1024,
+            max_size: 100 * 1024,
+            max_count: 100
+        }
+    }
+
+    /// New data request with provided offsets
+    pub fn offsets_with(
+        topic: String,
+        native_segment: u64,
+        native_offset: u64,
+        replica_segment: u64,
+        replica_offset: u64,
+        max_size: u64,
+        max_count: usize
+    ) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment,
+            replica_segment,
+            native_offset,
+            replica_offset,
+            max_size,
+            max_count
         }
     }
 }

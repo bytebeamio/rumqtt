@@ -24,8 +24,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Eventloop {0}")]
     EventLoop(#[from] ConnectionError),
-    #[error("Packet not supported yet")]
-    UnsupportedPacket(Incoming),
+    // #[error("Packet not supported yet")]
+    // UnsupportedPacket(Incoming),
     #[error("State error")]
     State(#[from] state::Error),
     #[error("Keep alive time exceeded")]
@@ -62,7 +62,8 @@ impl Link {
         let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
         let mut timeout = time::delay_for(keep_alive);
-        let mut inflight = 0;
+        let inflight = self.state.inflight;
+        let max_inflight = self.config.max_inflight_count;
 
         loop {
             let keep_alive2 = &mut timeout;
@@ -78,13 +79,12 @@ impl Link {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
-                Some(message) = self.tracker.next(), if inflight < 3 && self.tracker.has_next() => {
+                Some(message) = self.tracker.next(), if inflight < max_inflight && self.tracker.has_next() => {
                     // NOTE Right now we are request data by topic, instead if can request
                     // data of multiple topics at once, we can have better utilization of
                     // network and system calls for n publisher and 1 subscriber workloads
                     // as data from multiple topics can be batched (for a given connection)
                     debug!("{:?}", message);
-                    inflight += 1;
                     self.router_tx.send((self.id, message)).await?;
                 }
             }
@@ -99,6 +99,7 @@ impl Link {
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
+                self.tracker.update_data_tracker(&reply);
                 for p in reply.payload {
                     let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
                     let publish = self.state.handle_router_data(publish)?;

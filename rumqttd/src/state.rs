@@ -1,13 +1,12 @@
-use rumqttlog::tracker::Tracker;
 use rumqttc::{PubAck, Publish};
 
 use std::mem;
 
 pub struct State {
-    tracker: Tracker,
     outgoing_pub: Vec<Option<u16>>,
     max_inflight: u16,
-    last_pkid: u16,
+    pub(crate) inflight: u16,
+    pub(crate) last_pkid: u16,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -21,9 +20,9 @@ pub enum Error {
 impl State {
     pub fn new(max_inflight: u16) -> State {
         State {
-            tracker: Tracker::new(),
             outgoing_pub: vec![None; max_inflight as usize],
             max_inflight,
+            inflight: 0,
             last_pkid: 0
         }
     }
@@ -32,6 +31,11 @@ impl State {
         let pkid = ack.pkid as usize;
         if mem::replace(&mut self.outgoing_pub[pkid], None).is_none() {
             return Err(Error::UnsolicitedAck(ack.pkid))
+        }
+
+        self.inflight -= 1;
+        if self.inflight == 0 {
+            self.last_pkid = 0;
         }
 
         Ok(())
@@ -50,6 +54,7 @@ impl State {
             return Err(Error::Collision)
         }
 
+        self.inflight += 1;
         Ok(publish)
     }
 

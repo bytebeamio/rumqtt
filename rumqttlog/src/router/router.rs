@@ -7,7 +7,7 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 // use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionAck, ConnectionType, Data, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
+use crate::router::{ConnectionAck, ConnectionType, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
 
 use crate::Config;
 use thiserror::Error;
@@ -454,7 +454,7 @@ impl Router {
         let topic = &request.topic;
         let segment = request.native_segment;
         let offset = request.native_offset;
-        let size = request.size;
+        let size = request.max_size;
 
         debug!(
             "Pull native data. Topic = {}, seg = {}, offset = {}",
@@ -490,7 +490,7 @@ impl Router {
         let topic = &request.topic;
         let segment = request.replica_segment;
         let offset = request.replica_offset;
-        let size = request.size;
+        let size = request.max_size;
 
         debug!(
             "Pull replicated data. Topic = {}, seg = {}, offset = {}",
