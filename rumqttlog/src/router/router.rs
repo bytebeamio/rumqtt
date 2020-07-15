@@ -161,6 +161,8 @@ impl Router {
         if mem::replace(&mut self.connections[id], None).is_none() {
             warn!("Weird, removing a non existent connection")
         }
+
+        // TODO Remove this connection from all types of waiters
     }
 
     /// Handles new incoming data on a topic
@@ -216,7 +218,7 @@ impl Router {
             },
         };
 
-        // register this id to wake up when there are new topics
+        // register the connection 'id' to notify when there are new topics
         if reply.topics.is_empty() {
             self.register_topics_waiter(id, request);
             return
@@ -315,6 +317,8 @@ impl Router {
 
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request).unwrap();
+            debug!("Sending topic {:?} notification to id = {}", reply.topics, link_id);
+
             let reply = RouterOutMessage::TopicsReply(reply);
             self.reply(link_id, reply);
 
@@ -462,7 +466,6 @@ impl Router {
                 let reply = DataReply {
                     done: v.0,
                     topic: request.topic.clone(),
-                    payload: v.5,
                     native_segment: v.1,
                     native_offset: v.2,
                     native_count,
@@ -470,6 +473,7 @@ impl Router {
                     replica_offset: request.replica_offset,
                     replica_count: 0,
                     pkids: v.4,
+                    payload: v.5,
                 };
 
                 Some(reply)
@@ -539,12 +543,14 @@ impl Router {
     }
 
     fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
+        debug!("Registering connection {} for topic notifications", id);
         let request = (id.to_owned(), request);
         self.topics_waiters.push(request);
     }
 
     /// Register data waiter
     fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
+        debug!("Registering id = {} for {} data notifications", request.topic, id);
         let topic = request.topic.clone();
         let request = (id, request);
 
@@ -577,7 +583,7 @@ impl Router {
         };
 
         if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to reply. Error = {:?}", e);
+            error!("Failed to reply. Message = {:?}", e.into_inner());
         }
     }
 }

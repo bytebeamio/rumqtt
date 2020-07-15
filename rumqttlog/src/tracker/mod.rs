@@ -11,6 +11,7 @@ use mqtt4bytes::{has_wildcards, matches};
 /// host along with the status of the topic (active/inactive) for link
 /// to use while iterating. This helps us prevent maintaining 2 lists
 /// (active, inactive)
+#[derive(Debug)]
 pub struct Tracker {
     // TODO Replace this with vec later and use only pop?
     /// List of topics that we are tracking for data
@@ -51,6 +52,14 @@ impl Tracker {
         }
     }
 
+    pub fn has_next(&self) -> bool {
+        if !self.data_tracker.is_empty() || !self.watermarks_tracker.is_empty() || self.topics_tracker.is_some() {
+            return true
+        }
+
+        false
+    }
+
     pub fn add_subscription(&mut self, filter: &str) {
         if has_wildcards(filter) {
             self.wild_subscriptions.push(filter.to_owned());
@@ -72,9 +81,9 @@ impl Tracker {
         self.watermarks_tracker.push_back(request);
     }
 
-    /// Match the subscriptions this connection is interested in. Matches
-    /// only if the topic isn't already tracked.
-    fn track_matched_topics(&mut self, topic: String) {
+    /// Match this topic to subscriptions this connection is interested in.
+    /// Matches only if the topic isn't already tracked.
+    fn match_and_track(&mut self, topic: String) {
         // ignore if the topic is already being tracked
         if self.data_topics.contains(&topic) {
             return;
@@ -104,9 +113,10 @@ impl Tracker {
         self.watermarks_tracker.push_back(request);
     }
 
-    pub fn update_topics_tracker(&mut self, reply: &TopicsReply) {
+    /// Updates data tracker to track more topics
+    pub fn track_more_topics(&mut self, reply: &TopicsReply) {
         for topic in reply.topics.iter() {
-            self.track_matched_topics(topic.clone());
+            self.match_and_track(topic.clone());
         }
 
         self.topics_tracker = Some(TopicsRequest::offset(reply.offset + 1));
@@ -135,7 +145,7 @@ impl Tracker {
     /// This ignores inactive indexes while iterating
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
-    pub fn next(&mut self) -> Option<RouterInMessage> {
+    pub async fn next(&mut self) -> Option<RouterInMessage> {
         let start_tracker = self.tracker_type;
 
         if self.tracker_type == 0 {
@@ -197,7 +207,7 @@ mod tests {
 
         for i in 0..10 {
             let topic = format!("{}", i);
-            tracker.track_matched_topics(topic.clone());
+            tracker.match_and_track(topic.clone());
             tracker.track_watermark(topic);
         }
 
@@ -222,7 +232,7 @@ mod tests {
         // now add a new topics to the tracker
         for i in 10..20 {
             let topic = format!("{}", i);
-            tracker.track_matched_topics(topic.clone());
+            tracker.match_and_track(topic.clone());
             tracker.track_watermark(topic);
         }
 

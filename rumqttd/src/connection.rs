@@ -1,5 +1,5 @@
 use rumqttc::*;
-use rumqttlog::{Sender, RouterInMessage, tracker::Tracker};
+use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError};
 use tokio::{select, time};
 use std::io;
 use crate::{Id, ServerSettings};
@@ -15,6 +15,7 @@ pub struct Link {
     tracker: Tracker,
     state: State,
     router_tx: Sender<(Id, RouterInMessage)>,
+    link_rx: Receiver<RouterOutMessage>
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -28,7 +29,11 @@ pub enum Error {
     #[error("State error")]
     State(#[from] state::Error),
     #[error("Keep alive time exceeded")]
-    KeepAlive
+    KeepAlive,
+    #[error("Channel send error")]
+    Send(#[from] SendError<(Id, RouterInMessage)>),
+    #[error("Channel recv error")]
+    Recv(#[from] RecvError),
  }
 
 impl Link {
@@ -37,7 +42,8 @@ impl Link {
         connect: Connect,
         id: Id,
         network: Network,
-        router_tx: Sender<(Id, RouterInMessage)>
+        router_tx: Sender<(Id, RouterInMessage)>,
+        link_rx: Receiver<RouterOutMessage>
     ) -> Link {
         Link {
             config,
@@ -46,7 +52,8 @@ impl Link {
             network,
             tracker: Tracker::new(),
             state: State::new(100),
-            router_tx
+            router_tx,
+            link_rx
         }
     }
 
@@ -55,6 +62,7 @@ impl Link {
         let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
         let mut timeout = time::delay_for(keep_alive);
+        let mut inflight = 0;
 
         loop {
             let keep_alive2 = &mut timeout;
@@ -65,8 +73,36 @@ impl Link {
                     let packets = packets?;
                     self.handle_network_data(packets).await?;
                 }
+                message = self.link_rx.recv() => {
+                    debug!("{:?}", message);
+                    let message = message?;
+                    self.handle_router_response(message).await?;
+                }
+                Some(message) = self.tracker.next(), if inflight < 3 && self.tracker.has_next() => {
+                    // NOTE Right now we are request data by topic, instead if can request
+                    // data of multiple topics at once, we can have better utilization of
+                    // network and system calls for n publisher and 1 subscriber workloads
+                    // as data from multiple topics can be batched (for a given connection)
+                    debug!("{:?}", message);
+                    inflight += 1;
+                    self.router_tx.send((self.id, message)).await?;
+                }
             }
         }
+    }
+
+    async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
+        match message {
+            RouterOutMessage::TopicsReply(reply) => {
+                self.tracker.track_more_topics(&reply)
+            }
+            RouterOutMessage::ConnectionAck(_) => {}
+            RouterOutMessage::DataAck(_) => {}
+            RouterOutMessage::DataReply(_) => {}
+            RouterOutMessage::WatermarksReply(_) => {}
+        }
+
+        Ok(())
     }
 
     async fn handle_network_data(&mut self, incoming: Vec<Incoming>) -> Result<(), Error> {
@@ -89,6 +125,7 @@ impl Link {
                         self.tracker.add_subscription(&filter.topic_path);
                     }
 
+                    // println!("{:?}", self.tracker);
                     let suback = SubAck::new(subscribe.pkid, return_codes);
                     let suback = Request::SubAck(suback);
                     self.network.fill2(suback)?;
@@ -96,14 +133,23 @@ impl Link {
                 Incoming::PingReq => {
                     self.network.fill2(Request::PingResp)?;
                 }
+                Incoming::Disconnect => {
+                    // TODO Add correct disconnection handling
+                }
                 packet => {
-                    return Err(Error::UnsupportedPacket(packet))
+                    error!("Packet = {:?} not supported yet", packet);
+                    // return Err(Error::UnsupportedPacket(packet))
                 }
             }
         }
 
+        // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
-        let message = Some(RouterInMessage::Data(publishes));
+        if !publishes.is_empty() {
+            let message = RouterInMessage::Data(publishes);
+            self.router_tx.send((self.id, message)).await?;
+        }
+
         Ok(())
     }
 }

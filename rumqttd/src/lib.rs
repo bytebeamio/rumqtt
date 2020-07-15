@@ -114,8 +114,9 @@ impl Broker {
             task::spawn(async {
                 let connector = Connector::new(config, router_tx);
                 let network = Network::new(stream);
-                let o = connector.new_connection(network).await;
-                error!("Dropping link task!! Result = {:?}", o);
+                if let Err(e) = connector.new_connection(network).await {
+                    error!("Dropping link task!! Result = {:?}", e);
+                }
             });
 
             time::delay_for(accept_loop_delay).await;
@@ -193,9 +194,9 @@ impl Connector {
         };
 
         // Start the link
-        let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone()).await;
+        let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone(), link_rx).await;
         let o = link.start().await;
-        error!("Link stopped!! Result = {:?}", o);
+        error!("Link stopped!! Id = {}, Client Id = {},  Result = {:?}", id, client_id, o);
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);
         self.router_tx.send(message).await?;
