@@ -98,10 +98,19 @@ impl Link {
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataAck(_) => {}
-            RouterOutMessage::DataReply(_) => {}
+            RouterOutMessage::DataReply(reply) => {
+                for p in reply.payload {
+                    let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
+                    let publish = self.state.handle_router_data(publish)?;
+                    let publish = Request::Publish(publish);
+                    self.network.fill2(publish)?;
+                }
+            }
             RouterOutMessage::WatermarksReply(_) => {}
         }
 
+        // FIXME Early returns above will prevent router send and network write
+        self.network.flush().await?;
         Ok(())
     }
 
