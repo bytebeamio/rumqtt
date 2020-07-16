@@ -70,13 +70,14 @@ impl Tracker {
     }
 
     /// Adds a new topic to watermarks tracker
-    pub fn track_watermark(&mut self, topic: String) {
+    pub fn track_watermark(&mut self, topic: &str) {
         // ignore if the topic is already being tracked
-        if self.watermark_topics.contains(&topic) {
+        if self.watermark_topics.contains(topic) {
             return;
         }
 
-        self.watermark_topics.insert(topic.to_owned());
+        let topic = topic.to_owned();
+        self.watermark_topics.insert(topic.clone());
         let request = AcksRequest::new(topic, 0);
         self.watermarks_tracker.push_back(request);
     }
@@ -108,14 +109,16 @@ impl Tracker {
         }
     }
 
-    pub fn update_watermarks_tracker(&mut self, reply: AcksReply) {
-        let request = AcksRequest::new(reply.topic, reply.offset);
+    pub fn update_watermarks_tracker(&mut self, reply: &AcksReply) {
+        let request = AcksRequest::new(reply.topic.clone(), reply.offset);
         self.watermarks_tracker.push_back(request);
     }
 
     /// Updates data tracker to track more topics
+    /// So, a TopicReply triggers DataRequest
     pub fn track_more_topics(&mut self, reply: &TopicsReply) {
         for topic in reply.topics.iter() {
+            // Adds a DataRequest to data tracker if there is a match
             self.match_and_track(topic.clone());
         }
 
@@ -164,7 +167,7 @@ impl Tracker {
         if self.tracker_type == 1 {
             match self.watermarks_tracker.pop_front() {
                 Some(request) => {
-                    let message = RouterInMessage::WatermarksRequest(request);
+                    let message = RouterInMessage::AcksRequest(request);
                     return Some(message)
                 }
                 None => {
@@ -309,7 +312,7 @@ mod tests {
 
     fn get_watermarks_topic(message: &RouterInMessage) -> String {
         match message {
-            RouterInMessage::WatermarksRequest(request) => request.topic.clone(),
+            RouterInMessage::AcksRequest(request) => request.topic.clone(),
             v => panic!("Expecting data request. Received = {:?}", v),
         }
     }

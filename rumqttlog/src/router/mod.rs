@@ -9,6 +9,7 @@ use self::bytes::Bytes;
 use async_channel::{Sender, bounded, Receiver};
 use rumqttc::Publish;
 use std::fmt;
+use std::collections::VecDeque;
 
 /// Messages going into router
 #[derive(Debug)]
@@ -22,7 +23,7 @@ pub enum RouterInMessage {
     /// Topics request
     TopicsRequest(TopicsRequest),
     /// Watermarks request
-    WatermarksRequest(AcksRequest),
+    AcksRequest(AcksRequest),
     /// Disconnection request
     Disconnect(Disconnection)
 }
@@ -32,14 +33,12 @@ pub enum RouterInMessage {
 pub enum RouterOutMessage {
     /// Connection reply
     ConnectionAck(ConnectionAck),
-    /// Data ack
-    DataAck(DataAck),
     /// Data reply
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
     /// Watermarks reply
-    WatermarksReply(AcksReply),
+    AcksReply(AcksReply),
 }
 
 /// Data sent router to be written to commitlog
@@ -229,11 +228,11 @@ impl AcksRequest {
 
 #[derive(Debug)]
 pub struct AcksReply {
-    pub(crate) topic: String,
+    pub topic: String,
     /// packet ids that can be acked
-    pub(crate) pkids: Vec<u16>,
+    pub pkids: VecDeque<u16>,
     /// offset till which pkids are returned
-    pub(crate) offset: u64,
+    pub offset: u64,
 }
 
 #[derive(Debug, Clone)]

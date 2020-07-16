@@ -7,12 +7,12 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 // use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionAck, ConnectionType, DataAck, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
+use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
 
 use crate::Config;
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use rumqttc::Publish;
+use rumqttc::{Publish, QoS};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -110,7 +110,7 @@ impl Router {
                 RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
-                RouterInMessage::WatermarksRequest(request) => {
+                RouterInMessage::AcksRequest(request) => {
                     self.handle_acks_request(id, request)
                 }
                 RouterInMessage::Disconnect(request) => {
@@ -162,6 +162,11 @@ impl Router {
             warn!("Weird, removing a non existent connection")
         }
 
+        // FIXME We are iterating through all the topics to remove this connection
+        for (_, watermarks) in self.watermarks.iter_mut() {
+            mem::replace(&mut watermarks.pkid_offset_map[id], None) ;
+        }
+
         // TODO Remove this connection from all types of waiters
     }
 
@@ -177,21 +182,25 @@ impl Router {
                 pkid,
                 topic,
                 payload,
+                qos,
                 ..
             } = publish;
 
-            // Acknowledge the connection after writing data to commitlog
             if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
-                let watermarks = match self.watermarks.get_mut(&topic) {
-                    Some(w) => w,
-                    None => {
-                        self.watermarks.insert(topic.clone(), Watermarks::new(0));
-                        self.watermarks.get_mut(&topic).unwrap()
-                    },
-                };
+                // Store packet ids with offset mapping for QoS > 0
+                if qos == QoS::AtLeastOnce || qos == QoS::ExactlyOnce {
+                    let watermarks = match self.watermarks.get_mut(&topic) {
+                        Some(w) => w,
+                        None => {
+                            self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                            self.watermarks.get_mut(&topic).unwrap()
+                        },
+                    };
 
-                watermarks.update_pkid_offset_map(id, pkid, offset);
+                    watermarks.update_pkid_offset_map(id, pkid, offset);
+                }
             }
+
 
             // If there is a new unique append, send it to connection/linker waiting
             // on it. This is equivalent to hybrid of block and poll and we don't need
@@ -204,8 +213,15 @@ impl Router {
             }
 
             self.fresh_data_notification(id, &topic);
-        }
 
+            // After a bulk of publishes have been written to commitlog, if the replication factor
+            // of this topic is zero, it can be acked immediately if there is an AcksRequest already
+            // waiting. If we don't ack replication factor 0 acks here, these acks will be stuck
+            // TODO: This can probably be moved to connection to ack immediately?
+            // But connection has to maintain topic map to identify replication factor which router
+            // already does
+            self.fresh_watermarks_notification(&topic);
+        }
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
@@ -265,17 +281,19 @@ impl Router {
     }
 
     pub fn handle_acks_request(&mut self, id: ConnectionId, request: AcksRequest) {
-        let reply = match self.watermarks.get(&request.topic) {
+        // I don't think we'll need offset as next set of pkids will always be at head
+        let reply = match self.watermarks.get_mut(&request.topic) {
             Some(watermarks) => {
                 // let caught_up = watermarks.cluster_offsets == request.offset;
-                let caught_up = false;
+                let pkids = watermarks.acks(id);
+                let caught_up = pkids.is_empty();
                 if caught_up {
                     self.register_acks_waiter(id, request);
                     return
                 } else {
                     AcksReply {
                         topic: request.topic.clone(),
-                        pkids: vec![],
+                        pkids,
                         offset: 100,
                     }
                 }
@@ -286,7 +304,7 @@ impl Router {
             },
         };
 
-        let reply = RouterOutMessage::WatermarksReply(reply);
+        let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
     }
 
@@ -317,7 +335,7 @@ impl Router {
 
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request).unwrap();
-            debug!("Sending topic {:?} notification to id = {}", reply.topics, link_id);
+            debug!("Sending new topics {:?} notification to id = {}", reply.topics, link_id);
 
             let reply = RouterOutMessage::TopicsReply(reply);
             self.reply(link_id, reply);
@@ -376,15 +394,27 @@ impl Router {
             None => return,
         };
 
-        for (link_id, _request) in waiters {
-            let reply = AcksReply {
-                topic: topic.to_owned(),
-                pkids: vec![],
-                offset: 100,
-            };
 
-            let reply = RouterOutMessage::WatermarksReply(reply);
-            self.reply(link_id, reply);
+        // Multiple connections can send data on a same topic. WaterMarks splits acks to offset
+        // mapping by connection id. We iterate through all the connections that are waiting for
+        // acks for a give topic
+        for (link_id, request) in waiters {
+            if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
+                let pkids = watermarks.acks(link_id);
+
+                // Even though watermarks are updated, replication count might not be enough for
+                // `watermarks.acks()` to return acks. Send empty pkids in that case. Tracker will
+                // just add a new AcksRequest
+                let reply = AcksReply {
+                    topic: request.topic,
+                    pkids,
+                    // I don't think we'll need offset as next set of pkids will always be at head
+                    offset: 100,
+                };
+
+                let reply = RouterOutMessage::AcksReply(reply);
+                self.reply(link_id, reply);
+            }
         }
     }
 
@@ -409,7 +439,7 @@ impl Router {
                 }
             }
         } else {
-            debug!("Receiving connection data from {}, topic = {}", id, topic);
+            debug!("Receiving data from connection {}, topic = {}", id, topic);
             match self.commitlog.append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {
@@ -421,20 +451,20 @@ impl Router {
     }
 
     /// Acknowledge connection after the data is written to commitlog
-    fn _ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
-        let connection = match self.connections.get_mut(id).unwrap() {
-            Some(c) => c,
-            None => {
-                error!("3. Invalid id = {:?}", id);
-                return;
-            }
-        };
+    // fn _ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
+    //     let connection = match self.connections.get_mut(id).unwrap() {
+    //         Some(c) => c,
+    //         None => {
+    //             error!("3. Invalid id = {:?}", id);
+    //             return;
+    //         }
+    //     };
 
-        let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
-        if let Err(e) = connection.handle.try_send(ack) {
-            error!("Failed to topics refresh reply. Error = {:?}", e);
-        }
-    }
+    //     let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
+    //     if let Err(e) = connection.handle.try_send(ack) {
+    //         error!("Failed to topics refresh reply. Error = {:?}", e);
+    //     }
+    // }
 
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
         match self.topiclog.readv(request.offset, request.count) {
@@ -550,7 +580,7 @@ impl Router {
 
     /// Register data waiter
     fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
-        debug!("Registering id = {} for {} data notifications", request.topic, id);
+        debug!("Registering id = {} for {} data notifications", id, request.topic);
         let topic = request.topic.clone();
         let request = (id, request);
 
@@ -563,6 +593,7 @@ impl Router {
     }
 
     fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
+        debug!("Registering id = {} for {} ack notifications", id, request.topic);
         let topic = request.topic.clone();
         if let Some(waiters) = self.watermark_waiters.get_mut(&request.topic) {
             waiters.push((id, request));
@@ -588,16 +619,19 @@ impl Router {
     }
 }
 
+/// Watermarks for a given topic
 pub struct Watermarks {
-    _replication: usize,
+    replication: usize,
+    /// A map of packet ids and commitlog offsets for a given connection (identified by index)
     pkid_offset_map: Vec<Option<(VecDeque<Pkid>, VecDeque<Offset>)>>,
+    /// Offset till which replication has happened (per mesh node)
     cluster_offsets: Vec<Offset>
 }
 
 impl Watermarks {
     pub fn new(replication: usize) -> Watermarks {
         Watermarks {
-            _replication: replication,
+            replication,
             pkid_offset_map: vec![None; 1000],
             cluster_offsets: vec![0, 0, 0]
         }
@@ -613,13 +647,28 @@ impl Watermarks {
     }
      */
 
+    pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
+        if self.replication == 0 {
+            if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
+                let new_ids = (VecDeque::new(), VecDeque::new());
+                let (pkids, _offsets) = mem::replace(connection, new_ids);
+                return pkids
+            }
+        }
+
+        return VecDeque::new()
+    }
+
     pub fn update_pkid_offset_map(&mut self, id: usize, pkid: u16, offset: u64) {
         // connection ids which are greater than supported count should be rejected during
         // connection itself. Crashing here is a bug
         let connection = self.pkid_offset_map.get_mut(id).unwrap();
         let map = connection.get_or_insert((VecDeque::new(), VecDeque::new()));
         map.0.push_back(pkid);
-        map.1.push_back(offset);
+        // save offsets only if replication > 0
+        if self.replication > 0 {
+            map.1.push_back(offset);
+        }
     }
 }
 

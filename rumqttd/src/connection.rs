@@ -65,6 +65,9 @@ impl Link {
         let inflight = self.state.inflight;
         let max_inflight = self.config.max_inflight_count;
 
+        // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
+        //         Router shouldn't drop messages
+
         loop {
             let keep_alive2 = &mut timeout;
             select! {
@@ -84,7 +87,7 @@ impl Link {
                     // data of multiple topics at once, we can have better utilization of
                     // network and system calls for n publisher and 1 subscriber workloads
                     // as data from multiple topics can be batched (for a given connection)
-                    debug!("{:?}", message);
+                    debug!("Tracker next = {:?}", message);
                     self.router_tx.send((self.id, message)).await?;
                 }
             }
@@ -97,7 +100,6 @@ impl Link {
                 self.tracker.track_more_topics(&reply)
             }
             RouterOutMessage::ConnectionAck(_) => {}
-            RouterOutMessage::DataAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
                 self.tracker.update_data_tracker(&reply);
                 for p in reply.payload {
@@ -107,7 +109,14 @@ impl Link {
                     self.network.fill2(publish)?;
                 }
             }
-            RouterOutMessage::WatermarksReply(_) => {}
+            RouterOutMessage::AcksReply(reply) => {
+                self.tracker.update_watermarks_tracker(&reply);
+                for ack in reply.pkids {
+                    let ack = PubAck::new(ack);
+                    let ack = Request::PubAck(ack);
+                    self.network.fill2(ack)?;
+                }
+            }
         }
 
         // FIXME Early returns above will prevent router send and network write
@@ -125,7 +134,8 @@ impl Link {
                     self.state.handle_network_puback(ack)?;
                 }
                 Incoming::Publish(publish) => {
-                    publishes.push(publish)
+                    self.tracker.track_watermark(&publish.topic);
+                    publishes.push(publish);
                 }
                 Incoming::Subscribe(subscribe) => {
                     let mut return_codes = Vec::new();
