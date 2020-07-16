@@ -29,7 +29,9 @@ pub struct Log {
     /// Current active chunk to append
     active_chunk: u64,
     /// All the segments mapped with their base offsets
-    /// TODO benchmark with id map
+    // TODO benchmark with id map
+    // TODO chunks here can probably be converted to Vec<Option<Chunk>>
+    // TODO as this is all inmemory and we know max segments
     chunks: HashMapFnv<u64, Chunk>,
 }
 
@@ -139,10 +141,8 @@ impl Log {
             let chunk = match self.chunks.get(&chunks.segment) {
                 Some(c) => c,
                 None if chunks.count == 0 => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Invalid segment",
-                    ))
+                    let e= io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment");
+                    return Err(e)
                 }
                 None => {
                     done = true;
@@ -175,9 +175,7 @@ impl Log {
             chunks.count += count;
             chunks.size += payload_size;
             chunks.ids.extend(ids);
-            chunks
-                .chunks
-                .push((chunks.segment, position, payload_size, count));
+            chunks.chunks.push((chunks.segment, position, payload_size, count));
             if chunks.size >= size {
                 chunks.offset -= 1;
                 break;
@@ -194,10 +192,10 @@ impl Log {
         &mut self,
         segment: u64,
         offset: u64,
-        size: u64,
+        max_size: u64,
     ) -> io::Result<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)> {
         // TODO We don't need Vec<u64>. Remove that from return
-        let (done, chunks) = self.indexv(segment, offset, size)?;
+        let (done, chunks) = self.indexv(segment, offset, max_size)?;
         let mut out = Vec::new();
 
         for c in chunks.chunks {

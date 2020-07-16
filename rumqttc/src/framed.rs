@@ -150,7 +150,9 @@ impl Network {
                 packet.write(&mut self.write)?
             }
             Request::Subscribe(packet) => packet.write(&mut self.write)?,
+            Request::SubAck(packet) => packet.write(&mut self.write)?,
             Request::Unsubscribe(packet) => packet.write(&mut self.write)?,
+            Request::UnsubAck(packet) => packet.write(&mut self.write)?,
             Request::Disconnect => {
                 let packet = Disconnect;
                 packet.write(&mut self.write)?
@@ -180,7 +182,6 @@ impl Network {
         Ok(len)
     }
 
-    #[cfg(test)]
     pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {
         let len = match connack.write(&mut self.write) {
             Ok(size) => size,
@@ -189,6 +190,18 @@ impl Network {
 
         self.flush().await?;
         Ok(len)
+    }
+
+    pub async fn read_connect(&mut self) -> Result<Connect, io::Error> {
+        let packet = self.read().await?;
+
+        match packet {
+            Packet::Connect(connect) => Ok(connect),
+            packet => {
+                let error = format!("Expecting connack. Received = {:?}", packet);
+                Err(io::Error::new(io::ErrorKind::InvalidData, error))
+            }
+        }
     }
 
     pub async fn read_connack(&mut self) -> Result<Incoming, io::Error> {
@@ -217,6 +230,16 @@ impl Network {
 
         Ok(outgoing)
     }
+
+
+    pub fn fill2(&mut self, request: Request) -> Result<(), io::Error> {
+        if let Err(e) =  self.write_fill(request) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        };
+
+        Ok(())
+    }
+
 
     /// Write packet to network
     pub async fn write(&mut self, request: Request) -> Result<Outgoing, io::Error> {

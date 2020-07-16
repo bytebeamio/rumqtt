@@ -85,13 +85,12 @@ mod eventloop;
 #[cfg(feature = "passthrough")]
 mod eventloop2;
 
+#[cfg(feature = "passthrough")]
+pub use framed::Network;
 pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use state::MqttState;
 pub use mqtt4bytes::*;
-
-pub type Incoming2 = Packet;
-
 
 #[derive(Debug, Clone)]
 pub enum Incoming {
@@ -159,17 +158,19 @@ pub enum Outgoing {
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
-    Publishes(Vec<Publish>),
     PubAck(PubAck),
-    PubAcks(Vec<PubAck>),
     PubRec(PubRec),
     PubComp(PubComp),
     PubRel(PubRel),
     PingReq,
     PingResp,
     Subscribe(Subscribe),
+    SubAck(SubAck),
     Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
     Disconnect,
+    Publishes(Vec<Publish>),
+    PubAcks(Vec<PubAck>),
 }
 
 /// Key type for TLS authentication

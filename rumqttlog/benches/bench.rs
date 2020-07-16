@@ -1,9 +1,10 @@
+/*
 #[macro_use]
 extern crate bencher;
 
 use bencher::Bencher;
 use bytes::Bytes;
-use timestone::volatile::Log;
+use rumqttlog::volatile::Log;
 
 fn payloads(size: usize, count: u64) -> Vec<Bytes> {
     let mut out = Vec::new();
@@ -57,3 +58,8 @@ fn read(b: &mut Bencher) {
 
 benchmark_group!(benches, receive_and_store, read);
 benchmark_main!(benches);
+ */
+
+fn main() {
+
+}

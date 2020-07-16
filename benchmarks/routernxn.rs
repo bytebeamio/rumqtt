@@ -106,15 +106,15 @@ async fn connection(
         select! {
             Some(message) = this_rx.next() => {
                 match message {
-                    RouterOutMessage::DataAck(_ack) => continue,
+                    RouterOutMessage::AcksReply(_ack) => continue,
                     RouterOutMessage::TopicsReply(reply) => {
                         println!("Received = {:?}", reply);
-                        tracker.update_topics_request(&reply);
+                        tracker.track_more_topics(&reply);
                         got_last_reply = true;
                     }
                     RouterOutMessage::DataReply(reply) => {
                         // println!("Received = {:?}, {:?}, {:?}, {:?}", reply.topic, reply.native_segment, reply.native_offset, reply.native_count);
-                        tracker.update_data_request(&reply);
+                        tracker.update_data_tracker(&reply);
                         got_last_reply = true;
 
                         println!("{:?}", count);
@@ -129,7 +129,7 @@ async fn connection(
                 }
             }
             Some(publish) = network_rx.next() => {
-                let data = Data { topic: publish.topic, pkid: publish.pkid as u64, payload: publish.payload };
+                let data = vec![publish];
                 let message = (id, RouterInMessage::Data(data));
                 router_tx.send(message).await.unwrap();
             }

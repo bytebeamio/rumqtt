@@ -1,38 +1,40 @@
-/*
 #[macro_use]
 extern crate log;
-
-pub mod link;
-pub mod tracker;
 
 use serde::{Serialize, Deserialize};
 use std::{thread, io};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tokio_util::codec::Framed;
-use tokio::time;
-use tokio::task;
 use std::sync::Arc;
 
-use rumqttlog::{Router, RouterInMessage, Connection, Sender, bounded};
-use rumqttlog::mqtt4bytes::{self, MqttCodec, Packet, ConnAck, ConnectReturnCode};
 use tokio::time::Elapsed;
-use crate::link::Link;
-use tokio::stream::StreamExt;
+use rumqttlog::*;
+use rumqttc::{Packet, ConnAck, ConnectReturnCode, Network};
 
 pub use rumqttlog::Config as RouterConfig;
-use futures_util::SinkExt;
+use tokio::time;
+use tokio::net::TcpListener;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::task;
+use crate::connection::Link;
+
+mod connection;
+mod state;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
-    #[error("MQTT protocol error")]
-    Mqtt(#[from] mqtt4bytes::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
+    #[error("Channel recv error")]
+    Recv(#[from] RecvError),
+    #[error("Channel send error")]
+    Send(#[from] SendError<(Id, RouterInMessage)>),
+    #[error("Unexpected router message")]
+    RouterMessage(RouterOutMessage),
+    #[error("Connack error {0}")]
+    ConnAck(String),
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet)
@@ -44,6 +46,8 @@ pub struct Config {
     router: rumqttlog::Config,
 }
 
+type Id = usize;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
     pub port: u16,
@@ -53,6 +57,8 @@ pub struct ServerSettings {
     pub max_connections: usize,
     pub throttle_delay_ms: u64,
     pub max_payload_size: usize,
+    pub max_inflight_count: u16,
+    pub max_inflight_size: usize,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
@@ -70,6 +76,8 @@ impl Default for ServerSettings {
             max_connections: 100,
             throttle_delay_ms: 0,
             max_payload_size: 2 * 1024,
+            max_inflight_count: 100,
+            max_inflight_size: 100 * 1024,
             ca_path: None,
             cert_path: None,
             key_path: None,
@@ -81,7 +89,7 @@ impl Default for ServerSettings {
 
 pub struct Broker {
     config: Config,
-    router_tx: Sender<(String, RouterInMessage)>,
+    router_tx: Sender<(Id, RouterInMessage)>,
     router: Option<Router>
 }
 
@@ -91,7 +99,7 @@ impl Broker {
         Broker { config, router_tx, router: Some(router) }
     }
 
-    pub fn new_router_handle(&self) -> Sender<(String, RouterInMessage)> {
+    pub fn router_handle(&self) -> Sender<(Id, RouterInMessage)> {
         self.router_tx.clone()
     }
 
@@ -107,12 +115,14 @@ impl Broker {
             info!("Accepting from: {}", addr);
             let config = config.clone();
             let router_tx = self.router_tx.clone();
-            let framed = Framed::new(stream,MqttCodec::new(config.max_payload_size));
             task::spawn(async {
-                let connector = Connector { config, router_tx };
-                let o = connector.new_connection(framed).await;
-                error!("Dropping link task!! Result = {:?}", o);
+                let connector = Connector::new(config, router_tx);
+                let network = Network::new(stream);
+                if let Err(e) = connector.new_connection(network).await {
+                    error!("Dropping link task!! Result = {:?}", e);
+                }
             });
+
             time::delay_for(accept_loop_delay).await;
         }
     }
@@ -138,58 +148,66 @@ async fn router(mut router: Router) {
 
 struct Connector {
     config: Arc<ServerSettings>,
-    router_tx: Sender<(String, RouterInMessage)>
+    router_tx: Sender<(Id, RouterInMessage)>
 }
 
-
 impl Connector {
+    fn new(config: Arc<ServerSettings>, router_tx: Sender<(Id, RouterInMessage)>) -> Connector {
+        Connector {
+            config,
+            router_tx
+        }
+    }
+
     /// A new network connection should wait for mqtt connect packet. This handling should be handled
     /// asynchronously to avoid listener from not blocking new connections while this connection is
     /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
     /// denial of service attacks (rogue clients which only does network connection without sending
     /// mqtt connection packet to make make the server reach its concurrent connection limit)
-    async fn new_connection<S: IO>(&self, framed: Framed<S, MqttCodec>) -> Result<(), Error> {
-        let mut framed = framed;
+    async fn new_connection(&self, mut network: Network) -> Result<(), Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
         // DOS attacks by filling total connections that the server can handle with idle open
         // connections which results in server rejecting new connections
         let timeout = Duration::from_millis(self.config.connection_timeout_ms.into());
         let connect = time::timeout(timeout, async {
-            let connect = match framed.next().await.ok_or(Error::NetworkClosed)?? {
-                Packet::Connect(connect) => connect,
-                packet => return Err(Error::WrongPacket(packet))
-            };
-
+            let connect = network.read_connect().await?;
             Ok::<_, Error>(connect)
         }).await??;
 
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (link_tx, link_rx) = bounded(4);
         let client_id = connect.client_id.clone();
-        let connection = Connection::new(client_id, link_tx);
+        let (connection, link_rx) = Connection::new(&client_id, 4);
         let message = (0, RouterInMessage::Connect(connection));
-        let mut router_tx = self.router_tx.clone();
+        let router_tx = self.router_tx.clone();
         router_tx.send(message).await.unwrap();
 
         // Send connection acknowledgement back to the client
         let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-        let packet = Packet::ConnAck(connack);
-        framed.send(packet).await?;
-
-        // Start the link
-        let mut link = Link::new(&client_id, self.router_tx.clone(), link_rx);
-        let o = link.start(framed).await;
-        error!("Link stopped!! Result = {:?}", o);
+        network.connack(connack).await?;
 
         // TODO When a new connection request is sent to the router, router should ack with error
         // TODO if it exceeds maximum allowed active connections
+        let id = match link_rx.recv().await? {
+            RouterOutMessage::ConnectionAck(ack) =>  match ack {
+                ConnectionAck::Success(id) => id,
+                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason))
+            }
+            message => return Err(Error::RouterMessage(message))
+        };
+
+        // Start the link
+        let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone(), link_rx).await;
+        let o = link.start().await;
+        error!("Link stopped!! Id = {}, Client Id = {},  Result = {:?}", id, client_id, o);
+        let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
+        let message = (id, disconnect);
+        self.router_tx.send(message).await?;
         Ok(())
     }
 }
 
-pub trait IO: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T: AsyncRead + AsyncWrite + Send + Unpin> IO for T {}
+pub trait IO: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> IO for T {}
 
- */

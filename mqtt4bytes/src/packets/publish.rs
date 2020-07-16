@@ -28,6 +28,18 @@ impl Publish {
         }
     }
 
+    pub fn from_bytes<S: Into<String>>(topic: S, qos: QoS, payload: Bytes) -> Publish {
+        Publish {
+            dup: false,
+            qos,
+            retain: false,
+            pkid: 0,
+            topic: topic.into(),
+            payload,
+        }
+
+    }
+
     pub fn set_pkid(&mut self, pkid: u16) -> &mut Self {
         self.pkid = pkid;
         self

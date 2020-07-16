@@ -249,6 +249,12 @@ hes can have same packet ids
 - Link can request data for all the topics in 1 DataRequest. This might cause fairness issues for other connections 
   it's handle a lot of topics
   
+ 28/June/2020
+ --------------------------
+ 
+ - Sending a bulk (merged Bytes) for replication needs the receiver to convert to Vec<Bytes> because subscribers expect 
+   individual MQTT packets, not merged ones. This would've been a good addition to MQTT protocol?
+  
   
 TODO
 ---------------------------

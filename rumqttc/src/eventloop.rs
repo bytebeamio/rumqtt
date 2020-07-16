@@ -623,7 +623,7 @@ mod test {
 
     #[tokio::test]
     async fn packet_id_collisions_are_detected() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
         options.set_inflight(4);
 
         let eventloop = EventLoop::new(options, 5).await;
@@ -635,7 +635,7 @@ mod test {
         });
 
         task::spawn(async move {
-            let mut broker = Broker::new(1888, true).await;
+            let mut broker = Broker::new(1891, true).await;
             for _ in 1..=4 {
                 let packet = broker.read_publish().await;
                 assert!(packet.is_some());
@@ -643,7 +643,7 @@ mod test {
 
             // out of order ack
             broker.ack(2).await;
-            time::delay_for(Duration::from_secs(1)).await;
+            time::delay_for(Duration::from_secs(5)).await;
         });
 
 

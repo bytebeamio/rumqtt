@@ -1,3 +1,4 @@
+/*
 use argh::FromArgs;
 use bytes::Bytes;
 use futures_util::future::join_all;
@@ -104,16 +105,6 @@ async fn write(commandline: &CommandLine, tx: Sender<(usize, RouterInMessage)>) 
 
         // Listen for acks in batches to fix send/recv synchronization stalls
         let count = i + 1;
-        if count % 1000 == 0 {
-            for _ in 0..1000 {
-                if let RouterOutMessage::DataAck(_ack) = this_rx.recv().await.unwrap() {
-                    continue;
-                } else {
-                    panic!("Expecting Ack");
-                }
-            }
-        }
-
         if count == commandline.message_count / commandline.topic_count {
             topic_count += 1;
             topic = "hello/world".to_owned() + &topic_count.to_string();
@@ -154,7 +145,6 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
             replica_segment: 0,
             replica_offset: 0,
             size: commandline.sweep_size as u64,
-            tracker_topic_offset: 0,
         };
 
         let message = (id.to_owned(), RouterInMessage::DataRequest(request));
@@ -173,4 +163,9 @@ async fn read(commandline: &CommandLine, id: usize, tx: Sender<(usize, RouterInM
 
     println!("Id = {}, Total size = {}", id, total_size);
     total_size
+}
+*/
+
+fn main() {
+    println!("hello world!!");
 }

@@ -1,7 +1,5 @@
 extern crate bytes;
 
-/// NOTE: Don't let mqtt4bytes creep in here. By keeping MQTT specifics outside,
-/// supporting mqtt4 and 5 with the same router becomes easy
 mod commitlog;
 mod router;
 
@@ -9,7 +7,9 @@ pub use router::Router;
 
 use self::bytes::Bytes;
 use async_channel::{Sender, bounded, Receiver};
+use rumqttc::Publish;
 use std::fmt;
+use std::collections::VecDeque;
 
 /// Messages going into router
 #[derive(Debug)]
@@ -17,13 +17,15 @@ pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
     /// Data which is written to commitlog
-    Data(Data),
+    Data(Vec<Publish>),
     /// Data request
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
     /// Watermarks request
-    WatermarksRequest(WatermarksRequest),
+    AcksRequest(AcksRequest),
+    /// Disconnection request
+    Disconnect(Disconnection)
 }
 
 /// Messages coming from router
@@ -31,21 +33,19 @@ pub enum RouterInMessage {
 pub enum RouterOutMessage {
     /// Connection reply
     ConnectionAck(ConnectionAck),
-    /// Data ack
-    DataAck(DataAck),
     /// Data reply
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
     /// Watermarks reply
-    WatermarksReply(WatermarksReply),
+    AcksReply(AcksReply),
 }
 
 /// Data sent router to be written to commitlog
 #[derive(Debug)]
 pub struct Data {
     /// Id of the packet that connection received
-    pub pkid: u64,
+    pub pkid: u16,
     /// Topic of publish
     pub topic: String,
     /// Publish payload
@@ -79,10 +79,76 @@ pub struct DataRequest {
     pub native_offset: u64,
     /// This is where sweeps start from for replication data
     pub replica_offset: u64,
-    /// Request Size / Reply size
-    pub size: u64,
-    /// Offset of this topic in tracker
-    pub tracker_topic_offset: usize,
+    /// Maximum size of payload buffer
+    pub max_size: u64,
+    /// Maximum count of payload buffer
+    pub max_count: usize
+}
+
+impl DataRequest {
+    /// New data request with offsets starting from 0
+    pub fn new(topic: String) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment: 0,
+            replica_segment: 0,
+            native_offset: 0,
+            replica_offset: 0,
+            max_size: 100 * 1024,
+            max_count: 100
+        }
+    }
+
+    pub fn with(topic: String, max_size: u64, max_count: usize) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment: 0,
+            replica_segment: 0,
+            native_offset: 0,
+            replica_offset: 0,
+            max_size,
+            max_count
+        }
+    }
+
+    /// New data request with provided offsets
+    pub fn offsets(
+        topic: String,
+        native_segment: u64,
+        native_offset: u64,
+        replica_segment: u64,
+        replica_offset: u64) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment,
+            replica_segment,
+            native_offset,
+            replica_offset,
+            max_size: 100 * 1024,
+            max_count: 100
+        }
+    }
+
+    /// New data request with provided offsets
+    pub fn offsets_with(
+        topic: String,
+        native_segment: u64,
+        native_offset: u64,
+        replica_segment: u64,
+        replica_offset: u64,
+        max_size: u64,
+        max_count: usize
+    ) -> DataRequest {
+        DataRequest {
+            topic,
+            native_segment,
+            replica_segment,
+            native_offset,
+            replica_offset,
+            max_size,
+            max_count
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -107,8 +173,6 @@ pub struct DataReply {
     pub pkids: Vec<u64>,
     /// Reply data chain
     pub payload: Vec<Bytes>,
-    /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +181,22 @@ pub struct TopicsRequest {
     pub offset: usize,
     /// Maximum number of topics to read
     pub count: usize,
+}
+
+impl TopicsRequest {
+    pub fn new() -> TopicsRequest {
+        TopicsRequest {
+            offset: 0,
+            count: 10
+        }
+    }
+
+    pub fn offset(offset: usize) -> TopicsRequest {
+        TopicsRequest {
+            offset,
+            count: 10
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -128,19 +208,31 @@ pub struct TopicsReply {
 }
 
 #[derive(Debug, Clone)]
-pub struct WatermarksRequest {
+pub struct AcksRequest {
+    /// Acks request topic
     pub(crate) topic: String,
-    pub(crate) watermarks: Vec<u64>,
-    /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize,
+    /// Router return acks after this offset
+    /// Registers this request if it can't return acks
+    /// yet due to incomplete replication
+    pub(crate) offset: u64,
+}
+
+impl AcksRequest {
+    pub fn new(topic: String, offset: u64) -> AcksRequest {
+        AcksRequest {
+            topic,
+            offset
+        }
+    }
 }
 
 #[derive(Debug)]
-pub struct WatermarksReply {
-    pub(crate) topic: String,
-    pub(crate) watermarks: Vec<u64>,
-    /// Offset of this topic in tracker
-    pub(crate) tracker_topic_offset: usize,
+pub struct AcksReply {
+    pub topic: String,
+    /// packet ids that can be acked
+    pub pkids: VecDeque<u16>,
+    /// offset till which pkids are returned
+    pub offset: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -178,7 +270,7 @@ impl Connection {
 
 #[derive(Debug)]
 pub enum ConnectionAck {
-    /// Id assigned by the router for this connection
+    /// Id assigned by the router for this connectiobackn
     Success(usize),
     /// Failure and reason for failure string
     Failure(String),
@@ -187,5 +279,19 @@ pub enum ConnectionAck {
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.conn)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct Disconnection {
+    id: String,
+}
+
+impl Disconnection {
+    pub fn new(id: String) -> Disconnection {
+        Disconnection {
+            id
+        }
     }
 }

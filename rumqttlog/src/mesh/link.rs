@@ -1,20 +1,13 @@
-use futures_util::sink::SinkExt;
 use thiserror::Error;
-use tokio::select;
 
 use std::io;
-use std::time::Duration;
 
-use crate::mesh::codec::{MeshCodec, Packet};
-use crate::mesh::ConnectionId;
-use crate::router::{ConnectionType, Data, TopicsRequest};
 use crate::tracker::Tracker;
-use crate::{Connection, RouterInMessage, RouterOutMessage, IO};
-use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
-use bytes::BytesMut;
-use futures_util::StreamExt;
-use tokio::time;
-use tokio_util::codec::Framed;
+use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
+use crate::mesh::ConnectionId;
+use crate::{RouterInMessage, Connection, IO};
+use crate::router::ConnectionType;
+use rumqttc::{EventLoop, MqttOptions, Request};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -24,234 +17,85 @@ pub enum LinkError {
     Recv(#[from] RecvError),
 }
 
-macro_rules! try_loop {
-    ($expr:expr, $broken:expr, $action:stmt) => {
-        match $expr {
-            Result::Ok(val) => val,
-            Result::Err(err) => {
-                $broken = true;
-                error!("Error = {:?}", err);
-                $action
-            }
-        }
-    };
-}
-
 /// A link is a connection to another router
-pub struct Link {
+pub struct Replicator<S> {
     /// Id of the link. Id of the router this connection is with
     id: u8,
     /// Tracks the offsets and status of all the topic offsets
     tracker: Tracker,
-    /// Current position in topics log
-    topics_offset: TopicsRequest,
     /// Handle to send data to router
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handle to this link which router uses
-    link_rx: Option<Receiver<RouterOutMessage>>,
-    /// Connection handle which supervisor uses to pass new connection handles
-    /// Handle to supervisor
-    supervisor_tx: Sender<u8>,
+    link_rx: Option<Receiver<Request>>,
+    /// Connections receiver in server mode
+    connections_rx: Receiver<S>,
     /// Client or server link
     is_client: bool,
 }
 
-impl Link {
+impl<S: IO> Replicator<S> {
     /// New mesh link. This task is always alive unlike a connection task event though the connection
     /// might have been down. When the connection is broken, this task informs supervisor about it
     /// which establishes a new connection on behalf of the link and forwards the connection to this
     /// task. If this link is a server, it waits for the other end to initiate the connection
     pub async fn new(
         id: u8,
-        mut router_tx: Sender<(ConnectionId, RouterInMessage)>,
-        supervisor_tx: Sender<u8>,
-        is_client: bool,
-    ) -> Link {
+        router_tx: Sender<(ConnectionId, RouterInMessage)>,
+        connections_rx: Receiver<S>,
+        is_client: bool
+    ) -> Replicator<S> {
         // Register this link with router even though there is no network connection with other router yet.
         // Actual connection will be requested in `start`
-        info!(
-            "Creating link {} with router. Client mode = {}",
-            id, is_client
-        );
-        let link_rx = register_with_router(id, &mut router_tx).await;
-        let topics_offset = TopicsRequest {
-            offset: 0,
-            count: 100,
-        };
+        info!("Creating link {} with router. Client mode = {}", id, is_client);
 
         // Subscribe to all the data as we want to replicate everything.
-        // TODO this will be taken from config in future
-        let mut wild_subscriptions = Vec::new();
-        wild_subscriptions.push("#".to_owned());
-        Link {
+        let mut tracker = Tracker::new();
+        tracker.add_subscription("#");
+        let mut replicator = Replicator {
             id,
-            tracker: Tracker::new(),
-            topics_offset,
+            tracker,
             router_tx,
-            link_rx: Some(link_rx),
-            supervisor_tx,
+            connections_rx,
+            link_rx: None,
             is_client,
-        }
+        };
+
+        let link_rx = replicator.register_with_router().await;
+        replicator.link_rx = Some(link_rx);
+        replicator
     }
 
-    /// Request for topics to be polled again
-    async fn ask_for_more_topics(&mut self) -> Result<(), LinkError> {
-        debug!(
-            "Topics request. Offset = {}, Count = {}",
-            self.topics_offset.offset, self.topics_offset.count
-        );
-        let message = RouterInMessage::TopicsRequest(self.topics_offset.clone());
-        self.router_tx.send((self.id as usize, message)).await?;
-        Ok(())
+    async fn register_with_router(&self) -> Receiver<Request> {
+        let (link_tx, link_rx) = bounded(4);
+        let connection = Connection {
+            conn: ConnectionType::Replicator(self.id as usize),
+            handle: link_tx,
+        };
+        let message = RouterInMessage::Connect(connection);
+        self.router_tx.send((self.id as usize, message)).await.unwrap();
+        link_rx
     }
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
-    async fn connect<S: IO>(
-        &mut self,
-        connections_rx: &mut Receiver<Framed<S, MeshCodec>>,
-    ) -> Framed<S, MeshCodec> {
-        info!("Link with {} broken!!", self.id);
+    async fn connect(&mut self, cap: usize) -> EventLoop {
         if self.is_client {
-            info!("About to make a new connection ...");
-            time::delay_for(Duration::from_secs(2)).await;
-            self.supervisor_tx.send(self.id).await.unwrap();
+            let options = MqttOptions::new(self.id.to_string(), "localhost", 1883);
+            return EventLoop::new(options, cap).await;
         }
 
-        let framed = connections_rx.next().await.unwrap();
-        info!("Link with {} successful!!", self.id);
-        framed
+        let framed = self.connections_rx.recv().await.unwrap();
+        let options = MqttOptions::new(self.id.to_string(), "localhost", 1883);
+        let mut eventloop = EventLoop::new(options, cap).await;
+        // eventloop.set_network(framed);
+        eventloop
     }
 
-    /// Start handling the connection
-    /// Links and connections communicate with router with a pull. This allows router to just reply.
-    /// This ensured router never fills links/connections channel and take care of error handling
-    pub async fn start<S: IO>(
-        &mut self,
-        mut connections_rx: Receiver<Framed<S, MeshCodec>>,
-    ) -> Result<(), LinkError> {
-        let (router_tx, link_rx) = self.extract_handles();
-        let mut framed = self.connect(&mut connections_rx).await;
-
-        self.ask_for_more_topics().await.unwrap();
-        let mut broken = false;
-        'start: loop {
-            if broken {
-                drop(framed);
-                framed = self.connect(&mut connections_rx).await;
-                broken = false;
-            }
-
-            // TODO Handle case when connection has failed current publish batch has to be retransmitted
-            select! {
-                o = framed.next() => {
-                    let o = match o {
-                        Some(Ok(o)) => o,
-                        Some(Err(e)) => {
-                            error!("Stream error = {:?}", e);
-                            broken = true;
-                            continue;
-                        }
-                        None => {
-                            info!("Stream end!!");
-                            broken = true;
-                            continue;
-                        }
-                    };
-
-                    match o {
-                        Packet::Data(pkid, topic, payload) => {
-                            let ack = Packet::DataAck(pkid);
-                            try_loop!(framed.send(ack).await, broken, continue 'start);
-                            // This is a dummy in replication context
-                            let pkid = 0;
-                            let data = RouterInMessage::Data(Data { pkid, topic, payload });
-                            router_tx.send((self.id as usize, data)).await?;
-                        }
-                        Packet::DataAck(ack) => {
-                            debug!("Replicated till offset = {:?}", ack);
-                            match self.tracker.next() {
-                                Some(request) => self.router_tx.send((self.id as usize, request)).await?,
-                                None => continue
-                            };
-                        }
-                        packet => warn!("Received unsupported packet = {:?}", packet),
-                    }
-                }
-                o = link_rx.recv() => {
-                    match o? {
-                        RouterOutMessage::ConnectionAck(ack) => {
-                            info!("Connection status = {:?}", ack);
-                        }
-                        // Response to previous data request. Router also returns empty responses.
-                        // We use this to mark this topic as 'caught up' and move it from 'active'
-                        // to 'pending'. This ensures that next topics iterator ignores this topic
-                        RouterOutMessage::DataReply(reply) => {
-                            self.tracker.update_data_request(&reply);
-                            let topic = reply.topic;
-
-                            // TODO Inefficient. Find a better way to convert Vec<Bytes> -> Bytes
-                            let mut out = BytesMut::new();
-                            for payload in reply.payload.into_iter() {
-                                out.extend_from_slice(&payload[..]);
-                            }
-
-                            if out.len() == 0 { continue }
-                            let packet = Packet::Data(reply.native_offset, topic.clone(), out.freeze());
-                            try_loop!(framed.send(packet).await, broken, continue 'start);
-                        }
-                        // Refresh the list of interested topics. Router doesn't reply empty responses.
-                        // Router registers this link to notify whenever there are new topics. This
-                        // behaviour is contrary to data reply where router returns empty responses
-                        RouterOutMessage::TopicsReply(reply) => {
-                            debug!("Topics reply. Offset = {}, Count = {}", reply.offset, reply.topics.len());
-                            self.tracker.update_topics_request(&reply);
-
-                            // New topics. Use this to make a request to wake up request-reply loop
-                            match self.tracker.next() {
-                                Some(request) => self.router_tx.send((self.id as usize, request)).await?,
-                                None => continue,
-                            };
-
-                            // next topic request offset
-                            self.topics_offset.offset += reply.offset + 1;
-                        }
-                        message => error!("Invalid message = {:?}", message)
-                    }
-                }
-                Some(f) = connections_rx.next() => {
-                    framed = f;
-                    info!("Link update with {} successful!!", self.id);
-                }
-            }
-        }
-    }
-
-    fn extract_handles(
-        &mut self,
-    ) -> (
-        Sender<(ConnectionId, RouterInMessage)>,
-        Receiver<RouterOutMessage>,
-    ) {
-        let router_tx = self.router_tx.clone();
-        let link_rx = self.link_rx.take().unwrap();
-        (router_tx, link_rx)
+    pub async fn start(&self) {
     }
 }
 
-async fn register_with_router(
-    id: u8,
-    router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
-) -> Receiver<RouterOutMessage> {
-    let (link_tx, link_rx) = bounded(4);
-    let connection = Connection {
-        conn: ConnectionType::Replicator(id as usize),
-        handle: link_tx,
-    };
-    let message = RouterInMessage::Connect(connection);
-    router_tx.send((id as usize, message)).await.unwrap();
-    link_rx
-}
+
 
 #[cfg(test)]
 mod test {
