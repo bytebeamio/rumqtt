@@ -82,7 +82,7 @@ impl Link {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
-                Some(message) = self.tracker.next(), if inflight < max_inflight && self.tracker.has_next() => {
+                Some(message) = tracker_next(&mut self.tracker), if inflight < max_inflight && self.tracker.has_next() => {
                     // NOTE Right now we are request data by topic, instead if can request
                     // data of multiple topics at once, we can have better utilization of
                     // network and system calls for n publisher and 1 subscriber workloads
@@ -93,6 +93,7 @@ impl Link {
             }
         }
     }
+
 
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {
@@ -172,4 +173,8 @@ impl Link {
 
         Ok(())
     }
+}
+
+async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
+    tracker.next()
 }

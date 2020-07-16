@@ -148,7 +148,7 @@ impl Tracker {
     /// This ignores inactive indexes while iterating
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
-    pub async fn next(&mut self) -> Option<RouterInMessage> {
+    pub fn next(&mut self) -> Option<RouterInMessage> {
         let start_tracker = self.tracker_type;
 
         if self.tracker_type == 0 {
@@ -202,6 +202,7 @@ mod tests {
     use crate::tracker::Tracker;
     use crate::{DataReply, RouterInMessage};
     use bytes::Bytes;
+    use std::collections::VecDeque;
 
     #[test]
     fn next_track_iterates_through_tracks_correctly() {
@@ -211,7 +212,7 @@ mod tests {
         for i in 0..10 {
             let topic = format!("{}", i);
             tracker.match_and_track(topic.clone());
-            tracker.track_watermark(topic);
+            tracker.track_watermark(&topic);
         }
 
         // 10 data requests
@@ -236,7 +237,7 @@ mod tests {
         for i in 10..20 {
             let topic = format!("{}", i);
             tracker.match_and_track(topic.clone());
-            tracker.track_watermark(topic);
+            tracker.track_watermark(&topic);
         }
 
         // 20 data requests
@@ -287,7 +288,7 @@ mod tests {
     fn filled_watermarks_reply(topic: &str, tracker_topic_offset: usize) -> AcksReply {
         let reply = AcksReply {
             topic: topic.to_owned(),
-            pkids: vec![],
+            pkids: VecDeque::new(),
             offset: 3,
         };
 
