@@ -197,7 +197,9 @@ impl Router {
                         },
                     };
 
-                    watermarks.update_pkid_offset_map(id, pkid, offset);
+                    if !self.config.instant_ack {
+                        watermarks.update_pkid_offset_map(id, pkid, offset);
+                    }
                 }
             }
 
@@ -220,7 +222,9 @@ impl Router {
             // TODO: This can probably be moved to connection to ack immediately?
             // But connection has to maintain topic map to identify replication factor which router
             // already does
-            self.fresh_watermarks_notification(&topic);
+            if !self.config.instant_ack {
+                self.fresh_watermarks_notification(&topic);
+            }
         }
     }
 
@@ -449,22 +453,6 @@ impl Router {
             }
         }
     }
-
-    /// Acknowledge connection after the data is written to commitlog
-    // fn _ack_data(&mut self, id: ConnectionId, pkid: u64, offset: u64) {
-    //     let connection = match self.connections.get_mut(id).unwrap() {
-    //         Some(c) => c,
-    //         None => {
-    //             error!("3. Invalid id = {:?}", id);
-    //             return;
-    //         }
-    //     };
-
-    //     let ack = RouterOutMessage::DataAck(DataAck { pkid, offset });
-    //     if let Err(e) = connection.handle.try_send(ack) {
-    //         error!("Failed to topics refresh reply. Error = {:?}", e);
-    //     }
-    // }
 
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
         match self.topiclog.readv(request.offset, request.count) {

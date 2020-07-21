@@ -51,13 +51,12 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     }
 
     let elapsed_ms = start.elapsed().as_millis();
-    let throughput = acks_count as usize / elapsed_ms as usize;
-    let acks_throughput = throughput * 1000;
+    let throughput = (acks_count as usize * 1000) / elapsed_ms as usize;
     println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
              id,
-             count,
+             acks_count,
              payload_size,
-             acks_throughput,
+             throughput,
     );
     Ok(())
 }

@@ -1,5 +1,4 @@
 use argh::FromArgs;
-use rumqttlog::router::Data;
 use rumqttlog::tracker::Tracker;
 use rumqttlog::{Config, Router, RouterInMessage, RouterOutMessage, Sender};
 use mqtt4bytes::*;
