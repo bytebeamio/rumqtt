@@ -36,7 +36,7 @@ impl Network {
         }
     }
 
-    pub fn _with_capacity(socket: impl N + 'static, read: usize, write: usize) -> Network {
+    pub fn with_capacity(socket: impl N + 'static, read: usize, write: usize) -> Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
@@ -52,12 +52,12 @@ impl Network {
     //     self.max_packet_size = size;
     // }
 
-    // pub fn set_readv_count(&mut self, count: usize) {
-    //     self.max_readv_count = count;
-    // }
+    pub fn set_readv_count(&mut self, count: usize) {
+        self.max_readb_count = count;
+    }
 
     // TODO make this equivalent to `mqtt_read` to frame `Incoming` directly
-    pub(crate) async fn read(&mut self) -> Result<Packet, io::Error> {
+    pub async fn read(&mut self) -> Result<Packet, io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_packet_size) {
                 Ok(packet) => return Ok(packet),
