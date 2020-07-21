@@ -80,9 +80,27 @@ impl Segment {
     pub fn read(&mut self, position: u64, mut buf: &mut [u8]) -> io::Result<u64> {
         // TODO: No need to flush segments which are already filled. Make this conditional and check perf
         self.writer.flush()?;
+        self.read_at(position, buf)
+    }
 
+    #[inline]
+    #[cfg(target_family = "unix")]
+    fn read_at(&mut self, position: u64, mut buf: &mut [u8]) -> io::Result<u64> {
         use std::os::unix::fs::FileExt;
+
         self.file.read_exact_at(&mut buf, position)?;
+
+        Ok(buf.len() as u64)
+    }
+
+    #[inline]
+    #[cfg(target_family = "windows")]
+    fn read_at(&mut self, position: u64, mut buf: &mut [u8]) -> io::Result<u64> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        self.file.seek(SeekFrom::Start(position))?;
+        self.file.read_exact(&mut buf)?;
+
         Ok(buf.len() as u64)
     }
 
