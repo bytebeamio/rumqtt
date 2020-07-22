@@ -62,7 +62,8 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
 }
 
 fn requests(payloads: Vec<Vec<u8>>, client: &mut Client) {
-    for payload in payloads.into_iter() {
+    for (i, mut payload) in payloads.into_iter().enumerate() {
+        payload[0] = (i % 255) as u8;
         if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, false, payload) {
             println!("Client error: {:?}", e);
             break;

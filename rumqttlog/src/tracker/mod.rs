@@ -134,10 +134,7 @@ impl Tracker {
     pub fn update_data_tracker(&mut self, reply: &DataReply) {
         let request = DataRequest::offsets(
             reply.topic.clone(),
-            reply.native_segment,
-            reply.native_offset + 1,
-            reply.replica_segment,
-            reply.replica_offset + 1
+            reply.cursors
         );
 
         self.data_tracker.push_back(request);
@@ -198,6 +195,7 @@ impl Tracker {
 
 #[cfg(test)]
 mod tests {
+    /*
     use crate::router::{TopicsReply, AcksReply};
     use crate::tracker::Tracker;
     use crate::{DataReply, RouterInMessage};
@@ -324,4 +322,6 @@ mod tests {
             v => panic!("Expecting data request. Received = {:?}", v),
         }
     }
+
+     */
 }

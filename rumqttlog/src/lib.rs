@@ -27,7 +27,7 @@ pub struct MeshConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub id: u8,
+    pub id: usize,
     pub dir: PathBuf,
     pub max_segment_size: u64,
     pub max_segment_count: usize,

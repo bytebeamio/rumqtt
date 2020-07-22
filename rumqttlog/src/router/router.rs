@@ -26,15 +26,15 @@ type Offset = u64;
 type Pkid = u16;
 
 pub struct Router {
+    /// Router configuration
     config: Config,
+    /// Id of this router. Used to index native commitlog to store data from
+    /// local connections
+    id: ConnectionId,
     /// Commit log by topic. Commit log stores all the of given topic. The
     /// details are very similar to what kafka does. Who knows, we might
     /// even make the broker kafka compatible and directly feed it to databases
-    commitlog: CommitLog,
-    /// Messages directly received from connections should be separated from messages
-    /// received by the router replication to make sure that linker of the current
-    /// instance doesn't pull these again
-    replicatedlog: CommitLog,
+    commitlog: [CommitLog; 3],
     /// Captures new topic just like commitlog
     topiclog: TopicLog,
     /// Array of all the connections. Preinitialized to a fixed set of connections.
@@ -64,19 +64,18 @@ pub struct Router {
 }
 
 /// Router is the central node where most of the state is held. Connections and
-/// replicators ask router for data and router responds by putting data into
+/// replicators ask router for data and router responds by putting data int
 /// relevant connection handle
 impl Router {
     pub fn new(config: Config) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
         let (router_tx, router_rx) = bounded(1000);
-        let commitlog = CommitLog::new(config.clone());
-        let replicatedlog = CommitLog::new(config.clone());
         let topiclog = TopicLog::new();
+        let commitlog = [CommitLog::new(config.clone()), CommitLog::new(config.clone()), CommitLog::new(config.clone())];
 
         let router = Router {
             config: config.clone(),
+            id: config.id,
             commitlog,
-            replicatedlog,
             topiclog,
             connections: vec![None; 1000],
             data_waiters: HashMap::new(),
@@ -214,6 +213,8 @@ impl Router {
                 self.fresh_topics_notification(id);
             }
 
+            // TODO We are notifying in the loop per id. When router does bulk `try_recv`
+            // we can probably handle multiple requests better
             self.fresh_data_notification(id, &topic);
 
             // After a bulk of publishes have been written to commitlog, if the replication factor
@@ -255,7 +256,7 @@ impl Router {
             self.update_cluster_offsets(id, &request);
             self.extract_connection_data(&request)
         } else {
-            self.extract_data(&request)
+            self.extract_all_data(&request)
         };
 
         // If extraction fails due to some error/topic doesn't exist yet, reply with empty response.
@@ -315,7 +316,7 @@ impl Router {
     /// Updates replication watermarks
     fn update_cluster_offsets(&mut self, id: ConnectionId, request: &DataRequest) {
         if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
-            watermarks.cluster_offsets.insert(id as usize, request.native_offset);
+            watermarks.cluster_offsets.insert(id as usize, request.cursors[self.id].1);
             self.fresh_watermarks_notification(&request.topic);
         } else {
             // Fresh topic only initialize with 0 offset. Updates during the next request
@@ -366,11 +367,6 @@ impl Router {
                 0..=9 if replication_data => continue,
                 // extract new native connection data to be sent to replication link
                 0..=9 => match self.extract_connection_data(&request) {
-                    Some(reply) => reply,
-                    None => continue,
-                },
-                // extract new replication data to be sent to connection link
-                _ if replication_data => match self.extract_replicated_data(&request) {
                     Some(reply) => reply,
                     None => continue,
                 },
@@ -425,17 +421,12 @@ impl Router {
     /// Connections pull logs from both replication and connections where as replicator
     /// only pull logs from connections.
     /// Data from replicator and data from connection are separated for this reason
-    fn append_to_commitlog(
-        &mut self,
-        id: ConnectionId,
-        topic: &str,
-        bytes: Bytes,
-    ) -> Option<u64> {
+    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<u64> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
             debug!("Receiving replication data from {}, topic = {}", id, topic);
-            match self.replicatedlog.append(&topic, bytes) {
+            match self.commitlog[id].append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
@@ -444,7 +435,7 @@ impl Router {
             }
         } else {
             debug!("Receiving data from connection {}, topic = {}", id, topic);
-            match self.commitlog.append(&topic, bytes) {
+            match self.commitlog[self.config.id].append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
@@ -470,27 +461,20 @@ impl Router {
 
     fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
-        let segment = request.native_segment;
-        let offset = request.native_offset;
+        let (segment, offset) = request.cursors[self.id];
         let size = request.max_size;
 
-        debug!(
-            "Pull native data. Topic = {}, seg = {}, offset = {}",
-            topic, segment, offset
-        );
-        match self.commitlog.readv(topic, segment, offset, size) {
+        debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        match self.commitlog[self.id].readv(topic, segment, offset, size) {
             Ok(Some(v)) => {
-                let native_count = v.5.len();
+                // copy and update native commitlog's offsets
+                let mut cursors = request.cursors;
+                cursors[self.id] = (v.1, v.2 + 1);
+
                 let reply = DataReply {
                     done: v.0,
                     topic: request.topic.clone(),
-                    native_segment: v.1,
-                    native_offset: v.2,
-                    native_count,
-                    replica_segment: request.replica_segment,
-                    replica_offset: request.replica_offset,
-                    replica_count: 0,
-                    pkids: v.4,
+                    cursors,
                     payload: v.5,
                 };
 
@@ -504,59 +488,37 @@ impl Router {
         }
     }
 
-    fn extract_replicated_data(&mut self, request: &DataRequest) -> Option<DataReply> {
+    fn extract_all_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
-        let segment = request.replica_segment;
-        let offset = request.replica_offset;
-        let size = request.max_size;
 
-        debug!(
-            "Pull replicated data. Topic = {}, seg = {}, offset = {}",
-            topic, segment, offset
-        );
-        match self.replicatedlog.readv(topic, segment, offset, size) {
-            Ok(Some(v)) => {
-                let replica_count = v.5.len();
-                let reply = DataReply {
-                    done: v.0,
-                    topic: request.topic.clone(),
-                    payload: v.5,
-                    native_segment: request.native_segment,
-                    native_offset: request.native_offset,
-                    native_count: 0,
-                    replica_segment: v.1,
-                    replica_offset: v.2,
-                    replica_count,
-                    pkids: v.4,
-                };
-                Some(reply)
-            }
-            Ok(None) => None,
-            Err(e) => {
-                error!("Failed to extract data from commitlog. Error = {:?}", e);
-                None
+        // debug!("Pull data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        let mut reply = DataReply {
+            done: false,
+            topic: request.topic.clone(),
+            cursors: request.cursors,
+            payload: Vec::new()
+        };
+
+        for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
+            let (segment, offset) = request.cursors[i];
+            match commitlog.readv(topic, segment, offset, request.max_size) {
+                Ok(Some(mut v)) => {
+                    reply.cursors[i] = (v.1, v.2 + 1);
+                    // TODO: This copies data. Probably ok as these are just pointers
+                    reply.payload.append(&mut v.5);
+                }
+                Ok(None) => {
+                    warn!("Nothing to extract!!");
+                },
+                Err(e) => {
+                    error!("Failed to extract data from commitlog. Error = {:?}", e);
+                }
             }
         }
-    }
 
-    /// extracts data from correct commitlog's segment and sends it
-    fn extract_data(&mut self, request: &DataRequest) -> Option<DataReply> {
-        if let Some(mut reply) = self.extract_connection_data(&request) {
-            if let Some(mut replicated_data) = self.extract_replicated_data(&request) {
-                reply.replica_segment = replicated_data.replica_segment;
-                reply.replica_offset = replicated_data.replica_offset;
-                reply.replica_count = replicated_data.replica_count;
-                // TODO This copies data from one queue to another. Find if there is a way
-                // TODO to reduce cost here. The best option here is probably send Vec<Vec<Bytes>>
-                reply.payload.append(&mut replicated_data.payload);
-            }
-
-            Some(reply)
-        } else if let Some(reply) = self.extract_replicated_data(&request) {
-            Some(reply)
-        } else {
-            error!("Empty connection and replication data!!");
-            None
+        match reply.payload.is_empty() {
+            true => None,
+            false => Some(reply)
         }
     }
 

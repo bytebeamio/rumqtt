@@ -71,17 +71,11 @@ pub struct DataAck {
 pub struct DataRequest {
     /// Log to sweep
     pub topic: String,
-    /// Segment id of native log.
-    pub native_segment: u64,
-    /// Segment id of replicated log.
-    pub replica_segment: u64,
-    /// This is where sweeps start from for data native to this node
-    pub native_offset: u64,
-    /// This is where sweeps start from for replication data
-    pub replica_offset: u64,
-    /// Maximum size of payload buffer
+    /// (segment, offset) tuples per replica (1 native and 2 replicas)
+    pub cursors: [(u64, u64); 3],
+    /// Maximum size of payload buffer per replica
     pub max_size: u64,
-    /// Maximum count of payload buffer
+    /// Maximum count of payload buffer per replica
     pub max_count: usize
 }
 
@@ -90,10 +84,7 @@ impl DataRequest {
     pub fn new(topic: String) -> DataRequest {
         DataRequest {
             topic,
-            native_segment: 0,
-            replica_segment: 0,
-            native_offset: 0,
-            replica_offset: 0,
+            cursors: [(0, 0); 3],
             max_size: 100 * 1024,
             max_count: 100
         }
@@ -102,28 +93,17 @@ impl DataRequest {
     pub fn with(topic: String, max_size: u64, max_count: usize) -> DataRequest {
         DataRequest {
             topic,
-            native_segment: 0,
-            replica_segment: 0,
-            native_offset: 0,
-            replica_offset: 0,
+            cursors: [(0, 0); 3],
             max_size,
             max_count
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets(
-        topic: String,
-        native_segment: u64,
-        native_offset: u64,
-        replica_segment: u64,
-        replica_offset: u64) -> DataRequest {
+    pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
-            native_segment,
-            replica_segment,
-            native_offset,
-            replica_offset,
+            cursors,
             max_size: 100 * 1024,
             max_count: 100
         }
@@ -132,19 +112,13 @@ impl DataRequest {
     /// New data request with provided offsets
     pub fn offsets_with(
         topic: String,
-        native_segment: u64,
-        native_offset: u64,
-        replica_segment: u64,
-        replica_offset: u64,
+        cursors: [(u64, u64); 3],
         max_size: u64,
         max_count: usize
     ) -> DataRequest {
         DataRequest {
             topic,
-            native_segment,
-            replica_segment,
-            native_offset,
-            replica_offset,
+            cursors,
             max_size,
             max_count
         }
@@ -157,20 +131,8 @@ pub struct DataReply {
     pub done: bool,
     /// Log to sweep
     pub topic: String,
-    /// Segment id of native log of this topic.
-    pub native_segment: u64,
-    /// Offset of the last element of payload from this node
-    pub native_offset: u64,
-    /// Count of native data in payload
-    pub native_count: usize,
-    /// Segment id of replicated log of this topic.
-    pub replica_segment: u64,
-    /// Offset of the last element of paylaod due to replication
-    pub replica_offset: u64,
-    /// Count of replicated data in payload
-    pub replica_count: usize,
-    /// Packet ids of replys
-    pub pkids: Vec<u64>,
+    /// (segment, offset) tuples per replica (1 native and 2 replicas)
+    pub cursors: [(u64, u64); 3],
     /// Reply data chain
     pub payload: Vec<Bytes>,
 }
