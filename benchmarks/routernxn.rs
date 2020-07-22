@@ -47,6 +47,7 @@ async fn main() {
         max_segment_size: commandline.segment_size as u64,
         max_segment_count: 10000,
         routers: None,
+        instant_ack: false,
     };
 
     let (router, tx) = Router::new(config);
@@ -117,7 +118,7 @@ async fn connection(
                         got_last_reply = true;
 
                         println!("{:?}", count);
-                        count += reply.native_count;
+                        // TODO: Fix count
                         if count == commandline.message_count {
                             break
                         }

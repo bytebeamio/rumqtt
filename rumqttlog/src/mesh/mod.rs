@@ -1,16 +1,15 @@
 use crate::router::RouterInMessage;
-use crate::{Config, MeshConfig, IO};
+use crate::{Config, MeshConfig};
 
 mod link;
 
 use async_channel::{bounded, Sender};
 use link::Replicator;
-use rumqttc::{ConnAck, Connect, ConnectReturnCode, Packet};
+use rumqttc::{ConnAck, ConnectReturnCode, Incoming, Network};
 use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::stream::StreamExt;
+use tokio::net::{TcpListener};
 use tokio::time::{self, Elapsed};
 use tokio::{select, task};
 
@@ -22,7 +21,7 @@ pub enum Error {
     Timeout(#[from] Elapsed),
     StreamDone,
     ConnectionHandover,
-    WrongPacket(Packet),
+    WrongPacket(Incoming),
 }
 
 type ConnectionId = usize;
@@ -35,7 +34,7 @@ pub struct Mesh {
     /// Router handle to pass to links
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handles to all the links
-    links: HashMap<u8, LinkHandle<TcpStream>>,
+    links: HashMap<usize, LinkHandle>,
 }
 
 impl Mesh {
@@ -67,19 +66,19 @@ impl Mesh {
         loop {
             let (stream, addr) = listener.accept().await.unwrap();
             debug!("Received a tcp connection from {}", addr);
-            // let mut framed = Framed::new(stream, MqttCodec::new(10 * 1024));
-            // let id = match await_connect(&mut framed).await {
-            //     Ok(id) => id,
-            //     Err(e) => {
-            //         error!("Failed to await connect. Error = {:?}", e);
-            //         continue;
-            //     }
-            // };
+            let mut network = Network::new(stream);
+            let id = match await_connect(&mut network).await {
+                Ok(id) => id,
+                Err(e) => {
+                    error!("Failed to await connect. Error = {:?}", e);
+                    continue;
+                }
+            };
 
-            // let handle = self.links.get_mut(&id).unwrap();
-            // if let Err(_e) = handle.connections_tx.send(framed).await {
-            //     error!("Failed to send the connection to link");
-            // }
+            let handle = self.links.get_mut(&id).unwrap();
+            if let Err(_e) = handle.connections_tx.send(network).await {
+                error!("Failed to send the connection to link");
+            }
         }
     }
 
@@ -90,11 +89,12 @@ impl Mesh {
             let router_tx = self.router_tx.clone();
             let addr = format!("{}:{}", server.host, server.port);
             let id = server.id;
-            let link_handle = LinkHandle::new(server.id, addr, connections_tx);
+            let link_handle = LinkHandle::new(server.id, addr.clone(), connections_tx);
             self.links.insert(id, link_handle);
+            let remote = if is_client { addr } else { "".to_owned() };
 
             task::spawn(async move {
-                let replicator = Replicator::new(id, router_tx, connections_rx, is_client).await;
+                let replicator = Replicator::new(id, router_tx, connections_rx, remote).await;
                 replicator.start().await;
             });
         }
@@ -118,76 +118,41 @@ impl Mesh {
 }
 
 /// Await mqtt connect packet for incoming connections from a router
-async fn await_connect(framed: &mut Box<dyn IO>) -> Result<u8, Error> {
-    // let id = time::timeout(Duration::from_secs(5), async {
-    //     // wait for mesh connect packet with id
-    //     let packet = match framed.next().await {
-    //         Some(packet) => packet,
-    //         None => return Err(Error::StreamDone),
-    //     };
+async fn await_connect(network: &mut Network) -> Result<usize, Error> {
+    let id = time::timeout(Duration::from_secs(5), async {
+        let connect = network.read_connect().await?;
 
-        // let connect = match packet? {
-        //     Packet::Connect(connect) => connect,
-        //     packet => return Err(Error::WrongPacket(packet)),
-        // };
+        let id: usize = connect.client_id.parse().unwrap();
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+        network.connack(connack).await?;
+        Ok::<_, Error>(id)
+    })
+    .await??;
 
-    //     let id: u8 = connect.client_id.parse().unwrap();
-    //     let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-    //     framed.send(Packet::ConnAck(connack)).await?;
-    //     Ok::<_, Error>(id)
-    // })
-    // .await??;
-
-    // Ok(id)
-    todo!()
+    Ok(id)
 }
 
-pub struct LinkHandle<S> {
-    pub id: u8,
+pub struct LinkHandle {
+    pub id: usize,
     pub addr: String,
-    pub connections_tx: Sender<S>,
+    pub connections_tx: Sender<Network>,
 }
 
-impl<S: IO> LinkHandle<S> {
+impl LinkHandle {
     pub fn new(
-        id: u8,
+        id: usize,
         addr: String,
-        connections_tx: Sender<S>,
-    ) -> LinkHandle<S> {
+        connections_tx: Sender<Network>,
+    ) -> LinkHandle {
         LinkHandle {
             id,
             addr,
             connections_tx,
         }
     }
-
-    pub async fn connect(
-        &mut self,
-        this_id: u8,
-        mut framed: S,
-    ) -> Result<(), Error> {
-        // let connect = Connect::new(this_id.to_string());
-        // framed.send(Packet::Connect(connect)).await?;
-        // let packet = match framed.next().await {
-        //     Some(packet) => packet,
-        //     None => return Err(Error::StreamDone),
-        // };
-
-        // match packet? {
-        //     Packet::ConnAck(_ack) => (),
-        //     packet => return Err(Error::WrongPacket(packet)),
-        // };
-
-        // if let Err(_) = self.connections_tx.send(framed).await {
-        //     return Err(Error::ConnectionHandover);
-        // }
-
-        // Ok(())
-        todo!()
-    }
 }
 
-impl<H> Clone for LinkHandle<H> {
+impl Clone for LinkHandle {
     fn clone(&self) -> Self {
         LinkHandle {
             id: self.id,

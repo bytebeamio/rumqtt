@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-// pub mod mesh;
+mod mesh;
 pub mod router;
 pub mod storage;
 pub mod tracker;
@@ -20,7 +20,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshConfig {
-    id: u8,
+    id: usize,
     host: String,
     port: u16,
 }
