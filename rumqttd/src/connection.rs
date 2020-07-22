@@ -83,7 +83,7 @@ impl Link {
                     self.handle_router_response(message).await?;
                 }
                 Some(message) = tracker_next(&mut self.tracker), if inflight < max_inflight && self.tracker.has_next() => {
-                    // NOTE Right now we are request data by topic, instead if can request
+                    // NOTE Right now we request data by topic, instead if can request
                     // data of multiple topics at once, we can have better utilization of
                     // network and system calls for n publisher and 1 subscriber workloads
                     // as data from multiple topics can be batched (for a given connection)

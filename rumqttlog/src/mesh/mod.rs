@@ -5,13 +5,13 @@ mod link;
 
 use async_channel::{bounded, Sender};
 use link::Replicator;
-use rumqttc::{ConnAck, ConnectReturnCode, Incoming, Network};
+use rumqttc::{ConnAck, ConnectReturnCode, Network};
 use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 use tokio::net::{TcpListener};
 use tokio::time::{self, Elapsed};
-use tokio::{select, task};
+use tokio::task;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
@@ -19,9 +19,6 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
-    StreamDone,
-    ConnectionHandover,
-    WrongPacket(Incoming),
 }
 
 type ConnectionId = usize;
@@ -94,7 +91,7 @@ impl Mesh {
             let remote = if is_client { addr } else { "".to_owned() };
 
             task::spawn(async move {
-                let replicator = Replicator::new(id, router_tx, connections_rx, remote).await;
+                let mut replicator = Replicator::new(id, router_tx, connections_rx, remote).await;
                 replicator.start().await;
             });
         }

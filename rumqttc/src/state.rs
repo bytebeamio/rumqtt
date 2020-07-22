@@ -108,6 +108,10 @@ impl MqttState {
         pending
     }
 
+    pub fn inflight(&self) -> u16 {
+        self.inflight
+    }
+
     pub(crate) fn _handle_outgoing_packets(&mut self, requests: Vec<Request>) -> Result<Vec<Request>, StateError> {
         let mut out = Vec::with_capacity(10);
         for request in requests {

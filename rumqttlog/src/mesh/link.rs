@@ -7,9 +7,9 @@ use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
 use crate::mesh::ConnectionId;
 use crate::{RouterInMessage, Connection, RouterOutMessage};
 use crate::router::ConnectionType;
-use rumqttc::{Connect, Network};
+use rumqttc::{Connect, Network, MqttState};
 use tokio::net::TcpStream;
-use tokio::time;
+use tokio::{time, select};
 use std::time::Duration;
 
 #[derive(Error, Debug)]
@@ -29,11 +29,15 @@ pub struct Replicator {
     /// Handle to send data to router
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handle to this link which router uses
-    link_rx: Option<Receiver<RouterOutMessage>>,
+    link_rx: Receiver<RouterOutMessage>,
     /// Connections receiver in server mode
     connections_rx: Receiver<Network>,
+    /// State of this connection
+    state: MqttState,
     /// Remote address to connect to. Used in client mode
     remote: String,
+    /// Max inflight
+    max_inflight: u16,
 }
 
 impl Replicator {
@@ -50,34 +54,25 @@ impl Replicator {
         // Register this link with router even though there is no network connection with other router yet.
         // Actual connection will be requested in `start`
         info!("Creating link {} with router. Remote = {:?}", id, remote);
+        let max_inflight = 100;
 
         // Subscribe to all the data as we want to replicate everything.
         let mut tracker = Tracker::new();
         tracker.add_subscription("#");
-        let mut replicator = Replicator {
+        let link_rx = register_with_router(id, &router_tx).await;
+
+        Replicator {
             id,
             tracker,
             router_tx,
             connections_rx,
-            link_rx: None,
+            link_rx,
+            state: MqttState::new(max_inflight),
             remote,
-        };
-
-        let link_rx = replicator.register_with_router().await;
-        replicator.link_rx = Some(link_rx);
-        replicator
+            max_inflight,
+        }
     }
 
-    async fn register_with_router(&self) -> Receiver<RouterOutMessage> {
-        let (link_tx, link_rx) = bounded(4);
-        let connection = Connection {
-            conn: ConnectionType::Replicator(self.id as usize),
-            handle: link_tx,
-        };
-        let message = RouterInMessage::Connect(connection);
-        self.router_tx.send((self.id as usize, message)).await.unwrap();
-        link_rx
-    }
 
     /// Inform the supervisor for new connection if this is a client link. Wait for
     /// a new connection handle if this is a server link
@@ -109,10 +104,54 @@ impl Replicator {
         network
     }
 
-    pub async fn start(&self) {
+    async fn select(&mut self) -> Result<(), LinkError> {
+        let mut network = self.connect().await;
+        let tracker = &mut self.tracker;
+
+        loop {
+            let inflight_full = self.state.inflight() >= self.max_inflight;
+            select! {
+                // Pull a bunch of packets from network, reply in bunch and yield the first item
+                o = network.readb() => {
+                    let incoming = o?;
+                    debug!("Incoming packets = {:?}", incoming);
+                },
+                Some(message) = tracker_next(tracker), if !inflight_full && tracker.has_next() => {
+                    debug!("Tracker next = {:?}", message);
+                    self.router_tx.send((self.id, message)).await?;
+                }
+                response = self.link_rx.recv() => {
+                    let response = response?;
+                    debug!("Router response = {:?}", response);
+                },
+            }
+        }
+    }
+
+    pub async fn start(&mut self) {
+        loop {
+            if let Err(e) = self.select().await {
+                error!("Link failed. Error = {:?}", e);
+            }
+        }
     }
 }
 
+async fn register_with_router(id: usize, tx: &Sender<(usize, RouterInMessage)>) -> Receiver<RouterOutMessage> {
+    let (link_tx, link_rx) = bounded(4);
+    let connection = Connection {
+        conn: ConnectionType::Replicator(id),
+        handle: link_tx,
+    };
+
+    let message = RouterInMessage::Connect(connection);
+    tx.send((id, message)).await.unwrap();
+    link_rx
+}
+
+async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
+    tracker.next()
+}
 
 
 #[cfg(test)]
