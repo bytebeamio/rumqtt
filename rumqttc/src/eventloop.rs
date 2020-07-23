@@ -75,6 +75,7 @@ impl EventLoop {
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = options.inflight;
+        let timeout = Duration::from_secs(options.get_timeout());
 
         EventLoop {
             options,
@@ -88,6 +89,7 @@ impl EventLoop {
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
+
         }
     }
 
