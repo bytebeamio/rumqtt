@@ -472,9 +472,9 @@ impl Router {
                 cursors[self.id] = (v.1, v.2 + 1);
 
                 let reply = DataReply {
-                    done: v.0,
                     topic: request.topic.clone(),
                     cursors,
+                    size: v.3,
                     payload: v.5,
                 };
 
@@ -493,9 +493,9 @@ impl Router {
 
         // debug!("Pull data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
         let mut reply = DataReply {
-            done: false,
             topic: request.topic.clone(),
             cursors: request.cursors,
+            size: 0,
             payload: Vec::new()
         };
 
@@ -504,8 +504,9 @@ impl Router {
             match commitlog.readv(topic, segment, offset, request.max_size) {
                 Ok(Some(mut v)) => {
                     reply.cursors[i] = (v.1, v.2 + 1);
-                    // TODO: This copies data. Probably ok as these are just pointers
+                    reply.size += v.3;
                     reply.payload.append(&mut v.5);
+
                 }
                 Ok(None) => {
                     warn!("Nothing to extract!!");

@@ -89,7 +89,7 @@ mod eventloop2;
 pub use framed::Network;
 pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
-pub use state::MqttState;
+pub use state::{MqttState, StateError};
 pub use mqtt4bytes::*;
 
 #[derive(Debug, Clone)]

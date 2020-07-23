@@ -74,7 +74,7 @@ pub struct DataRequest {
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursors: [(u64, u64); 3],
     /// Maximum size of payload buffer per replica
-    pub max_size: u64,
+    pub max_size: usize,
     /// Maximum count of payload buffer per replica
     pub max_count: usize
 }
@@ -90,7 +90,7 @@ impl DataRequest {
         }
     }
 
-    pub fn with(topic: String, max_size: u64, max_count: usize) -> DataRequest {
+    pub fn with(topic: String, max_size: usize, max_count: usize) -> DataRequest {
         DataRequest {
             topic,
             cursors: [(0, 0); 3],
@@ -113,7 +113,7 @@ impl DataRequest {
     pub fn offsets_with(
         topic: String,
         cursors: [(u64, u64); 3],
-        max_size: u64,
+        max_size: usize,
         max_count: usize
     ) -> DataRequest {
         DataRequest {
@@ -127,12 +127,12 @@ impl DataRequest {
 
 #[derive(Debug)]
 pub struct DataReply {
-    /// Catch up status
-    pub done: bool,
     /// Log to sweep
     pub topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursors: [(u64, u64); 3],
+    /// Payload size
+    pub size: usize,
     /// Reply data chain
     pub payload: Vec<Bytes>,
 }
