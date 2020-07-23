@@ -9,7 +9,7 @@ use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
 use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
 
-use crate::Config;
+use crate::{Config, ReplicationData};
 use thiserror::Error;
 use tokio::stream::StreamExt;
 use rumqttc::{Publish, QoS};
@@ -105,7 +105,8 @@ impl Router {
         while let Some((id, data)) = self.router_rx.next().await {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
-                RouterInMessage::Data(data) => self.handle_incoming_data(id, data),
+                RouterInMessage::ConnectionData(data) => self.handle_connection_data(id, data),
+                RouterInMessage::ReplicationData(data) => self.handle_replication_data(id, data),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::AcksRequest(request) => {
@@ -169,21 +170,14 @@ impl Router {
     }
 
     /// Handles new incoming data on a topic
-    fn handle_incoming_data(&mut self, id: ConnectionId, data: Vec<Publish>) {
+    fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Publish>) {
         for publish in data {
             if publish.payload.len() == 0 {
                 error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
                 return;
             }
 
-            let Publish {
-                pkid,
-                topic,
-                payload,
-                qos,
-                ..
-            } = publish;
-
+            let Publish { pkid, topic, payload, qos, .. } = publish;
             if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
                 // Store packet ids with offset mapping for QoS > 0
                 if qos == QoS::AtLeastOnce || qos == QoS::ExactlyOnce {
@@ -225,6 +219,45 @@ impl Router {
             if !self.config.instant_ack {
                 self.fresh_watermarks_notification(&topic);
             }
+        }
+    }
+
+    fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
+        for data in data {
+            let ReplicationData { pkid, topic, payload, .. } = data;
+            for payload in payload {
+                if payload.len() == 0 {
+                    error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
+                    return;
+                }
+
+                self.append_to_commitlog(id, &topic, payload);
+            }
+
+            let watermarks = match self.watermarks.get_mut(&topic) {
+                Some(w) => w,
+                None => {
+                    self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                    self.watermarks.get_mut(&topic).unwrap()
+                },
+            };
+
+            // we can ignore offset mapping for replicated data
+            watermarks.update_pkid_offset_map(id, pkid, 0);
+
+            // If there is a new unique append, send it to connection/linker waiting
+            // on it. This is equivalent to hybrid of block and poll and we don't need
+            // timers. Connections/Replicator will make a request and request fails as
+            // there is no new data. Router caches the failed request on the topic.
+            // If there is new data on this topic, router fulfills the last failed request.
+            // This completely eliminates the need of polling
+            if self.topiclog.unique_append(&topic) {
+                dbg!();
+                self.fresh_topics_notification(id);
+            }
+
+            // we can probably handle multiple requests better
+            self.fresh_data_notification(id, &topic);
         }
     }
 
@@ -599,7 +632,8 @@ impl Watermarks {
      */
 
     pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
-        if self.replication == 0 {
+        let is_replica = id < 10;
+        if self.replication == 0 || is_replica {
             if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
                 let new_ids = (VecDeque::new(), VecDeque::new());
                 let (pkids, _offsets) = mem::replace(connection, new_ids);

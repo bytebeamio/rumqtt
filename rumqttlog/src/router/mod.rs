@@ -16,8 +16,10 @@ use std::collections::VecDeque;
 pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
-    /// Data which is written to commitlog
-    Data(Vec<Publish>),
+    /// Data for native commitlog
+    ConnectionData(Vec<Publish>),
+    /// Data for commitlog of a replica
+    ReplicationData(Vec<ReplicationData>),
     /// Data request
     DataRequest(DataRequest),
     /// Topics request
@@ -43,13 +45,27 @@ pub enum RouterOutMessage {
 
 /// Data sent router to be written to commitlog
 #[derive(Debug)]
-pub struct Data {
+pub struct ReplicationData {
     /// Id of the packet that connection received
     pub pkid: u16,
     /// Topic of publish
     pub topic: String,
     /// Publish payload
-    pub payload: Bytes,
+    pub payload: Vec<Bytes>,
+}
+
+impl ReplicationData {
+    pub fn with_capacity(pkid: u16, topic: String, cap: usize) -> ReplicationData {
+        ReplicationData {
+            pkid,
+            topic,
+            payload: Vec::with_capacity(cap)
+        }
+    }
+
+    pub fn push(&mut self, payload: Bytes) {
+        self.payload.push(payload)
+    }
 }
 
 /// Acknowledgement after data is written to commitlog
@@ -125,7 +141,6 @@ impl DataRequest {
     }
 }
 
-#[derive(Debug)]
 pub struct DataReply {
     /// Log to sweep
     pub topic: String,
@@ -135,6 +150,12 @@ pub struct DataReply {
     pub size: usize,
     /// Reply data chain
     pub payload: Vec<Bytes>,
+}
+
+impl fmt::Debug for DataReply {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}", self.topic, self.cursors, self.size, self.payload.len())
+    }
 }
 
 #[derive(Debug, Clone)]

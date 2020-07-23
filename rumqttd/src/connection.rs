@@ -175,7 +175,7 @@ impl Link {
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
         if !publishes.is_empty() {
-            let message = RouterInMessage::Data(publishes);
+            let message = RouterInMessage::ConnectionData(publishes);
             self.router_tx.send((self.id, message)).await?;
         }
 

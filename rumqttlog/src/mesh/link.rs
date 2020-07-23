@@ -11,7 +11,8 @@ use rumqttc::{Connect, Incoming, Network, MqttState, PubAck, Request, Publish, Q
 use tokio::net::TcpStream;
 use tokio::{time, select};
 use std::time::Duration;
-use bytes::{BytesMut, BufMut};
+use bytes::{BytesMut, BufMut, Buf};
+use crate::router::ReplicationData;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -83,7 +84,7 @@ impl Replicator {
     }
 
     async fn handle_network_data(&mut self, incoming: Vec<Incoming>) -> Result<(), LinkError> {
-        let mut publishes = Vec::new();
+        let mut data = Vec::new();
 
         for packet in incoming {
             let (incoming, _) = self.state.handle_incoming_packet(packet)?;
@@ -91,7 +92,16 @@ impl Replicator {
             match incoming {
                 Incoming::Publish(publish) => {
                     self.tracker.track_watermark(&publish.topic);
-                    publishes.push(publish);
+                    let Publish { pkid, topic, mut payload, .. } = publish;
+                    let count = payload.get_u32() as usize;
+                    let mut replication_data = ReplicationData::with_capacity(pkid, topic, count);
+                    for _i in 0..count {
+                        let len = payload.get_u32() as usize;
+                        let packet = payload.split_to(len);
+                        replication_data.push(packet) ;
+                    }
+
+                    data.push( replication_data);
                 }
                 Incoming::PingReq => {
                     self.network.fill2(Request::PingResp)?;
@@ -105,8 +115,8 @@ impl Replicator {
             }
         }
 
-        if !publishes.is_empty() {
-            let message = RouterInMessage::Data(publishes);
+        if !data.is_empty() {
+            let message = RouterInMessage::ReplicationData(data);
             self.router_tx.send((self.remote_id, message)).await?;
         }
         Ok(())
@@ -184,7 +194,8 @@ impl Replicator {
                 error!("Link failed. Error = {:?}", e);
             }
 
-            connect(&self.remote, self.local_id, &self.connections_rx).await;
+            let network = connect(&self.remote, self.local_id, &self.connections_rx).await;
+            self.network = network;
         }
     }
 }
