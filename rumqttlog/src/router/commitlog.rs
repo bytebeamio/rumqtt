@@ -39,8 +39,8 @@ impl CommitLog {
         topic: &str,
         segment: u64,
         offset: u64,
-        size: u64,
-    ) -> io::Result<Option<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)>> {
+        size: usize,
+    ) -> io::Result<Option<(bool, u64, u64, usize, Vec<u64>, Vec<Bytes>)>> {
         let log = match self.logs.get_mut(topic) {
             Some(l) => l,
             None => return Ok(None),

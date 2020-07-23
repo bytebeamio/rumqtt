@@ -11,7 +11,7 @@ argh = "0.1"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.1"}
 rumqttc = { path = "../rumqttc", features = ["passthrough"] }
 rumqttlog = { path = "../rumqttlog" }
-tokio = { version = "=0.2.21", features = ["full"] }
+tokio = { version = "=0.2.22", features = ["full"] }
 futures = { version = "0.3", features = ["compat"] }	
 bytes = "0.5"
 # paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }

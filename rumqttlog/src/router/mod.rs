@@ -16,8 +16,10 @@ use std::collections::VecDeque;
 pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
-    /// Data which is written to commitlog
-    Data(Vec<Publish>),
+    /// Data for native commitlog
+    ConnectionData(Vec<Publish>),
+    /// Data for commitlog of a replica
+    ReplicationData(Vec<ReplicationData>),
     /// Data request
     DataRequest(DataRequest),
     /// Topics request
@@ -43,13 +45,27 @@ pub enum RouterOutMessage {
 
 /// Data sent router to be written to commitlog
 #[derive(Debug)]
-pub struct Data {
+pub struct ReplicationData {
     /// Id of the packet that connection received
     pub pkid: u16,
     /// Topic of publish
     pub topic: String,
     /// Publish payload
-    pub payload: Bytes,
+    pub payload: Vec<Bytes>,
+}
+
+impl ReplicationData {
+    pub fn with_capacity(pkid: u16, topic: String, cap: usize) -> ReplicationData {
+        ReplicationData {
+            pkid,
+            topic,
+            payload: Vec::with_capacity(cap)
+        }
+    }
+
+    pub fn push(&mut self, payload: Bytes) {
+        self.payload.push(payload)
+    }
 }
 
 /// Acknowledgement after data is written to commitlog
@@ -71,17 +87,11 @@ pub struct DataAck {
 pub struct DataRequest {
     /// Log to sweep
     pub topic: String,
-    /// Segment id of native log.
-    pub native_segment: u64,
-    /// Segment id of replicated log.
-    pub replica_segment: u64,
-    /// This is where sweeps start from for data native to this node
-    pub native_offset: u64,
-    /// This is where sweeps start from for replication data
-    pub replica_offset: u64,
-    /// Maximum size of payload buffer
-    pub max_size: u64,
-    /// Maximum count of payload buffer
+    /// (segment, offset) tuples per replica (1 native and 2 replicas)
+    pub cursors: [(u64, u64); 3],
+    /// Maximum size of payload buffer per replica
+    pub max_size: usize,
+    /// Maximum count of payload buffer per replica
     pub max_count: usize
 }
 
@@ -90,40 +100,26 @@ impl DataRequest {
     pub fn new(topic: String) -> DataRequest {
         DataRequest {
             topic,
-            native_segment: 0,
-            replica_segment: 0,
-            native_offset: 0,
-            replica_offset: 0,
+            cursors: [(0, 0); 3],
             max_size: 100 * 1024,
             max_count: 100
         }
     }
 
-    pub fn with(topic: String, max_size: u64, max_count: usize) -> DataRequest {
+    pub fn with(topic: String, max_size: usize, max_count: usize) -> DataRequest {
         DataRequest {
             topic,
-            native_segment: 0,
-            replica_segment: 0,
-            native_offset: 0,
-            replica_offset: 0,
+            cursors: [(0, 0); 3],
             max_size,
             max_count
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets(
-        topic: String,
-        native_segment: u64,
-        native_offset: u64,
-        replica_segment: u64,
-        replica_offset: u64) -> DataRequest {
+    pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
-            native_segment,
-            replica_segment,
-            native_offset,
-            replica_offset,
+            cursors,
             max_size: 100 * 1024,
             max_count: 100
         }
@@ -132,47 +128,34 @@ impl DataRequest {
     /// New data request with provided offsets
     pub fn offsets_with(
         topic: String,
-        native_segment: u64,
-        native_offset: u64,
-        replica_segment: u64,
-        replica_offset: u64,
-        max_size: u64,
+        cursors: [(u64, u64); 3],
+        max_size: usize,
         max_count: usize
     ) -> DataRequest {
         DataRequest {
             topic,
-            native_segment,
-            replica_segment,
-            native_offset,
-            replica_offset,
+            cursors,
             max_size,
             max_count
         }
     }
 }
 
-#[derive(Debug)]
 pub struct DataReply {
-    /// Catch up status
-    pub done: bool,
     /// Log to sweep
     pub topic: String,
-    /// Segment id of native log of this topic.
-    pub native_segment: u64,
-    /// Offset of the last element of payload from this node
-    pub native_offset: u64,
-    /// Count of native data in payload
-    pub native_count: usize,
-    /// Segment id of replicated log of this topic.
-    pub replica_segment: u64,
-    /// Offset of the last element of paylaod due to replication
-    pub replica_offset: u64,
-    /// Count of replicated data in payload
-    pub replica_count: usize,
-    /// Packet ids of replys
-    pub pkids: Vec<u64>,
+    /// (segment, offset) tuples per replica (1 native and 2 replicas)
+    pub cursors: [(u64, u64); 3],
+    /// Payload size
+    pub size: usize,
     /// Reply data chain
     pub payload: Vec<Bytes>,
+}
+
+impl fmt::Debug for DataReply {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}", self.topic, self.cursors, self.size, self.payload.len())
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-// pub mod mesh;
+mod mesh;
 pub mod router;
 pub mod storage;
 pub mod tracker;
@@ -9,7 +9,7 @@ pub mod volatile;
 
 pub use async_channel::{bounded, Receiver, Sender, RecvError, SendError};
 pub use mqtt4bytes;
-pub use router::{Connection, ConnectionAck, Disconnection, Data, DataReply, DataRequest, Router, RouterInMessage, RouterOutMessage};
+pub use router::{Connection, ConnectionAck, Disconnection, ReplicationData, DataReply, DataRequest, Router, RouterInMessage, RouterOutMessage};
 pub use storage::segment::Segment;
 pub use storage::Log;
 
@@ -20,18 +20,19 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshConfig {
-    id: u8,
+    id: usize,
     host: String,
     port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub id: u8,
+    pub id: usize,
     pub dir: PathBuf,
     pub max_segment_size: u64,
     pub max_segment_count: usize,
-    pub routers: Option<Vec<MeshConfig>>,
+    pub instant_ack: bool,
+    pub mesh: Option<Vec<MeshConfig>>,
 }
 
 impl Default for Config {
@@ -41,7 +42,8 @@ impl Default for Config {
             dir: PathBuf::from("/tmp/timestone"),
             max_segment_size: 5 * 1024 * 1024,
             max_segment_count: 1024,
-            routers: None,
+            instant_ack: true,
+            mesh: None,
         }
     }
 }

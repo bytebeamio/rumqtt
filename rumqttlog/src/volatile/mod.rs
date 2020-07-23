@@ -93,8 +93,10 @@ impl Log {
         }
 
         // write record to segment and index
-        let len = record.len() as u64;
+        let len = record.len();
         let active_chunk = self.chunks.get_mut(&self.active_chunk).unwrap();
+
+        // debug!("Log = {:?}", active_chunk.segment.file);
         let (offset, _) = active_chunk.segment.append(record)?;
         self.last_record_id += 1;
         active_chunk.index.write(self.last_record_id, offset, len);
@@ -125,7 +127,7 @@ impl Log {
     /// When there is more data (in other segments) current eof should move to next segment
     /// Empty segments are possible after moving to next segment
     /// EOFs after some data is collected are not errors
-    fn indexv(&self, segment: u64, offset: u64, size: u64) -> io::Result<(bool, Chunks)> {
+    fn indexv(&self, segment: u64, offset: u64, size: usize) -> io::Result<(bool, Chunks)> {
         let mut done = false;
         let mut chunks = Chunks {
             segment,
@@ -192,8 +194,8 @@ impl Log {
         &mut self,
         segment: u64,
         offset: u64,
-        max_size: u64,
-    ) -> io::Result<(bool, u64, u64, u64, Vec<u64>, Vec<Bytes>)> {
+        max_size: usize,
+    ) -> io::Result<(bool, u64, u64, usize, Vec<u64>, Vec<Bytes>)> {
         // TODO We don't need Vec<u64>. Remove that from return
         let (done, chunks) = self.indexv(segment, offset, max_size)?;
         let mut out = Vec::new();
@@ -227,11 +229,11 @@ struct Chunks {
     segment: u64,
     offset: u64,
     count: u64,
-    size: u64,
+    size: usize,
     /// All the identifiers of payloads to be collected from segments
     ids: Vec<u64>,
     /// Segment, offset, size, count of a chunk
-    chunks: Vec<(u64, u64, u64, u64)>,
+    chunks: Vec<(u64, u64, usize, u64)>,
 }
 
 #[cfg(test)]

@@ -1,5 +1,4 @@
 use argh::FromArgs;
-use rumqttlog::router::Data;
 use rumqttlog::tracker::Tracker;
 use rumqttlog::{Config, Router, RouterInMessage, RouterOutMessage, Sender};
 use mqtt4bytes::*;
@@ -47,7 +46,8 @@ async fn main() {
         dir: Default::default(),
         max_segment_size: commandline.segment_size as u64,
         max_segment_count: 10000,
-        routers: None,
+        mesh: None,
+        instant_ack: false,
     };
 
     let (router, tx) = Router::new(config);
@@ -92,7 +92,7 @@ async fn connection(
     let mut tracker = Tracker::new();
     tracker.add_subscription("#");
     let mut got_last_reply = true;
-    let mut count = 0;
+    let count = 0;
     let start = Instant::now();
 
     loop {
@@ -118,7 +118,7 @@ async fn connection(
                         got_last_reply = true;
 
                         println!("{:?}", count);
-                        count += reply.native_count;
+                        // TODO: Fix count
                         if count == commandline.message_count {
                             break
                         }
@@ -130,7 +130,7 @@ async fn connection(
             }
             Some(publish) = network_rx.next() => {
                 let data = vec![publish];
-                let message = (id, RouterInMessage::Data(data));
+                let message = (id, RouterInMessage::ConnectionData(data));
                 router_tx.send(message).await.unwrap();
             }
         }

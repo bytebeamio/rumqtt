@@ -83,7 +83,7 @@ impl Link {
                     self.handle_router_response(message).await?;
                 }
                 Some(message) = tracker_next(&mut self.tracker), if inflight < max_inflight && self.tracker.has_next() => {
-                    // NOTE Right now we are request data by topic, instead if can request
+                    // NOTE Right now we request data by topic, instead if can request
                     // data of multiple topics at once, we can have better utilization of
                     // network and system calls for n publisher and 1 subscriber workloads
                     // as data from multiple topics can be batched (for a given connection)
@@ -136,6 +136,14 @@ impl Link {
                 }
                 Incoming::Publish(publish) => {
                     self.tracker.track_watermark(&publish.topic);
+                    // ack immediately if enabled in config
+                    if self.config.instant_ack {
+                        let ack = PubAck::new(publish.pkid);
+                        let ack = Request::PubAck(ack);
+                        self.network.fill2(ack)?;
+                    }
+
+                    // collect publishes from this batch
                     publishes.push(publish);
                 }
                 Incoming::Subscribe(subscribe) => {
@@ -167,7 +175,7 @@ impl Link {
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
         if !publishes.is_empty() {
-            let message = RouterInMessage::Data(publishes);
+            let message = RouterInMessage::ConnectionData(publishes);
             self.router_tx.send((self.id, message)).await?;
         }
 

@@ -108,6 +108,10 @@ impl MqttState {
         pending
     }
 
+    pub fn inflight(&self) -> u16 {
+        self.inflight
+    }
+
     pub(crate) fn _handle_outgoing_packets(&mut self, requests: Vec<Request>) -> Result<Vec<Request>, StateError> {
         let mut out = Vec::with_capacity(10);
         for request in requests {
@@ -120,7 +124,7 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub(crate) fn handle_outgoing_packet(&mut self, request: Request,) -> Result<Request, StateError> {
+    pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<Request, StateError> {
         let out = match request {
             Request::Publish(publish) => self.handle_outgoing_publish(publish)?,
             Request::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
@@ -156,7 +160,7 @@ impl MqttState {
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub(crate) fn handle_incoming_packet(
+    pub fn handle_incoming_packet(
         &mut self,
         packet: Incoming,
     ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
