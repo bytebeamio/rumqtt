@@ -46,7 +46,7 @@ async fn main() {
         dir: Default::default(),
         max_segment_size: commandline.segment_size as u64,
         max_segment_count: 10000,
-        routers: None,
+        mesh: None,
         instant_ack: false,
     };
 
@@ -92,7 +92,7 @@ async fn connection(
     let mut tracker = Tracker::new();
     tracker.add_subscription("#");
     let mut got_last_reply = true;
-    let mut count = 0;
+    let count = 0;
     let start = Instant::now();
 
     loop {
@@ -130,7 +130,7 @@ async fn connection(
             }
             Some(publish) = network_rx.next() => {
                 let data = vec![publish];
-                let message = (id, RouterInMessage::Data(data));
+                let message = (id, RouterInMessage::ConnectionData(data));
                 router_tx.send(message).await.unwrap();
             }
         }
