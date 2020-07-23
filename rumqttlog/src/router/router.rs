@@ -397,13 +397,13 @@ impl Router {
             let reply = match link_id {
                 // don't extract new replicated data for replication links
                 0..=9 if replication_data => continue,
-                // extract new native connection data to be sent to replication link
+                // extract new native data to be sent to replication link
                 0..=9 => match self.extract_connection_data(&request) {
                     Some(reply) => reply,
                     None => continue,
                 },
-                // extract new native connection data to be sent to connection link
-                _ => match self.extract_connection_data(&request) {
+                // extract all data to be sent to connection link
+                _ => match self.extract_all_data(&request) {
                     Some(reply) => reply,
                     None => continue,
                 },
@@ -524,7 +524,7 @@ impl Router {
     fn extract_all_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
 
-        // debug!("Pull data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        debug!("Pull data. Topic = {}, cursors = {:?}", topic, request.cursors);
         let mut reply = DataReply {
             topic: request.topic.clone(),
             cursors: request.cursors,
@@ -542,7 +542,7 @@ impl Router {
 
                 }
                 Ok(None) => {
-                    warn!("Nothing to extract!!");
+                    debug!("Nothing more to extract from commitlog {}!!", i);
                 },
                 Err(e) => {
                     error!("Failed to extract data from commitlog. Error = {:?}", e);
