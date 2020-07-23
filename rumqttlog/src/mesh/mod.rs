@@ -52,8 +52,8 @@ impl Mesh {
         let (head, this, tail) = self.extract_servers();
 
         // start outgoing (client) links and then incoming (server) links
-        self.start_replicators(tail, true).await;
-        self.start_replicators(head, false).await;
+        self.start_replicators(this.id, tail, true).await;
+        self.start_replicators(this.id, head, false).await;
 
         let addr = format!("{}:{}", this.host, this.port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
@@ -80,18 +80,17 @@ impl Mesh {
     }
 
     /// launch client replicators. We'll connect later
-    async fn start_replicators(&mut self, config: Vec<MeshConfig>, is_client: bool) {
-        for server in config.iter() {
+    async fn start_replicators(&mut self, local_id: usize, remote: Vec<MeshConfig>, is_client: bool) {
+        for server in remote.iter() {
             let (connections_tx, connections_rx) = bounded(1);
             let router_tx = self.router_tx.clone();
             let addr = format!("{}:{}", server.host, server.port);
-            let id = server.id;
-            let link_handle = LinkHandle::new(server.id, addr.clone(), connections_tx);
-            self.links.insert(id, link_handle);
+            let server_id = server.id;
+            let link_handle = LinkHandle::new(server_id, addr.clone(), connections_tx);
+            self.links.insert(server_id, link_handle);
             let remote = if is_client { addr } else { "".to_owned() };
-
             task::spawn(async move {
-                let mut replicator = Replicator::new(id, router_tx, connections_rx, remote).await;
+                let mut replicator = Replicator::new(local_id,server_id, router_tx, connections_rx, remote).await;
                 replicator.start().await;
             });
         }
@@ -103,7 +102,7 @@ impl Mesh {
     /// - Outgoing connections that this router should make
     fn extract_servers(&self) -> (Vec<MeshConfig>, MeshConfig, Vec<MeshConfig>) {
         let id = self.config.id.clone();
-        let mut routers = self.config.routers.clone().unwrap();
+        let mut routers = self.config.mesh.clone().unwrap();
         let position = routers.iter().position(|v| v.id == id);
         let position = position.unwrap();
 

@@ -95,6 +95,8 @@ impl Log {
         // write record to segment and index
         let len = record.len() as u64;
         let active_chunk = self.chunks.get_mut(&self.active_chunk).unwrap();
+
+        // debug!("Log = {:?}", active_chunk.segment.file);
         let (offset, _) = active_chunk.segment.append(record)?;
         self.last_record_id += 1;
         active_chunk.index.write(self.last_record_id, offset, len);

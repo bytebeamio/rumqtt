@@ -8,7 +8,7 @@ use std::io;
 /// which makes the cursor movement very dynamic
 pub struct Segment {
     _base_offset: u64,
-    file: Vec<Bytes>,
+    pub(crate) file: Vec<Bytes>,
     size: u64,
     next_offset: u64,
     max_record_size: u64,

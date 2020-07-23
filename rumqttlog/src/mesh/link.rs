@@ -22,8 +22,10 @@ pub enum LinkError {
 
 /// A link is a connection to another router
 pub struct Replicator {
-    /// Id of the link. Id of the router this connection is with
-    id: usize,
+    /// Id of the link. Id of the replica node that this connection is linked with
+    remote_id: usize,
+    /// Id of this router node. MQTT connection is made with this ID
+    local_id: usize,
     /// Tracks the offsets and status of all the topic offsets
     tracker: Tracker,
     /// Handle to send data to router
@@ -46,23 +48,25 @@ impl Replicator {
     /// which establishes a new connection on behalf of the link and forwards the connection to this
     /// task. If this link is a server, it waits for the other end to initiate the connection
     pub async fn new(
-        id: usize,
+        local_id: usize,
+        remote_id: usize,
         router_tx: Sender<(ConnectionId, RouterInMessage)>,
         connections_rx: Receiver<Network>,
         remote: String
     ) -> Replicator {
         // Register this link with router even though there is no network connection with other router yet.
         // Actual connection will be requested in `start`
-        info!("Creating link {} with router. Remote = {:?}", id, remote);
+        info!("Initializing link {} <-> {}. Remote = {:?}", local_id, remote_id, remote);
         let max_inflight = 100;
 
         // Subscribe to all the data as we want to replicate everything.
         let mut tracker = Tracker::new();
         tracker.add_subscription("#");
-        let link_rx = register_with_router(id, &router_tx).await;
+        let link_rx = register_with_router(remote_id, &router_tx).await;
 
         Replicator {
-            id,
+            remote_id,
+            local_id,
             tracker,
             router_tx,
             connections_rx,
@@ -82,16 +86,22 @@ impl Replicator {
                 let stream = match TcpStream::connect(&self.remote).await {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("Failed to connect to router. Error = {:?}. Reconnecting", e);
+                        error!("Failed to connect to node {}. Error = {:?}", self.remote, e);
                         time::delay_for(Duration::from_secs(1)).await;
                         continue
                     }
                 };
 
                 let mut network = Network::new(stream);
-                let connect = Connect::new(self.id.to_string());
+                let connect = Connect::new(self.local_id.to_string());
                 if let Err(e) = network.connect(connect).await {
-                    error!("Failed to connect to router. Error = {:?}. Reconnecting", e);
+                    error!("Failed to mqtt connect to node {}. Error = {:?}", self.remote, e);
+                    time::delay_for(Duration::from_secs(1)).await;
+                    continue
+                }
+
+                if let Err(e) = network.read_connack().await {
+                    error!("Failed to read connack from node = {}. Error = {:?}", self.remote, e);
                     time::delay_for(Duration::from_secs(1)).await;
                     continue
                 }
@@ -110,6 +120,7 @@ impl Replicator {
 
         loop {
             let inflight_full = self.state.inflight() >= self.max_inflight;
+            // dbg!(inflight_full, tracker.has_next());
             select! {
                 // Pull a bunch of packets from network, reply in bunch and yield the first item
                 o = network.readb() => {
@@ -118,7 +129,7 @@ impl Replicator {
                 },
                 Some(message) = tracker_next(tracker), if !inflight_full && tracker.has_next() => {
                     debug!("Tracker next = {:?}", message);
-                    self.router_tx.send((self.id, message)).await?;
+                    self.router_tx.send((self.remote_id, message)).await?;
                 }
                 response = self.link_rx.recv() => {
                     let response = response?;

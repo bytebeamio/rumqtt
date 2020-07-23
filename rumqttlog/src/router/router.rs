@@ -97,7 +97,7 @@ impl Router {
     }
 
     pub async fn start(&mut self) {
-        if self.config.routers.is_some() {
+        if self.config.mesh.is_some() {
             self.enable_replication();
         }
 
@@ -434,13 +434,14 @@ impl Router {
             }
         } else {
             debug!("Receiving data from connection {}, topic = {}", id, topic);
-            match self.commitlog[self.config.id].append(&topic, bytes) {
+            match self.commitlog[self.id].append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
                     None
                 }
             }
+
         }
     }
 
