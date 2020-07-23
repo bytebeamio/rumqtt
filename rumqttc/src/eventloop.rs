@@ -59,6 +59,8 @@ pub struct EventLoop {
     pub(crate) cancel_tx: Option<Sender<()>>,
     /// Delay between reconnection (after a failure)
     pub(crate) reconnection_delay: Duration,
+    /// wait for this duration to acquire connection, default to 5s
+    timeout: Duration,
 }
 
 impl EventLoop {
@@ -89,6 +91,7 @@ impl EventLoop {
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
+            timeout,
 
         }
     }
@@ -267,7 +270,7 @@ impl EventLoop {
     }
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
-        let network = time::timeout(Duration::from_secs(5), async {
+        let network = time::timeout(self.timeout, async {
             let network = if self.options.ca.is_some() {
                 let socket = tls::tls_connect(&self.options).await?;
                 Network::new(socket)
@@ -303,14 +306,14 @@ impl EventLoop {
         }
 
         // mqtt connection with timeout
-        time::timeout(Duration::from_secs(5), async {
+        time::timeout(self.timeout, async {
             network.connect(connect).await?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
 
         // wait for 'timeout' time to validate connack
-        let packet = time::timeout(Duration::from_secs(5), async {
+        let packet = time::timeout(self.timeout, async {
             let packet = network.read_connack().await?;
             Ok::<_, ConnectionError>(packet)
         })
