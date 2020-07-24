@@ -287,5 +287,21 @@ mod test {
             ]
         );
     }
-}
 
+    #[test]
+    fn topic_no_newline() {
+        let publish = Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            topic: "a\nb".to_owned(),
+            pkid: 0,
+            payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
+        };
+        let mut buf = BytesMut::new();
+        let result = publish.write(&mut buf);
+
+        let err = result.expect_err("Cannot write a topic with a newline");
+        assert_eq!(err, crate::Error::InvalidTopic);
+    }
+}
