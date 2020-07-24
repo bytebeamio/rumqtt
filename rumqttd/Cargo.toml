@@ -17,7 +17,7 @@ path = "src/bin.rs"
 
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.1"}
-rumqttc = { path = "../rumqttc", version = "0.0.4"}
+rumqttc = { path = "../rumqttc", version = "0.0.5"}
 tokio = { version = "=0.2.22", features = ["full"]}
 serde = { version = "1", features = ["derive"] }
 log = "0.4"

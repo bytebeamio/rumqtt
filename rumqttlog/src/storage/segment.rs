@@ -77,7 +77,7 @@ impl Segment {
     }
 
     /// Reads to fill the complete buffer. Returns number of bytes read
-    pub fn read(&mut self, position: u64, mut buf: &mut [u8]) -> io::Result<u64> {
+    pub fn read(&mut self, position: u64, buf: &mut [u8]) -> io::Result<u64> {
         // TODO: No need to flush segments which are already filled. Make this conditional and check perf
         self.writer.flush()?;
         self.read_at(position, buf)

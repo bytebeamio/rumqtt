@@ -12,7 +12,7 @@ memmap = "0.7"
 bytes = "0.5"
 confy = "0.4"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.1" }
-rumqttc = { path = "../rumqttc", version = "0.0.4"}
+rumqttc = { path = "../rumqttc", version = "0.0.5"}
 async-channel = "1"
 tokio = { version = "0.2", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
