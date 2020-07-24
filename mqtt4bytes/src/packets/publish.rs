@@ -88,6 +88,9 @@ impl Publish {
     }
 
     pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        if self.topic.contains(|c| c == '\n' || c == '\r') {
+            return Err(Error::InvalidTopic);
+        }
         let dup = self.dup as u8;
         let qos = self.qos as u8;
         let retain = self.retain as u8;

@@ -32,6 +32,7 @@ pub enum Error {
     BoundaryCrossed,
     MalformedRemainingLength,
     InsufficientBytes(usize),
+    InvalidTopic,
 }
 
 /// Encapsulates all MQTT packet types
