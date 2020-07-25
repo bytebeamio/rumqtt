@@ -1,5 +1,5 @@
 use rumqttc::{self, MqttOptions, Incoming, QoS, Client};
-use std::time::{Duration, Instant};
+use std::time::{Instant, Duration};
 use std::error::Error;
 use std::thread;
 
@@ -20,11 +20,10 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     mqttoptions.set_inflight(100);
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
-    let payloads = generate_payloads(count, payload_size);
     thread::spawn(move || {
         let mut client = client;
-        requests(payloads, &mut client);
-        thread::sleep(Duration::from_secs(10));
+        requests(count, payload_size, &mut client);
+        thread::sleep(Duration::from_secs(1));
     });
 
     let mut acks_count = 0;
@@ -45,6 +44,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
             }
         };
 
+        // println!("{}, {}", count, acks_count);
         if acks_count == count {
             break;
         }
@@ -61,16 +61,13 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
     Ok(())
 }
 
-fn requests(payloads: Vec<Vec<u8>>, client: &mut Client) {
-    for (i, mut payload) in payloads.into_iter().enumerate() {
+fn requests(count: usize, payload_size: usize, client: &mut Client) {
+    for i in 0..count {
+        let mut payload = vec![1; payload_size];
         payload[0] = (i % 255) as u8;
         if let Err(e) = client.publish("hello/world", QoS::AtLeastOnce, false, payload) {
             println!("Client error: {:?}", e);
             break;
         }
     }
-}
-
-fn generate_payloads(count: usize, payload_size: usize) -> Vec<Vec<u8>> {
-    vec![vec![1; payload_size]; count]
 }
