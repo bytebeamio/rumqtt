@@ -12,7 +12,7 @@ mod common;
 async fn main() {
     pretty_env_logger::init();
     // let guard = pprof::ProfilerGuard::new(100).unwrap();
-    start("rumqtt-async", 100, 1_000_00).await.unwrap();
+    start("rumqtt-async", 100, 1_000_000).await.unwrap();
     // common::profile("bench.pb", guard);
 }
 
@@ -22,6 +22,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
+    mqttoptions.set_max_request_batch(10);
 
     let mut eventloop = EventLoop::new(mqttoptions, 10).await;
     let requests_tx = eventloop.handle();

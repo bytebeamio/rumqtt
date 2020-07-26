@@ -19,6 +19,7 @@ async fn main() {
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
     mqttoptions.set_keep_alive(1000);
+    mqttoptions.set_max_request_batch(10);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
