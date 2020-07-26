@@ -8,6 +8,9 @@ use async_channel::Sender;
 
 mod common;
 
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[tokio::main(core_threads = 2)]
 async fn main() {
     pretty_env_logger::init();

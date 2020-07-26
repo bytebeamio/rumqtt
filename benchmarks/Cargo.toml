@@ -20,6 +20,7 @@ async-channel = "1"
 pretty_env_logger = "0.4"
 prost = "0.6"
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
+jemallocator = "0.3"
 
 [[bin]]
 name = "rumqttasync"

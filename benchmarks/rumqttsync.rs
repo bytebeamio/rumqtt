@@ -5,6 +5,10 @@ use std::thread;
 
 mod common;
 
+
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 fn main() {
     pretty_env_logger::init();
     let guard = pprof::ProfilerGuard::new(250).unwrap();

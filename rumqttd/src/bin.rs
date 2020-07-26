@@ -10,6 +10,9 @@ use pprof::ProfilerGuard;
 use prost::Message;
 use std::process::exit;
 
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Config {
     broker: librumqttd::Config,
