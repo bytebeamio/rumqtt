@@ -1,4 +1,4 @@
-use rumqttc::{self, EventLoop, MqttOptions, Incoming, QoS, Request, Publish};
+use rumqttc::{self, EventLoop, MqttOptions, Incoming, QoS, Request, PublishRaw};
 use std::time::{Duration, Instant};
 use std::error::Error;
 
@@ -13,10 +13,10 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[tokio::main(core_threads = 2)]
 async fn main() {
-    pretty_env_logger::init();
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    // pretty_env_logger::init();
+    // let guard = pprof::ProfilerGuard::new(100).unwrap();
     start("rumqtt-async", 100, 1_000_000).await.unwrap();
-    common::profile("bench.pb", guard);
+    // common::profile("bench.pb", guard);
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
@@ -24,7 +24,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
     mqttoptions.set_keep_alive(20);
 
     // NOTE More the inflight size, better the perf
-    mqttoptions.set_inflight(100);
+    mqttoptions.set_inflight(1000);
     mqttoptions.set_max_request_batch(10);
 
     let mut eventloop = EventLoop::new(mqttoptions, 10).await;
@@ -76,8 +76,8 @@ async fn requests(id: &str, payloads: Vec<Vec<u8>>, requests_tx: Sender<Request>
     // let subscription = rumqttc::Subscribe::new(&topic, QoS::AtLeastOnce);
     // let _ = requests_tx.send(Request::Subscribe(subscription)).await;
     for payload in payloads.into_iter() {
-        let publish = Publish::new(&topic, QoS::AtLeastOnce, payload);
-        let publish = Request::Publish(publish);
+        let publish = PublishRaw::new(&topic, QoS::AtLeastOnce, payload).unwrap();
+        let publish = Request::PublishRaw(publish);
         if let Err(_) = requests_tx.send(publish).await {
             break;
         }

@@ -158,6 +158,7 @@ pub enum Outgoing {
 #[derive(Debug)]
 pub enum Request {
     Publish(Publish),
+    PublishRaw(PublishRaw),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),

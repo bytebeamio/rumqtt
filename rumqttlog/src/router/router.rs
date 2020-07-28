@@ -168,17 +168,20 @@ impl Router {
 
         // FIXME iterates through all the topics and all the (pending) requests remove the request
         for waiters in self.data_waiters.values_mut() {
-            let index = waiters.iter().position(|x| x.0 == id).unwrap();
-            waiters.swap_remove(index);
+            if let Some(index) =  waiters.iter().position(|x| x.0 == id) {
+                waiters.swap_remove(index);
+            }
         }
 
         for waiters in self.ack_waiters.values_mut() {
-            let index = waiters.iter().position(|x| x.0 == id).unwrap();
-            waiters.swap_remove(index);
+            if let Some(index) = waiters.iter().position(|x| x.0 == id) {
+                waiters.swap_remove(index);
+            }
         }
 
-        let index = self.topics_waiters.iter().position(|x| x.0 == id).unwrap();
-        self.topics_waiters.swap_remove(index);
+        if let Some(index) = self.topics_waiters.iter().position(|x| x.0 == id) {
+            self.topics_waiters.swap_remove(index);
+        }
     }
 
     /// Handles new incoming data on a topic

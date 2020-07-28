@@ -17,6 +17,8 @@ pub enum ClientError {
     Cancel(#[from] SendError<()>),
     #[error("Failed to send mqtt requests to eventloop")]
     Request(#[from] SendError<Request>),
+    #[error("Serialization error")]
+    Mqtt4(mqtt4bytes::Error),
 }
 
 /// `Client` to communicate with MQTT eventloop `Connection`.
@@ -69,10 +71,15 @@ impl Client {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, qos, payload.into());
-        publish.retain = retain;
-        let request = Request::Publish(publish);
-        blocking::block_on(self.request_tx.send(request))?;
+
+        let mut publish = match PublishRaw::new(topic, qos, payload) {
+            Ok(publish) => publish,
+            Err(e) => return Err(ClientError::Mqtt4(e))
+        };
+
+        publish.set_retain(retain);
+        let publish = Request::PublishRaw(publish);
+        blocking::block_on(self.request_tx.send(publish))?;
         Ok(())
     }
 

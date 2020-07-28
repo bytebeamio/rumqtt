@@ -23,6 +23,8 @@ pub enum StateError {
     /// Collision due to broker not acking in sequence
     #[error("Broker not acking in order. Packet id collision")]
     Collision,
+    #[error("Mqtt serialization/deserialization error")]
+    Mqtt4(mqtt4bytes::Error),
 }
 
 /// State of the mqtt connection.
@@ -51,7 +53,7 @@ pub struct MqttState {
     /// Inflight queue full flag
     pub(crate) recycle: bool,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub(crate) outgoing_pub: Vec<Option<Publish>>,
+    pub(crate) outgoing_pub: Vec<Option<PublishRaw>>,
     /// Packet ids of released QoS 2 publishes
     pub(crate) outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
@@ -85,7 +87,7 @@ impl MqttState {
         // remove and collect pending publishes
         for publish in self.outgoing_pub.iter_mut() {
             if let Some(publish) = publish.take() {
-                let request = Request::Publish(publish);
+                let request = Request::PublishRaw(publish);
                 pending.push(request);
             }
         }
@@ -127,6 +129,7 @@ impl MqttState {
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<Request, StateError> {
         let out = match request {
             Request::Publish(publish) => self.handle_outgoing_publish(publish)?,
+            Request::PublishRaw(publish) => self.handle_outgoing_raw_publish(publish)?,
             Request::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
             Request::PingReq => self.handle_outgoing_ping()?,
             _ => unimplemented!(),
@@ -191,11 +194,6 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn handle_outgoing_publish(&mut self, publish: Publish) -> Result<Request, StateError> {
-        let publish = match publish.qos {
-            QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
-        };
-
         debug!(
             "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
             publish.topic,
@@ -203,7 +201,37 @@ impl MqttState {
             publish.payload.len()
         );
 
-        Ok(Request::Publish(publish))
+        let publish = match publish.raw() {
+            Ok(publish) => publish,
+            Err(e) => return Err(StateError::Mqtt4(e))
+        };
+
+        let publish = match publish.qos {
+            QoS::AtMostOnce => publish,
+            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
+        };
+
+
+
+
+        Ok(Request::PublishRaw(publish))
+    }
+
+    /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
+    /// it buy wrapping publish in packet
+    fn handle_outgoing_raw_publish(&mut self, publish: PublishRaw) -> Result<Request, StateError> {
+        debug!(
+            "Publish.  Pkid = {:?}, Payload Size = {:?}",
+            publish.pkid,
+            publish.payload.len()
+        );
+
+        let publish = match publish.qos {
+            QoS::AtMostOnce => publish,
+            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
+        };
+
+        Ok(Request::PublishRaw(publish))
     }
 
     /// Iterates through the list of stored publishes and removes the publish with the
@@ -374,7 +402,7 @@ impl MqttState {
 
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
+    fn add_packet_id_and_save(&mut self, mut publish: PublishRaw) -> Result<PublishRaw, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) and None as uninitialized packets
             0 => {
@@ -475,7 +503,7 @@ mod test {
             let publish = build_outgoing_publish(QoS::AtLeastOnce);
             let request = mqtt.handle_outgoing_publish(publish).unwrap();
             let pkid = match request {
-                Request::Publish(publish) => publish.pkid,
+                Request::PublishRaw(publish) => publish.pkid,
                 request => panic!("Expecting a publish. Found = {:?}", request)
             };
 
@@ -492,7 +520,7 @@ mod test {
             let publish = build_outgoing_publish(QoS::AtLeastOnce);
             let request = mqtt.handle_outgoing_publish(publish).unwrap();
             let pkid = match request {
-                Request::Publish(publish) => publish.pkid,
+                Request::PublishRaw(publish) => publish.pkid,
                 request => panic!("Expecting a publish. Found = {:?}", request)
             };
 
@@ -509,7 +537,7 @@ mod test {
 
         // Packet id shouldn't be set and publish shouldn't be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish) {
-            Ok(Request::Publish(p)) => p,
+            Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 0);
@@ -520,7 +548,7 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Request::Publish(p)) => p,
+            Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 1);
@@ -528,7 +556,7 @@ mod test {
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Request::Publish(p)) => p,
+            Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 2);
@@ -539,7 +567,7 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Request::Publish(p)) => p,
+            Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 3);
@@ -547,7 +575,7 @@ mod test {
 
         // Packet id should be incremented and publish should be saved in queue
         let publish_out = match mqtt.handle_outgoing_publish(publish.clone()) {
-            Ok(Request::Publish(p)) => p,
+            Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
         assert_eq!(publish_out.pkid, 4);
