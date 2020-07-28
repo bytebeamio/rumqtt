@@ -5,6 +5,10 @@ use std::thread;
 
 mod common;
 
+
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 fn main() {
     pretty_env_logger::init();
     let guard = pprof::ProfilerGuard::new(250).unwrap();
@@ -15,6 +19,7 @@ fn main() {
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
     mqttoptions.set_keep_alive(20);
+    mqttoptions.set_max_request_batch(10);
 
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);

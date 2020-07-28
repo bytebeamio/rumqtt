@@ -50,7 +50,7 @@ pub struct Router {
     /// Waiters on watermark updates
     /// Whenever a topic is replicated, it's watermark is updated till the offset
     /// that replication has happened
-    watermark_waiters: HashMap<Topic, Vec<(ConnectionId, AcksRequest)>>,
+    ack_waiters: HashMap<Topic, Vec<(ConnectionId, AcksRequest)>>,
     /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
     /// represents a router in the mesh
     /// Watermark 'n' implies data till n-1 is synced with the other node
@@ -80,7 +80,7 @@ impl Router {
             connections: vec![None; 1000],
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
-            watermark_waiters: HashMap::new(),
+            ack_waiters: HashMap::new(),
             watermarks: HashMap::new(),
             router_rx,
             router_tx: router_tx.clone(),
@@ -166,7 +166,22 @@ impl Router {
             mem::replace(&mut watermarks.pkid_offset_map[id], None) ;
         }
 
-        // TODO Remove this connection from all types of waiters
+        // FIXME iterates through all the topics and all the (pending) requests remove the request
+        for waiters in self.data_waiters.values_mut() {
+            if let Some(index) =  waiters.iter().position(|x| x.0 == id) {
+                waiters.swap_remove(index);
+            }
+        }
+
+        for waiters in self.ack_waiters.values_mut() {
+            if let Some(index) = waiters.iter().position(|x| x.0 == id) {
+                waiters.swap_remove(index);
+            }
+        }
+
+        if let Some(index) = self.topics_waiters.iter().position(|x| x.0 == id) {
+            self.topics_waiters.swap_remove(index);
+        }
     }
 
     /// Handles new incoming data on a topic
@@ -213,11 +228,8 @@ impl Router {
             // After a bulk of publishes have been written to commitlog, if the replication factor
             // of this topic is zero, it can be acked immediately if there is an AcksRequest already
             // waiting. If we don't ack replication factor 0 acks here, these acks will be stuck
-            // TODO: This can probably be moved to connection to ack immediately?
-            // But connection has to maintain topic map to identify replication factor which router
-            // already does
             if !self.config.instant_ack {
-                self.fresh_watermarks_notification(&topic);
+                self.fresh_acks_notification(&topic);
             }
         }
     }
@@ -252,7 +264,6 @@ impl Router {
             // If there is new data on this topic, router fulfills the last failed request.
             // This completely eliminates the need of polling
             if self.topiclog.unique_append(&topic) {
-                dbg!();
                 self.fresh_topics_notification(id);
             }
 
@@ -285,7 +296,6 @@ impl Router {
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
         let reply = if id < 10 {
-            self.update_cluster_offsets(id, &request);
             self.extract_connection_data(&request)
         } else {
             self.extract_all_data(&request)
@@ -346,10 +356,10 @@ impl Router {
     }
 
     /// Updates replication watermarks
-    fn update_cluster_offsets(&mut self, id: ConnectionId, request: &DataRequest) {
+    fn _update_cluster_offsets(&mut self, id: ConnectionId, request: &DataRequest) {
         if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
             watermarks.cluster_offsets.insert(id as usize, request.cursors[self.id].1);
-            self.fresh_watermarks_notification(&request.topic);
+            self.fresh_acks_notification(&request.topic);
         } else {
             // Fresh topic only initialize with 0 offset. Updates during the next request
             // Watermark 'n' implies data till n-1 is synced with the other node
@@ -420,12 +430,11 @@ impl Router {
         }
     }
 
-    fn fresh_watermarks_notification(&mut self, topic: &str) {
-        let waiters = match self.watermark_waiters.remove(topic) {
+    fn fresh_acks_notification(&mut self, topic: &str) {
+        let waiters = match self.ack_waiters.remove(topic) {
             Some(w) => w,
             None => return,
         };
-
 
         // Multiple connections can send data on a same topic. WaterMarks splits acks to offset
         // mapping by connection id. We iterate through all the connections that are waiting for
@@ -579,11 +588,11 @@ impl Router {
     fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
         debug!("Registering id = {} for {} ack notifications", id, request.topic);
         let topic = request.topic.clone();
-        if let Some(waiters) = self.watermark_waiters.get_mut(&request.topic) {
+        if let Some(waiters) = self.ack_waiters.get_mut(&request.topic) {
             waiters.push((id, request));
         } else {
             let waiters = vec![(id, request)];
-            self.watermark_waiters.insert(topic, waiters);
+            self.ack_waiters.insert(topic, waiters);
         }
     }
 
@@ -598,7 +607,8 @@ impl Router {
         };
 
         if let Err(e) = connection.handle.try_send(reply) {
-            error!("Failed to reply. Message = {:?}", e.into_inner());
+            let error = format!("{:?}", e);
+            error!("Failed to reply. Error = {:?}, Message = {:?}", error, e.into_inner());
         }
     }
 }

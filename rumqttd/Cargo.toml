@@ -30,4 +30,4 @@ flame = "0.2.2"
 prost = "0.6"
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 ctrlc = "=3.1"
-
+jemallocator = "0.3"

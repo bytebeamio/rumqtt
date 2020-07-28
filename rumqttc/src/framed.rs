@@ -133,6 +133,7 @@ impl Network {
     fn write_fill(&mut self, request: Request) -> Result<usize, Error> {
         let size = match request {
             Request::Publish(packet) => packet.write(&mut self.write)?,
+            Request::PublishRaw(packet) => packet.write(&mut self.write)?,
             Request::Publishes(packets) => {
                 let mut size = 0;
                 for packet in packets {
@@ -271,6 +272,7 @@ impl Network {
 fn outgoing(packet: &Request) -> Outgoing {
     match packet {
         Request::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Request::PublishRaw(publish) => Outgoing::Publish(publish.pkid),
         Request::Publishes(publishes) => {
             let mut out = Vec::with_capacity(publishes.len());
             for publish in publishes {

@@ -36,3 +36,4 @@ file-per-thread-logger = "0.1"
 [[bench]]
 name = "bench"
 harness = false
+

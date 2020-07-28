@@ -28,6 +28,10 @@ impl Publish {
         }
     }
 
+    pub fn raw(self) -> Result<PublishRaw, Error> {
+        PublishRaw::from_bytes(self.topic, self.qos, self.payload)
+    }
+
     pub fn from_bytes<S: Into<String>>(topic: S, qos: QoS, payload: Bytes) -> Publish {
         Publish {
             dup: false,
@@ -114,6 +118,7 @@ impl Publish {
         Ok(1 + remaining_len_bytes + remaining_len)
     }
 }
+
 
 impl fmt::Debug for Publish {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

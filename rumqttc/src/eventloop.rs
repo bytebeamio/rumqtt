@@ -341,15 +341,17 @@ fn bulk_fill(
     // Make sure size of total inflight messages isn't greater than
     // OS tcp write buffer size to prevent bounded buffer deadlocks
     for _i in 0..options.max_request_batch {
+        if state.inflight >= options.inflight {
+            break
+        }
+
         let request = match requests.try_recv() {
             Ok(r) => r,
             Err(_) => break
         };
         let request = state.handle_outgoing_packet(request)?;
         let _outgoing = network.fill(request);
-        if state.inflight >= options.inflight {
-            break
-        }
+
     }
 
     Ok(())
