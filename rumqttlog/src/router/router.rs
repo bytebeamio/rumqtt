@@ -7,7 +7,7 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
+use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
 
 use crate::{Config, ReplicationData};
 use thiserror::Error;
@@ -107,6 +107,7 @@ impl Router {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::ConnectionData(data) => self.handle_connection_data(id, data),
                 RouterInMessage::ReplicationData(data) => self.handle_replication_data(id, data),
+                RouterInMessage::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::AcksRequest(request) => {
@@ -199,7 +200,8 @@ impl Router {
                     let watermarks = match self.watermarks.get_mut(&topic) {
                         Some(w) => w,
                         None => {
-                            self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                            let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
+                            self.watermarks.insert(topic.clone(), Watermarks::new(replication_count));
                             self.watermarks.get_mut(&topic).unwrap()
                         },
                     };
@@ -246,6 +248,7 @@ impl Router {
                 self.append_to_commitlog(id, &topic, payload);
             }
 
+            // TODO: Is this necessary for replicated data
             let watermarks = match self.watermarks.get_mut(&topic) {
                 Some(w) => w,
                 None => {
@@ -269,6 +272,14 @@ impl Router {
 
             // we can probably handle multiple requests better
             self.fresh_data_notification(id, &topic);
+        }
+    }
+
+    fn handle_replication_acks(&mut self, id: ConnectionId, acks: Vec<ReplicationAck>) {
+        for ack in acks {
+            let watermarks = self.watermarks.get_mut(&ack.topic).unwrap();
+            watermarks.update_cluster_offsets(id, ack.offset);
+            self.fresh_acks_notification(&ack.topic);
         }
     }
 
@@ -631,7 +642,6 @@ impl Watermarks {
         }
     }
 
-    /*
     pub fn update_cluster_offsets(&mut self, id: usize, offset: u64) {
         if let Some(position) = self.cluster_offsets.get_mut(id) {
             *position = offset
@@ -639,15 +649,33 @@ impl Watermarks {
             panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
         }
     }
-     */
 
     pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
         let is_replica = id < 10;
+        // ack immediately if replication factor is 0 or if acks are being asked by a
+        // replicator connection
         if self.replication == 0 || is_replica {
             if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
                 let new_ids = (VecDeque::new(), VecDeque::new());
                 let (pkids, _offsets) = mem::replace(connection, new_ids);
                 return pkids
+            }
+        } else {
+            if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
+                let highest_replicated_offset = *self.cluster_offsets.iter().max().unwrap();
+
+                // cut offsets which are less than highest replicated offset
+                // e.g. For connection = 30, router id = 0, pkid_offset_map and replica offsets looks like this
+                // pkid offset map = [5, 4, 3, 2, 1] : [15, 14, 10, 9, 8]
+                // replica offsets = [0, 12, 8] implies replica 1 has replicated till 12 and replica 2 till 8
+                // the above example should return pkids [5, 4]
+
+                // get index of offset less than replicated offset and split there
+                if let Some(index) = connection.1.iter().position(|x| *x < highest_replicated_offset) {
+                    connection.1.truncate(index);
+                    let pkids = connection.0.split_off(index);
+                    return pkids
+                }
             }
         }
 
@@ -659,10 +687,10 @@ impl Watermarks {
         // connection itself. Crashing here is a bug
         let connection = self.pkid_offset_map.get_mut(id).unwrap();
         let map = connection.get_or_insert((VecDeque::new(), VecDeque::new()));
-        map.0.push_back(pkid);
+        map.0.push_front(pkid);
         // save offsets only if replication > 0
         if self.replication > 0 {
-            map.1.push_back(offset);
+            map.1.push_front(offset);
         }
     }
 }

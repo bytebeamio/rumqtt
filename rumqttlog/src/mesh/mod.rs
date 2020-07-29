@@ -2,6 +2,7 @@ use crate::router::RouterInMessage;
 use crate::{Config, MeshConfig};
 
 mod link;
+mod state;
 
 use async_channel::{bounded, Sender};
 use link::Replicator;

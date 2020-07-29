@@ -112,7 +112,7 @@ impl Link {
             }
             RouterOutMessage::AcksReply(reply) => {
                 self.tracker.update_watermarks_tracker(&reply);
-                for ack in reply.pkids {
+                for ack in reply.pkids.into_iter().rev() {
                     let ack = PubAck::new(ack);
                     let ack = Request::PubAck(ack);
                     self.network.fill2(ack)?;
