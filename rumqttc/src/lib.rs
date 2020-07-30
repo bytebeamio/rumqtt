@@ -247,7 +247,7 @@ pub struct MqttOptions {
     /// Key type for TLS 
     key_type: Key,
 
-    timeout: u64,
+    conn_timeout: u64,
 }
 
 impl MqttOptions {
@@ -275,7 +275,7 @@ impl MqttOptions {
             inflight: 100,
             last_will: None,
             key_type: Key::RSA,
-            timeout: 5,
+            conn_timeout: 5,
         }
     }
 
@@ -433,15 +433,15 @@ impl MqttOptions {
         self.key_type
     }
 
-    /// set timeout in secs
-    pub fn set_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.timeout = timeout;
+    /// set connection timeout in secs
+    pub fn set_conn_timeout(&mut self, timeout: u64) -> &mut Self {
+        self.conn_timeout = timeout;
         self
     }
 
     /// get timeout in secs
-    pub fn get_timeout(&self) -> u64 {
-        self.timeout
+    pub fn timeout(&self) -> u64 {
+        self.conn_timeout
     }
 
 }
