@@ -1,6 +1,7 @@
 extern crate bytes;
 
 mod commitlog;
+mod watermarks;
 mod router;
 
 pub use router::Router;
