@@ -12,7 +12,7 @@ use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, Topic
 use crate::{Config, ReplicationData};
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use rumqttc::{Publish, QoS};
+use rumqttc::Publish;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -196,7 +196,7 @@ impl Router {
             let Publish { pkid, topic, payload, qos, .. } = publish;
             if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
                 // Store packet ids with offset mapping for QoS > 0
-                if qos == QoS::AtLeastOnce || qos == QoS::ExactlyOnce {
+                if qos as u8 > 0 {
                     let watermarks = match self.watermarks.get_mut(&topic) {
                         Some(w) => w,
                         None => {
@@ -272,12 +272,21 @@ impl Router {
 
             // we can probably handle multiple requests better
             self.fresh_data_notification(id, &topic);
+
+
+            // Replicated data should be acked immediately when there are pending requests
+            // in waiters
+            self.fresh_acks_notification(&topic);
         }
     }
 
     fn handle_replication_acks(&mut self, id: ConnectionId, acks: Vec<ReplicationAck>) {
         for ack in acks {
-            let watermarks = self.watermarks.get_mut(&ack.topic).unwrap();
+            let watermarks = match self.watermarks.get_mut(&ack.topic) {
+                Some(w) => w,
+                None => continue
+            };
+
             watermarks.update_cluster_offsets(id, ack.offset);
             self.fresh_acks_notification(&ack.topic);
         }
@@ -364,18 +373,6 @@ impl Router {
 
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
-    }
-
-    /// Updates replication watermarks
-    fn _update_cluster_offsets(&mut self, id: ConnectionId, request: &DataRequest) {
-        if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
-            watermarks.cluster_offsets.insert(id as usize, request.cursors[self.id].1);
-            self.fresh_acks_notification(&request.topic);
-        } else {
-            // Fresh topic only initialize with 0 offset. Updates during the next request
-            // Watermark 'n' implies data till n-1 is synced with the other node
-            self.watermarks.insert(request.topic.clone(), Watermarks::new(0));
-        }
     }
 
     /// Send notifications to links which registered them
@@ -648,6 +645,8 @@ impl Watermarks {
         } else {
             panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
         }
+
+        debug!("Updating cluster offsets: {:?}", self.cluster_offsets);
     }
 
     pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
@@ -671,7 +670,7 @@ impl Watermarks {
                 // the above example should return pkids [5, 4]
 
                 // get index of offset less than replicated offset and split there
-                if let Some(index) = connection.1.iter().position(|x| *x < highest_replicated_offset) {
+                if let Some(index) = connection.1.iter().position(|x| *x <= highest_replicated_offset) {
                     connection.1.truncate(index);
                     let pkids = connection.0.split_off(index);
                     return pkids

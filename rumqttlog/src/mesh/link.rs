@@ -1,20 +1,20 @@
-use thiserror::Error;
-
 use std::io;
 
 use crate::tracker::Tracker;
-use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
 use crate::mesh::ConnectionId;
 use crate::{RouterInMessage, Connection, RouterOutMessage};
 use crate::router::ConnectionType;
+use crate::router::ReplicationData;
+use crate::mesh::state::{State, StateError};
+use crate::router::ReplicationAck;
+
+use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
 use rumqttc::{Connect, Incoming, Network, PubAck, Request, Publish, QoS};
 use tokio::net::TcpStream;
 use tokio::{time, select};
 use std::time::Duration;
 use bytes::{BytesMut, BufMut, Buf};
-use crate::router::ReplicationData;
-use crate::mesh::state::{State, StateError};
-use crate::router::ReplicationAck;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -60,8 +60,8 @@ impl Replicator {
         connections_rx: Receiver<Network>,
         remote: String
     ) -> Replicator {
-        // Register this link with router even though there is no network connection with other router yet.
-        // Actual connection will be requested in `start`
+        // Register this link with router even though there is no network connection
+        // with other router yet. Actual connection will be requested in `start`
         info!("Initializing link {} <-> {}. Remote = {:?}", local_id, remote_id, remote);
         let max_inflight = 100;
 
