@@ -265,7 +265,7 @@ impl EventLoop {
     }
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
-        let network = time::timeout(Duration::from_secs(5), async {
+        let network = time::timeout(Duration::from_secs(self.options.timeout()), async {
             let network = if self.options.ca.is_some() {
                 let socket = tls::tls_connect(&self.options).await?;
                 Network::new(socket)
@@ -301,14 +301,14 @@ impl EventLoop {
         }
 
         // mqtt connection with timeout
-        time::timeout(Duration::from_secs(5), async {
+        time::timeout(Duration::from_secs(self.options.timeout()), async {
             network.connect(connect).await?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
 
         // wait for 'timeout' time to validate connack
-        let packet = time::timeout(Duration::from_secs(5), async {
+        let packet = time::timeout(Duration::from_secs(self.options.timeout()), async {
             let packet = network.read_connack().await?;
             Ok::<_, ConnectionError>(packet)
         })
