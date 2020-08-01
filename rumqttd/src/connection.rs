@@ -136,13 +136,6 @@ impl Link {
                 }
                 Incoming::Publish(publish) => {
                     self.tracker.track_watermark(&publish.topic);
-                    // ack immediately if enabled in config
-                    if self.config.instant_ack {
-                        let ack = PubAck::new(publish.pkid);
-                        let ack = Request::PubAck(ack);
-                        self.network.fill2(ack)?;
-                    }
-
                     // collect publishes from this batch
                     publishes.push(publish);
                 }

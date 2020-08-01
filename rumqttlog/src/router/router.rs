@@ -205,9 +205,7 @@ impl Router {
                         },
                     };
 
-                    if !self.config.instant_ack {
-                        watermarks.update_pkid_offset_map(id, pkid, offset);
-                    }
+                    watermarks.update_pkid_offset_map(id, pkid, offset);
                 }
             }
 
@@ -229,9 +227,7 @@ impl Router {
             // After a bulk of publishes have been written to commitlog, if the replication factor
             // of this topic is zero, it can be acked immediately if there is an AcksRequest already
             // waiting. If we don't ack replication factor 0 acks here, these acks will be stuck
-            if !self.config.instant_ack {
-                self.fresh_acks_notification(&topic);
-            }
+            self.fresh_acks_notification(&topic);
         }
     }
 

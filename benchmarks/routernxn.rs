@@ -47,7 +47,6 @@ async fn main() {
         max_segment_size: commandline.segment_size as u64,
         max_segment_count: 10000,
         mesh: None,
-        instant_ack: false,
     };
 
     let (router, tx) = Router::new(config);
