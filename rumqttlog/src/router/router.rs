@@ -147,6 +147,7 @@ impl Router {
         let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
         if let Err(e) = connection.handle.try_send(message) {
             error!("Failed to send connection ack. Error = {:?}", e.to_string());
+            return
         }
 
         info!("New Connection. In ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
@@ -186,6 +187,7 @@ impl Router {
 
     /// Handles new incoming data on a topic
     fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Publish>) {
+        trace!("{:08} {:14} Id = {}, Count = {}", "data", "nativecommit", id, data.len());
         for publish in data {
             if publish.payload.len() == 0 {
                 error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
@@ -193,6 +195,7 @@ impl Router {
             }
 
             let Publish { pkid, topic, payload, qos, .. } = publish;
+
             if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
                 // Store packet ids with offset mapping for QoS > 0
                 if qos as u8 > 0 {
@@ -200,7 +203,7 @@ impl Router {
                         Some(w) => w,
                         None => {
                             let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
-                            self.watermarks.insert(topic.clone(), Watermarks::new(replication_count));
+                            self.watermarks.insert(topic.clone(), Watermarks::new(&topic, replication_count));
                             self.watermarks.get_mut(&topic).unwrap()
                         },
                     };
@@ -220,18 +223,17 @@ impl Router {
                 self.fresh_topics_notification(id);
             }
 
-            // TODO We are notifying in the loop per id. When router does bulk `try_recv`
-            // we can probably handle multiple requests better
+            // Notify waiters on this topic of new data
             self.fresh_data_notification(id, &topic);
 
-            // After a bulk of publishes have been written to commitlog, if the replication factor
-            // of this topic is zero, it can be acked immediately if there is an AcksRequest already
-            // waiting. If we don't ack replication factor 0 acks here, these acks will be stuck
+            // Data from topics with replication factor = 0 should be acked immediately if there are
+            // waiters registered. We shouldn't rely on replication acks for data acks in this case
             self.fresh_acks_notification(&topic);
         }
     }
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
+        trace!("{:08} {:14} Id = {}, Count = {}", "data", "replicacommit", id, data.len());
         for data in data {
             let ReplicationData { pkid, topic, payload, .. } = data;
             for payload in payload {
@@ -247,7 +249,7 @@ impl Router {
             let watermarks = match self.watermarks.get_mut(&topic) {
                 Some(w) => w,
                 None => {
-                    self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                    self.watermarks.insert(topic.clone(), Watermarks::new(&topic, 0));
                     self.watermarks.get_mut(&topic).unwrap()
                 },
             };
@@ -288,6 +290,7 @@ impl Router {
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
+        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
         let reply = self.extract_topics(&request);
         let reply = match reply {
             Some(r) => r,
@@ -303,10 +306,12 @@ impl Router {
             return
         }
 
+        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "response", id, reply.offset);
         self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
+        trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "request", request.topic, request.cursors);
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
@@ -338,18 +343,20 @@ impl Router {
             return
         }
 
+        trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "response", reply.topic, reply.cursors);
         let reply = RouterOutMessage::DataReply(reply);
         self.reply(id, reply);
     }
 
     pub fn handle_acks_request(&mut self, id: ConnectionId, request: AcksRequest) {
+        trace!("{:08} {:14} Id = {}, Topic = {}, Offset = {:?}", "acks", "request", id, request.topic, request.offset);
         // I don't think we'll need offset as next set of pkids will always be at head
         let reply = match self.watermarks.get_mut(&request.topic) {
             Some(watermarks) => {
-                // let caught_up = watermarks.cluster_offsets == request.offset;
                 let pkids = watermarks.acks(id);
-                let caught_up = pkids.is_empty();
-                if caught_up {
+
+                // Caught up. Register for notifications when we can ack more
+                if pkids.is_empty() {
                     self.register_acks_waiter(id, request);
                     return
                 } else {
@@ -366,49 +373,50 @@ impl Router {
             },
         };
 
+        trace!("{:08} {:14} Id = {}, Topic = {}, Offset = {:?}", "acks", "response", id, reply.topic, reply.offset);
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
     }
 
     fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
-        debug!("Registering connection {} for topic notifications", id);
+        trace!("{:08} {:14} Id = {}", "topics", "register", id);
         let request = (id.to_owned(), request);
         self.topics_waiters.push(request);
     }
 
     /// Register data waiter
     fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
-        debug!("Registering id = {} for {} data notifications", id, request.topic);
+        trace!("{:08} {:14} Id = {}, Topic = {}", "data", "register", id, request.topic);
         let topic = request.topic.clone();
         let request = (id, request);
 
-        if let Some(waiters) = self.data_waiters.get_mut(&topic) {
-            waiters.push(request);
-        } else {
-            let waiters = vec![request];
-            self.data_waiters.insert(topic, waiters);
+        match self.data_waiters.get_mut(&topic) {
+            Some(waiters) => waiters.push(request),
+            None => {
+                let waiters = vec![request];
+                self.data_waiters.insert(topic, waiters);
+            }
         }
     }
 
     fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
-        debug!("Registering id = {} for {} ack notifications", id, request.topic);
+        trace!("{:08} {:14} Id = {}, Topic = {}", "acks", "register", id, request.topic);
         let topic = request.topic.clone();
-        if let Some(waiters) = self.ack_waiters.get_mut(&request.topic) {
-            waiters.push((id, request));
-        } else {
-            let waiters = vec![(id, request)];
-            self.ack_waiters.insert(topic, waiters);
+        match self.ack_waiters.get_mut(&request.topic) {
+            Some(waiters) => waiters.push((id, request)),
+            None => {
+                let waiters = vec![(id, request)];
+                self.ack_waiters.insert(topic, waiters);
+            }
         }
     }
 
     /// Send notifications to links which registered them
     fn fresh_topics_notification(&mut self, id: ConnectionId) {
-        // TODO too many indirection to get a link to the handle, probably directly
-        // TODO clone a handle to the link and save it instead of saving ids?
         let waiters = mem::replace(&mut self.topics_waiters, Vec::new());
         let replication_data = id < 10;
         for (link_id, request) in waiters {
-            // don't send replicated topic notifications to replication link
+            // Don't send replicated topic notifications to replication link
             // id 0-10 are reserved for replicators which are linked to other routers in the mesh
             if replication_data && link_id < 10 {
                 continue;
@@ -416,8 +424,8 @@ impl Router {
 
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request).unwrap();
-            debug!("Sending new topics {:?} notification to id = {}", reply.topics, link_id);
 
+            trace!("{:08} {:14} Id = {}, Topics = {:?}", "topics", "notification", link_id, reply.topics);
             let reply = RouterOutMessage::TopicsReply(reply);
             self.reply(link_id, reply);
 
@@ -453,6 +461,7 @@ impl Router {
                 },
             };
 
+            trace!("{:08} {:14} Id = {}, Topic = {}", "data", "notification", link_id, reply.topic);
             let reply = RouterOutMessage::DataReply(reply);
             self.reply(link_id, reply);
 
@@ -487,6 +496,7 @@ impl Router {
                     offset: 100,
                 };
 
+                trace!("{:08} {:14} Id = {}, Topic = {}", "acks", "notification", link_id, reply.topic);
                 let reply = RouterOutMessage::AcksReply(reply);
                 self.reply(link_id, reply);
             }
@@ -500,7 +510,6 @@ impl Router {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
-            debug!("Receiving replication data from {}, topic = {}", id, topic);
             match self.commitlog[id].append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {
@@ -509,7 +518,6 @@ impl Router {
                 }
             }
         } else {
-            debug!("Receiving data from connection {}, topic = {}", id, topic);
             match self.commitlog[self.id].append(&topic, bytes) {
                 Ok(offset) => Some(offset),
                 Err(e) => {

@@ -6,6 +6,9 @@ type Offset = u64;
 
 /// Watermarks for a given topic
 pub struct Watermarks {
+    /// Topic this watermarks is tracking. This is only for debug prints
+    topic: String,
+    /// Replication count for this topic
     replication: usize,
     /// A map of packet ids and commitlog offsets for a given connection (identified by index)
     pub(crate) pkid_offset_map: Vec<Option<(VecDeque<Pkid>, VecDeque<Offset>)>>,
@@ -14,8 +17,9 @@ pub struct Watermarks {
 }
 
 impl Watermarks {
-    pub fn new(replication: usize) -> Watermarks {
+    pub fn new(topic: &str, replication: usize) -> Watermarks {
         Watermarks {
+            topic: topic.to_owned(),
             replication,
             pkid_offset_map: vec![None; 1000],
             cluster_offsets: vec![0, 0, 0]
@@ -29,7 +33,7 @@ impl Watermarks {
             panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
         }
 
-        debug!("Updating cluster offsets: {:?}", self.cluster_offsets);
+        debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);
     }
 
     pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
