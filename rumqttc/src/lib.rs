@@ -75,7 +75,10 @@
 #[macro_use]
 extern crate log;
 
+use std::fmt::{self, Debug, Formatter};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio_rustls::rustls::ClientConfig;
 
 mod client;
 mod tls;
@@ -212,7 +215,7 @@ pub enum SecurityOptions {
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
 /// Options to configure the behaviour of mqtt connection
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
     broker_addr: String,
@@ -247,6 +250,8 @@ pub struct MqttOptions {
     last_will: Option<LastWill>,
     /// Key type for TLS 
     key_type: Key,
+    /// Injected rustls ClientConfig for TLS, to allow more customisation.
+    tls_client_config: Option<Arc<ClientConfig>>,
 
     conn_timeout: u64,
 }
@@ -276,6 +281,7 @@ impl MqttOptions {
             inflight: 100,
             last_will: None,
             key_type: Key::RSA,
+            tls_client_config: None,
             conn_timeout: 5,
         }
     }
@@ -294,7 +300,15 @@ impl MqttOptions {
         self.last_will.clone()
     }
 
+    /// Set the CA certificate to use for TLS connections. Doing so implicitly enables TLS.
+    ///
+    /// See `set_client_auth`, `set_alpn` and `set_key_type`. If you want to control more options
+    /// then you can inject a rustls ClientConfig directly with `set_tls_client_config`.
     pub fn set_ca(&mut self, ca: Vec<u8>) -> &mut Self {
+        assert!(
+            self.tls_client_config.is_none(),
+            "Can't set both tls_client_config and ca."
+        );
         self.ca = Some(ca);
         self
     }
@@ -304,6 +318,10 @@ impl MqttOptions {
     }
 
     pub fn set_client_auth(&mut self, cert: Vec<u8>, key: Vec<u8>) -> &mut Self {
+        assert!(
+            self.tls_client_config.is_none(),
+            "Can't set both tls_client_config and ca."
+        );
         self.client_auth = Some((cert, key));
         self
     }
@@ -313,6 +331,10 @@ impl MqttOptions {
     }
 
     pub fn set_alpn(&mut self, alpn: Vec<Vec<u8>>) -> &mut Self {
+        assert!(
+            self.tls_client_config.is_none(),
+            "Can't set both tls_client_config and alpn."
+        );
         self.alpn = Some(alpn);
         self
     }
@@ -434,6 +456,32 @@ impl MqttOptions {
         self.key_type
     }
 
+    /// Inject a rustls ClientConfig to use for making a TLS connection.
+    ///
+    /// Doing so implicitly enabled TLS. You must not set both this and the other TLS options
+    /// (set_ca, set_client_auth, set_alpn)
+    pub fn set_tls_client_config(&mut self, tls_client_config: Arc<ClientConfig>) -> &mut Self {
+        assert!(
+            self.ca.is_none(),
+            "Can't set both tls_client_config and ca."
+        );
+        assert!(
+            self.client_auth.is_none(),
+            "Can't set both tls_client_config and client_auth."
+        );
+        assert!(
+            self.alpn.is_none(),
+            "Can't set both tls_client_config and alpn."
+        );
+        self.tls_client_config = Some(tls_client_config);
+        self
+    }
+
+    /// Get the ClientConfig which was previously set, if any.
+    pub fn get_tls_client_config(&self) -> Option<Arc<ClientConfig>> {
+        self.tls_client_config.clone()
+    }
+
     /// set connection timeout in secs
     pub fn set_conn_timeout(&mut self, timeout: u64) -> &mut Self {
         self.conn_timeout = timeout;
@@ -444,12 +492,41 @@ impl MqttOptions {
     pub fn timeout(&self) -> u64 {
         self.conn_timeout
     }
+}
 
+// Implement Debug manually because ClientConfig doesn't implement it, so derive(Debug) doesn't
+// work.
+impl Debug for MqttOptions {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("MqttOptions")
+            .field("broker_addr", &self.broker_addr)
+            .field("port", &self.port)
+            .field("keep_alive", &self.keep_alive)
+            .field("clean_session", &self.clean_session)
+            .field("client_id", &self.client_id)
+            .field("ca", &self.ca)
+            .field("client_auth", &self.client_auth)
+            .field("alpn", &self.alpn)
+            .field("credentials", &self.credentials)
+            .field("max_packet_size", &self.max_packet_size)
+            .field("request_channel_capacity", &self.request_channel_capacity)
+            .field("max_request_batch", &self.max_request_batch)
+            .field("pending_throttle", &self.pending_throttle)
+            .field("inflight", &self.inflight)
+            .field("last_will", &self.last_will)
+            .field("key_type", &self.key_type)
+            .field(
+                "tls_client_config",
+                &self.tls_client_config.as_ref().map(|_| "..."),
+            )
+            .field("conn_timeout", &self.conn_timeout)
+            .finish()
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use super::MqttOptions;
+    use super::*;
 
     #[test]
     #[should_panic]
@@ -461,5 +538,15 @@ mod test {
     #[should_panic]
     fn no_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
+    }
+
+    #[test]
+    #[should_panic]
+    fn ca_and_client_config() {
+        let client_config = ClientConfig::new();
+        let mut mqtt_opts = MqttOptions::new("client", "127.0.0.1", 1883);
+        mqtt_opts
+            .set_tls_client_config(Arc::new(client_config))
+            .set_ca(vec![]);
     }
 }
