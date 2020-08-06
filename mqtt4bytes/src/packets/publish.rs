@@ -29,7 +29,16 @@ impl Publish {
     }
 
     pub fn raw(self) -> Result<PublishRaw, Error> {
-        PublishRaw::from_bytes(self.topic, self.qos, self.payload)
+        let pkid = self.pkid;
+        let dup = self.dup;
+        let retain = self.retain;
+        PublishRaw::from_bytes(self.topic, self.qos, self.payload).map(|mut raw|
+        {
+            raw.set_pkid(pkid);
+            raw.set_dup(dup);
+            raw.set_retain(retain);
+            raw
+        })
     }
 
     pub fn from_bytes<S: Into<String>>(topic: S, qos: QoS, payload: Bytes) -> Publish {
