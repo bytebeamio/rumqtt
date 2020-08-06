@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 indexmap = "1"
 thiserror = "1"
 log = "0.4"
-fnv = "1"
+intmap = "0.7"
 
 [dev-dependencies]
 argh = "0.1"

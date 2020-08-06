@@ -29,7 +29,7 @@ pub struct MeshConfig {
 pub struct Config {
     pub id: usize,
     pub dir: PathBuf,
-    pub max_segment_size: u64,
+    pub max_segment_size: usize,
     pub max_segment_count: usize,
     pub mesh: Option<Vec<MeshConfig>>,
 }

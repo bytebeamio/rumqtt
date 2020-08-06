@@ -1,239 +1,99 @@
-use fnv::FnvHasher;
-use std::collections::HashMap;
-
-mod index;
 mod segment;
 
 use bytes::Bytes;
-use index::Index;
+use intmap::IntMap;
+
 use segment::Segment;
-use std::hash::BuildHasherDefault;
-use std::io;
+use std::collections::VecDeque;
 
-type HashMapFnv<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
-
-struct Chunk {
-    index: Index,
-    segment: Segment,
-}
 
 pub struct Log {
-    /// ID of the last appended record
-    last_record_id: u64,
+    /// Offset of the last appended record
+    next_offset: u64,
     /// Maximum size of a segment
-    max_segment_size: u64,
-    /// Base offsets of all the segments
-    base_offsets: Vec<u64>,
+    max_segment_size: usize,
     /// Maximum number of segments
     max_segments: usize,
     /// Current active chunk to append
-    active_chunk: u64,
-    /// All the segments mapped with their base offsets
-    // TODO benchmark with id map
-    // TODO chunks here can probably be converted to Vec<Option<Chunk>>
-    // TODO as this is all inmemory and we know max segments
-    chunks: HashMapFnv<u64, Chunk>,
+    active_chunk: Segment,
+    /// All the segments in a ringbuffer
+    segments: IntMap<Segment>,
 }
 
 impl Log {
-    pub fn new(max_segment_size: u64, max_segments: usize) -> io::Result<Self> {
+    /// Creates a new Log which is a collection of segments
+    /// Segments backed by a ring buffer. Indexes sequentially increase
+    /// with out allocation
+    pub fn new(max_segment_size: usize, max_segments: usize) -> Log {
         if max_segment_size < 1024 {
             panic!("size should be at least 1KB")
         }
 
-        let mut base_offsets = Vec::new();
-        let mut chunks = HashMapFnv::default();
+        let mut segments = VecDeque::with_capacity(max_segments);
+        let segment = Segment::new(0);
+        segments.push_back(segment);
 
-        let index = Index::new(0);
-        let segment = Segment::new(0)?;
-        let chunk = Chunk { index, segment };
-
-        chunks.insert(0, chunk);
-        base_offsets.push(0);
-
-        let log = Log {
-            last_record_id: 0,
+        Log {
+            next_offset: 0,
             max_segment_size,
             max_segments,
-            base_offsets,
-            chunks,
+            segments,
             active_chunk: 0,
-        };
-
-        Ok(log)
+        }
     }
 
-    pub fn active_chunk(&self) -> u64 {
-        self.active_chunk
-    }
+    /// Appends this record to the tail and returns the offset of this append.
+    /// When the current segment is full, this also create a new segment and
+    /// writes the record to it. This function also handles retention by removing
+    /// head segment
+    pub fn append(&mut self, record: Bytes) -> u64 {
+        let mut active_chunk = self.segments.back_mut().unwrap();
 
-    pub fn append(&mut self, record: Bytes) -> Result<u64, io::Error> {
-        // TODO last_record_id and offset are same. Remove last_record_id
-        let active_chunk = if let Some(v) = self.chunks.get_mut(&self.active_chunk) {
-            v
-        } else {
-            return Err(io::Error::new(io::ErrorKind::Other, "No active segment"));
-        };
+        if active_chunk.size() >= self.max_segment_size {
+            let segment = Segment::new(0);
+            self.segments.push_back(segment);
 
-        if active_chunk.segment.size() >= self.max_segment_size {
-            // update active chunk
-            let base_offset = active_chunk.index.base_offset() + active_chunk.index.count();
-            let index = Index::new(base_offset);
-            let segment = Segment::new(base_offset)?;
-            let chunk = Chunk { index, segment };
-
-            self.chunks.insert(base_offset, chunk);
-            self.base_offsets.push(base_offset);
-            self.active_chunk = base_offset;
-
-            if self.base_offsets.len() > self.max_segments {
-                let remove_offset = self.base_offsets.remove(0);
-                self.chunks.remove(&remove_offset);
+            if self.segments.len() > self.max_segments {
+                self.segments.pop_front();
             }
+
+            active_chunk = self.segments.back_mut().unwrap();
+            self.next_offset = 0;
         }
 
-        // write record to segment and index
-        let len = record.len();
-        let active_chunk = self.chunks.get_mut(&self.active_chunk).unwrap();
+        active_chunk.append(record);
 
-        // debug!("Log = {:?}", active_chunk.segment.file);
-        let (offset, _) = active_chunk.segment.append(record)?;
-        self.last_record_id += 1;
-        active_chunk.index.write(self.last_record_id, offset, len);
-        Ok(self.last_record_id)
+        let last_offset = self.next_offset;
+        self.next_offset += 1;
+        last_offset
     }
 
     /// Read a record from correct segment
     /// Returns data, next base offset and relative offset
-    pub fn read(&mut self, base_offset: u64, offset: u64) -> io::Result<(u64, Bytes)> {
-        let chunk = match self.chunks.get_mut(&base_offset) {
+    pub fn read(&mut self, segment_index: usize, offset: usize) -> Option<Bytes> {
+        let segment = match self.segments.get_mut(segment_index) {
             Some(segment) => segment,
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Invalid segment",
-                ))
-            }
+            None => return None
         };
 
-        let (offset, _len, id) = chunk.index.read(offset)?;
-        let payload = chunk.segment.read(offset);
-        Ok((id, payload))
-    }
-
-    /// Goes through index and returns chunks which tell how to sweep segments to collect
-    /// necessary amount on data asked by the user
-    /// Corner cases:
-    /// When there is more data (in other segments) current eof should move to next segment
-    /// Empty segments are possible after moving to next segment
-    /// EOFs after some data is collected are not errors
-    fn indexv(&self, segment: u64, offset: u64, size: usize) -> io::Result<(bool, Chunks)> {
-        let mut done = false;
-        let mut chunks = Chunks {
-            segment,
-            offset,
-            count: 0,
-            size: 0,
-            ids: Vec::with_capacity(1000),
-            chunks: Vec::new(),
-        };
-
-        loop {
-            // Get the chunk with given base offset
-            let chunk = match self.chunks.get(&chunks.segment) {
-                Some(c) => c,
-                None if chunks.count == 0 => {
-                    let e= io::Error::new(io::ErrorKind::InvalidInput, "Invalid segment");
-                    return Err(e)
-                }
-                None => {
-                    done = true;
-                    break;
-                }
-            };
-
-            // If next relative offset is equal to index count => We've crossed the boundary
-            if chunks.offset >= chunk.index.count() {
-                // break if we are already at the tail segment
-                if chunks.segment == *self.base_offsets.last().unwrap() {
-                    chunks.offset -= 1;
-                    done = true;
-                    break;
-                }
-
-                // we use 'total offsets' to go next segment. this remains same during subsequent
-                // tail reads if there are no appends. hence the above early return
-                chunks.segment = chunk.index.base_offset() + chunk.index.count();
-                chunks.offset = 0;
-                continue;
-            }
-
-            // Get what to read from the segment and fill the buffer. Covers the case where the logic has just moved to next
-            // segment and the segment is empty
-            let read_size = size - chunks.size;
-            let (position, payload_size, ids) = chunk.index.readv(chunks.offset, read_size)?;
-            let count = ids.len() as u64;
-            chunks.offset += count;
-            chunks.count += count;
-            chunks.size += payload_size;
-            chunks.ids.extend(ids);
-            chunks.chunks.push((chunks.segment, position, payload_size, count));
-            if chunks.size >= size {
-                chunks.offset -= 1;
-                break;
-            }
-        }
-
-        Ok((done, chunks))
+        segment.read(offset)
     }
 
     /// Reads multiple packets from the storage and return base offset and relative offset of the
     /// Returns base offset, relative offset of the last record along with number of messages and count
     /// Goes to next segment when relative off set crosses boundary
-    pub fn readv(
-        &mut self,
-        segment: u64,
-        offset: u64,
-        max_size: usize,
-    ) -> io::Result<(bool, u64, u64, usize, Vec<u64>, Vec<Bytes>)> {
-        // TODO We don't need Vec<u64>. Remove that from return
-        let (done, chunks) = self.indexv(segment, offset, max_size)?;
-        let mut out = Vec::new();
-
-        for c in chunks.chunks {
-            let chunk = match self.chunks.get_mut(&c.0) {
-                Some(c) => c,
-                None => break,
-            };
-
-            let o = chunk.segment.readv(c.1, c.3);
-            out.extend(o);
+    pub fn readv(&mut self, segment_index: usize, segment_offset: usize) -> (usize, usize, Vec<Bytes>) {
+        // return everything in this segment if there is a next segment
+        if self.segments.len() >= segment_index + 1 {
+            let segment = self.segments.get(segment_index).unwrap();
+            let out = segment.file.get(segment_offset..).unwrap().to_vec();
+            let segment = segment_index;
+            return (segment, segment_offset, out)
         }
 
-        Ok((
-            done,
-            chunks.segment,
-            chunks.offset,
-            chunks.size,
-            chunks.ids,
-            out,
-        ))
+        let out = self.segments.get(segment_index).unwrap().readv(segment_offset);
+        (segment_index, segment_offset, out)
     }
-}
-
-/// Captured state while sweeping indexes collect a bulk of records
-/// from segment/segments
-/// TODO: 'chunks' vector arguments aren't readable
-#[derive(Debug)]
-struct Chunks {
-    segment: u64,
-    offset: u64,
-    count: u64,
-    size: usize,
-    /// All the identifiers of payloads to be collected from segments
-    ids: Vec<u64>,
-    /// Segment, offset, size, count of a chunk
-    chunks: Vec<(u64, u64, usize, u64)>,
 }
 
 #[cfg(test)]
@@ -303,6 +163,7 @@ mod test {
         };
     }
 
+    /*
     #[test]
     fn multi_segment_reads_work_as_expected() {
         // 100K bytes
@@ -427,4 +288,6 @@ mod test {
         assert_eq!(done, true);
         assert_eq!(total_size, 90 * 1024);
     }
+
+     */
 }

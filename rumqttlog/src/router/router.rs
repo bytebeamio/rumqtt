@@ -203,11 +203,13 @@ impl Router {
                         Some(w) => w,
                         None => {
                             let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
-                            self.watermarks.insert(topic.clone(), Watermarks::new(&topic, replication_count));
+                            let watermarks = Watermarks::new(&topic, replication_count);
+                            self.watermarks.insert(topic.clone(), watermarks);
                             self.watermarks.get_mut(&topic).unwrap()
                         },
                     };
 
+                    dbg!(offset);
                     watermarks.update_pkid_offset_map(id, pkid, offset);
                 }
             }
@@ -249,7 +251,8 @@ impl Router {
             let watermarks = match self.watermarks.get_mut(&topic) {
                 Some(w) => w,
                 None => {
-                    self.watermarks.insert(topic.clone(), Watermarks::new(&topic, 0));
+                    let watermarks = Watermarks::new(&topic, 0);
+                    self.watermarks.insert(topic.clone(), watermarks);
                     self.watermarks.get_mut(&topic).unwrap()
                 },
             };
@@ -546,20 +549,19 @@ impl Router {
     fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let (segment, offset) = request.cursors[self.id];
-        let size = request.max_size;
 
         debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
-        match self.commitlog[self.id].readv(topic, segment, offset, size) {
+        match self.commitlog[self.id].readv(topic, segment, offset) {
             Ok(Some(v)) => {
                 // copy and update native commitlog's offsets
                 let mut cursors = request.cursors;
-                cursors[self.id] = (v.1, v.2 + 1);
+                cursors[self.id] = (v.0, v.1 + 1);
 
                 let reply = DataReply {
                     topic: request.topic.clone(),
                     cursors,
-                    size: v.3,
-                    payload: v.5,
+                    size: 0,
+                    payload: v.2,
                 };
 
                 Some(reply)
@@ -585,11 +587,10 @@ impl Router {
 
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
             let (segment, offset) = request.cursors[i];
-            match commitlog.readv(topic, segment, offset, request.max_size) {
+            match commitlog.readv(topic, segment, offset) {
                 Ok(Some(mut v)) => {
-                    reply.cursors[i] = (v.1, v.2 + 1);
-                    reply.size += v.3;
-                    reply.payload.append(&mut v.5);
+                    reply.cursors[i] = (v.0, v.1 + 1);
+                    reply.payload.append(&mut v.2);
 
                 }
                 Ok(None) => {
