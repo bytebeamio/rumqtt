@@ -266,7 +266,7 @@ impl EventLoop {
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
         let network = time::timeout(Duration::from_secs(self.options.timeout()), async {
-            let network = if self.options.ca.is_some() {
+            let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
                 let socket = tls::tls_connect(&self.options).await?;
                 Network::new(socket)
             } else {
