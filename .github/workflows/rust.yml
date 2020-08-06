@@ -1,11 +1,11 @@
 on: [push, pull_request]
 
-name: CI
+name: workflow
 
 jobs:
   ubuntu:
-    name: Rust project
-    runs-on: ubuntu-latest
+    name: rumqtt
+    runs-on: [self-hosted, linux, X64, cicd]
     steps:
       - uses: actions/checkout@master
       - uses: actions-rs/cargo@v1
