@@ -209,7 +209,6 @@ impl Router {
                         },
                     };
 
-                    dbg!(offset);
                     watermarks.update_pkid_offset_map(id, pkid, offset);
                 }
             }
@@ -298,16 +297,11 @@ impl Router {
         let reply = match reply {
             Some(r) => r,
             None => {
+                // register the connection 'id' to notify when there are new topics
                 self.register_topics_waiter(id, request);
                 return
             },
         };
-
-        // register the connection 'id' to notify when there are new topics
-        if reply.topics.is_empty() {
-            self.register_topics_waiter(id, request);
-            return
-        }
 
         trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "response", id, reply.offset);
         self.reply(id, RouterOutMessage::TopicsReply(reply));
@@ -336,15 +330,6 @@ impl Router {
                 return
             },
         };
-
-        // This connectionr/replicator is completely caught up with this topic.
-        // Add this connection/linker into waiters list of this topic.
-        // We don't send any response
-        // TODO: This check can probably be removed after verifying the flow
-        if reply.payload.is_empty() {
-            self.register_data_waiter(id, request);
-            return
-        }
 
         trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "response", reply.topic, reply.cursors);
         let reply = RouterOutMessage::DataReply(reply);
@@ -532,38 +517,40 @@ impl Router {
         }
     }
 
+    /// Extracts topics from topics commitlog.Returns None if the log is caught up
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
         match self.topiclog.readv(request.offset, request.count) {
-            Some(o) => {
-                let reply = TopicsReply {
-                    offset: o.0,
-                    topics: o.1,
-                };
-
-                Some(reply)
-            }
+            Some((_, topics)) if topics.is_empty() => None,
+            Some((offset, topics)) => Some(TopicsReply { offset, topics, }),
             None => None,
         }
     }
 
+    /// Extracts data from native log. Returns None in case the
+    /// log is caught up or encountered an error while reading data
     fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let (segment, offset) = request.cursors[self.id];
 
         debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        let mut reply = DataReply {
+            topic: request.topic.clone(),
+            cursors: request.cursors,
+            size: 0,
+            payload: Vec::new()
+        };
+
         match self.commitlog[self.id].readv(topic, segment, offset) {
-            Ok(Some(v)) => {
-                // copy and update native commitlog's offsets
-                let mut cursors = request.cursors;
-                cursors[self.id] = (v.0, v.1 + 1);
+            Ok(Some((done, base_offset, record_offset, payload))) => {
+                // Update reply's cursors only when read has returned some data
+                // Move the reply to next segment if we are done with the current one
+                if payload.is_empty() { return None }
+                match done {
+                    true => reply.cursors[self.id] = (base_offset + 1, base_offset + 1),
+                    false => reply.cursors[self.id] = (base_offset, record_offset),
+                }
 
-                let reply = DataReply {
-                    topic: request.topic.clone(),
-                    cursors,
-                    size: 0,
-                    payload: v.2,
-                };
-
+                reply.payload = payload;
                 Some(reply)
             }
             Ok(None) => None,
@@ -574,6 +561,8 @@ impl Router {
         }
     }
 
+    /// Extracts data from native and replicated logs. Returns None in case the
+    /// log is caught up or encountered an error while reading data
     fn extract_all_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
 
@@ -585,17 +574,20 @@ impl Router {
             payload: Vec::new()
         };
 
+        // Iterate through native and replica commitlogs to collect data (of a topic)
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
             let (segment, offset) = request.cursors[i];
             match commitlog.readv(topic, segment, offset) {
-                Ok(Some(mut v)) => {
-                    reply.cursors[i] = (v.0, v.1 + 1);
-                    reply.payload.append(&mut v.2);
+                Ok(Some((done, base_offset, record_offset, mut payload))) => {
+                    if payload.is_empty() { continue }
+                    match done {
+                        true => reply.cursors[self.id] = (base_offset + 1, base_offset + 1),
+                        false => reply.cursors[self.id] = (base_offset, record_offset + 1),
+                    }
 
+                    reply.payload.append(&mut payload);
                 }
-                Ok(None) => {
-                    debug!("Nothing more to extract from commitlog {}!!", i);
-                },
+                Ok(None) => continue,
                 Err(e) => {
                     error!("Failed to extract data from commitlog. Error = {:?}", e);
                 }

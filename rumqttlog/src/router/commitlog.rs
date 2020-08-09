@@ -39,14 +39,16 @@ impl CommitLog {
         topic: &str,
         segment: u64,
         offset: u64,
-    ) -> io::Result<Option<(u64, u64, Vec<Bytes>)>> {
+    ) -> io::Result<Option<(bool, u64, u64, Vec<Bytes>)>> {
+        // Router during data request and notifications will check both
+        // native and replica commitlog where this topic doesn't exist
         let log = match self.logs.get_mut(topic) {
-            Some(l) => l,
-            None => return Ok(None),
+            Some(log) => log,
+            None => return Ok(None)
         };
 
-        let (segment, offset, data) = log.readv(segment as usize, offset as usize);
-        Ok(Some((segment as u64, offset as u64, data)))
+        let (done, segment, offset, data) = log.readv(segment, offset);
+        Ok(Some((done, segment, offset, data)))
     }
 }
 

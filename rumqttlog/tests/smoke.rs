@@ -77,7 +77,6 @@ fn vread_records(count: u64) -> Result<(), io::Error> {
     let mut next_rel_offset = 0;
     let mut current_count = 0;
     loop {
-        dbg!(current_count);
         let (base_offset, rel_offset, cnt, data) =
             log.readv(next_base_offset, next_rel_offset, 500)?;
         let records = String::from_utf8(data).unwrap();

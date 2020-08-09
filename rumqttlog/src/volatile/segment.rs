@@ -8,7 +8,6 @@ use bytes::Bytes;
 pub struct Segment {
     base_offset: u64,
     size: usize,
-    next_offset: u64,
     pub(crate) file: Vec<Bytes>,
 }
 
@@ -20,12 +19,19 @@ impl Segment {
             base_offset,
             file,
             size: 0,
-            next_offset: 0,
         }
+    }
+
+    pub fn base_offset(&self) -> u64 {
+        self.base_offset
     }
 
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn len(&self) -> usize {
+        self.file.len()
     }
 
     /// Appends record to the file and return its offset
@@ -33,14 +39,10 @@ impl Segment {
         let len = record.len();
         self.file.push(record);
 
-
         self.size += len;
 
         // return current offset after incrementing next offset
-        let offset = self.next_offset;
-        self.next_offset += 1;
-
-        offset
+        self.base_offset + self.file.len() as u64
     }
 
     /// Reads to fill the complete buffer. Returns number of bytes reamodd
@@ -53,12 +55,6 @@ impl Segment {
 
     /// Reads multiple data from a segment
     pub fn readv(&self, offset: usize) -> Vec<Bytes> {
-        let mut out = Vec::with_capacity(100);
-
-        for d in self.file[offset..].iter() {
-            out.push(d.clone());
-        }
-
-        out
+        self.file[offset..].to_vec()
     }
 }

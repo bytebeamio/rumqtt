@@ -1,98 +1,115 @@
 mod segment;
 
 use bytes::Bytes;
-use intmap::IntMap;
+use fnv::FnvHashMap;
 
 use segment::Segment;
-use std::collections::VecDeque;
+use std::mem;
 
-
+/// Log is an inmemory commitlog (per topic) which splits data in segments.
+/// It drops the oldest segment when retention policies are crossed.
+/// Each segment is identified by base offset and a new segment is created
+/// when ever current segment crosses storage limit
 pub struct Log {
     /// Offset of the last appended record
-    next_offset: u64,
+    head_offset: u64,
     /// Maximum size of a segment
     max_segment_size: usize,
     /// Maximum number of segments
     max_segments: usize,
     /// Current active chunk to append
-    active_chunk: Segment,
+    active_segment: Segment,
     /// All the segments in a ringbuffer
-    segments: IntMap<Segment>,
+    segments: FnvHashMap<u64, Segment>,
 }
 
 impl Log {
-    /// Creates a new Log which is a collection of segments
-    /// Segments backed by a ring buffer. Indexes sequentially increase
-    /// with out allocation
+    /// Create a new log
     pub fn new(max_segment_size: usize, max_segments: usize) -> Log {
         if max_segment_size < 1024 {
             panic!("size should be at least 1KB")
         }
 
-        let mut segments = VecDeque::with_capacity(max_segments);
-        let segment = Segment::new(0);
-        segments.push_back(segment);
-
         Log {
-            next_offset: 0,
+            head_offset: 0,
             max_segment_size,
             max_segments,
-            segments,
-            active_chunk: 0,
+            segments: FnvHashMap::default(),
+            active_segment: Segment::new(0),
         }
     }
 
     /// Appends this record to the tail and returns the offset of this append.
     /// When the current segment is full, this also create a new segment and
-    /// writes the record to it. This function also handles retention by removing
-    /// head segment
+    /// writes the record to it.
+    /// This function also handles retention by removing head segment
     pub fn append(&mut self, record: Bytes) -> u64 {
-        let mut active_chunk = self.segments.back_mut().unwrap();
+        if self.active_segment.size() >= self.max_segment_size {
+            let next_offset = self.active_segment.base_offset() + self.active_segment.len() as u64;
+            let last_active = mem::replace(&mut self.active_segment, Segment::new(next_offset));
+            self.segments.insert(last_active.base_offset(), last_active);
 
-        if active_chunk.size() >= self.max_segment_size {
-            let segment = Segment::new(0);
-            self.segments.push_back(segment);
-
-            if self.segments.len() > self.max_segments {
-                self.segments.pop_front();
+            // if backlog + active segment count is greater than max segments,
+            // delete first segment and update head
+            if self.segments.len() + 1 > self.max_segments {
+                if let Some(segment) = self.segments.remove(&self.head_offset) {
+                    self.head_offset = segment.base_offset() + segment.len() as u64;
+                }
             }
-
-            active_chunk = self.segments.back_mut().unwrap();
-            self.next_offset = 0;
         }
 
-        active_chunk.append(record);
-
-        let last_offset = self.next_offset;
-        self.next_offset += 1;
-        last_offset
+        self.active_segment.append(record)
     }
 
     /// Read a record from correct segment
-    /// Returns data, next base offset and relative offset
-    pub fn read(&mut self, segment_index: usize, offset: usize) -> Option<Bytes> {
-        let segment = match self.segments.get_mut(segment_index) {
-            Some(segment) => segment,
-            None => return None
-        };
-
-        segment.read(offset)
-    }
-
-    /// Reads multiple packets from the storage and return base offset and relative offset of the
-    /// Returns base offset, relative offset of the last record along with number of messages and count
-    /// Goes to next segment when relative off set crosses boundary
-    pub fn readv(&mut self, segment_index: usize, segment_offset: usize) -> (usize, usize, Vec<Bytes>) {
-        // return everything in this segment if there is a next segment
-        if self.segments.len() >= segment_index + 1 {
-            let segment = self.segments.get(segment_index).unwrap();
-            let out = segment.file.get(segment_offset..).unwrap().to_vec();
-            let segment = segment_index;
-            return (segment, segment_offset, out)
+    pub fn read(&mut self, base_offset: u64, offset: usize) -> Option<Bytes> {
+        if base_offset == self.active_segment.base_offset() {
+            return self.active_segment.read(offset as usize)
         }
 
-        let out = self.segments.get(segment_index).unwrap().readv(segment_offset);
-        (segment_index, segment_offset, out)
+        match self.segments.get_mut(&base_offset) {
+            Some(segment) => segment.read(offset),
+            None => None
+        }
+    }
+
+    /// Reads multiple packets from the storage and return base offset and relative
+    /// offset of the last segment. Done status is used by the caller to jump to next segment
+    /// Returns base offset, offset of the last record along will records batch
+    /// **Note**: Base offset is used to be able to pull directly from correct segment instead of
+    /// using an explicit index to identify correct segment. Kafka clients just use absolute
+    /// offset in request. Upper layers should somehow translate absolute offet to base offset
+    /// **Note**: This method also returns full segment data when requested data is not of active
+    /// segment. Set your max_segment size keeping tail latencies of all the concurrent
+    /// connections mind (some runtimes support internal preemption using await points
+    /// where this might not be a problem)
+    /// **Note**: When data of deleted segment is asked, returns data of the current head
+    pub fn readv(&mut self, mut base_offset: u64, mut offset: u64) -> (bool, u64, u64, Vec<Bytes>) {
+        // TODO Fix usize to u64 conversions
+
+        // jump to head if the caller is trying to read deleted segment
+        if base_offset < self.head_offset {
+            base_offset = self.head_offset;
+            offset = self.head_offset;
+        }
+
+        // read from active segment if base offset matches active segment's base offset
+        if base_offset == self.active_segment.base_offset() {
+            let relative_offset = (offset - base_offset) as usize;
+            let out = self.active_segment.readv(relative_offset);
+            let last_record_offset = offset + out.len() as u64 - 1;
+            return (false, self.active_segment.base_offset(), last_record_offset, out)
+        }
+
+        // read from backlog segments
+        if let Some(segment) = self.segments.get(&base_offset) {
+            let relative_offset = (offset - base_offset) as usize;
+            let out = segment.readv(relative_offset);
+            let last_record_offset = offset + out.len() as u64 - 1;
+            return (true, segment.base_offset(), last_record_offset, out)
+        }
+
+        (false, base_offset, offset, Vec::new())
     }
 }
 
@@ -101,193 +118,124 @@ mod test {
     use super::Log;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
-    use std::io;
 
     #[test]
     fn append_creates_and_deletes_segments_correctly() {
-        let mut log = Log::new(10 * 1024, 10).unwrap();
-        let mut payload = vec![0u8; 1024];
+        let mut log = Log::new(10 * 1024, 10);
 
-        // 200 1K iterations. 20 files ignoring deletes. 0.segment, 10.segment .... 199.segment
-        // considering deletes -> 110.segment .. 199.segment
+        // 200 1K iterations. 10 1K records per file. 20 files ignoring deletes.
+        // segments: 0.segment, 10.segment .... 190.segment
+        // considering deletes: 100.segment .. 190.segment
         for i in 0..200 {
-            payload[0] = i;
-            let payload = Bytes::from(payload.clone());
-            log.append(payload).unwrap();
+            let payload = vec![i; 1024];
+            let payload = Bytes::from(payload);
+            log.append(payload);
         }
 
-        // Semi fill 200.segment
+        // Semi fill 200.segment. Deletes 100.segment
+        // considering deletes: 110.segment .. 190.segment
         for i in 200..205 {
-            payload[0] = i;
-            let payload = Bytes::from(payload.clone());
-            log.append(payload).unwrap();
+            let payload = vec![i; 1024];
+            let payload = Bytes::from(payload);
+            log.append(payload);
         }
 
-        let data = log.read(10, 0);
-        match data {
-            Err(e) if e.kind() == io::ErrorKind::InvalidInput => (),
-            _ => panic!("Expecting an invalid input error"),
-        };
+        let data = log.read(90, 0);
+        assert!(data.is_none());
 
+        // considering: 100.segment (100-109) .. 190.segment (190-199)
         // read segment with base offset 110
         let base_offset = 110;
         for i in 0..10 {
-            let (id, data) = log.read(base_offset, i).unwrap();
-            let d = (base_offset + i) as u8;
+            let data = log.read(base_offset, i).unwrap();
+            let d = base_offset as u8 + i as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u64 + 1);
         }
 
-        // read segment with base offset 190
-        let base_offset = 110;
+        // read segment with base offset 190 (1 last segment before
+        // semi filled segment)
+        let base_offset = 190;
         for i in 0..10 {
-            let (id, data) = log.read(base_offset, i).unwrap();
-            let d = (base_offset + i) as u8;
+            let data = log.read(base_offset, i).unwrap();
+            let d = base_offset as u8 + i as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u64 + 1);
         }
 
         // read 200.segment which is semi filled with 5 records
         let base_offset = 200;
         for i in 0..5 {
-            let (id, data) = log.read(base_offset, i).unwrap();
-            let d = (base_offset + i) as u8;
+            let data = log.read(base_offset, i).unwrap();
+            let d = base_offset as u8 + i as u8;
             assert_eq!(data[0], d);
-            assert_eq!(id, d as u64 + 1);
         }
 
         let data = log.read(base_offset, 5);
-        match data {
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => (),
-            _ => panic!("Expecting end of file error"),
-        };
-    }
-
-    /*
-    #[test]
-    fn multi_segment_reads_work_as_expected() {
-        // 100K bytes
-        let record_count = 100;
-        let record_size = 1 * 1024;
-
-        // 10 records per segment. 10 segments (0.segment - 90.segment)
-        let max_segment_size = 10 * 1024;
-        let mut log = Log::new(max_segment_size, 100).unwrap();
-
-        // 100 1K iterations. 10 files ignoring deletes.
-        // 0.segment (data with 0 - 9), 10.segment (10 - 19) .... 90.segment (90..99)
-        // 10K per file
-        let mut payload = vec![0u8; record_size];
-        for i in 0..record_count {
-            payload[0] = i as u8;
-            let payload = Bytes::from(payload.clone());
-            log.append(payload).unwrap();
-        }
-
-        // Read all the segments
-        let base_offset = 0;
-        for i in 0..10 {
-            let (id, data) = log.read(base_offset, i).unwrap();
-            let d = (base_offset + i) as u8;
-            assert_eq!(data[0], d);
-            assert_eq!(id, d as u64 + 1);
-        }
+        assert!(data.is_none());
     }
 
     #[test]
     fn vectored_read_works_as_expected() {
-        let mut log = Log::new(10 * 1024, 10).unwrap();
+        let mut log = Log::new(10 * 1024, 10);
 
         // 90 1K iterations. 10 files ignoring deletes.
-        // 0.segment (data with 0 - 9), 10.segment (10 - 19) .... 90.segment (0 size)
-        // 10K per file
-        let mut payload = vec![0u8; 1024];
+        // 0.segment (data with 0 - 9), 10.segment (10 - 19) .... 80.segment (80 - 89)
+        // 10K per segment = 10 records per segment
         for i in 0..90 {
-            payload[0] = i;
-            let payload = Bytes::from(payload.clone());
-            log.append(payload).unwrap();
+            let payload = vec![i; 1024];
+            let payload = Bytes::from(payload);
+            log.append(payload);
         }
 
-        // Read 50K. Reads 0.segment - 4.segment
-        let (done, segment, offset, total_size, ids, _data) = log.readv(0, 0, 50 * 1024).unwrap();
-        assert_eq!(segment, 40);
-        assert_eq!(offset, 9);
-        assert_eq!(ids.len(), 50);
-        for i in 0..ids.len() {
-            assert_eq!(i as u64 + 1, ids[i]);
-        }
-        assert_eq!(done, false);
-        assert_eq!(total_size, 50 * 1024);
+        let (done, base_offset, last_offset, data) = log.readv(0, 0);
+        assert_eq!(base_offset, 0);
+        assert_eq!(last_offset, 9);
+        assert_eq!(data[base_offset as usize][0], 0);
+        assert_eq!(data[last_offset as usize][0], 9);
+        assert_eq!(done, true);
 
         // Read 50.segment offset 0
-        let (id, data) = log.read(50, 0).unwrap();
+        let data = log.read(50, 0).unwrap();
         assert_eq!(data[0], 50);
-        assert_eq!(id, 51);
     }
 
     #[test]
     fn vectored_reads_crosses_boundary_correctly() {
-        let mut log = Log::new(10 * 1024, 10).unwrap();
+        let mut log = Log::new(10 * 1024, 10);
 
-        // 25 1K iterations. 3 segments
-        // 0.segment (10K, data with 0 - 9), 10.segment (5K, data with 10 - 14)
-        let mut payload = vec![0u8; 1024];
-        for i in 0..25 {
-            payload[0] = i;
-            let payload = Bytes::from(payload.clone());
-            log.append(payload).unwrap();
+        // 200 1K iterations. 10 1K records per file. 20 files ignoring deletes.
+        // segments: 0.segment, 10.segment .... 190.segment
+        // considering deletes: 100.segment .. 190.segment
+        for i in 0..200 {
+            let payload = vec![i; 1024];
+            let payload = Bytes::from(payload);
+            log.append(payload);
         }
 
         // Read 15K. Crosses boundaries of the segment and offset will be in the middle of 2nd segment
-        let (done, segment, offset, total_size, ids, _data) = log.readv(0, 0, 15 * 1024).unwrap();
-        assert_eq!(segment, 10);
-        assert_eq!(offset, 4);
-        assert_eq!(ids.len(), 15);
-        for i in 0..ids.len() {
-            assert_eq!(i as u64 + 1, ids[i])
-        }
-        assert_eq!(done, false);
-        assert_eq!(total_size, 15 * 1024);
-
-        // Read 15K. Crosses boundaries of the segment and offset will be at last record of 3rd segment
-        let (done, segment, offset, total_size, ids, _data) =
-            log.readv(segment, offset + 1, 15 * 1024).unwrap();
-        assert_eq!(segment, 20);
-        assert_eq!(offset, 4);
-        assert_eq!(ids.len(), 10);
-        for i in 0..ids.len() {
-            let id = i + 15;
-            assert_eq!(id as u64 + 1, ids[i])
-        }
+        let (done, segment, offset, _data) = log.readv(0, 0);
+        assert_eq!(segment, 100);
+        assert_eq!(offset, 109);
         assert_eq!(done, true);
-        assert_eq!(total_size, 10 * 1024);
     }
 
     #[test]
-    fn vectored_read_more_than_full_chomp_works_as_expected() {
-        let mut log = Log::new(10 * 1024, 10).unwrap();
+    fn vectored_reads_from_active_segment_works_as_expected() {
+        let mut log = Log::new(10 * 1024, 10);
 
-        // 90 1K iterations. 10 files
-        // 0.segment (data with 0 - 9), 10.segment (10 - 19) .... 80.segment
-        // 10K per file. 90K in total
-        let mut payload = vec![0u8; 1024];
-        for i in 0..90 {
-            payload[0] = i;
-            let payload = Bytes::from(payload.clone());
-            log.append(payload).unwrap();
+        // 200 1K iterations. 10 1K records per file. 20 files ignoring deletes.
+        // segments: 0.segment, 10.segment .... 190.segment
+        // considering deletes: 100.segment .. 190.segment
+        for i in 0..200 {
+            let payload = vec![i; 1024];
+            let payload = Bytes::from(payload);
+            log.append(payload);
         }
 
-        // Read 200K. Crosses boundaries of all the segments
-        let (done, segment, offset, total_size, ids, _data) = log.readv(0, 0, 200 * 1024).unwrap();
-        assert_eq!(segment, 80);
-        assert_eq!(offset, 9);
-        assert_eq!(ids.len(), 90);
-        for i in 0..ids.len() {
-            assert_eq!(i as u64 + 1, ids[i])
-        }
-        assert_eq!(done, true);
-        assert_eq!(total_size, 90 * 1024);
+        // read active segment
+        let (done, segment, offset, data) = log.readv(190, 190);
+        assert_eq!(data.len(), 10);
+        assert_eq!(segment, 190);
+        assert_eq!(offset, 199);
+        assert_eq!(done, false);
     }
-
-     */
 }

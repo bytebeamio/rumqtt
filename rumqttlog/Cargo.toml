@@ -20,6 +20,7 @@ indexmap = "1"
 thiserror = "1"
 log = "0.4"
 intmap = "0.7"
+fnv = "1"
 
 [dev-dependencies]
 argh = "0.1"
