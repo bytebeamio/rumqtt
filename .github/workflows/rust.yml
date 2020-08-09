@@ -3,9 +3,9 @@ on: [push, pull_request]
 name: workflow
 
 jobs:
-  linux_build_and_test:
+  test:
     name: rumqtt
-    runs-on: [self-hosted, linux, X64, cicd]
+    runs-on: [self-hosted, linux, X64, rumqtt]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -15,5 +15,6 @@ jobs:
         with:
           command: build
           args: --release --all-features
+
 
 
