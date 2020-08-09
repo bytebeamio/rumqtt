@@ -16,5 +16,18 @@ jobs:
           command: build
           args: --release --all-features
 
+  deploy:
+    name: docker
+    runs-on: [self-hosted, linux, X64, rumqtt]
+    defaults:
+      run:
+        working-directory: docker
+    steps:
+      run: docker stop rumqttd || true 
+      run: ./build.sh
+      run: docker run -d -p 1883:1883 --name rumqttd rumqttd
+
+
+
 
 
