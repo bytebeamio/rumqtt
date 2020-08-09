@@ -196,31 +196,39 @@ impl Router {
 
             let Publish { pkid, topic, payload, qos, .. } = publish;
 
-            if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
-                // Store packet ids with offset mapping for QoS > 0
-                if qos as u8 > 0 {
-                    let watermarks = match self.watermarks.get_mut(&topic) {
-                        Some(w) => w,
-                        None => {
-                            let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
-                            let watermarks = Watermarks::new(&topic, replication_count);
-                            self.watermarks.insert(topic.clone(), watermarks);
-                            self.watermarks.get_mut(&topic).unwrap()
-                        },
-                    };
+            let is_new_topic = match self.append_to_commitlog(id, &topic, payload) {
+                Some((is_new_topic, offset)) => {
+                    // Store packet ids with offset mapping for QoS > 0
+                    if qos as u8 > 0 {
+                        let watermarks = match self.watermarks.get_mut(&topic) {
+                            Some(w) => w,
+                            None => {
+                                let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
+                                let watermarks = Watermarks::new(&topic, replication_count);
+                                self.watermarks.insert(topic.clone(), watermarks);
+                                self.watermarks.get_mut(&topic).unwrap()
+                            },
+                        };
 
-                    watermarks.update_pkid_offset_map(id, pkid, offset);
+                        watermarks.update_pkid_offset_map(id, pkid, offset);
+                    }
+
+                    is_new_topic
                 }
-            }
+                None => continue
+            };
 
 
-            // If there is a new unique append, send it to connection/linker waiting
-            // on it. This is equivalent to hybrid of block and poll and we don't need
-            // timers. Connections/Replicator will make a request and request fails as
-            // there is no new data. Router caches the failed request on the topic.
-            // If there is new data on this topic, router fulfills the last failed request.
-            // This completely eliminates the need of polling
-            if self.topiclog.unique_append(&topic) {
+            // If there is a new unique append, send it to connection waiting on it
+            // This is equivalent to hybrid of block and poll and we don't need timers.
+            // Connections/Replicator will make a request and request might fail as
+            // there are no new topic publishes. Router caches the failed request on the topic.
+            // If there is new topic, router fulfills the last failed request.
+            // Note that the above commitlog append distinguishes `is_new_topic` by connection's
+            // commitlog (i.e native or replica commitlog). So there is a chance that topic log
+            // has duplicate topics. Tracker filters these duplicates though
+            if is_new_topic {
+                self.topiclog.append(&topic);
                 self.fresh_topics_notification(id);
             }
 
@@ -237,13 +245,16 @@ impl Router {
         trace!("{:08} {:14} Id = {}, Count = {}", "data", "replicacommit", id, data.len());
         for data in data {
             let ReplicationData { pkid, topic, payload, .. } = data;
+            let mut is_new_topic = false;
             for payload in payload {
                 if payload.len() == 0 {
                     error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
                     return;
                 }
 
-                self.append_to_commitlog(id, &topic, payload);
+                if let Some((new_topic, _)) = self.append_to_commitlog(id, &topic, payload) {
+                    is_new_topic = new_topic;
+                }
             }
 
             // TODO: Is this necessary for replicated data
@@ -259,13 +270,8 @@ impl Router {
             // we can ignore offset mapping for replicated data
             watermarks.update_pkid_offset_map(id, pkid, 0);
 
-            // If there is a new unique append, send it to connection/linker waiting
-            // on it. This is equivalent to hybrid of block and poll and we don't need
-            // timers. Connections/Replicator will make a request and request fails as
-            // there is no new data. Router caches the failed request on the topic.
-            // If there is new data on this topic, router fulfills the last failed request.
-            // This completely eliminates the need of polling
-            if self.topiclog.unique_append(&topic) {
+            if is_new_topic {
+                self.topiclog.append(&topic);
                 self.fresh_topics_notification(id);
             }
 
@@ -494,12 +500,12 @@ impl Router {
     /// Connections pull logs from both replication and connections where as replicator
     /// only pull logs from connections.
     /// Data from replicator and data from connection are separated for this reason
-    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<u64> {
+    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<(bool, u64)> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
             match self.commitlog[id].append(&topic, bytes) {
-                Ok(offset) => Some(offset),
+                Ok(v) => Some(v),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
                     None
@@ -507,7 +513,7 @@ impl Router {
             }
         } else {
             match self.commitlog[self.id].append(&topic, bytes) {
-                Ok(offset) => Some(offset),
+                Ok(v) => Some(v),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
                     None

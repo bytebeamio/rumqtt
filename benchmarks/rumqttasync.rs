@@ -14,9 +14,9 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[tokio::main(core_threads = 2)]
 async fn main() {
     // pretty_env_logger::init();
-    // let guard = pprof::ProfilerGuard::new(100).unwrap();
+    let guard = pprof::ProfilerGuard::new(100).unwrap();
     start("rumqtt-async", 100, 1_000_000).await.unwrap();
-    // common::profile("bench.pb", guard);
+    common::profile("bench.pb", guard);
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {

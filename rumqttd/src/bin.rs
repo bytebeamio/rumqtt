@@ -22,7 +22,7 @@ struct Config {
 /// Command line args for rumqttd
 struct CommandLine {
     /// path to config file
-    #[argh(option, short = 'c', default = "PathBuf::from(\"rumqttd.conf\")")]
+    #[argh(option, short = 'c', default = "PathBuf::from(\"config/rumqttd.conf\")")]
     config: PathBuf,
 }
 
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     ctrlc::set_handler(move || {
-        profile("rumqttd2.pb", &guard);
+        profile("rumqttd.pb", &guard);
         exit(0);
     }).expect("Error setting Ctrl-C handler");
 

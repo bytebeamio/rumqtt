@@ -19,18 +19,20 @@ impl CommitLog {
         }
     }
 
-    pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<u64> {
+    /// Appends the record to correct commitlog and returns a boolean to indicate
+    /// if this topic is new along with the offset of append
+    pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<(bool, u64)> {
         // Entry instead of if/else?
         if let Some(log) = self.logs.get_mut(topic) {
             let offset = log.append(record);
-            Ok(offset)
+            Ok((false, offset))
         } else {
             let max_segment_size = self.config.max_segment_size;
             let max_segment_count = self.config.max_segment_count;
             let mut log = Log::new(max_segment_size, max_segment_count);
             let offset = log.append(record);
             self.logs.insert(topic.to_owned(), log);
-            Ok(offset)
+            Ok((true, offset))
         }
     }
 
@@ -71,15 +73,8 @@ impl TopicLog {
     }
 
     /// Appends the topic if the topic isn't already seen
-    pub fn unique_append(&mut self, topic: &str) -> bool {
-        let mut append = false;
-        if !self.unique.contains(topic) {
-            self.topics.push(topic.to_owned());
-            append = true;
-        }
-
-        self.unique.insert(topic.to_owned());
-        append
+    pub fn append(&mut self, topic: &str) {
+        self.topics.push(topic.to_owned());
     }
 
     /// read n topics from a give offset along with offset of the last read topic
