@@ -1,6 +1,9 @@
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - master
 
-name: workflow
+name: master
 
 jobs:
   test:
@@ -13,11 +16,11 @@ jobs:
           toolchain: stable
       - uses: actions-rs/cargo@v1
         with:
-          command: build
+          command: test
           args: --release --all-features
 
   deploy:
-    name: docker
+    name: docker build and deploy
     needs: test
     runs-on: [self-hosted, linux, X64, rumqtt]
     defaults:
