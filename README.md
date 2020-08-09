@@ -1,4 +1,4 @@
-# rumq 
+# rumqtt 
 [![img](https://github.com/tekjar/rumq/workflows/CI/badge.svg)](https://github.com/tekjar/rumq/actions)
 [![img](https://img.shields.io/discord/633193308033646605?style=flat)](https://discord.gg/mpkSqDg)
 

@@ -1,6 +1,7 @@
 extern crate bytes;
 
 mod commitlog;
+mod watermarks;
 mod router;
 
 pub use router::Router;
@@ -20,6 +21,8 @@ pub enum RouterInMessage {
     ConnectionData(Vec<Publish>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
+    /// Replication acks
+    ReplicationAcks(Vec<ReplicationAck>),
     /// Data request
     DataRequest(DataRequest),
     /// Topics request
@@ -68,15 +71,23 @@ impl ReplicationData {
     }
 }
 
-/// Acknowledgement after data is written to commitlog
-/// Router sends this to connection for connection to maintain
-/// mapping between packet id and router assigned id
+/// Replication connection frames this after receiving an ack from other replica
+/// This is used by router to update watermarks, which is used to send acks
+/// for replicated data
 #[derive(Debug)]
-pub struct DataAck {
-    /// Packet id that connection received
-    pub pkid: u64,
+pub struct ReplicationAck {
+    pub topic: String,
     /// Packet id that router assigned
     pub offset: u64,
+}
+
+impl ReplicationAck {
+    pub fn new(topic: String, offset: u64) -> ReplicationAck {
+        ReplicationAck {
+            topic,
+            offset
+        }
+    }
 }
 
 /// Request that connection/linker makes to extract data from commitlog

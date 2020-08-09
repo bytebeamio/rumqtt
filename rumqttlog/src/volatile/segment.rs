@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use std::io;
 
 /// Segment of a storage. Writes go through a buffer writers to
 /// reduce number of system calls. Reads are directly read from
@@ -7,75 +6,55 @@ use std::io;
 /// Also multiple readers might be operating on a given segment
 /// which makes the cursor movement very dynamic
 pub struct Segment {
-    _base_offset: u64,
+    base_offset: u64,
+    size: usize,
     pub(crate) file: Vec<Bytes>,
-    size: u64,
-    next_offset: u64,
-    max_record_size: u64,
 }
 
 impl Segment {
-    pub fn new(base_offset: u64) -> io::Result<Segment> {
+    pub fn new(base_offset: u64) -> Segment {
         let file = Vec::with_capacity(10000);
 
-        let segment = Segment {
-            _base_offset: base_offset,
+        Segment {
+            base_offset,
             file,
             size: 0,
-            next_offset: 0,
-            max_record_size: 10 * 1024,
-        };
-
-        Ok(segment)
+        }
     }
 
-    pub fn size(&self) -> u64 {
+    pub fn base_offset(&self) -> u64 {
+        self.base_offset
+    }
+
+    pub fn size(&self) -> usize {
         self.size
     }
 
-    /// Appends record to the file and return its offset
-    pub fn append(&mut self, record: Bytes) -> io::Result<(u64, u64)> {
-        let record_size = record.len() as u64;
-        if record_size > self.max_record_size {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Max record size exceeded",
-            ));
-        }
+    pub fn len(&self) -> usize {
+        self.file.len()
+    }
 
-        // append record and increment size. cursor is moved to the end as per the docs
-        // so we probably don't have to worry about reading and writing simultaneously
+    /// Appends record to the file and return its offset
+    pub fn append(&mut self, record: Bytes) -> u64 {
         let len = record.len();
         self.file.push(record);
-        let position = self.size;
-        self.size += len as u64;
+
+        self.size += len;
 
         // return current offset after incrementing next offset
-        let offset = self.next_offset;
-        self.next_offset += 1;
-
-        Ok((offset, position))
+        self.base_offset + self.file.len() as u64
     }
 
-    /// Reads to fill the complete buffer. Returns number of bytes read
-    pub fn read(&mut self, offset: u64) -> Bytes {
-        self.file.get(offset as usize).unwrap().clone()
-    }
-
-    /// Reads to fill the complete buffer. Returns number of bytes read
-    pub fn readv(&mut self, offset: u64, count: u64) -> Vec<Bytes> {
-        let mut out = Vec::with_capacity(100);
-        // TODO Return total size
-        // let mut current_size = 0;
-
-        let start = offset as usize;
-        let end = start + count as usize;
-        for d in self.file[start..end].iter() {
-            // dbg!(d);
-            out.push(d.clone());
-            // current_size += d.len();
+    /// Reads to fill the complete buffer. Returns number of bytes reamodd
+    pub fn read(&mut self, offset: usize) -> Option<Bytes> {
+        match self.file.get(offset) {
+            Some(record) => Some(record.clone()),
+            None => None
         }
+    }
 
-        out
+    /// Reads multiple data from a segment
+    pub fn readv(&self, offset: usize) -> Vec<Bytes> {
+        self.file[offset..].to_vec()
     }
 }

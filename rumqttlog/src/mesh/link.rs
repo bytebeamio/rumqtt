@@ -1,18 +1,20 @@
-use thiserror::Error;
-
 use std::io;
 
 use crate::tracker::Tracker;
-use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
 use crate::mesh::ConnectionId;
 use crate::{RouterInMessage, Connection, RouterOutMessage};
 use crate::router::ConnectionType;
-use rumqttc::{Connect, Incoming, Network, MqttState, PubAck, Request, Publish, QoS, StateError};
+use crate::router::ReplicationData;
+use crate::mesh::state::{State, StateError};
+use crate::router::ReplicationAck;
+
+use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
+use rumqttc::{Connect, Incoming, Network, PubAck, Request, Publish, QoS};
 use tokio::net::TcpStream;
 use tokio::{time, select};
 use std::time::Duration;
 use bytes::{BytesMut, BufMut, Buf};
-use crate::router::ReplicationData;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -38,7 +40,7 @@ pub struct Replicator {
     /// Connections receiver in server mode
     connections_rx: Receiver<Network>,
     /// State of this connection
-    state: MqttState,
+    state: State,
     /// Remote address to connect to. Used in client mode
     remote: String,
     /// Max inflight
@@ -58,8 +60,8 @@ impl Replicator {
         connections_rx: Receiver<Network>,
         remote: String
     ) -> Replicator {
-        // Register this link with router even though there is no network connection with other router yet.
-        // Actual connection will be requested in `start`
+        // Register this link with router even though there is no network connection
+        // with other router yet. Actual connection will be requested in `start`
         info!("Initializing link {} <-> {}. Remote = {:?}", local_id, remote_id, remote);
         let max_inflight = 100;
 
@@ -76,7 +78,7 @@ impl Replicator {
             router_tx,
             connections_rx,
             link_rx,
-            state: MqttState::new(max_inflight),
+            state: State::new(max_inflight),
             remote,
             max_inflight,
             network
@@ -85,10 +87,9 @@ impl Replicator {
 
     async fn handle_network_data(&mut self, incoming: Vec<Incoming>) -> Result<(), LinkError> {
         let mut data = Vec::new();
+        let mut acks = Vec::new();
 
-        for packet in incoming {
-            let (incoming, _) = self.state.handle_incoming_packet(packet)?;
-            let incoming = incoming.unwrap();
+        for incoming in incoming {
             match incoming {
                 Incoming::Publish(publish) => {
                     self.tracker.track_watermark(&publish.topic);
@@ -106,8 +107,13 @@ impl Replicator {
                 Incoming::PingReq => {
                     self.network.fill2(Request::PingResp)?;
                 }
-                Incoming::PubAck(_puback) => {
-                    // TODO Use this to update watermarks
+                Incoming::PingResp => {
+                    self.state.handle_incoming_pingresp()?;
+                }
+                Incoming::PubAck(puback) => {
+                    let (topic, offset) = self.state.handle_incoming_puback(puback)?;
+                    let ack = ReplicationAck::new(topic, offset);
+                    acks.push(ack);
                 }
                 packet => {
                     error!("Packet = {:?} not supported yet", packet);
@@ -117,6 +123,11 @@ impl Replicator {
 
         if !data.is_empty() {
             let message = RouterInMessage::ReplicationData(data);
+            self.router_tx.send((self.remote_id, message)).await?;
+        }
+
+        if !acks.is_empty() {
+            let message = RouterInMessage::ReplicationAcks(acks);
             self.router_tx.send((self.remote_id, message)).await?;
         }
         Ok(())
@@ -135,6 +146,7 @@ impl Replicator {
                 // TODO: Vectorize this
                 let payload_size = reply.size;
                 let payload_count = reply.payload.len();
+                let offset = reply.cursors[self.local_id].1;
                 let mut payload = BytesMut::with_capacity(payload_size + 4 * payload_count);
                 payload.put_u32(reply.payload.len() as u32);
                 // length encode vec<bytes>
@@ -145,8 +157,7 @@ impl Replicator {
 
 
                 let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, payload.freeze());
-                let publish = Request::Publish(publish);
-                let publish = self.state.handle_outgoing_packet(publish)?;
+                let publish = self.state.handle_outgoing_publish(offset, publish)?;
                 self.network.fill2(publish)?;
             }
 

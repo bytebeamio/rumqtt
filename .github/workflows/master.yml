@@ -1,0 +1,36 @@
+on:
+  push:
+    branches:
+      - master
+
+name: master
+
+jobs:
+  test:
+    name: rumqtt
+    runs-on: [self-hosted, linux, X64, rumqtt]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --all-features
+
+  deploy:
+    name: docker build and deploy
+    needs: test
+    runs-on: [self-hosted, linux, X64, rumqtt]
+    defaults:
+      run:
+        working-directory: docker
+    steps:
+      - run: ./build.sh
+      - run: docker run -d -p 1883:1883 --name rumqttd rumqttd
+
+
+
+
+

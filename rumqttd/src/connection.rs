@@ -112,7 +112,7 @@ impl Link {
             }
             RouterOutMessage::AcksReply(reply) => {
                 self.tracker.update_watermarks_tracker(&reply);
-                for ack in reply.pkids {
+                for ack in reply.pkids.into_iter().rev() {
                     let ack = PubAck::new(ack);
                     let ack = Request::PubAck(ack);
                     self.network.fill2(ack)?;
@@ -136,13 +136,6 @@ impl Link {
                 }
                 Incoming::Publish(publish) => {
                     self.tracker.track_watermark(&publish.topic);
-                    // ack immediately if enabled in config
-                    if self.config.instant_ack {
-                        let ack = PubAck::new(publish.pkid);
-                        let ack = Request::PubAck(ack);
-                        self.network.fill2(ack)?;
-                    }
-
                     // collect publishes from this batch
                     publishes.push(publish);
                 }

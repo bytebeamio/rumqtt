@@ -1,5 +1,5 @@
 use async_channel::{bounded, Receiver, Sender};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::{io, mem, thread};
 
 use super::bytes::Bytes;
@@ -7,12 +7,13 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection};
+use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
 
 use crate::{Config, ReplicationData};
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use rumqttc::{Publish, QoS};
+use rumqttc::Publish;
+use crate::router::watermarks::Watermarks;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -22,8 +23,6 @@ pub enum Error {
 
 type ConnectionId = usize;
 type Topic = String;
-type Offset = u64;
-type Pkid = u16;
 
 pub struct Router {
     /// Router configuration
@@ -107,6 +106,7 @@ impl Router {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::ConnectionData(data) => self.handle_connection_data(id, data),
                 RouterInMessage::ReplicationData(data) => self.handle_replication_data(id, data),
+                RouterInMessage::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::AcksRequest(request) => {
@@ -147,6 +147,7 @@ impl Router {
         let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
         if let Err(e) = connection.handle.try_send(message) {
             error!("Failed to send connection ack. Error = {:?}", e.to_string());
+            return
         }
 
         info!("New Connection. In ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
@@ -186,6 +187,7 @@ impl Router {
 
     /// Handles new incoming data on a topic
     fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Publish>) {
+        trace!("{:08} {:14} Id = {}, Count = {}", "data", "nativecommit", id, data.len());
         for publish in data {
             if publish.payload.len() == 0 {
                 error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
@@ -193,63 +195,74 @@ impl Router {
             }
 
             let Publish { pkid, topic, payload, qos, .. } = publish;
-            if let Some(offset) = self.append_to_commitlog(id, &topic, payload) {
-                // Store packet ids with offset mapping for QoS > 0
-                if qos == QoS::AtLeastOnce || qos == QoS::ExactlyOnce {
-                    let watermarks = match self.watermarks.get_mut(&topic) {
-                        Some(w) => w,
-                        None => {
-                            self.watermarks.insert(topic.clone(), Watermarks::new(0));
-                            self.watermarks.get_mut(&topic).unwrap()
-                        },
-                    };
 
-                    if !self.config.instant_ack {
+            let is_new_topic = match self.append_to_commitlog(id, &topic, payload) {
+                Some((is_new_topic, offset)) => {
+                    // Store packet ids with offset mapping for QoS > 0
+                    if qos as u8 > 0 {
+                        let watermarks = match self.watermarks.get_mut(&topic) {
+                            Some(w) => w,
+                            None => {
+                                let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
+                                let watermarks = Watermarks::new(&topic, replication_count);
+                                self.watermarks.insert(topic.clone(), watermarks);
+                                self.watermarks.get_mut(&topic).unwrap()
+                            },
+                        };
+
                         watermarks.update_pkid_offset_map(id, pkid, offset);
                     }
+
+                    is_new_topic
                 }
-            }
+                None => continue
+            };
 
 
-            // If there is a new unique append, send it to connection/linker waiting
-            // on it. This is equivalent to hybrid of block and poll and we don't need
-            // timers. Connections/Replicator will make a request and request fails as
-            // there is no new data. Router caches the failed request on the topic.
-            // If there is new data on this topic, router fulfills the last failed request.
-            // This completely eliminates the need of polling
-            if self.topiclog.unique_append(&topic) {
+            // If there is a new unique append, send it to connection waiting on it
+            // This is equivalent to hybrid of block and poll and we don't need timers.
+            // Connections/Replicator will make a request and request might fail as
+            // there are no new topic publishes. Router caches the failed request on the topic.
+            // If there is new topic, router fulfills the last failed request.
+            // Note that the above commitlog append distinguishes `is_new_topic` by connection's
+            // commitlog (i.e native or replica commitlog). So there is a chance that topic log
+            // has duplicate topics. Tracker filters these duplicates though
+            if is_new_topic {
+                self.topiclog.append(&topic);
                 self.fresh_topics_notification(id);
             }
 
-            // TODO We are notifying in the loop per id. When router does bulk `try_recv`
-            // we can probably handle multiple requests better
+            // Notify waiters on this topic of new data
             self.fresh_data_notification(id, &topic);
 
-            // After a bulk of publishes have been written to commitlog, if the replication factor
-            // of this topic is zero, it can be acked immediately if there is an AcksRequest already
-            // waiting. If we don't ack replication factor 0 acks here, these acks will be stuck
-            if !self.config.instant_ack {
-                self.fresh_acks_notification(&topic);
-            }
+            // Data from topics with replication factor = 0 should be acked immediately if there are
+            // waiters registered. We shouldn't rely on replication acks for data acks in this case
+            self.fresh_acks_notification(&topic);
         }
     }
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
+        trace!("{:08} {:14} Id = {}, Count = {}", "data", "replicacommit", id, data.len());
         for data in data {
             let ReplicationData { pkid, topic, payload, .. } = data;
+            let mut is_new_topic = false;
             for payload in payload {
                 if payload.len() == 0 {
                     error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
                     return;
                 }
 
-                self.append_to_commitlog(id, &topic, payload);
+                if let Some((new_topic, _)) = self.append_to_commitlog(id, &topic, payload) {
+                    is_new_topic = new_topic;
+                }
             }
 
+            // TODO: Is this necessary for replicated data
             let watermarks = match self.watermarks.get_mut(&topic) {
                 Some(w) => w,
                 None => {
-                    self.watermarks.insert(topic.clone(), Watermarks::new(0));
+                    let watermarks = Watermarks::new(&topic, 0);
+                    self.watermarks.insert(topic.clone(), watermarks);
                     self.watermarks.get_mut(&topic).unwrap()
                 },
             };
@@ -257,41 +270,51 @@ impl Router {
             // we can ignore offset mapping for replicated data
             watermarks.update_pkid_offset_map(id, pkid, 0);
 
-            // If there is a new unique append, send it to connection/linker waiting
-            // on it. This is equivalent to hybrid of block and poll and we don't need
-            // timers. Connections/Replicator will make a request and request fails as
-            // there is no new data. Router caches the failed request on the topic.
-            // If there is new data on this topic, router fulfills the last failed request.
-            // This completely eliminates the need of polling
-            if self.topiclog.unique_append(&topic) {
+            if is_new_topic {
+                self.topiclog.append(&topic);
                 self.fresh_topics_notification(id);
             }
 
             // we can probably handle multiple requests better
             self.fresh_data_notification(id, &topic);
+
+
+            // Replicated data should be acked immediately when there are pending requests
+            // in waiters
+            self.fresh_acks_notification(&topic);
+        }
+    }
+
+    fn handle_replication_acks(&mut self, id: ConnectionId, acks: Vec<ReplicationAck>) {
+        for ack in acks {
+            let watermarks = match self.watermarks.get_mut(&ack.topic) {
+                Some(w) => w,
+                None => continue
+            };
+
+            watermarks.update_cluster_offsets(id, ack.offset);
+            self.fresh_acks_notification(&ack.topic);
         }
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
+        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
         let reply = self.extract_topics(&request);
         let reply = match reply {
             Some(r) => r,
             None => {
+                // register the connection 'id' to notify when there are new topics
                 self.register_topics_waiter(id, request);
                 return
             },
         };
 
-        // register the connection 'id' to notify when there are new topics
-        if reply.topics.is_empty() {
-            self.register_topics_waiter(id, request);
-            return
-        }
-
+        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "response", id, reply.offset);
         self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
+        trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "request", request.topic, request.cursors);
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
@@ -314,27 +337,20 @@ impl Router {
             },
         };
 
-        // This connectionr/replicator is completely caught up with this topic.
-        // Add this connection/linker into waiters list of this topic.
-        // We don't send any response
-        // TODO: This check can probably be removed after verifying the flow
-        if reply.payload.is_empty() {
-            self.register_data_waiter(id, request);
-            return
-        }
-
+        trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "response", reply.topic, reply.cursors);
         let reply = RouterOutMessage::DataReply(reply);
         self.reply(id, reply);
     }
 
     pub fn handle_acks_request(&mut self, id: ConnectionId, request: AcksRequest) {
+        trace!("{:08} {:14} Id = {}, Topic = {}, Offset = {:?}", "acks", "request", id, request.topic, request.offset);
         // I don't think we'll need offset as next set of pkids will always be at head
         let reply = match self.watermarks.get_mut(&request.topic) {
             Some(watermarks) => {
-                // let caught_up = watermarks.cluster_offsets == request.offset;
                 let pkids = watermarks.acks(id);
-                let caught_up = pkids.is_empty();
-                if caught_up {
+
+                // Caught up. Register for notifications when we can ack more
+                if pkids.is_empty() {
                     self.register_acks_waiter(id, request);
                     return
                 } else {
@@ -351,30 +367,50 @@ impl Router {
             },
         };
 
+        trace!("{:08} {:14} Id = {}, Topic = {}, Offset = {:?}", "acks", "response", id, reply.topic, reply.offset);
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
     }
 
-    /// Updates replication watermarks
-    fn _update_cluster_offsets(&mut self, id: ConnectionId, request: &DataRequest) {
-        if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
-            watermarks.cluster_offsets.insert(id as usize, request.cursors[self.id].1);
-            self.fresh_acks_notification(&request.topic);
-        } else {
-            // Fresh topic only initialize with 0 offset. Updates during the next request
-            // Watermark 'n' implies data till n-1 is synced with the other node
-            self.watermarks.insert(request.topic.clone(), Watermarks::new(0));
+    fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
+        trace!("{:08} {:14} Id = {}", "topics", "register", id);
+        let request = (id.to_owned(), request);
+        self.topics_waiters.push(request);
+    }
+
+    /// Register data waiter
+    fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
+        trace!("{:08} {:14} Id = {}, Topic = {}", "data", "register", id, request.topic);
+        let topic = request.topic.clone();
+        let request = (id, request);
+
+        match self.data_waiters.get_mut(&topic) {
+            Some(waiters) => waiters.push(request),
+            None => {
+                let waiters = vec![request];
+                self.data_waiters.insert(topic, waiters);
+            }
+        }
+    }
+
+    fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
+        trace!("{:08} {:14} Id = {}, Topic = {}", "acks", "register", id, request.topic);
+        let topic = request.topic.clone();
+        match self.ack_waiters.get_mut(&request.topic) {
+            Some(waiters) => waiters.push((id, request)),
+            None => {
+                let waiters = vec![(id, request)];
+                self.ack_waiters.insert(topic, waiters);
+            }
         }
     }
 
     /// Send notifications to links which registered them
     fn fresh_topics_notification(&mut self, id: ConnectionId) {
-        // TODO too many indirection to get a link to the handle, probably directly
-        // TODO clone a handle to the link and save it instead of saving ids?
         let waiters = mem::replace(&mut self.topics_waiters, Vec::new());
         let replication_data = id < 10;
         for (link_id, request) in waiters {
-            // don't send replicated topic notifications to replication link
+            // Don't send replicated topic notifications to replication link
             // id 0-10 are reserved for replicators which are linked to other routers in the mesh
             if replication_data && link_id < 10 {
                 continue;
@@ -382,8 +418,8 @@ impl Router {
 
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request).unwrap();
-            debug!("Sending new topics {:?} notification to id = {}", reply.topics, link_id);
 
+            trace!("{:08} {:14} Id = {}, Topics = {:?}", "topics", "notification", link_id, reply.topics);
             let reply = RouterOutMessage::TopicsReply(reply);
             self.reply(link_id, reply);
 
@@ -419,6 +455,7 @@ impl Router {
                 },
             };
 
+            trace!("{:08} {:14} Id = {}, Topic = {}", "data", "notification", link_id, reply.topic);
             let reply = RouterOutMessage::DataReply(reply);
             self.reply(link_id, reply);
 
@@ -453,6 +490,7 @@ impl Router {
                     offset: 100,
                 };
 
+                trace!("{:08} {:14} Id = {}, Topic = {}", "acks", "notification", link_id, reply.topic);
                 let reply = RouterOutMessage::AcksReply(reply);
                 self.reply(link_id, reply);
             }
@@ -462,22 +500,20 @@ impl Router {
     /// Connections pull logs from both replication and connections where as replicator
     /// only pull logs from connections.
     /// Data from replicator and data from connection are separated for this reason
-    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<u64> {
+    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<(bool, u64)> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
-            debug!("Receiving replication data from {}, topic = {}", id, topic);
             match self.commitlog[id].append(&topic, bytes) {
-                Ok(offset) => Some(offset),
+                Ok(v) => Some(v),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
                     None
                 }
             }
         } else {
-            debug!("Receiving data from connection {}, topic = {}", id, topic);
             match self.commitlog[self.id].append(&topic, bytes) {
-                Ok(offset) => Some(offset),
+                Ok(v) => Some(v),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
                     None
@@ -487,39 +523,40 @@ impl Router {
         }
     }
 
+    /// Extracts topics from topics commitlog.Returns None if the log is caught up
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
         match self.topiclog.readv(request.offset, request.count) {
-            Some(o) => {
-                let reply = TopicsReply {
-                    offset: o.0,
-                    topics: o.1,
-                };
-
-                Some(reply)
-            }
+            Some((_, topics)) if topics.is_empty() => None,
+            Some((offset, topics)) => Some(TopicsReply { offset, topics, }),
             None => None,
         }
     }
 
+    /// Extracts data from native log. Returns None in case the
+    /// log is caught up or encountered an error while reading data
     fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let (segment, offset) = request.cursors[self.id];
-        let size = request.max_size;
 
         debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
-        match self.commitlog[self.id].readv(topic, segment, offset, size) {
-            Ok(Some(v)) => {
-                // copy and update native commitlog's offsets
-                let mut cursors = request.cursors;
-                cursors[self.id] = (v.1, v.2 + 1);
+        let mut reply = DataReply {
+            topic: request.topic.clone(),
+            cursors: request.cursors,
+            size: 0,
+            payload: Vec::new()
+        };
 
-                let reply = DataReply {
-                    topic: request.topic.clone(),
-                    cursors,
-                    size: v.3,
-                    payload: v.5,
-                };
+        match self.commitlog[self.id].readv(topic, segment, offset) {
+            Ok(Some((done, base_offset, record_offset, payload))) => {
+                // Update reply's cursors only when read has returned some data
+                // Move the reply to next segment if we are done with the current one
+                if payload.is_empty() { return None }
+                match done {
+                    true => reply.cursors[self.id] = (base_offset + 1, base_offset + 1),
+                    false => reply.cursors[self.id] = (base_offset, record_offset),
+                }
 
+                reply.payload = payload;
                 Some(reply)
             }
             Ok(None) => None,
@@ -530,6 +567,8 @@ impl Router {
         }
     }
 
+    /// Extracts data from native and replicated logs. Returns None in case the
+    /// log is caught up or encountered an error while reading data
     fn extract_all_data(&mut self, request: &DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
 
@@ -541,18 +580,20 @@ impl Router {
             payload: Vec::new()
         };
 
+        // Iterate through native and replica commitlogs to collect data (of a topic)
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
             let (segment, offset) = request.cursors[i];
-            match commitlog.readv(topic, segment, offset, request.max_size) {
-                Ok(Some(mut v)) => {
-                    reply.cursors[i] = (v.1, v.2 + 1);
-                    reply.size += v.3;
-                    reply.payload.append(&mut v.5);
+            match commitlog.readv(topic, segment, offset) {
+                Ok(Some((done, base_offset, record_offset, mut payload))) => {
+                    if payload.is_empty() { continue }
+                    match done {
+                        true => reply.cursors[self.id] = (base_offset + 1, base_offset + 1),
+                        false => reply.cursors[self.id] = (base_offset, record_offset + 1),
+                    }
 
+                    reply.payload.append(&mut payload);
                 }
-                Ok(None) => {
-                    debug!("Nothing more to extract from commitlog {}!!", i);
-                },
+                Ok(None) => continue,
                 Err(e) => {
                     error!("Failed to extract data from commitlog. Error = {:?}", e);
                 }
@@ -562,37 +603,6 @@ impl Router {
         match reply.payload.is_empty() {
             true => None,
             false => Some(reply)
-        }
-    }
-
-    fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
-        debug!("Registering connection {} for topic notifications", id);
-        let request = (id.to_owned(), request);
-        self.topics_waiters.push(request);
-    }
-
-    /// Register data waiter
-    fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
-        debug!("Registering id = {} for {} data notifications", id, request.topic);
-        let topic = request.topic.clone();
-        let request = (id, request);
-
-        if let Some(waiters) = self.data_waiters.get_mut(&topic) {
-            waiters.push(request);
-        } else {
-            let waiters = vec![request];
-            self.data_waiters.insert(topic, waiters);
-        }
-    }
-
-    fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
-        debug!("Registering id = {} for {} ack notifications", id, request.topic);
-        let topic = request.topic.clone();
-        if let Some(waiters) = self.ack_waiters.get_mut(&request.topic) {
-            waiters.push((id, request));
-        } else {
-            let waiters = vec![(id, request)];
-            self.ack_waiters.insert(topic, waiters);
         }
     }
 
@@ -613,59 +623,6 @@ impl Router {
     }
 }
 
-/// Watermarks for a given topic
-pub struct Watermarks {
-    replication: usize,
-    /// A map of packet ids and commitlog offsets for a given connection (identified by index)
-    pkid_offset_map: Vec<Option<(VecDeque<Pkid>, VecDeque<Offset>)>>,
-    /// Offset till which replication has happened (per mesh node)
-    cluster_offsets: Vec<Offset>
-}
-
-impl Watermarks {
-    pub fn new(replication: usize) -> Watermarks {
-        Watermarks {
-            replication,
-            pkid_offset_map: vec![None; 1000],
-            cluster_offsets: vec![0, 0, 0]
-        }
-    }
-
-    /*
-    pub fn update_cluster_offsets(&mut self, id: usize, offset: u64) {
-        if let Some(position) = self.cluster_offsets.get_mut(id) {
-            *position = offset
-        } else {
-            panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
-        }
-    }
-     */
-
-    pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
-        let is_replica = id < 10;
-        if self.replication == 0 || is_replica {
-            if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
-                let new_ids = (VecDeque::new(), VecDeque::new());
-                let (pkids, _offsets) = mem::replace(connection, new_ids);
-                return pkids
-            }
-        }
-
-        return VecDeque::new()
-    }
-
-    pub fn update_pkid_offset_map(&mut self, id: usize, pkid: u16, offset: u64) {
-        // connection ids which are greater than supported count should be rejected during
-        // connection itself. Crashing here is a bug
-        let connection = self.pkid_offset_map.get_mut(id).unwrap();
-        let map = connection.get_or_insert((VecDeque::new(), VecDeque::new()));
-        map.0.push_back(pkid);
-        // save offsets only if replication > 0
-        if self.replication > 0 {
-            map.1.push_back(offset);
-        }
-    }
-}
 
 #[cfg(test)]
 mod test {
