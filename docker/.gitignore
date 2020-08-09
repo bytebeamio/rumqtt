@@ -1,0 +1,3 @@
+# ignore everything except README in stage
+stage/*
+!stage/README.md
