@@ -1,6 +1,6 @@
 on:
   push:
-    braches-ignore:
+    branches-ignore:
       - master
   pull_request:
     branches:
