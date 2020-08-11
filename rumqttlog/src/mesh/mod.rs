@@ -64,7 +64,7 @@ impl Mesh {
         loop {
             let (stream, addr) = listener.accept().await.unwrap();
             debug!("Received a tcp connection from {}", addr);
-            let mut network = Network::new(stream);
+            let mut network = Network::new(stream, 10 * 1024);
             let id = match await_connect(&mut network).await {
                 Ok(id) => id,
                 Err(e) => {
