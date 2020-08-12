@@ -254,6 +254,8 @@ pub struct MqttOptions {
     tls_client_config: Option<Arc<ClientConfig>>,
 
     conn_timeout: u64,
+    /// MTU size, Default 1500 as this offers maximum throughput. https://community.cisco.com/t5/other-network-architecture/why-the-mtu-size-is-1500/m-p/105422/highlight/true#M35328
+    mtu_size: Option<usize>,
 }
 
 impl MqttOptions {
@@ -283,6 +285,7 @@ impl MqttOptions {
             key_type: Key::RSA,
             tls_client_config: None,
             conn_timeout: 5,
+            mtu_size: Some(1500),
         }
     }
 
@@ -491,6 +494,17 @@ impl MqttOptions {
     /// get timeout in secs
     pub fn timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// set mtu
+    pub fn set_mtu(&mut self, mtu: usize) -> &mut Self {
+        self.mtu_size = Some(mtu);
+        self
+    }
+
+    /// get mtu
+    pub fn get_mtu(&self) -> Option<usize> {
+        self.mtu_size
     }
 }
 

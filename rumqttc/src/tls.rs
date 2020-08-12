@@ -39,6 +39,8 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
         config.clone()
     } else {
         let mut config = ClientConfig::new();
+        // set mtu. If client config is provided by User, its their responsibilty
+        config.set_mtu(&options.get_mtu());
 
         // Add ca to root store if the connection is TLS
         // NOTE: Adding DER file isn't feasible as some of the chain information
