@@ -254,6 +254,8 @@ pub struct MqttOptions {
     tls_client_config: Option<Arc<ClientConfig>>,
 
     conn_timeout: u64,
+    /// mtu
+    mtu: Option<usize>,
 }
 
 impl MqttOptions {
@@ -283,6 +285,7 @@ impl MqttOptions {
             key_type: Key::RSA,
             tls_client_config: None,
             conn_timeout: 5,
+            mtu: Some(1500),
         }
     }
 
@@ -491,6 +494,17 @@ impl MqttOptions {
     /// get timeout in secs
     pub fn timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// set MTU. Perform a Ping test to determine most optimal MTU
+    pub fn set_mtu(&mut self, mtu: usize) -> &mut Self {
+        self.mtu = Some(mtu);
+        self
+    }
+
+    /// get mtu
+    pub fn get_mtu(&self) -> Option<usize> {
+        self.mtu
     }
 }
 
