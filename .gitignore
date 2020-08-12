@@ -15,4 +15,5 @@ Cargo.lock
 *.pb
 perf.data*
 utils/benchmark/benchmark
+utils/certgenerator/out
 cachegrind.out
