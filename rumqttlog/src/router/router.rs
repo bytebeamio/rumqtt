@@ -313,15 +313,15 @@ impl Router {
         self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
-    fn handle_data_request(&mut self, id: ConnectionId, request: DataRequest) {
+    fn handle_data_request(&mut self, id: ConnectionId, mut request: DataRequest) {
         trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "request", request.topic, request.cursors);
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
         let reply = if id < 10 {
-            self.extract_connection_data(&request)
+            self.extract_connection_data(&mut request)
         } else {
-            self.extract_all_data(&request)
+            self.extract_all_data(&mut request)
         };
 
         // If extraction fails due to some error/topic doesn't exist yet, reply with empty response.
@@ -439,17 +439,17 @@ impl Router {
         };
 
         let replication_data = id < 10;
-        for (link_id, request) in waiters {
+        for (link_id, mut request) in waiters {
             let reply = match link_id {
                 // don't extract new replicated data for replication links
                 0..=9 if replication_data => continue,
                 // extract new native data to be sent to replication link
-                0..=9 => match self.extract_connection_data(&request) {
+                0..=9 => match self.extract_connection_data(&mut request) {
                     Some(reply) => reply,
                     None => continue,
                 },
                 // extract all data to be sent to connection link
-                _ => match self.extract_all_data(&request) {
+                _ => match self.extract_all_data(&mut request) {
                     Some(reply) => reply,
                     None => continue,
                 },
@@ -534,26 +534,43 @@ impl Router {
 
     /// Extracts data from native log. Returns None in case the
     /// log is caught up or encountered an error while reading data
-    fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
+    fn extract_connection_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
+        let native_id = self.id;
         let topic = &request.topic;
-        let (segment, offset) = request.cursors[self.id];
+        let commitlog = &mut self.commitlog[native_id];
 
+        let cursors = match request.cursors {
+            Some(cursors) => cursors,
+            None => {
+                let (base_offset, record_offset)  = match commitlog.last_offset(topic) {
+                    Some(v) => v,
+                    None => return None
+                };
+
+                let mut cursors = [(0, 0); 3];
+                cursors[native_id] = (base_offset, record_offset + 1);
+                request.cursors = Some(cursors);
+                return None
+            }
+        };
+
+        let (segment, offset) = cursors[native_id];
         debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
         let mut reply = DataReply {
             topic: request.topic.clone(),
-            cursors: request.cursors,
+            cursors,
             size: 0,
             payload: Vec::new()
         };
 
-        match self.commitlog[self.id].readv(topic, segment, offset) {
+        match commitlog.readv(topic, segment, offset) {
             Ok(Some((done, base_offset, record_offset, payload))) => {
                 // Update reply's cursors only when read has returned some data
                 // Move the reply to next segment if we are done with the current one
                 if payload.is_empty() { return None }
                 match done {
-                    true => reply.cursors[self.id] = (base_offset + 1, base_offset + 1),
-                    false => reply.cursors[self.id] = (base_offset, record_offset),
+                    true => reply.cursors[native_id] = (base_offset + 1, base_offset + 1),
+                    false => reply.cursors[native_id] = (base_offset, record_offset + 1),
                 }
 
                 reply.payload = payload;
@@ -569,29 +586,39 @@ impl Router {
 
     /// Extracts data from native and replicated logs. Returns None in case the
     /// log is caught up or encountered an error while reading data
-    fn extract_all_data(&mut self, request: &DataRequest) -> Option<DataReply> {
+    fn extract_all_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
 
         debug!("Pull data. Topic = {}, cursors = {:?}", topic, request.cursors);
-        let mut reply = DataReply {
-            topic: request.topic.clone(),
-            cursors: request.cursors,
-            size: 0,
-            payload: Vec::new()
-        };
+
+        let mut cursors = [(0, 0); 3];
+        let mut payload = Vec::new();
 
         // Iterate through native and replica commitlogs to collect data (of a topic)
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
-            let (segment, offset) = request.cursors[i];
+            let (segment, offset) = match request.cursors {
+                Some(cursors) => cursors[i],
+                None => {
+                    let (base_offset, record_offset)  = match commitlog.last_offset(topic) {
+                        Some(v) => v,
+                        None => return None
+                    };
+
+                    cursors[i] = (base_offset, record_offset + 1);
+                    continue
+                }
+            };
+
+
             match commitlog.readv(topic, segment, offset) {
-                Ok(Some((done, base_offset, record_offset, mut payload))) => {
-                    if payload.is_empty() { continue }
+                Ok(Some((done, base_offset, record_offset, mut data))) => {
+                    if data.is_empty() { continue }
                     match done {
-                        true => reply.cursors[self.id] = (base_offset + 1, base_offset + 1),
-                        false => reply.cursors[self.id] = (base_offset, record_offset + 1),
+                        true => cursors[i] = (base_offset + 1, base_offset + 1),
+                        false => cursors[i] = (base_offset, record_offset + 1),
                     }
 
-                    reply.payload.append(&mut payload);
+                    payload.append(&mut data);
                 }
                 Ok(None) => continue,
                 Err(e) => {
@@ -600,9 +627,19 @@ impl Router {
             }
         }
 
-        match reply.payload.is_empty() {
-            true => None,
-            false => Some(reply)
+        match payload.is_empty() {
+            true => {
+                request.cursors = Some(cursors);
+                None
+            },
+            false => {
+                Some(DataReply {
+                    topic: request.topic.clone(),
+                    cursors,
+                    size: 0,
+                    payload
+                })
+            }
         }
     }
 
