@@ -36,15 +36,6 @@ impl CommitLog {
         }
     }
 
-    pub fn last_offset(&mut self, topic: &str) -> Option<(u64, u64)> {
-        let log = match self.logs.get_mut(topic) {
-            Some(log) => log,
-            None => return None
-        };
-
-        Some(log.last_offset())
-    }
-
     pub fn readv(
         &mut self,
         topic: &str,
