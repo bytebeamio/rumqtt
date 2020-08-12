@@ -13,13 +13,11 @@ use mqtt4bytes::{has_wildcards, matches};
 /// (active, inactive)
 #[derive(Debug)]
 pub struct Tracker {
-    // TODO Replace this with vec later and use only pop?
-    /// List of topics that we are tracking for data
-    data_tracker: VecDeque<DataRequest>,
-    /// List of topics that we are tracking for watermark
-    watermarks_tracker: VecDeque<AcksRequest>,
-    /// List of topics that we are tracking for watermark
-    topics_tracker: Option<TopicsRequest>,
+    /// A ring buffer which tracks
+    /// new topics: TopicsRequest
+    /// data for a given topic: DataRequest
+    /// acks for incoming publishes: AcksRequest
+    tracker: VecDeque<RouterInMessage>,
     /// List of topics that are being tracked for data. This
     /// index is used to not add topics which are are already
     /// being tracked by `data_requests`
@@ -39,10 +37,13 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new() -> Tracker {
+        let mut tracker = VecDeque::with_capacity(100);
+        let request = TopicsRequest::new();
+        let request = RouterInMessage::TopicsRequest(request);
+        tracker.push_back(request);
+
         Tracker {
-            data_tracker: VecDeque::with_capacity(100),
-            watermarks_tracker: VecDeque::with_capacity(100),
-            topics_tracker: Some(TopicsRequest::new()),
+            tracker,
             data_topics: HashSet::new(),
             watermark_topics: HashSet::new(),
             concrete_subscriptions: HashSet::new(),
@@ -53,7 +54,7 @@ impl Tracker {
     }
 
     pub fn has_next(&self) -> bool {
-        if !self.data_tracker.is_empty() || !self.watermarks_tracker.is_empty() || self.topics_tracker.is_some() {
+        if !self.tracker.is_empty() {
             return true
         }
 
@@ -79,7 +80,8 @@ impl Tracker {
         let topic = topic.to_owned();
         self.watermark_topics.insert(topic.clone());
         let request = AcksRequest::new(topic, 0);
-        self.watermarks_tracker.push_back(request);
+        let request = RouterInMessage::AcksRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Match this topic to subscriptions this connection is interested in.
@@ -95,7 +97,8 @@ impl Tracker {
         if self.concrete_subscriptions.contains(&topic) {
             self.data_topics.insert(topic.clone());
             let request = DataRequest::new(topic);
-            self.data_tracker.push_back(request);
+            let request = RouterInMessage::DataRequest(request);
+            self.tracker.push_back(request);
             return;
         }
 
@@ -103,7 +106,8 @@ impl Tracker {
             if matches(&topic, filter) {
                 self.data_topics.insert(topic.clone());
                 let request = DataRequest::new(topic);
-                self.data_tracker.push_back(request);
+                let request = RouterInMessage::DataRequest(request);
+                self.tracker.push_back(request);
                 return;
             }
         }
@@ -111,7 +115,8 @@ impl Tracker {
 
     pub fn update_watermarks_tracker(&mut self, reply: &AcksReply) {
         let request = AcksRequest::new(reply.topic.clone(), reply.offset);
-        self.watermarks_tracker.push_back(request);
+        let request = RouterInMessage::AcksRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Updates data tracker to track more topics
@@ -122,7 +127,9 @@ impl Tracker {
             self.match_and_track(topic.clone());
         }
 
-        self.topics_tracker = Some(TopicsRequest::offset(reply.offset + 1));
+        let request = TopicsRequest::offset(reply.offset);
+        let request = RouterInMessage::TopicsRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Updates offset of this topic for the next data request
@@ -137,7 +144,8 @@ impl Tracker {
             reply.cursors
         );
 
-        self.data_tracker.push_back(request);
+        let request = RouterInMessage::DataRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Returns data request from next topic by cycling through all the tracks
@@ -146,50 +154,7 @@ impl Tracker {
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
     pub fn next(&mut self) -> Option<RouterInMessage> {
-        let start_tracker = self.tracker_type;
-
-        if self.tracker_type == 0 {
-            // loop to go to next active topic if the topic at the current offset is inactive
-            match self.data_tracker.pop_front() {
-                Some(request) => {
-                    let message = RouterInMessage::DataRequest(request);
-                    return Some(message)
-                }
-                None => {
-                    self.tracker_type = 1;
-                }
-            };
-        }
-
-        if self.tracker_type == 1 {
-            match self.watermarks_tracker.pop_front() {
-                Some(request) => {
-                    let message = RouterInMessage::AcksRequest(request);
-                    return Some(message)
-                }
-                None => {
-                    // Reset the next position and track next tracker type
-                    self.tracker_type = 2;
-                }
-            };
-        }
-
-        if self.tracker_type == 2 {
-            self.tracker_type = 0;
-
-            if let Some(request) = self.topics_tracker.take() {
-                let message = RouterInMessage::TopicsRequest(request);
-                return Some(message);
-            }
-
-            // if we fall from  top to bottom, all trackers are inactive
-            if self.tracker_type == start_tracker {
-                self.active = false;
-                return None;
-            }
-        }
-
-        None
+        self.tracker.pop_front()
     }
 }
 

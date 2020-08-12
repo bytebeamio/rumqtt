@@ -527,7 +527,7 @@ impl Router {
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
         match self.topiclog.readv(request.offset, request.count) {
             Some((_, topics)) if topics.is_empty() => None,
-            Some((offset, topics)) => Some(TopicsReply { offset, topics, }),
+            Some((offset, topics)) => Some(TopicsReply {offset: offset + 1, topics}),
             None => None,
         }
     }
