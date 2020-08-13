@@ -109,12 +109,11 @@ impl Router {
                 RouterInMessage::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
                 RouterInMessage::TopicsRequest(request) => self.handle_topics_request(id, request),
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
-                RouterInMessage::AcksRequest(request) => {
-                    self.handle_acks_request(id, request)
-                }
-                RouterInMessage::Disconnect(request) => {
-                    self.handle_disconnection(id, request)
-                }
+                RouterInMessage::AcksRequest(request) => self.handle_acks_request(id, request),
+                RouterInMessage::Disconnect(request) => self.handle_disconnection(id, request),
+                RouterInMessage::AllTopicsRequest => {
+                    self.handle_all_topics_request(id)
+                },
             }
         }
 
@@ -297,8 +296,27 @@ impl Router {
         }
     }
 
+    fn handle_all_topics_request(&mut self, id: ConnectionId) {
+        let request = TopicsRequest { offset: 0, count: 0 };
+
+        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
+
+        let reply = match self.topiclog.topics() {
+            Some((offset, topics)) => {
+                TopicsReply { offset: offset + 1, topics }
+            },
+            None => {
+                TopicsReply { offset: 0, topics: Vec::new() }
+            },
+        };
+
+        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "response", id, reply.offset);
+        self.reply(id, RouterOutMessage::AllTopicsReply(reply));
+    }
+
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
         trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
+
         let reply = self.extract_topics(&request);
         let reply = match reply {
             Some(r) => r,
@@ -524,6 +542,7 @@ impl Router {
     }
 
     /// Extracts topics from topics commitlog.Returns None if the log is caught up
+    /// TODO: Remove this for consistency with all_topics_request
     fn extract_topics(&mut self, request: &TopicsRequest) -> Option<TopicsReply> {
         match self.topiclog.readv(request.offset, request.count) {
             Some((_, topics)) if topics.is_empty() => None,
@@ -588,7 +607,6 @@ impl Router {
     /// log is caught up or encountered an error while reading data
     fn extract_all_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
-
         debug!("Pull data. Topic = {}, cursors = {:?}", topic, request.cursors);
 
         let mut cursors = [(0, 0); 3];
@@ -601,9 +619,11 @@ impl Router {
                 None => {
                     let (base_offset, record_offset)  = match commitlog.last_offset(topic) {
                         Some(v) => v,
-                        None => return None
+                        None => continue
                     };
 
+                    // Uninitialized requests are always registered with next offset. Collect next offsets
+                    // in all the commitlogs. End logic will update request with these offsets
                     cursors[i] = (base_offset, record_offset + 1);
                     continue
                 }
@@ -627,11 +647,16 @@ impl Router {
             }
         }
 
+        // When payload is empty due to uninitialized request,
+        // update request with latest offsets and return None so
+        // that caller registers the request with updated offsets
+        if request.cursors.is_none() {
+            request.cursors = Some(cursors);
+            return None
+        }
+
         match payload.is_empty() {
-            true => {
-                request.cursors = Some(cursors);
-                None
-            },
+            true => None,
             false => {
                 Some(DataReply {
                     topic: request.topic.clone(),

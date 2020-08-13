@@ -27,6 +27,8 @@ pub enum RouterInMessage {
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
+    /// Request of all the topics in commitlog
+    AllTopicsRequest,
     /// Watermarks request
     AcksRequest(AcksRequest),
     /// Disconnection request
@@ -42,6 +44,8 @@ pub enum RouterOutMessage {
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
+    /// Response with all the topics
+    AllTopicsReply(TopicsReply),
     /// Watermarks reply
     AcksReply(AcksReply),
 }

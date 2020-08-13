@@ -81,6 +81,17 @@ impl TopicLog {
         }
     }
 
+    pub fn topics(&self) -> Option<(usize, Vec<String>)> {
+        let topics = self.topics.clone();
+        match topics.is_empty() {
+            true => None,
+            false => {
+                let last_offset = topics.len() - 1;
+                Some((last_offset, topics))
+            }
+        }
+    }
+
     /// Appends the topic if the topic isn't already seen
     pub fn append(&mut self, topic: &str) {
         self.topics.push(topic.to_owned());

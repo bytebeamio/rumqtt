@@ -98,7 +98,7 @@ impl Link {
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {
             RouterOutMessage::TopicsReply(reply) => {
-                self.tracker.track_more_topics(&reply)
+                self.tracker.track_new_topics(&reply)
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
@@ -117,6 +117,9 @@ impl Link {
                     let ack = Request::PubAck(ack);
                     self.network.fill2(ack)?;
                 }
+            }
+            RouterOutMessage::AllTopicsReply(reply) => {
+                self.tracker.track_all_topics(&reply);
             }
         }
 

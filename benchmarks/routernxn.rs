@@ -108,7 +108,7 @@ async fn connection(
                     RouterOutMessage::AcksReply(_ack) => continue,
                     RouterOutMessage::TopicsReply(reply) => {
                         println!("Received = {:?}", reply);
-                        tracker.track_more_topics(&reply);
+                        tracker.track_new_topics(&reply);
                         got_last_reply = true;
                     }
                     RouterOutMessage::DataReply(reply) => {

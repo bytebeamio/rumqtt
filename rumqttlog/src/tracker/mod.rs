@@ -37,13 +37,9 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new() -> Tracker {
-        let mut tracker = VecDeque::with_capacity(100);
-        let request = TopicsRequest::new();
-        let request = RouterInMessage::TopicsRequest(request);
-        tracker.push_back(request);
-
+        // TODO: Don't allow more than allocated capacity in tracker
         Tracker {
-            tracker,
+            tracker: VecDeque::with_capacity(100),
             data_topics: HashSet::new(),
             watermark_topics: HashSet::new(),
             concrete_subscriptions: HashSet::new(),
@@ -64,10 +60,12 @@ impl Tracker {
     pub fn add_subscription(&mut self, filter: &str) {
         if has_wildcards(filter) {
             self.wild_subscriptions.push(filter.to_owned());
-            return;
+        } else {
+            self.concrete_subscriptions.insert(filter.to_owned());
         }
 
-        self.concrete_subscriptions.insert(filter.to_owned());
+        let request = RouterInMessage::AllTopicsRequest;
+        self.tracker.push_front(request);
     }
 
     /// Adds a new topic to watermarks tracker
@@ -86,7 +84,11 @@ impl Tracker {
 
     /// Match this topic to subscriptions this connection is interested in.
     /// Matches only if the topic isn't already tracked.
-    fn match_and_track(&mut self, topic: String) {
+    /// initialized = true pulls data from commitlog from scratch. Used when
+    /// there are new topics on existing subscription
+    /// initialized = false pulls data from current offset. Used when there
+    /// is a new subscription which matches existing topics in the commitlog
+    fn match_and_track(&mut self, topic: String, initialized: bool) {
         // ignore if the topic is already being tracked
         if self.data_topics.contains(&topic) {
             return;
@@ -96,7 +98,11 @@ impl Tracker {
         // A concrete subscription match. Add this new topic to data tracker
         if self.concrete_subscriptions.contains(&topic) {
             self.data_topics.insert(topic.clone());
-            let request = DataRequest::new(topic);
+            let request = match initialized {
+                true => DataRequest::offsets(topic, [(0, 0); 3]),
+                false => DataRequest::new(topic),
+            };
+
             let request = RouterInMessage::DataRequest(request);
             self.tracker.push_back(request);
             return;
@@ -105,7 +111,10 @@ impl Tracker {
         for filter in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.data_topics.insert(topic.clone());
-                let request = DataRequest::new(topic);
+                let request = match initialized {
+                    true => DataRequest::offsets(topic, [(0, 0); 3]),
+                    false => DataRequest::new(topic),
+                };
                 let request = RouterInMessage::DataRequest(request);
                 self.tracker.push_back(request);
                 return;
@@ -119,12 +128,25 @@ impl Tracker {
         self.tracker.push_back(request);
     }
 
-    /// Updates data tracker to track more topics
-    /// So, a TopicReply triggers DataRequest
-    pub fn track_more_topics(&mut self, reply: &TopicsReply) {
+    /// Updates data tracker to track new topics in the commitlog if they match
+    /// a subscription.So, a TopicReply triggers DataRequest
+    pub fn track_new_topics(&mut self, reply: &TopicsReply) {
         for topic in reply.topics.iter() {
             // Adds a DataRequest to data tracker if there is a match
-            self.match_and_track(topic.clone());
+            self.match_and_track(topic.clone(), true);
+        }
+
+        let request = TopicsRequest::offset(reply.offset);
+        let request = RouterInMessage::TopicsRequest(request);
+        self.tracker.push_back(request);
+    }
+
+    /// Updates data tracker to track all the topics in the commitlog with new
+    /// subscriptions.So, a TopicReply triggers DataRequest
+    pub fn track_all_topics(&mut self, reply: &TopicsReply) {
+        for topic in reply.topics.iter() {
+            // Adds a DataRequest to data tracker if there is a match
+            self.match_and_track(topic.clone(), false);
         }
 
         let request = TopicsRequest::offset(reply.offset);
