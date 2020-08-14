@@ -103,8 +103,9 @@ impl Tracker {
                 false => DataRequest::new(topic),
             };
 
+            // Prioritize new matched topics
             let request = RouterInMessage::DataRequest(request);
-            self.tracker.push_back(request);
+            self.tracker.push_front(request);
             return;
         }
 
@@ -116,7 +117,7 @@ impl Tracker {
                     false => DataRequest::new(topic),
                 };
                 let request = RouterInMessage::DataRequest(request);
-                self.tracker.push_back(request);
+                self.tracker.push_front(request);
                 return;
             }
         }

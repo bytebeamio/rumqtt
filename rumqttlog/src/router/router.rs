@@ -111,9 +111,7 @@ impl Router {
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::AcksRequest(request) => self.handle_acks_request(id, request),
                 RouterInMessage::Disconnect(request) => self.handle_disconnection(id, request),
-                RouterInMessage::AllTopicsRequest => {
-                    self.handle_all_topics_request(id)
-                },
+                RouterInMessage::AllTopicsRequest => self.handle_all_topics_request(id),
             }
         }
 

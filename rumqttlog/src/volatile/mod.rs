@@ -98,6 +98,7 @@ impl Log {
 
         // jump to head if the caller is trying to read deleted segment
         if base_offset < self.head_offset {
+            warn!("Trying to read a deleted segment. Jumping");
             base_offset = self.head_offset;
             offset = self.head_offset;
         }
