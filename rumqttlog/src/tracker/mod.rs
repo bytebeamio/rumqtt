@@ -13,13 +13,11 @@ use mqtt4bytes::{has_wildcards, matches};
 /// (active, inactive)
 #[derive(Debug)]
 pub struct Tracker {
-    // TODO Replace this with vec later and use only pop?
-    /// List of topics that we are tracking for data
-    data_tracker: VecDeque<DataRequest>,
-    /// List of topics that we are tracking for watermark
-    watermarks_tracker: VecDeque<AcksRequest>,
-    /// List of topics that we are tracking for watermark
-    topics_tracker: Option<TopicsRequest>,
+    /// A ring buffer which tracks
+    /// new topics: TopicsRequest
+    /// data for a given topic: DataRequest
+    /// acks for incoming publishes: AcksRequest
+    tracker: VecDeque<RouterInMessage>,
     /// List of topics that are being tracked for data. This
     /// index is used to not add topics which are are already
     /// being tracked by `data_requests`
@@ -31,42 +29,44 @@ pub struct Tracker {
     concrete_subscriptions: HashSet<String>,
     /// List of wildcard subscriptions
     wild_subscriptions: Vec<String>,
-    /// Current tracker type. Data = 0, Watermarks = 1
-    tracker_type: u8,
-    /// flag to indicate if all the trackers are inactive
-    pub(crate) active: bool
+    /// number of inflight requests
+    inflight: usize
 }
 
 impl Tracker {
     pub fn new() -> Tracker {
+        // TODO: Don't allow more than allocated capacity in tracker
         Tracker {
-            data_tracker: VecDeque::with_capacity(100),
-            watermarks_tracker: VecDeque::with_capacity(100),
-            topics_tracker: Some(TopicsRequest::new()),
+            tracker: VecDeque::with_capacity(100),
             data_topics: HashSet::new(),
             watermark_topics: HashSet::new(),
             concrete_subscriptions: HashSet::new(),
             wild_subscriptions: Vec::new(),
-            tracker_type: 0,
-            active: true
+            inflight: 0
         }
     }
 
     pub fn has_next(&self) -> bool {
-        if !self.data_tracker.is_empty() || !self.watermarks_tracker.is_empty() || self.topics_tracker.is_some() {
+        if !self.tracker.is_empty() {
             return true
         }
 
         false
     }
 
+    pub fn inflight(&self) -> usize {
+        self.inflight
+    }
+
     pub fn add_subscription(&mut self, filter: &str) {
         if has_wildcards(filter) {
             self.wild_subscriptions.push(filter.to_owned());
-            return;
+        } else {
+            self.concrete_subscriptions.insert(filter.to_owned());
         }
 
-        self.concrete_subscriptions.insert(filter.to_owned());
+        let request = RouterInMessage::AllTopicsRequest;
+        self.tracker.push_front(request);
     }
 
     /// Adds a new topic to watermarks tracker
@@ -79,12 +79,17 @@ impl Tracker {
         let topic = topic.to_owned();
         self.watermark_topics.insert(topic.clone());
         let request = AcksRequest::new(topic, 0);
-        self.watermarks_tracker.push_back(request);
+        let request = RouterInMessage::AcksRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Match this topic to subscriptions this connection is interested in.
     /// Matches only if the topic isn't already tracked.
-    fn match_and_track(&mut self, topic: String) {
+    /// initialized = true pulls data from commitlog from scratch. Used when
+    /// there are new topics on existing subscription
+    /// initialized = false pulls data from current offset. Used when there
+    /// is a new subscription which matches existing topics in the commitlog
+    fn match_and_track(&mut self, topic: String, initialized: bool) {
         // ignore if the topic is already being tracked
         if self.data_topics.contains(&topic) {
             return;
@@ -94,35 +99,64 @@ impl Tracker {
         // A concrete subscription match. Add this new topic to data tracker
         if self.concrete_subscriptions.contains(&topic) {
             self.data_topics.insert(topic.clone());
-            let request = DataRequest::new(topic);
-            self.data_tracker.push_back(request);
+            let request = match initialized {
+                true => DataRequest::offsets(topic, [(0, 0); 3]),
+                false => DataRequest::new(topic),
+            };
+
+            // Prioritize new matched topics
+            let request = RouterInMessage::DataRequest(request);
+            self.tracker.push_front(request);
             return;
         }
 
         for filter in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.data_topics.insert(topic.clone());
-                let request = DataRequest::new(topic);
-                self.data_tracker.push_back(request);
+                let request = match initialized {
+                    true => DataRequest::offsets(topic, [(0, 0); 3]),
+                    false => DataRequest::new(topic),
+                };
+                let request = RouterInMessage::DataRequest(request);
+                self.tracker.push_front(request);
                 return;
             }
         }
     }
 
     pub fn update_watermarks_tracker(&mut self, reply: &AcksReply) {
+        self.inflight -= 1;
         let request = AcksRequest::new(reply.topic.clone(), reply.offset);
-        self.watermarks_tracker.push_back(request);
+        let request = RouterInMessage::AcksRequest(request);
+        self.tracker.push_back(request);
     }
 
-    /// Updates data tracker to track more topics
-    /// So, a TopicReply triggers DataRequest
-    pub fn track_more_topics(&mut self, reply: &TopicsReply) {
+    /// Updates data tracker to track new topics in the commitlog if they match
+    /// a subscription.So, a TopicReply triggers DataRequest
+    pub fn track_new_topics(&mut self, reply: &TopicsReply) {
+        self.inflight -= 1;
         for topic in reply.topics.iter() {
             // Adds a DataRequest to data tracker if there is a match
-            self.match_and_track(topic.clone());
+            self.match_and_track(topic.clone(), true);
         }
 
-        self.topics_tracker = Some(TopicsRequest::offset(reply.offset + 1));
+        let request = TopicsRequest::offset(reply.offset);
+        let request = RouterInMessage::TopicsRequest(request);
+        self.tracker.push_back(request);
+    }
+
+    /// Updates data tracker to track all the topics in the commitlog with new
+    /// subscriptions.So, a TopicReply triggers DataRequest
+    pub fn track_all_topics(&mut self, reply: &TopicsReply) {
+        self.inflight -= 1;
+        for topic in reply.topics.iter() {
+            // Adds a DataRequest to data tracker if there is a match
+            self.match_and_track(topic.clone(), false);
+        }
+
+        let request = TopicsRequest::offset(reply.offset);
+        let request = RouterInMessage::TopicsRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Updates offset of this topic for the next data request
@@ -132,12 +166,14 @@ impl Tracker {
     /// holds a pending notification (be it immediate reply and notification when there
     /// is new data)
     pub fn update_data_tracker(&mut self, reply: &DataReply) {
+        self.inflight -= 1;
         let request = DataRequest::offsets(
             reply.topic.clone(),
             reply.cursors
         );
 
-        self.data_tracker.push_back(request);
+        let request = RouterInMessage::DataRequest(request);
+        self.tracker.push_back(request);
     }
 
     /// Returns data request from next topic by cycling through all the tracks
@@ -146,50 +182,8 @@ impl Tracker {
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
     pub fn next(&mut self) -> Option<RouterInMessage> {
-        let start_tracker = self.tracker_type;
-
-        if self.tracker_type == 0 {
-            // loop to go to next active topic if the topic at the current offset is inactive
-            match self.data_tracker.pop_front() {
-                Some(request) => {
-                    let message = RouterInMessage::DataRequest(request);
-                    return Some(message)
-                }
-                None => {
-                    self.tracker_type = 1;
-                }
-            };
-        }
-
-        if self.tracker_type == 1 {
-            match self.watermarks_tracker.pop_front() {
-                Some(request) => {
-                    let message = RouterInMessage::AcksRequest(request);
-                    return Some(message)
-                }
-                None => {
-                    // Reset the next position and track next tracker type
-                    self.tracker_type = 2;
-                }
-            };
-        }
-
-        if self.tracker_type == 2 {
-            self.tracker_type = 0;
-
-            if let Some(request) = self.topics_tracker.take() {
-                let message = RouterInMessage::TopicsRequest(request);
-                return Some(message);
-            }
-
-            // if we fall from  top to bottom, all trackers are inactive
-            if self.tracker_type == start_tracker {
-                self.active = false;
-                return None;
-            }
-        }
-
-        None
+        self.inflight += 1;
+        self.tracker.pop_front()
     }
 }
 

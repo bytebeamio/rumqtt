@@ -137,7 +137,7 @@ impl Replicator {
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), LinkError> {
         match message {
             RouterOutMessage::TopicsReply(reply) => {
-                self.tracker.track_more_topics(&reply)
+                self.tracker.track_new_topics(&reply)
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
@@ -169,6 +169,7 @@ impl Replicator {
                     self.network.fill2(ack)?;
                 }
             }
+            RouterOutMessage::AllTopicsReply(_) => {}
         }
 
         // FIXME Early returns above will prevent router send and network write

@@ -61,6 +61,15 @@ impl Log {
         self.active_segment.append(record)
     }
 
+    pub fn last_offset(&self) -> (u64, u64) {
+        let base_offset = self.active_segment.base_offset();
+        // Segment will always have at least 1 element as it's lazily
+        // created with append. Hence we can ignore -ve overflow
+        let relative_offset = base_offset + self.active_segment.len() as u64 - 1;
+
+        (base_offset, relative_offset)
+    }
+
     /// Read a record from correct segment
     pub fn read(&mut self, base_offset: u64, offset: usize) -> Option<Bytes> {
         if base_offset == self.active_segment.base_offset() {
@@ -89,6 +98,7 @@ impl Log {
 
         // jump to head if the caller is trying to read deleted segment
         if base_offset < self.head_offset {
+            warn!("Trying to read a deleted segment. Jumping");
             base_offset = self.head_offset;
             offset = self.head_offset;
         }

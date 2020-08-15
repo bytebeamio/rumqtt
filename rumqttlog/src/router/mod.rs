@@ -27,6 +27,8 @@ pub enum RouterInMessage {
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
+    /// Request of all the topics in commitlog
+    AllTopicsRequest,
     /// Watermarks request
     AcksRequest(AcksRequest),
     /// Disconnection request
@@ -42,6 +44,8 @@ pub enum RouterOutMessage {
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
+    /// Response with all the topics
+    AllTopicsReply(TopicsReply),
     /// Watermarks reply
     AcksReply(AcksReply),
 }
@@ -99,7 +103,7 @@ pub struct DataRequest {
     /// Log to sweep
     pub topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    pub cursors: [(u64, u64); 3],
+    pub cursors: Option<[(u64, u64); 3]>,
     /// Maximum size of payload buffer per replica
     pub max_size: usize,
     /// Maximum count of payload buffer per replica
@@ -111,7 +115,7 @@ impl DataRequest {
     pub fn new(topic: String) -> DataRequest {
         DataRequest {
             topic,
-            cursors: [(0, 0); 3],
+            cursors: None,
             max_size: 100 * 1024,
             max_count: 100
         }
@@ -120,7 +124,7 @@ impl DataRequest {
     pub fn with(topic: String, max_size: usize, max_count: usize) -> DataRequest {
         DataRequest {
             topic,
-            cursors: [(0, 0); 3],
+            cursors: None,
             max_size,
             max_count
         }
@@ -130,7 +134,7 @@ impl DataRequest {
     pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
-            cursors,
+            cursors: Some(cursors),
             max_size: 100 * 1024,
             max_count: 100
         }
@@ -145,7 +149,7 @@ impl DataRequest {
     ) -> DataRequest {
         DataRequest {
             topic,
-            cursors,
+            cursors: Some(cursors),
             max_size,
             max_count
         }

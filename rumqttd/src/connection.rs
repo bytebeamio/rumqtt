@@ -72,7 +72,7 @@ impl Link {
             let keep_alive2 = &mut timeout;
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),
-                packets = self.network.readb() => {
+                packets = self.network.readb(), if self.state.inflight < max_inflight => {
                     timeout.reset(Instant::now() + keep_alive);
                     let packets = packets?;
                     self.handle_network_data(packets).await?;
@@ -82,7 +82,7 @@ impl Link {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
-                Some(message) = tracker_next(&mut self.tracker), if inflight < max_inflight && self.tracker.has_next() => {
+                Some(message) = tracker_next(&mut self.tracker), if self.tracker.inflight() < 10 && self.tracker.has_next() => {
                     // NOTE Right now we request data by topic, instead if can request
                     // data of multiple topics at once, we can have better utilization of
                     // network and system calls for n publisher and 1 subscriber workloads
@@ -98,7 +98,7 @@ impl Link {
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {
             RouterOutMessage::TopicsReply(reply) => {
-                self.tracker.track_more_topics(&reply)
+                self.tracker.track_new_topics(&reply)
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
@@ -117,6 +117,9 @@ impl Link {
                     let ack = Request::PubAck(ack);
                     self.network.fill2(ack)?;
                 }
+            }
+            RouterOutMessage::AllTopicsReply(reply) => {
+                self.tracker.track_all_topics(&reply);
             }
         }
 
