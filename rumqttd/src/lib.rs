@@ -178,7 +178,7 @@ impl Connector {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new(&client_id, 4);
+        let (connection, link_rx) = Connection::new(&client_id, 10);
         let message = (0, RouterInMessage::Connect(connection));
         let router_tx = self.router_tx.clone();
         router_tx.send(message).await.unwrap();

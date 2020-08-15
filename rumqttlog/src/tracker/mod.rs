@@ -29,10 +29,8 @@ pub struct Tracker {
     concrete_subscriptions: HashSet<String>,
     /// List of wildcard subscriptions
     wild_subscriptions: Vec<String>,
-    /// Current tracker type. Data = 0, Watermarks = 1
-    tracker_type: u8,
-    /// flag to indicate if all the trackers are inactive
-    pub(crate) active: bool
+    /// number of inflight requests
+    inflight: usize
 }
 
 impl Tracker {
@@ -44,8 +42,7 @@ impl Tracker {
             watermark_topics: HashSet::new(),
             concrete_subscriptions: HashSet::new(),
             wild_subscriptions: Vec::new(),
-            tracker_type: 0,
-            active: true
+            inflight: 0
         }
     }
 
@@ -55,6 +52,10 @@ impl Tracker {
         }
 
         false
+    }
+
+    pub fn inflight(&self) -> usize {
+        self.inflight
     }
 
     pub fn add_subscription(&mut self, filter: &str) {
@@ -124,6 +125,7 @@ impl Tracker {
     }
 
     pub fn update_watermarks_tracker(&mut self, reply: &AcksReply) {
+        self.inflight -= 1;
         let request = AcksRequest::new(reply.topic.clone(), reply.offset);
         let request = RouterInMessage::AcksRequest(request);
         self.tracker.push_back(request);
@@ -132,6 +134,7 @@ impl Tracker {
     /// Updates data tracker to track new topics in the commitlog if they match
     /// a subscription.So, a TopicReply triggers DataRequest
     pub fn track_new_topics(&mut self, reply: &TopicsReply) {
+        self.inflight -= 1;
         for topic in reply.topics.iter() {
             // Adds a DataRequest to data tracker if there is a match
             self.match_and_track(topic.clone(), true);
@@ -145,6 +148,7 @@ impl Tracker {
     /// Updates data tracker to track all the topics in the commitlog with new
     /// subscriptions.So, a TopicReply triggers DataRequest
     pub fn track_all_topics(&mut self, reply: &TopicsReply) {
+        self.inflight -= 1;
         for topic in reply.topics.iter() {
             // Adds a DataRequest to data tracker if there is a match
             self.match_and_track(topic.clone(), false);
@@ -162,6 +166,7 @@ impl Tracker {
     /// holds a pending notification (be it immediate reply and notification when there
     /// is new data)
     pub fn update_data_tracker(&mut self, reply: &DataReply) {
+        self.inflight -= 1;
         let request = DataRequest::offsets(
             reply.topic.clone(),
             reply.cursors
@@ -177,6 +182,7 @@ impl Tracker {
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
     pub fn next(&mut self) -> Option<RouterInMessage> {
+        self.inflight += 1;
         self.tracker.pop_front()
     }
 }

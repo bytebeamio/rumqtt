@@ -20,7 +20,8 @@ pub enum Error {
 impl State {
     pub fn new(max_inflight: u16) -> State {
         State {
-            outgoing_pub: vec![None; max_inflight as usize],
+            // index 0 is wasted as 0 not a valid packet id
+            outgoing_pub: vec![None; max_inflight as usize + 1],
             max_inflight,
             inflight: 0,
             last_pkid: 0
@@ -34,10 +35,6 @@ impl State {
         }
 
         self.inflight -= 1;
-        if self.inflight == 0 {
-            self.last_pkid = 0;
-        }
-
         Ok(())
     }
 
