@@ -226,7 +226,7 @@ async fn connect(addr: &str, local_id: usize, connections_rx: &Receiver<Network>
                 }
             };
 
-            let mut network = Network::new(stream);
+            let mut network = Network::new(stream, 10 * 1024);
             let connect = Connect::new(local_id.to_string());
             if let Err(e) = network.connect(connect).await {
                 error!("Failed to mqtt connect to node {}. Error = {:?}", addr, e);

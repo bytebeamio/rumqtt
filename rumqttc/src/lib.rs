@@ -94,6 +94,7 @@ pub use client::{Client, Connection, ClientError};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use state::{MqttState, StateError};
 pub use mqtt4bytes::*;
+pub use async_channel::{Sender, SendError, TrySendError};
 
 #[derive(Debug, Clone)]
 pub enum Incoming {
@@ -235,8 +236,13 @@ pub struct MqttOptions {
     alpn: Option<Vec<Vec<u8>>>,
     /// username and password
     credentials: Option<(String, String)>,
-    /// maximum packet size
-    max_packet_size: usize,
+    /// maximum incoming packet size (verifies remaining length of the packet)
+    max_incoming_packet_size: usize,
+    /// Maximum outgoing packet size (only verifies publish payload size)
+    // TODO Verify this with all packets. This can be packet.write but message left in
+    // the state might be a footgun as user has to explicitly clean it. Probably state
+    // has to be moved to network
+    max_outgoing_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// Max internal request batching
@@ -274,7 +280,8 @@ impl MqttOptions {
             client_auth: None,
             alpn: None,
             credentials: None,
-            max_packet_size: 256 * 1024,
+            max_incoming_packet_size: 10 * 1024,
+            max_outgoing_packet_size: 10 * 1024,
             request_channel_capacity: 10,
             max_request_batch: 0,
             pending_throttle: Duration::from_micros(0),
@@ -364,15 +371,16 @@ impl MqttOptions {
         self.client_id.clone()
     }
 
-    /// Set packet size limit (in Kilo Bytes)
-    pub fn set_max_packet_size(&mut self, sz: usize) -> &mut Self {
-        self.max_packet_size = sz * 1024;
+    /// Set packet size limit for outgoing an incoming packets
+    pub fn set_max_packet_size(&mut self, incoming: usize, outgoing: usize) -> &mut Self {
+        self.max_incoming_packet_size = incoming;
+        self.max_outgoing_packet_size = outgoing;
         self
     }
 
     /// Maximum packet size
     pub fn max_packet_size(&self) -> usize {
-        self.max_packet_size
+        self.max_incoming_packet_size
     }
 
     /// Maximum internal batching of requests
@@ -508,7 +516,7 @@ impl Debug for MqttOptions {
             .field("client_auth", &self.client_auth)
             .field("alpn", &self.alpn)
             .field("credentials", &self.credentials)
-            .field("max_packet_size", &self.max_packet_size)
+            .field("max_packet_size", &self.max_incoming_packet_size)
             .field("request_channel_capacity", &self.request_channel_capacity)
             .field("max_request_batch", &self.max_request_batch)
             .field("pending_throttle", &self.pending_throttle)

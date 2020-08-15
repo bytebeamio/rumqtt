@@ -117,7 +117,8 @@ impl Broker {
             let router_tx = self.router_tx.clone();
             task::spawn(async {
                 let connector = Connector::new(config, router_tx);
-                let network = Network::new(stream);
+                // TODO Remove all max packet size hard codes
+                let network = Network::new(stream, 10 * 1024);
                 if let Err(e) = connector.new_connection(network).await {
                     error!("Dropping link task!! Result = {:?}", e);
                 }

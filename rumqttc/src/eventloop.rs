@@ -268,12 +268,12 @@ impl EventLoop {
         let network = time::timeout(Duration::from_secs(self.options.timeout()), async {
             let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
                 let socket = tls::tls_connect(&self.options).await?;
-                Network::new(socket)
+                Network::new(socket, self.options.max_incoming_packet_size)
             } else {
                 let addr = self.options.broker_addr.as_str();
                 let port = self.options.port;
                 let socket = TcpStream::connect((addr, port)).await?;
-                Network::new(socket)
+                Network::new(socket, self.options.max_incoming_packet_size)
             };
 
             Ok::<_, ConnectionError>(network)
@@ -754,7 +754,7 @@ mod broker {
             let addr = format!("127.0.0.1:{}", port);
             let mut listener = TcpListener::bind(&addr).await.unwrap();
             let (stream, _) = listener.accept().await.unwrap();
-            let mut framed = Network::new(stream);
+            let mut framed = Network::new(stream, 10 * 1024);
 
             let packet = framed.read().await.unwrap();
             if let Packet::Connect(_) = packet {

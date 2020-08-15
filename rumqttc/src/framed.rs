@@ -18,39 +18,35 @@ pub struct Network {
     /// Buffered writes
     write: BytesMut,
     /// Maximum packet size
-    max_packet_size: usize,
+    max_incoming_size: usize,
     /// Maximum readv count
     max_readb_count: usize,
 }
 
 impl Network {
-    pub fn new(socket: impl N + 'static) -> Network {
+    pub fn new(socket: impl N + 'static, max_incoming_size: usize) -> Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
             pending: 0,
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
-            max_packet_size: 1 * 1024,
+            max_incoming_size,
             max_readb_count:10
         }
     }
 
-    pub fn with_capacity(socket: impl N + 'static, read: usize, write: usize) -> Network {
+    pub fn with_capacity(socket: impl N + 'static, read: usize, write: usize, max_incoming_size: usize) -> Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
             pending: 0,
             read: BytesMut::with_capacity(read),
             write: BytesMut::with_capacity(write),
-            max_packet_size: 1 * 1024,
+            max_incoming_size,
             max_readb_count:10
         }
     }
-
-    // pub fn set_max_packet_size(&mut self, size: usize) {
-    //     self.max_packet_size = size;
-    // }
 
     pub fn set_readv_count(&mut self, count: usize) {
         self.max_readb_count = count;
@@ -59,7 +55,7 @@ impl Network {
     // TODO make this equivalent to `mqtt_read` to frame `Incoming` directly
     pub async fn read(&mut self) -> Result<Packet, io::Error> {
         loop {
-            match mqtt_read(&mut self.read, self.max_packet_size) {
+            match mqtt_read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => return Ok(packet),
                 Err(Error::InsufficientBytes(required)) => self.pending = required,
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
@@ -84,7 +80,7 @@ impl Network {
     pub async fn readb(&mut self) -> Result<Vec<Incoming>, io::Error> {
         let mut out = Vec::with_capacity(self.max_readb_count);
         loop {
-            match mqtt_read(&mut self.read, self.max_packet_size) {
+            match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Connection is explicitly handled by other methods. This read is used after establishing
                 // the link. Ignore connection related packets
                 Ok(Packet::Connect(_)) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Not expecting connect")),
@@ -131,6 +127,7 @@ impl Network {
 
     #[inline]
     fn write_fill(&mut self, request: Request) -> Result<usize, Error> {
+        // TODO Implement max_outgoing_packet_size using write size
         let size = match request {
             Request::Publish(packet) => packet.write(&mut self.write)?,
             Request::PublishRaw(packet) => packet.write(&mut self.write)?,
