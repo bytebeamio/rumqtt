@@ -28,6 +28,19 @@ impl State {
         }
     }
 
+    /// Returns number of acks required to prevent collision. A return
+    /// of 0 implies, no collision is possible and hence connection can
+    /// safely send all the messages to network with in flow control
+    /// restrictions
+    pub fn no_collision_count(&self, count: usize) -> usize {
+        let free = self.max_inflight - self.inflight;
+        if count < free as usize {
+            return 0
+        }
+
+        count - free as usize
+    }
+
     pub fn handle_network_puback(&mut self, ack: PubAck) -> Result<(), Error> {
         let pkid = ack.pkid as usize;
         if mem::replace(&mut self.outgoing_pub[pkid], None).is_none() {
