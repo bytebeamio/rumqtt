@@ -140,7 +140,8 @@ impl Link {
                 }
 
                 self.tracker.update_data_tracker(&reply);
-                self.total += reply.payload.len();
+                self.total += payload_count;
+                dbg!(self.total);
                 for p in reply.payload {
                     let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
                     let publish = self.state.handle_router_data(publish)?;

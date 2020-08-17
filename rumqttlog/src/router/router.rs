@@ -184,7 +184,7 @@ impl Router {
 
     /// Handles new incoming data on a topic
     fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Publish>) {
-        trace!("{:08} {:14} Id = {}, Count = {}", "data", "nativecommit", id, data.len());
+        trace!("{:11} {:14} Id = {}, Count = {}", "data", "nativecommit", id, data.len());
         for publish in data {
             if publish.payload.len() == 0 {
                 error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
@@ -239,7 +239,7 @@ impl Router {
     }
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
-        trace!("{:08} {:14} Id = {}, Count = {}", "data", "replicacommit", id, data.len());
+        trace!("{:11} {:14} Id = {}, Count = {}", "data", "replicacommit", id, data.len());
         for data in data {
             let ReplicationData { pkid, topic, payload, .. } = data;
             let mut is_new_topic = false;
@@ -297,7 +297,7 @@ impl Router {
     fn handle_all_topics_request(&mut self, id: ConnectionId) {
         let request = TopicsRequest { offset: 0, count: 0 };
 
-        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
+        trace!("{:11} {:14} Id = {}, Offset = {}", "alltopics", "request", id, request.offset);
 
         let reply = match self.topiclog.topics() {
             Some((offset, topics)) => {
@@ -308,12 +308,12 @@ impl Router {
             },
         };
 
-        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "response", id, reply.offset);
+        trace!("{:11} {:14} Id = {}, Offset = {}", "alltopics", "response", id, reply.offset);
         self.reply(id, RouterOutMessage::AllTopicsReply(reply));
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
-        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
+        trace!("{:11} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
 
         let reply = self.extract_topics(&request);
         let reply = match reply {
@@ -325,12 +325,12 @@ impl Router {
             },
         };
 
-        trace!("{:08} {:14} Id = {}, Offset = {}", "topics", "response", id, reply.offset);
+        trace!("{:11} {:14} Id = {}, Offset = {}, Count = {}", "topics", "response", id, reply.offset, reply.topics.len());
         self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, mut request: DataRequest) {
-        trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "request", request.topic, request.cursors);
+        trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}", "data", "request", id, request.topic, request.cursors);
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
@@ -353,13 +353,13 @@ impl Router {
             },
         };
 
-        trace!("{:08} {:14} Topic = {}, Offsets = {:?}", "data", "response", reply.topic, reply.cursors);
+        trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "response", id, reply.topic, reply.cursors, reply.payload.len());
         let reply = RouterOutMessage::DataReply(reply);
         self.reply(id, reply);
     }
 
     pub fn handle_acks_request(&mut self, id: ConnectionId, request: AcksRequest) {
-        trace!("{:08} {:14} Id = {}, Topic = {}, Offset = {:?}", "acks", "request", id, request.topic, request.offset);
+        trace!("{:11} {:14} Id = {}, Topic = {}", "acks", "request", id, request.topic);
         // I don't think we'll need offset as next set of pkids will always be at head
         let reply = match self.watermarks.get_mut(&request.topic) {
             Some(watermarks) => {
@@ -383,20 +383,20 @@ impl Router {
             },
         };
 
-        trace!("{:08} {:14} Id = {}, Topic = {}, Offset = {:?}", "acks", "response", id, reply.topic, reply.offset);
+        trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "response", id, reply.topic, reply.pkids.len());
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
     }
 
     fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
-        trace!("{:08} {:14} Id = {}", "topics", "register", id);
+        trace!("{:11} {:14} Id = {}", "topics", "register", id);
         let request = (id.to_owned(), request);
         self.topics_waiters.push(request);
     }
 
     /// Register data waiter
     fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
-        trace!("{:08} {:14} Id = {}, Topic = {}", "data", "register", id, request.topic);
+        trace!("{:11} {:14} Id = {}, Topic = {}", "data", "register", id, request.topic);
         let topic = request.topic.clone();
         let request = (id, request);
 
@@ -410,7 +410,7 @@ impl Router {
     }
 
     fn register_acks_waiter(&mut self, id: ConnectionId, request: AcksRequest) {
-        trace!("{:08} {:14} Id = {}, Topic = {}", "acks", "register", id, request.topic);
+        trace!("{:11} {:14} Id = {}, Topic = {}", "acks", "register", id, request.topic);
         let topic = request.topic.clone();
         match self.ack_waiters.get_mut(&request.topic) {
             Some(waiters) => waiters.push((id, request)),
@@ -435,7 +435,7 @@ impl Router {
             // Send reply to the link which registered this notification
             let reply = self.extract_topics(&request).unwrap();
 
-            trace!("{:08} {:14} Id = {}, Topics = {:?}", "topics", "notification", link_id, reply.topics);
+            trace!("{:11} {:14} Id = {}, Topics = {:?}", "topics", "notification", link_id, reply.topics);
             let reply = RouterOutMessage::TopicsReply(reply);
             self.reply(link_id, reply);
 
@@ -471,7 +471,7 @@ impl Router {
                 },
             };
 
-            trace!("{:08} {:14} Id = {}, Topic = {}", "data", "notification", link_id, reply.topic);
+            trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "notification", link_id, reply.topic, reply.cursors, reply.payload.len());
             let reply = RouterOutMessage::DataReply(reply);
             self.reply(link_id, reply);
 
@@ -506,7 +506,7 @@ impl Router {
                     offset: 100,
                 };
 
-                trace!("{:08} {:14} Id = {}, Topic = {}", "acks", "notification", link_id, reply.topic);
+                trace!("{:11} {:14} Id = {}, Topic = {}", "acks", "notification", link_id, reply.topic);
                 let reply = RouterOutMessage::AcksReply(reply);
                 self.reply(link_id, reply);
             }
