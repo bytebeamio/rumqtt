@@ -583,14 +583,14 @@ impl Router {
 
         match commitlog.readv(topic, segment, offset) {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
-                // Update reply's cursors only when read has returned some data
-                // Move the reply to next segment if we are done with the current one
-                if payload.is_empty() { return None }
                 match jump {
                     Some(next) => reply.cursors[native_id] = (next, next),
                     None => reply.cursors[native_id] = (base_offset, record_offset + 1),
                 }
 
+                // Update reply's cursors only when read has returned some data
+                // Move the reply to next segment if we are done with the current one
+                if payload.is_empty() { return None }
                 reply.payload = payload;
                 Some(reply)
             }
