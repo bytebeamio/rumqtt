@@ -38,7 +38,7 @@ pub enum Error {
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
     #[error("Payload count greater than max inflight")]
-    TooManyPayloads
+    TooManyPayloads(usize)
  }
 
 impl Link {
@@ -50,13 +50,14 @@ impl Link {
         router_tx: Sender<(Id, RouterInMessage)>,
         link_rx: Receiver<RouterOutMessage>
     ) -> Link {
+        let max_inflight_count = config.max_inflight_count;
         Link {
             config,
             connect,
             id,
             network,
             tracker: Tracker::new(),
-            state: State::new(100),
+            state: State::new(max_inflight_count),
             router_tx,
             link_rx,
             acks_required: 0,
@@ -83,7 +84,7 @@ impl Link {
             // as data from multiple topics can be batched (for a given connection)
             if self.tracker.inflight() < 10 {
                 if let Some(message) = self.tracker.next() {
-                    debug!("Tracker next = {:?}", message);
+                    trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
                     self.router_tx.send((self.id, message)).await?;
                 }
             }
@@ -97,7 +98,6 @@ impl Link {
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),
                 packets = self.network.readb() => {
-                    // dbg!();
                     timeout.reset(Instant::now() + keep_alive);
                     let packets = packets?;
                     self.handle_network_data(packets).await?;
@@ -105,12 +105,10 @@ impl Link {
                 // Receive from router when previous when state isn't in collision
                 // due to previously recived data request
                 message = self.link_rx.recv(), if self.acks_required == 0 => {
-                    debug!("{:?}", message);
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
             }
-            // dbg!();
         }
     }
 
@@ -118,13 +116,15 @@ impl Link {
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {
             RouterOutMessage::TopicsReply(reply) => {
+                trace!("{:11} {:14} Id = {}, Count = {}", "topics", "reply", self.id, reply.topics.len());
                 self.tracker.track_new_topics(&reply)
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
+                trace!("{:11} {:14} Id = {}, Count = {}", "data", "reply", self.id, reply.payload.len());
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
-                    return Err(Error::TooManyPayloads)
+                    return Err(Error::TooManyPayloads(payload_count))
                 }
 
                 // Save this message and set collision flag to not receive any
@@ -141,7 +141,7 @@ impl Link {
 
                 self.tracker.update_data_tracker(&reply);
                 self.total += payload_count;
-                dbg!(self.total);
+                // dbg!(self.total);
                 for p in reply.payload {
                     let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
                     let publish = self.state.handle_router_data(publish)?;
@@ -150,6 +150,7 @@ impl Link {
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
+                trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.pkids.len());
                 self.tracker.update_watermarks_tracker(&reply);
                 for ack in reply.pkids.into_iter().rev() {
                     let ack = PubAck::new(ack);
@@ -158,6 +159,7 @@ impl Link {
                 }
             }
             RouterOutMessage::AllTopicsReply(reply) => {
+                trace!("{:11} {:14} Id = {}, Count = {}", "alltopics", "reply", self.id, reply.topics.len());
                 self.tracker.track_all_topics(&reply);
             }
         }

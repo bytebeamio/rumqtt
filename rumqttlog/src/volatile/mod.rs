@@ -43,7 +43,7 @@ impl Log {
     /// When the current segment is full, this also create a new segment and
     /// writes the record to it.
     /// This function also handles retention by removing head segment
-    pub fn append(&mut self, record: Bytes) -> u64 {
+    pub fn append(&mut self, record: Bytes) -> (u64, u64) {
         if self.active_segment.size() >= self.max_segment_size {
             let next_offset = self.active_segment.base_offset() + self.active_segment.len() as u64;
             let last_active = mem::replace(&mut self.active_segment, Segment::new(next_offset));
@@ -58,7 +58,8 @@ impl Log {
             }
         }
 
-        self.active_segment.append(record)
+        let base_offset = self.active_segment.base_offset();
+        (base_offset, self.active_segment.append(record))
     }
 
     pub fn last_offset(&self) -> (u64, u64) {
@@ -93,7 +94,7 @@ impl Log {
     /// connections mind (some runtimes support internal preemption using await points
     /// where this might not be a problem)
     /// **Note**: When data of deleted segment is asked, returns data of the current head
-    pub fn readv(&mut self, mut base_offset: u64, mut offset: u64) -> (bool, u64, u64, Vec<Bytes>) {
+    pub fn readv(&mut self, mut base_offset: u64, mut offset: u64) -> (Option<u64>, u64, u64, Vec<Bytes>) {
         // TODO Fix usize to u64 conversions
 
         // jump to head if the caller is trying to read deleted segment
@@ -106,20 +107,36 @@ impl Log {
         // read from active segment if base offset matches active segment's base offset
         if base_offset == self.active_segment.base_offset() {
             let relative_offset = (offset - base_offset) as usize;
-            let out = self.active_segment.readv(relative_offset);
+            let out = match self.active_segment.readv(relative_offset) {
+                Some(v) => v,
+                None => Vec::new()
+            };
+
             let last_record_offset = offset + out.len() as u64 - 1;
-            return (false, self.active_segment.base_offset(), last_record_offset, out)
+            return (None, self.active_segment.base_offset(), last_record_offset, out)
         }
 
         // read from backlog segments
         if let Some(segment) = self.segments.get(&base_offset) {
             let relative_offset = (offset - base_offset) as usize;
             let out = segment.readv(relative_offset);
-            let last_record_offset = offset + out.len() as u64 - 1;
-            return (true, segment.base_offset(), last_record_offset, out)
+
+            // This jump to active segment is necessary;
+            match out {
+                Some(out) => {
+                    let last_record_offset = offset + out.len() as u64 - 1;
+                    let next_segment_offset = segment.base_offset() + segment.len() as u64;
+                    return (Some(next_segment_offset), segment.base_offset(), last_record_offset, out)
+                }
+                None => {
+                    let out = self.active_segment.readv(0).unwrap();
+                    let last_record_offset = offset + out.len() as u64 - 1;
+                    return (None, segment.base_offset(), last_record_offset, out)
+                }
+            }
         }
 
-        (false, base_offset, offset, Vec::new())
+        (None, base_offset, offset, Vec::new())
     }
 }
 

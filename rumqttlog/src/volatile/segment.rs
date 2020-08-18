@@ -54,7 +54,11 @@ impl Segment {
     }
 
     /// Reads multiple data from a segment
-    pub fn readv(&self, offset: usize) -> Vec<Bytes> {
-        self.file[offset..].to_vec()
+    pub fn readv(&self, offset: usize) -> Option<Vec<Bytes>> {
+        if offset >= self.file.len() {
+            return None
+        }
+
+        Some(self.file[offset..].to_vec())
     }
 }
