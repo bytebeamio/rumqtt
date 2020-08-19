@@ -265,20 +265,15 @@ impl EventLoop {
     }
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
-        let network = time::timeout(Duration::from_secs(self.options.timeout()), async {
-            let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
-                let socket = tls::tls_connect(&self.options).await?;
-                Network::new(socket, self.options.max_incoming_packet_size)
-            } else {
-                let addr = self.options.broker_addr.as_str();
-                let port = self.options.port;
-                let socket = TcpStream::connect((addr, port)).await?;
-                Network::new(socket, self.options.max_incoming_packet_size)
-            };
-
-            Ok::<_, ConnectionError>(network)
-        })
-        .await??;
+       let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
+           let socket = tls::tls_connect(&self.options).await?;
+           Network::new(socket, self.options.max_incoming_packet_size)
+       } else {
+           let addr = self.options.broker_addr.as_str();
+           let port = self.options.port;
+           let socket = TcpStream::connect((addr, port)).await?;
+           Network::new(socket, self.options.max_incoming_packet_size)
+       };
 
         self.network = Some(network);
         Ok(())
@@ -301,14 +296,14 @@ impl EventLoop {
         }
 
         // mqtt connection with timeout
-        time::timeout(Duration::from_secs(self.options.timeout()), async {
+        time::timeout(Duration::from_secs(self.options.connection_timeout()), async {
             network.connect(connect).await?;
             Ok::<_, ConnectionError>(())
         })
         .await??;
 
         // wait for 'timeout' time to validate connack
-        let packet = time::timeout(Duration::from_secs(self.options.timeout()), async {
+        let packet = time::timeout(Duration::from_secs(self.options.connection_timeout()), async {
             let packet = network.read_connack().await?;
             Ok::<_, ConnectionError>(packet)
         })

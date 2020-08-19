@@ -67,10 +67,10 @@
 //! - Reconnects if polled again after an error
 //! - User handle to send requests is just a channel
 //!
-//! Since eventloop is externally polled (with `iter()/poll()`) out side the library, users can
+//! Since eventloop is externally polled (with `iter()/poll()` in a loop) out side the library, users can
 //! - Distribute incoming messages based on topics
 //! - Stop it when required
-//! - Access internal state for use cases like graceful shutdown
+//! - Access internal state for use cases like graceful shutdown or to modify options before reconnection
 
 #[macro_use]
 extern crate log;
@@ -78,7 +78,6 @@ extern crate log;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_rustls::rustls::ClientConfig;
 
 mod client;
 mod tls;
@@ -95,6 +94,8 @@ pub use eventloop::{ConnectionError, EventLoop};
 pub use state::{MqttState, StateError};
 pub use mqtt4bytes::*;
 pub use async_channel::{Sender, SendError, TrySendError};
+pub use tokio_rustls::rustls::ClientConfig;
+pub use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
 
 #[derive(Debug, Clone)]
 pub enum Incoming {
@@ -486,18 +487,18 @@ impl MqttOptions {
     }
 
     /// Get the ClientConfig which was previously set, if any.
-    pub fn get_tls_client_config(&self) -> Option<Arc<ClientConfig>> {
+    pub fn tls_client_config(&self) -> Option<Arc<ClientConfig>> {
         self.tls_client_config.clone()
     }
 
     /// set connection timeout in secs
-    pub fn set_conn_timeout(&mut self, timeout: u64) -> &mut Self {
+    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
         self.conn_timeout = timeout;
         self
     }
 
     /// get timeout in secs
-    pub fn timeout(&self) -> u64 {
+    pub fn connection_timeout(&self) -> u64 {
         self.conn_timeout
     }
 }
