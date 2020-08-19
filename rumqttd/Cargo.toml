@@ -2,7 +2,7 @@
 name = "rumqttd"
 description = "Distributed, embeddable mqtt broker library"
 license = "Apache-2.0"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 
@@ -17,7 +17,7 @@ path = "src/bin.rs"
 
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.1"}
-rumqttc = { path = "../rumqttc", version = "0.0.5"}
+rumqttc = { path = "../rumqttc", version = "0.0.6"}
 tokio = { version = "=0.2.22", features = ["full"]}
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
