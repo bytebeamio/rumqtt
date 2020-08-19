@@ -556,6 +556,7 @@ impl Router {
         let native_id = self.id;
         let topic = &request.topic;
         let commitlog = &mut self.commitlog[native_id];
+        let max_count = request.max_count;
 
         let cursors = match request.cursors {
             Some(cursors) => cursors,
@@ -581,7 +582,7 @@ impl Router {
             payload: Vec::new()
         };
 
-        match commitlog.readv(topic, segment, offset) {
+        match commitlog.readv(topic, segment, offset, max_count) {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
                 match jump {
                     Some(next) => reply.cursors[native_id] = (next, next),
@@ -606,6 +607,7 @@ impl Router {
     /// log is caught up or encountered an error while reading data
     fn extract_all_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
+        let max_count = request.max_count;
         debug!("Pull data. Topic = {}, cursors = {:?}", topic, request.cursors);
 
         let mut cursors = [(0, 0); 3];
@@ -628,7 +630,7 @@ impl Router {
                 }
             };
 
-            match commitlog.readv(topic, segment, offset) {
+            match commitlog.readv(topic, segment, offset, max_count) {
                 Ok(Some((jump, base_offset, record_offset, mut data))) => {
                     match jump {
                         Some(next) => cursors[i] = (next, next),

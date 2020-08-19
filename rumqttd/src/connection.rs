@@ -56,7 +56,7 @@ impl Link {
             connect,
             id,
             network,
-            tracker: Tracker::new(),
+            tracker: Tracker::new(max_inflight_count as usize),
             state: State::new(max_inflight_count),
             router_tx,
             link_rx,

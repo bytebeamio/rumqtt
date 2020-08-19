@@ -66,7 +66,7 @@ impl Replicator {
         let max_inflight = 100;
 
         // Subscribe to all the data as we want to replicate everything.
-        let mut tracker = Tracker::new();
+        let mut tracker = Tracker::new(100);
         tracker.add_subscription("#");
         let link_rx = register_with_router(remote_id, &router_tx).await;
 
