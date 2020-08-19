@@ -228,21 +228,21 @@ mod test {
         assert_eq!(jump, Some(20));
 
         // Read a segment from scratch and max count crosses boundary
-        let (jump, base_offset, last_offset, data) = log.readv(10, 10, 100);
+        let (_, _, _, data) = log.readv(10, 10, 100);
         assert_eq!(data.len(), 10);
 
         // Read a segment from scratch and max count less than boundary
-        let (jump, base_offset, last_offset, data) = log.readv(10, 10, 5);
+        let (_, base_offset, last_offset, data) = log.readv(10, 10, 5);
         assert_eq!(data.len(), 5);
         assert_eq!(base_offset, 10);
         assert_eq!(last_offset, 14);
 
         // Read a segment from middle and max count crosses boundary
-        let (jump, base_offset, last_offset, data) = log.readv(10, 15, 100);
+        let (_, _, _, data) = log.readv(10, 15, 100);
         assert_eq!(data.len(), 5);
 
         // Read a segment from middle and max count less than boundary
-        let (jump, base_offset, last_offset, data) = log.readv(10, 15, 2);
+        let (_, base_offset, last_offset, data) = log.readv(10, 15, 2);
         assert_eq!(data.len(), 2);
         assert_eq!(base_offset, 10);
         assert_eq!(last_offset, 16);
