@@ -18,7 +18,7 @@ fn main() {
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     let start = Instant::now();
     for _i in 0..count {
-        let (_, s, o, _data) = log.readv(segment, offset);
+        let (_, s, o, _data) = log.readv(segment, offset, 100);
         segment = s;
         offset = o + 1;
     }

@@ -32,18 +32,18 @@ impl CommitLog {
 
     /// Appends the record to correct commitlog and returns a boolean to indicate
     /// if this topic is new along with the offset of append
-    pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<(bool, u64)> {
+    pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<(bool, (u64, u64))> {
         // Entry instead of if/else?
         if let Some(log) = self.logs.get_mut(topic) {
-            let offset = log.append(record);
-            Ok((false, offset))
+            let offsets = log.append(record);
+            Ok((false, offsets))
         } else {
             let max_segment_size = self.config.max_segment_size;
             let max_segment_count = self.config.max_segment_count;
             let mut log = Log::new(max_segment_size, max_segment_count);
-            let offset = log.append(record);
+            let offsets = log.append(record);
             self.logs.insert(topic.to_owned(), log);
-            Ok((true, offset))
+            Ok((true, offsets))
         }
     }
 
@@ -61,7 +61,8 @@ impl CommitLog {
         topic: &str,
         segment: u64,
         offset: u64,
-    ) -> io::Result<Option<(bool, u64, u64, Vec<Bytes>)>> {
+        max_count: usize
+    ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
         // native and replica commitlog where this topic doesn't exist
         let log = match self.logs.get_mut(topic) {
@@ -69,8 +70,8 @@ impl CommitLog {
             None => return Ok(None)
         };
 
-        let (done, segment, offset, data) = log.readv(segment, offset);
-        Ok(Some((done, segment, offset, data)))
+        let (jump, segment, offset, data) = log.readv(segment, offset, max_count);
+        Ok(Some((jump, segment, offset, data)))
     }
 }
 

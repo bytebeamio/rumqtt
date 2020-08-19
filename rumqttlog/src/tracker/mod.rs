@@ -30,11 +30,13 @@ pub struct Tracker {
     /// List of wildcard subscriptions
     wild_subscriptions: Vec<String>,
     /// number of inflight requests
-    inflight: usize
+    inflight: usize,
+    /// max message count in data request
+    max_count: usize
 }
 
 impl Tracker {
-    pub fn new() -> Tracker {
+    pub fn new(max_count: usize) -> Tracker {
         // TODO: Don't allow more than allocated capacity in tracker
         Tracker {
             tracker: VecDeque::with_capacity(100),
@@ -42,7 +44,8 @@ impl Tracker {
             watermark_topics: HashSet::new(),
             concrete_subscriptions: HashSet::new(),
             wild_subscriptions: Vec::new(),
-            inflight: 0
+            inflight: 0,
+            max_count
         }
     }
 

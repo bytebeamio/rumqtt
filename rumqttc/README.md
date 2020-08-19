@@ -16,7 +16,7 @@ use std::thread;
 
 fn main() {
     let mut mqttoptions = MqttOptions::new("rumqtt-sync-client", "test.mosquitto.org", 1883);
-    mqttoptions.set_keep_alive(5).set_throttle(Duration::from_secs(1));
+    mqttoptions.set_keep_alive(5);
 
     let (mut client, mut connection) = Client::new(mqttoptions, 10);
     client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
@@ -56,8 +56,8 @@ use std::error::Error;
 #[tokio::main(core_threads = 1)]
 async fn main() {
     let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-    let requests_rx = tokio::stream::iter(Vec::new());;
-    let mut eventloop = EventLoop::new(mqttoptions, requests_rx).await;
+    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+    let requests_tx = eventloop.handle();
 
     loop {
         let notification = eventloop.poll().await.unwrap();
@@ -67,16 +67,11 @@ async fn main() {
 }
 ```
 - Reconnects if polled again after an error
-- Takes any `Stream` for requests and hence offers a lot of customization
+- User handle to send requests is just a channel
 
-**Few of our real world use cases**
-- Bounded or unbounded requests
-- A stream which orchestrates data between disk and memory by detecting backpressure and never (practically) loose data
-- A stream which juggles data between several channels based on priority of the data
-
-Since eventloop is externally polled (with `iter()/poll()`) out side the library, users can
+Since eventloop is externally polled (with `iter()/poll()` in a loop) out side the library, users can
 - Distribute incoming messages based on topics
 - Stop it when required
-- Access internal state for use cases like graceful shutdown
+- Access internal state for use cases like graceful shutdown or to modify options before reconnection
 
-License: MIT
+License: Apache-2.0

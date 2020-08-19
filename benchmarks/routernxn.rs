@@ -88,7 +88,7 @@ async fn connection(
     router_tx: Sender<(usize, RouterInMessage)>
 ) {
     let (id, mut this_rx) = common::new_connection(id, 10, &router_tx).await;
-    let mut tracker = Tracker::new();
+    let mut tracker = Tracker::new(100);
     tracker.add_subscription("#");
     let mut got_last_reply = true;
     let count = 0;

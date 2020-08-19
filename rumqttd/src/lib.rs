@@ -200,8 +200,10 @@ impl Connector {
 
         // Start the link
         let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone(), link_rx).await;
-        let o = link.start().await;
-        error!("Link stopped!! Id = {}, Client Id = {},  Result = {:?}", id, client_id, o);
+        match link.start().await {
+            Ok(_) => info!("Link stopped!! Id = {}, Client Id = {}", id, client_id),
+            Err(e) => error!("Link stopped!! Id = {}, Client Id = {}, {:?}", id, client_id, e),
+        }
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);
         self.router_tx.send(message).await?;

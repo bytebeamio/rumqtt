@@ -54,7 +54,16 @@ impl Segment {
     }
 
     /// Reads multiple data from a segment
-    pub fn readv(&self, offset: usize) -> Vec<Bytes> {
-        self.file[offset..].to_vec()
+    pub fn readv(&self, offset: usize, max_count: usize) -> Vec<Bytes> {
+        let end = match self.file.len() {
+            // Requested offset crosses segment boundary
+            len if offset > len => return Vec::new(),
+            // End offset crosses boundary when trying fetch requested max count
+            len if offset + max_count > len => len,
+            // Return maximum number of elements
+            _ => offset + max_count
+        };
+
+        self.file[offset..end].to_vec()
     }
 }
