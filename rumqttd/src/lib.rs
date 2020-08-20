@@ -201,8 +201,18 @@ impl Connector {
         // Start the link
         let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone(), link_rx).await;
         match link.start().await {
-            Ok(_) => info!("Link stopped!! Id = {}, Client Id = {}", id, client_id),
-            Err(e) => error!("Link stopped!! Id = {}, Client Id = {}, {:?}", id, client_id, e),
+            // Connection get close. This shouldn't usually happen
+            Ok(_) => {
+                error!("Link stopped!! Id = {}, Client Id = {}", id, client_id)
+            },
+            // We are representing clean close as Abort in `Network`
+            Err(connection::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
+                info!("Link closed!! Id = {}, Client Id = {}", id, client_id)
+            },
+            // Any other error
+            Err(e) => {
+                error!("Link stopped with error!! Id = {}, Client Id = {}, {:?}", id, client_id, e)
+            },
         }
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);

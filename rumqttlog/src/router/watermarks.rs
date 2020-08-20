@@ -17,11 +17,11 @@ pub struct Watermarks {
 }
 
 impl Watermarks {
-    pub fn new(topic: &str, replication: usize) -> Watermarks {
+    pub fn new(topic: &str, replication: usize, max_connections: usize) -> Watermarks {
         Watermarks {
             topic: topic.to_owned(),
             replication,
-            pkid_offset_map: vec![None; 1000],
+            pkid_offset_map: vec![None; max_connections],
             cluster_offsets: vec![0, 0, 0]
         }
     }

@@ -31,6 +31,7 @@ pub struct Config {
     pub dir: PathBuf,
     pub max_segment_size: usize,
     pub max_segment_count: usize,
+    pub max_connections: usize,
     pub mesh: Option<Vec<MeshConfig>>,
 }
 
@@ -41,6 +42,7 @@ impl Default for Config {
             dir: PathBuf::from("/tmp/timestone"),
             max_segment_size: 5 * 1024 * 1024,
             max_segment_count: 1024,
+            max_connections: 1010,
             mesh: None,
         }
     }

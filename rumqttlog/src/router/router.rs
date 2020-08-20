@@ -76,7 +76,7 @@ impl Router {
             id: config.id,
             commitlog,
             topiclog,
-            connections: vec![None; 1000],
+            connections: vec![None; config.max_connections],
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
             ack_waiters: HashMap::new(),
@@ -206,7 +206,7 @@ impl Router {
                     Some(w) => w,
                     None => {
                         let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
-                        let watermarks = Watermarks::new(&topic, replication_count);
+                        let watermarks = Watermarks::new(&topic, replication_count, self.config.max_connections);
                         self.watermarks.insert(topic.clone(), watermarks);
                         self.watermarks.get_mut(&topic).unwrap()
                     },
@@ -259,7 +259,7 @@ impl Router {
             let watermarks = match self.watermarks.get_mut(&topic) {
                 Some(w) => w,
                 None => {
-                    let watermarks = Watermarks::new(&topic, 0);
+                    let watermarks = Watermarks::new(&topic, 0, self.config.max_connections);
                     self.watermarks.insert(topic.clone(), watermarks);
                     self.watermarks.get_mut(&topic).unwrap()
                 },
@@ -683,7 +683,7 @@ impl Router {
 
         if let Err(e) = connection.handle.try_send(reply) {
             let error = format!("{:?}", e);
-            error!("Failed to reply. Error = {:?}, Message = {:?}", error, e.into_inner());
+            error!("Failed to reply. Id = {}, Error = {:?}, Message = {:?}", id, error, e.into_inner());
         }
     }
 }

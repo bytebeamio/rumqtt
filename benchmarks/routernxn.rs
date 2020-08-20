@@ -46,6 +46,7 @@ async fn main() {
         dir: Default::default(),
         max_segment_size: commandline.segment_size,
         max_segment_count: 10000,
+        max_connections: 100,
         mesh: None,
     };
 
