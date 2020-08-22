@@ -1,4 +1,4 @@
-use async_channel::{bounded, Receiver, Sender};
+use async_channel::{bounded, Receiver, Sender, TrySendError};
 use std::collections::HashMap;
 use std::{io, mem, thread};
 
@@ -682,8 +682,10 @@ impl Router {
         };
 
         if let Err(e) = connection.handle.try_send(reply) {
-            let error = format!("{:?}", e);
-            error!("Failed to reply. Id = {}, Error = {:?}, Message = {:?}", id, error, e.into_inner());
+            match e {
+                TrySendError::Full(e) => error!("Channel full. Id = {}, Message = {:?}", id, e),
+                TrySendError::Closed(e) => info!("Channel closed. Id = {}, Message = {:?}", id, e),
+            }
         }
     }
 }

@@ -128,7 +128,7 @@ impl Broker {
         }
     }
 
-    #[tokio::main(core_threads = 1)]
+    #[tokio::main(core_threads = 4)]
     pub async fn start(&mut self) -> Result<(), Error> {
         let r = self.router.take().unwrap();
         thread::spawn(move || router(r));
