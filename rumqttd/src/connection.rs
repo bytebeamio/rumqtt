@@ -1,11 +1,11 @@
-use rumqttc::*;
-use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError};
+use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, PubAck, Incoming, SubscribeReturnCodes, SubAck, Connect};
+use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
 use tokio::{select, time};
 use std::io;
 use crate::{Id, ServerSettings};
 use crate::state::{self, State};
 use std::sync::Arc;
-use tokio::time::{Instant, Duration};
+use tokio::time::{Instant, Duration, Elapsed};
 
 pub struct Link {
     config: Arc<ServerSettings>,
@@ -25,12 +25,16 @@ pub struct Link {
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
-    #[error("Eventloop {0}")]
-    EventLoop(#[from] ConnectionError),
     // #[error("Packet not supported yet")]
     // UnsupportedPacket(Incoming),
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
     #[error("State error")]
     State(#[from] state::Error),
+    #[error("Unexpected router message")]
+    RouterMessage(RouterOutMessage),
+    #[error("Connack error {0}")]
+    ConnAck(String),
     #[error("Keep alive time exceeded")]
     KeepAlive,
     #[error("Channel send error")]
@@ -44,14 +48,43 @@ pub enum Error {
 impl Link {
     pub async fn new(
         config: Arc<ServerSettings>,
-        connect: Connect,
-        id: Id,
-        network: Network,
         router_tx: Sender<(Id, RouterInMessage)>,
-        link_rx: Receiver<RouterOutMessage>
-    ) -> Link {
+        mut network: Network
+    ) -> Result<(String, Id, Link), Error> {
+        // Wait for MQTT connect packet and error out if it's not received in time to prevent
+        // DOS attacks by filling total connections that the server can handle with idle open
+        // connections which results in server rejecting new connections
+        let timeout = Duration::from_millis(config.connection_timeout_ms.into());
+        let connect = time::timeout(timeout, async {
+            let connect = network.read_connect().await?;
+            Ok::<_, Error>(connect)
+        }).await??;
+
+
+        // Register this connection with the router. Router replys with ack which if ok will
+        // start the link. Router can sometimes reject the connection (ex max connection limit)
+        let client_id = connect.client_id.clone();
+        let (connection, link_rx) = Connection::new(&client_id, 10);
+        let message = (0, RouterInMessage::Connect(connection));
+        router_tx.send(message).await.unwrap();
+
+        // Send connection acknowledgement back to the client
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+        network.connack(connack).await?;
+
+        // TODO When a new connection request is sent to the router, router should ack with error
+        // TODO if it exceeds maximum allowed active connections
+        // Right now link identifies failure with dropped rx in router, which is probably ok for now
+        let id = match link_rx.recv().await? {
+            RouterOutMessage::ConnectionAck(ack) =>  match ack {
+                ConnectionAck::Success(id) => id,
+                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason))
+            }
+            message => return Err(Error::RouterMessage(message))
+        };
+
         let max_inflight_count = config.max_inflight_count;
-        Link {
+        Ok((client_id, id, Link {
             config,
             connect,
             id,
@@ -63,7 +96,7 @@ impl Link {
             acks_required: 0,
             stored_message: None,
             total: 0
-        }
+        }))
     }
 
 

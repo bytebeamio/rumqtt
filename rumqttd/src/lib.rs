@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::time::Elapsed;
 use rumqttlog::*;
-use rumqttc::{Packet, ConnAck, ConnectReturnCode, Network};
+use rumqttc::{Packet, Network};
 
 pub use rumqttlog::Config as RouterConfig;
 use tokio::time;
@@ -25,16 +25,14 @@ mod state;
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
+    #[error("Connection error")]
+    Connection(#[from] connection::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, RouterInMessage)>),
-    #[error("Unexpected router message")]
-    RouterMessage(RouterOutMessage),
-    #[error("Connack error {0}")]
-    ConnAck(String),
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet)
@@ -165,41 +163,11 @@ impl Connector {
     /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
     /// denial of service attacks (rogue clients which only does network connection without sending
     /// mqtt connection packet to make make the server reach its concurrent connection limit)
-    async fn new_connection(&self, mut network: Network) -> Result<(), Error> {
-        // Wait for MQTT connect packet and error out if it's not received in time to prevent
-        // DOS attacks by filling total connections that the server can handle with idle open
-        // connections which results in server rejecting new connections
-        let timeout = Duration::from_millis(self.config.connection_timeout_ms.into());
-        let connect = time::timeout(timeout, async {
-            let connect = network.read_connect().await?;
-            Ok::<_, Error>(connect)
-        }).await??;
-
-
-        // Register this connection with the router. Router replys with ack which if ok will
-        // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new(&client_id, 10);
-        let message = (0, RouterInMessage::Connect(connection));
+    async fn new_connection(&self, network: Network) -> Result<(), Error> {
+        let config = self.config.clone();
         let router_tx = self.router_tx.clone();
-        router_tx.send(message).await.unwrap();
-
-        // Send connection acknowledgement back to the client
-        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-        network.connack(connack).await?;
-
-        // TODO When a new connection request is sent to the router, router should ack with error
-        // TODO if it exceeds maximum allowed active connections
-        let id = match link_rx.recv().await? {
-            RouterOutMessage::ConnectionAck(ack) =>  match ack {
-                ConnectionAck::Success(id) => id,
-                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason))
-            }
-            message => return Err(Error::RouterMessage(message))
-        };
-
         // Start the link
-        let mut link = Link::new(self.config.clone(), connect, id,  network, router_tx.clone(), link_rx).await;
+        let (client_id, id, mut link) = Link::new(config, router_tx, network).await?;
         match link.start().await {
             // Connection get close. This shouldn't usually happen
             Ok(_) => {
