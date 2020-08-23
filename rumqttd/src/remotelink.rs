@@ -7,7 +7,7 @@ use crate::state::{self, State};
 use std::sync::Arc;
 use tokio::time::{Instant, Duration, Elapsed};
 
-pub struct Link {
+pub struct RemoteLink {
     config: Arc<ServerSettings>,
     connect: Connect,
     id: Id,
@@ -45,12 +45,12 @@ pub enum Error {
     TooManyPayloads(usize)
  }
 
-impl Link {
+impl RemoteLink {
     pub async fn new(
         config: Arc<ServerSettings>,
         router_tx: Sender<(Id, RouterInMessage)>,
         mut network: Network
-    ) -> Result<(String, Id, Link), Error> {
+    ) -> Result<(String, Id, RemoteLink), Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
         // DOS attacks by filling total connections that the server can handle with idle open
         // connections which results in server rejecting new connections
@@ -59,7 +59,6 @@ impl Link {
             let connect = network.read_connect().await?;
             Ok::<_, Error>(connect)
         }).await??;
-
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
@@ -84,7 +83,7 @@ impl Link {
         };
 
         let max_inflight_count = config.max_inflight_count;
-        Ok((client_id, id, Link {
+        Ok((client_id, id, RemoteLink {
             config,
             connect,
             id,
@@ -98,7 +97,6 @@ impl Link {
             total: 0
         }))
     }
-
 
     pub async fn start(&mut self) -> Result<(), Error> {
         let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
@@ -144,7 +142,6 @@ impl Link {
             }
         }
     }
-
 
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {

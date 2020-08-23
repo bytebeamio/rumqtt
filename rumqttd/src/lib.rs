@@ -15,10 +15,13 @@ use tokio::time;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task;
-use crate::connection::Link;
+use crate::remotelink::RemoteLink;
 
-mod connection;
+mod remotelink;
+mod locallink;
 mod state;
+
+pub use locallink::{LocalLink as Link, Error as LinkError};
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -26,7 +29,7 @@ pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
     #[error("Connection error")]
-    Connection(#[from] connection::Error),
+    Connection(#[from] remotelink::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("Channel recv error")]
@@ -167,14 +170,14 @@ impl Connector {
         let config = self.config.clone();
         let router_tx = self.router_tx.clone();
         // Start the link
-        let (client_id, id, mut link) = Link::new(config, router_tx, network).await?;
+        let (client_id, id, mut link) = RemoteLink::new(config, router_tx, network).await?;
         match link.start().await {
             // Connection get close. This shouldn't usually happen
             Ok(_) => {
                 error!("Link stopped!! Id = {}, Client Id = {}", id, client_id)
             },
             // We are representing clean close as Abort in `Network`
-            Err(connection::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
+            Err(remotelink::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
                 info!("Link closed!! Id = {}, Client Id = {}", id, client_id)
             },
             // Any other error
