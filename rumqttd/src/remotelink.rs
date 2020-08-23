@@ -105,21 +105,12 @@ impl RemoteLink {
 
         // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
         //         Router shouldn't drop messages
-
+        // NOTE: Right now we request data by topic, instead if can request data
+        // of multiple topics at once, we can have better utilization of
+        // network and system calls for n publisher and 1 subscriber workloads
+        // as data from multiple topics can be batched (for a given connection)
         loop {
             let keep_alive2 = &mut timeout;
-
-            // Right now we request data by topic, instead if can request data
-            // of multiple topics at once, we can have better utilization of
-            // network and system calls for n publisher and 1 subscriber workloads
-            // as data from multiple topics can be batched (for a given connection)
-            if self.tracker.inflight() < 10 {
-                if let Some(message) = self.tracker.next() {
-                    trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
-                    self.router_tx.send((self.id, message)).await?;
-                }
-            }
-
             if self.acks_required == 0 {
                 if let Some(message) = self.stored_message.take() {
                     self.handle_router_response(message).await?;
@@ -139,6 +130,11 @@ impl RemoteLink {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
+                Some(message) = tracker_next(&mut self.tracker),
+                if self.tracker.has_next() && self.tracker.inflight() < 10 => {
+                    trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
+                    self.router_tx.send((self.id, message)).await?;
+                }
             }
         }
     }
@@ -151,7 +147,7 @@ impl RemoteLink {
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "data", "reply", self.id, reply.payload.len());
+                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "data", "reply", self.id, reply.topic, reply.payload.len());
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count))
@@ -180,7 +176,7 @@ impl RemoteLink {
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.pkids.len());
+                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "reply", self.id, reply.topic, reply.pkids.len());
                 self.tracker.update_watermarks_tracker(&reply);
                 for ack in reply.pkids.into_iter().rev() {
                     let ack = PubAck::new(ack);
@@ -218,6 +214,7 @@ impl RemoteLink {
                     publishes.push(publish);
                 }
                 Incoming::Subscribe(subscribe) => {
+                    trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
                     let mut return_codes = Vec::new();
                     for filter in subscribe.topics {
                         let code = SubscribeReturnCodes::Success(filter.qos);
@@ -246,10 +243,15 @@ impl RemoteLink {
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
         if !publishes.is_empty() {
+            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, publishes.len());
             let message = RouterInMessage::ConnectionData(publishes);
             self.router_tx.send((self.id, message)).await?;
         }
 
         Ok(())
     }
+}
+
+async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
+    tracker.next()
 }
