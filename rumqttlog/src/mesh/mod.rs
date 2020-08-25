@@ -13,6 +13,7 @@ use std::time::Duration;
 use tokio::net::{TcpListener};
 use tokio::time::{self, Elapsed};
 use tokio::task;
+use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug)]
 #[error("...")]
@@ -28,7 +29,7 @@ type ConnectionId = usize;
 /// connection is implemented using handehake combination by sequentially following routers in config
 pub struct Mesh {
     /// Config which holds details of all the routers for distributed mesh
-    config: Config,
+    config: Arc<Config>,
     /// Router handle to pass to links
     router_tx: Sender<(ConnectionId, RouterInMessage)>,
     /// Handles to all the links
@@ -36,7 +37,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub(crate) fn new(config: Config, router_tx: Sender<(ConnectionId, RouterInMessage)>) -> Mesh {
+    pub(crate) fn new(config: Arc<Config>, router_tx: Sender<(ConnectionId, RouterInMessage)>) -> Mesh {
         Mesh {
             config,
             router_tx,

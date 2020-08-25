@@ -96,7 +96,8 @@ pub struct Broker {
 
 impl Broker {
     pub fn new(config: Config) -> Broker {
-        let (router, router_tx) = Router::new(config.router.clone());
+        let router_config = Arc::new(config.router.clone());
+        let (router, router_tx) = Router::new(router_config);
         Broker { config, router_tx, router: Some(router) }
     }
 

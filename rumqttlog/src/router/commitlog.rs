@@ -4,17 +4,18 @@ use std::io;
 use super::bytes::Bytes;
 use crate::volatile::Log;
 use crate::Config;
+use std::sync::Arc;
 
 // TODO change config to Arc
 pub(crate) struct CommitLog {
-    config: Config,
+    config: Arc<Config>,
     logs: HashMap<String, Log>,
 }
 
 impl CommitLog {
-    pub fn new(config: Config) -> CommitLog {
+    pub fn new(config: Arc<Config>) -> CommitLog {
         CommitLog {
-            config: config.clone(),
+            config,
             logs: HashMap::new(),
         }
     }

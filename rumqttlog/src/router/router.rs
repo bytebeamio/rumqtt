@@ -14,6 +14,7 @@ use thiserror::Error;
 use tokio::stream::StreamExt;
 use rumqttc::Publish;
 use crate::router::watermarks::Watermarks;
+use std::sync::Arc;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -26,7 +27,7 @@ type Topic = String;
 
 pub struct Router {
     /// Router configuration
-    config: Config,
+    config: Arc<Config>,
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
     id: ConnectionId,
@@ -66,7 +67,7 @@ pub struct Router {
 /// replicators ask router for data and router responds by putting data int
 /// relevant connection handle
 impl Router {
-    pub fn new(config: Config) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
+    pub fn new(config: Arc<Config>) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
         let (router_tx, router_rx) = bounded(1000);
         let topiclog = TopicLog::new();
         let commitlog = [CommitLog::new(config.clone()), CommitLog::new(config.clone()), CommitLog::new(config.clone())];
