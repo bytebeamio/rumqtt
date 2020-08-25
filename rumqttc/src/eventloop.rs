@@ -66,7 +66,7 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub async fn new(options: MqttOptions, cap: usize) -> EventLoop {
+    pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
         let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
@@ -400,7 +400,7 @@ mod test {
 
         time::delay_for(Duration::from_secs(1)).await;
         let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let mut eventloop = EventLoop::new(options, 5);
 
         let start = Instant::now();
         let o = eventloop.poll().await;
@@ -422,7 +422,7 @@ mod test {
         let keep_alive = options.keep_alive();
 
         // start sending requests
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         // start the eventloop
         task::spawn(async move {
             run(eventloop, false).await.unwrap();
@@ -458,7 +458,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incomin activity
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
@@ -496,7 +496,7 @@ mod test {
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         task::spawn(async move {
             run(eventloop, false).await.unwrap();
         });
@@ -527,7 +527,7 @@ mod test {
 
         time::delay_for(Duration::from_secs(1)).await;
         let start = Instant::now();
-        let mut eventloop = EventLoop::new(options, 5).await;
+        let mut eventloop = EventLoop::new(options, 5);
         loop {
             if let Err(e) = eventloop.poll().await {
                 match e {
@@ -548,7 +548,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incoming activity
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -574,7 +574,7 @@ mod test {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
         options.set_inflight(3);
 
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
 
         task::spawn(async move {
@@ -623,7 +623,7 @@ mod test {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
         options.set_inflight(4);
 
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
 
         task::spawn(async move {
@@ -658,7 +658,7 @@ mod test {
         options.set_keep_alive(5);
 
         // start sending qos0 publishes. Makes sure that there is out activity but no in activity
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -700,7 +700,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incoming activity
-        let eventloop = EventLoop::new(options, 5).await;
+        let eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;

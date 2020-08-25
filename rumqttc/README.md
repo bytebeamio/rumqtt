@@ -56,7 +56,7 @@ use std::error::Error;
 #[tokio::main(core_threads = 1)]
 async fn main() {
     let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+    let mut eventloop = EventLoop::new(mqttoptions, 10);
     let requests_tx = eventloop.handle();
 
     loop {

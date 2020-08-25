@@ -40,8 +40,7 @@ impl Client {
             .enable_all()
             .build()
             .unwrap();
-        let eventloop = EventLoop::new(options, cap);
-        let mut eventloop = runtime.block_on(eventloop);
+        let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
         let cancel_tx = eventloop.take_cancel_handle().unwrap();
 
