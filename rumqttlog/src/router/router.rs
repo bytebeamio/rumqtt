@@ -1,4 +1,4 @@
-use async_channel::{bounded, Receiver, Sender};
+use async_channel::{bounded, Receiver, Sender, TrySendError};
 use std::collections::HashMap;
 use std::{io, mem, thread};
 
@@ -14,6 +14,7 @@ use thiserror::Error;
 use tokio::stream::StreamExt;
 use rumqttc::Publish;
 use crate::router::watermarks::Watermarks;
+use std::sync::Arc;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -26,7 +27,7 @@ type Topic = String;
 
 pub struct Router {
     /// Router configuration
-    config: Config,
+    config: Arc<Config>,
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
     id: ConnectionId,
@@ -66,7 +67,7 @@ pub struct Router {
 /// replicators ask router for data and router responds by putting data int
 /// relevant connection handle
 impl Router {
-    pub fn new(config: Config) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
+    pub fn new(config: Arc<Config>) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
         let (router_tx, router_rx) = bounded(1000);
         let topiclog = TopicLog::new();
         let commitlog = [CommitLog::new(config.clone()), CommitLog::new(config.clone()), CommitLog::new(config.clone())];
@@ -76,7 +77,7 @@ impl Router {
             id: config.id,
             commitlog,
             topiclog,
-            connections: vec![None; 1000],
+            connections: vec![None; config.max_connections],
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
             ack_waiters: HashMap::new(),
@@ -206,7 +207,7 @@ impl Router {
                     Some(w) => w,
                     None => {
                         let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
-                        let watermarks = Watermarks::new(&topic, replication_count);
+                        let watermarks = Watermarks::new(&topic, replication_count, self.config.max_connections);
                         self.watermarks.insert(topic.clone(), watermarks);
                         self.watermarks.get_mut(&topic).unwrap()
                     },
@@ -259,7 +260,7 @@ impl Router {
             let watermarks = match self.watermarks.get_mut(&topic) {
                 Some(w) => w,
                 None => {
-                    let watermarks = Watermarks::new(&topic, 0);
+                    let watermarks = Watermarks::new(&topic, 0, self.config.max_connections);
                     self.watermarks.insert(topic.clone(), watermarks);
                     self.watermarks.get_mut(&topic).unwrap()
                 },
@@ -682,8 +683,10 @@ impl Router {
         };
 
         if let Err(e) = connection.handle.try_send(reply) {
-            let error = format!("{:?}", e);
-            error!("Failed to reply. Error = {:?}, Message = {:?}", error, e.into_inner());
+            match e {
+                TrySendError::Full(e) => error!("Channel full. Id = {}, Message = {:?}", id, e),
+                TrySendError::Closed(e) => info!("Channel closed. Id = {}, Message = {:?}", id, e),
+            }
         }
     }
 }

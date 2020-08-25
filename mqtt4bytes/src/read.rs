@@ -57,8 +57,9 @@ pub fn check(stream: &mut BytesMut, max_packet_size: usize) -> Result<FixedHeade
     // If the current call fails due to insufficient bytes in the stream, after calculating
     // remaining length, we extend the stream
     let frame_length = fixed_header.frame_length();
-    if stream.len() < frame_length {
-        return Err(Error::InsufficientBytes(frame_length));
+    let stream_length = stream.len();
+    if stream_length < frame_length {
+        return Err(Error::InsufficientBytes(frame_length - stream_length));
     }
 
     Ok(fixed_header)

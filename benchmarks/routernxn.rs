@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::{task, select, time};
 use tokio::stream::StreamExt;
 use async_channel::{Receiver, bounded};
+use std::sync::Arc;
 
 pub mod common;
 
@@ -46,10 +47,11 @@ async fn main() {
         dir: Default::default(),
         max_segment_size: commandline.segment_size,
         max_segment_count: 10000,
+        max_connections: 100,
         mesh: None,
     };
 
-    let (router, tx) = Router::new(config);
+    let (router, tx) = Router::new(Arc::new(config));
     thread::spawn(move || start_router(router));
 
     let (network_tx, network_rx) = bounded(100);

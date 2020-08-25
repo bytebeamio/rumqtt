@@ -116,9 +116,9 @@ impl Network {
         let read = self.socket.read_buf(&mut self.read).await?;
         if 0 == read {
             return if self.read.is_empty() {
-                Err(io::Error::new(io::ErrorKind::ConnectionReset, "connection reset by peer"))
+                Err(io::Error::new(io::ErrorKind::ConnectionAborted, "connection closed by peer"))
             } else {
-                Err(io::Error::new(io::ErrorKind::BrokenPipe, "connection broken by peer"))
+                Err(io::Error::new(io::ErrorKind::ConnectionReset, "connection reset by peer"))
             };
         }
 

@@ -1,13 +1,13 @@
-use rumqttc::*;
-use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError};
+use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, PubAck, Incoming, SubscribeReturnCodes, SubAck, Connect};
+use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
 use tokio::{select, time};
 use std::io;
 use crate::{Id, ServerSettings};
 use crate::state::{self, State};
 use std::sync::Arc;
-use tokio::time::{Instant, Duration};
+use tokio::time::{Instant, Duration, Elapsed};
 
-pub struct Link {
+pub struct RemoteLink {
     config: Arc<ServerSettings>,
     connect: Connect,
     id: Id,
@@ -25,12 +25,16 @@ pub struct Link {
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
-    #[error("Eventloop {0}")]
-    EventLoop(#[from] ConnectionError),
     // #[error("Packet not supported yet")]
     // UnsupportedPacket(Incoming),
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
     #[error("State error")]
     State(#[from] state::Error),
+    #[error("Unexpected router message")]
+    RouterMessage(RouterOutMessage),
+    #[error("Connack error {0}")]
+    ConnAck(String),
     #[error("Keep alive time exceeded")]
     KeepAlive,
     #[error("Channel send error")]
@@ -41,17 +45,45 @@ pub enum Error {
     TooManyPayloads(usize)
  }
 
-impl Link {
+impl RemoteLink {
     pub async fn new(
         config: Arc<ServerSettings>,
-        connect: Connect,
-        id: Id,
-        network: Network,
         router_tx: Sender<(Id, RouterInMessage)>,
-        link_rx: Receiver<RouterOutMessage>
-    ) -> Link {
+        mut network: Network
+    ) -> Result<(String, Id, RemoteLink), Error> {
+        // Wait for MQTT connect packet and error out if it's not received in time to prevent
+        // DOS attacks by filling total connections that the server can handle with idle open
+        // connections which results in server rejecting new connections
+        let timeout = Duration::from_millis(config.connection_timeout_ms.into());
+        let connect = time::timeout(timeout, async {
+            let connect = network.read_connect().await?;
+            Ok::<_, Error>(connect)
+        }).await??;
+
+        // Register this connection with the router. Router replys with ack which if ok will
+        // start the link. Router can sometimes reject the connection (ex max connection limit)
+        let client_id = connect.client_id.clone();
+        let (connection, link_rx) = Connection::new(&client_id, 10);
+        let message = (0, RouterInMessage::Connect(connection));
+        router_tx.send(message).await.unwrap();
+
+        // Send connection acknowledgement back to the client
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+        network.connack(connack).await?;
+
+        // TODO When a new connection request is sent to the router, router should ack with error
+        // TODO if it exceeds maximum allowed active connections
+        // Right now link identifies failure with dropped rx in router, which is probably ok for now
+        let id = match link_rx.recv().await? {
+            RouterOutMessage::ConnectionAck(ack) =>  match ack {
+                ConnectionAck::Success(id) => id,
+                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason))
+            }
+            message => return Err(Error::RouterMessage(message))
+        };
+
         let max_inflight_count = config.max_inflight_count;
-        Link {
+        Ok((client_id, id, RemoteLink {
             config,
             connect,
             id,
@@ -63,9 +95,8 @@ impl Link {
             acks_required: 0,
             stored_message: None,
             total: 0
-        }
+        }))
     }
-
 
     pub async fn start(&mut self) -> Result<(), Error> {
         let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
@@ -74,21 +105,12 @@ impl Link {
 
         // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
         //         Router shouldn't drop messages
-
+        // NOTE: Right now we request data by topic, instead if can request data
+        // of multiple topics at once, we can have better utilization of
+        // network and system calls for n publisher and 1 subscriber workloads
+        // as data from multiple topics can be batched (for a given connection)
         loop {
             let keep_alive2 = &mut timeout;
-
-            // Right now we request data by topic, instead if can request data
-            // of multiple topics at once, we can have better utilization of
-            // network and system calls for n publisher and 1 subscriber workloads
-            // as data from multiple topics can be batched (for a given connection)
-            if self.tracker.inflight() < 10 {
-                if let Some(message) = self.tracker.next() {
-                    trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
-                    self.router_tx.send((self.id, message)).await?;
-                }
-            }
-
             if self.acks_required == 0 {
                 if let Some(message) = self.stored_message.take() {
                     self.handle_router_response(message).await?;
@@ -108,10 +130,14 @@ impl Link {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
+                Some(message) = tracker_next(&mut self.tracker),
+                if self.tracker.has_next() && self.tracker.inflight() < 10 => {
+                    trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
+                    self.router_tx.send((self.id, message)).await?;
+                }
             }
         }
     }
-
 
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {
@@ -121,7 +147,7 @@ impl Link {
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "data", "reply", self.id, reply.payload.len());
+                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "data", "reply", self.id, reply.topic, reply.payload.len());
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count))
@@ -150,7 +176,7 @@ impl Link {
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.pkids.len());
+                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "reply", self.id, reply.topic, reply.pkids.len());
                 self.tracker.update_watermarks_tracker(&reply);
                 for ack in reply.pkids.into_iter().rev() {
                     let ack = PubAck::new(ack);
@@ -188,6 +214,7 @@ impl Link {
                     publishes.push(publish);
                 }
                 Incoming::Subscribe(subscribe) => {
+                    trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
                     let mut return_codes = Vec::new();
                     for filter in subscribe.topics {
                         let code = SubscribeReturnCodes::Success(filter.qos);
@@ -216,10 +243,15 @@ impl Link {
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
         if !publishes.is_empty() {
+            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, publishes.len());
             let message = RouterInMessage::ConnectionData(publishes);
             self.router_tx.send((self.id, message)).await?;
         }
 
         Ok(())
     }
+}
+
+async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
+    tracker.next()
 }

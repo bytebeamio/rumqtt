@@ -98,7 +98,7 @@ impl ReplicationAck {
 /// NOTE Connection can make one sweep request to get data from multiple topics
 /// but we'll keep it simple for now as multiple requests in one message can
 /// makes constant extraction size harder
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DataRequest {
     /// Log to sweep
     pub topic: String,
@@ -146,6 +146,12 @@ impl DataRequest {
             cursors: Some(cursors),
             max_count
         }
+    }
+}
+
+impl fmt::Debug for DataRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Topic = {}, cursors = {:?}, max_count = {}", self.topic, self.cursors, self.max_count)
     }
 }
 
@@ -198,7 +204,7 @@ pub struct TopicsReply {
     pub topics: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AcksRequest {
     /// Acks request topic
     pub(crate) topic: String,
@@ -214,6 +220,13 @@ impl AcksRequest {
             topic,
             offset
         }
+    }
+}
+
+
+impl fmt::Debug for AcksRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Topic = {}, offset = {}", self.topic, self.offset)
     }
 }
 

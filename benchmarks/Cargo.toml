@@ -16,7 +16,7 @@ futures = { version = "0.3", features = ["compat"] }
 bytes = "0.5"
 # paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 paho-mqtt = "0.7"
-async-channel = "1"
+async-channel = "1.4"
 pretty_env_logger = "0.4"
 prost = "0.6"
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
