@@ -18,7 +18,9 @@ pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
     /// Data for native commitlog
-    ConnectionData(Vec<Publish>),
+    Publish(Publish),
+    /// Data for native commitlog
+    Publishes(Vec<Publish>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
     /// Replication acks

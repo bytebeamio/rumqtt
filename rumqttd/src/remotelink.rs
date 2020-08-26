@@ -244,7 +244,7 @@ impl RemoteLink {
         self.network.flush().await?;
         if !publishes.is_empty() {
             trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, publishes.len());
-            let message = RouterInMessage::ConnectionData(publishes);
+            let message = RouterInMessage::Publishes(publishes);
             self.router_tx.send((self.id, message)).await?;
         }
 

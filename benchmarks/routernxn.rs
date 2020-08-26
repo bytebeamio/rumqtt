@@ -131,7 +131,7 @@ async fn connection(
             }
             Some(publish) = network_rx.next() => {
                 let data = vec![publish];
-                let message = (id, RouterInMessage::ConnectionData(data));
+                let message = (id, RouterInMessage::Publishes(data));
                 router_tx.send(message).await.unwrap();
             }
         }

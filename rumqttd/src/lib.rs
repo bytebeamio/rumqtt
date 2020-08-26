@@ -21,7 +21,7 @@ mod remotelink;
 mod locallink;
 mod state;
 
-pub use locallink::{LocalLink as Link, Error as LinkError};
+pub use crate::locallink::{LinkTx, LinkRx, LinkError};
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -103,6 +103,27 @@ impl Broker {
 
     pub fn router_handle(&self) -> Sender<(Id, RouterInMessage)> {
         self.router_tx.clone()
+    }
+
+    pub async fn link(&self, client_id: &str, capacity: usize) -> Result<(LinkTx, LinkRx), LinkError> {
+        // Register this connection with the router. Router replies with ack which if ok will
+        // start the link. Router can sometimes reject the connection (ex max connection limit)
+        let (connection, link_rx) = Connection::new(client_id, capacity);
+        let message = (0, RouterInMessage::Connect(connection));
+        self.router_tx.send(message).await.unwrap();
+
+        // Right now link identifies failure with dropped rx in router, which is probably ok for now
+        let id = match link_rx.recv().await? {
+            RouterOutMessage::ConnectionAck(ack) => match ack {
+                ConnectionAck::Success(id) => id,
+                ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason))
+            }
+            message => return Err(LinkError::NotConnectionAck(message))
+        };
+
+        let tx = LinkTx::new(id, self.router_tx.clone());
+        let rx = LinkRx::new(id, self.router_tx.clone(), link_rx);
+        Ok((tx, rx))
     }
 
     async fn accept_loop(&self, config: Arc<ServerSettings>) -> Result<(), Error> {
