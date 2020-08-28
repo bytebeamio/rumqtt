@@ -8,7 +8,7 @@ pub use router::Router;
 
 use self::bytes::Bytes;
 use async_channel::{Sender, bounded, Receiver};
-use rumqttc::Publish;
+use rumqttc::{Publish, Incoming};
 use std::fmt;
 use std::collections::VecDeque;
 
@@ -20,7 +20,7 @@ pub enum RouterInMessage {
     /// Data for native commitlog
     Publish(Publish),
     /// Data for native commitlog
-    Publishes(Vec<Publish>),
+    Data(Vec<Incoming>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
     /// Replication acks
@@ -256,6 +256,12 @@ pub struct Connection {
     /// Replicator connection are only created from inside this library.
     /// All the external connections are of 'device' type
     pub(crate) conn: ConnectionType,
+    /// Topics that this connection is tracking
+    pub(crate) topics: Vec<String>,
+    /// Concrete subscriptions on this topic
+    pub(crate) concrete_subscriptions: Vec<String>,
+    /// Wildcard subscriptions on this topic
+    pub(crate) wild_subscriptions: Vec<String>,
     /// Handle which is given to router to allow router to comminicate with
     /// this connection
     pub handle: Sender<RouterOutMessage>,
@@ -267,6 +273,9 @@ impl Connection {
 
         let connection = Connection {
             conn: ConnectionType::Device(id.to_owned()),
+            topics: Vec::new(),
+            concrete_subscriptions: Vec::new(),
+            wild_subscriptions: Vec::new(),
             handle: this_tx,
         };
 

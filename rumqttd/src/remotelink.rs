@@ -196,7 +196,7 @@ impl RemoteLink {
     }
 
     async fn handle_network_data(&mut self, incoming: Vec<Incoming>) -> Result<(), Error> {
-        let mut publishes = Vec::new();
+        let mut data = Vec::new();
 
         for packet in incoming {
             // debug!("Id = {}[{}], Incoming packet = {:?}", self.connect.client_id, self.id, packet);
@@ -210,8 +210,9 @@ impl RemoteLink {
                 }
                 Incoming::Publish(publish) => {
                     self.tracker.track_watermark(&publish.topic);
+                    let incoming = Incoming::Publish(publish);
                     // collect publishes from this batch
-                    publishes.push(publish);
+                    data.push(incoming);
                 }
                 Incoming::Subscribe(subscribe) => {
                     trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
@@ -242,9 +243,9 @@ impl RemoteLink {
 
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
-        if !publishes.is_empty() {
-            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, publishes.len());
-            let message = RouterInMessage::Publishes(publishes);
+        if !data.is_empty() {
+            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, data.len());
+            let message = RouterInMessage::Data(data);
             self.router_tx.send((self.id, message)).await?;
         }
 

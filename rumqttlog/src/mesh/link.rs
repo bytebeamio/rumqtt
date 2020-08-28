@@ -253,6 +253,9 @@ async fn register_with_router(id: usize, tx: &Sender<(usize, RouterInMessage)>) 
     let (link_tx, link_rx) = bounded(4);
     let connection = Connection {
         conn: ConnectionType::Replicator(id),
+        topics: vec![],
+        concrete_subscriptions: vec![],
+        wild_subscriptions: vec![],
         handle: link_tx,
     };
 
