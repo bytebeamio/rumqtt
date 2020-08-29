@@ -67,8 +67,10 @@ impl Replicator {
         let max_inflight = 100;
 
         // Subscribe to all the data as we want to replicate everything.
-        let mut tracker = Tracker::new(100);
-        tracker.add_subscription("#");
+        let tracker = Tracker::new(100);
+
+        // TODO: Reenable this by sending subscription to router
+        // tracker.add_subscription("#");
         let link_rx = register_with_router(remote_id, &router_tx).await;
 
         let network = connect(&remote, local_id, &connections_rx).await;
@@ -93,7 +95,6 @@ impl Replicator {
         for incoming in incoming {
             match incoming {
                 Incoming::Publish(publish) => {
-                    self.tracker.track_watermark(&publish.topic);
                     let Publish { pkid, topic, mut payload, .. } = publish;
                     let count = payload.get_u32() as usize;
                     let mut replication_data = ReplicationData::with_capacity(pkid, topic, count);
@@ -170,7 +171,6 @@ impl Replicator {
                     self.network.fill2(ack)?;
                 }
             }
-            RouterOutMessage::AllTopicsReply(_) => {}
         }
 
         // FIXME Early returns above will prevent router send and network write

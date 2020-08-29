@@ -116,7 +116,6 @@ impl Router {
                 RouterInMessage::DataRequest(request) => self.handle_data_request(id, request),
                 RouterInMessage::AcksRequest(request) => self.handle_acks_request(id, request),
                 RouterInMessage::Disconnect(request) => self.handle_disconnection(id, request),
-                RouterInMessage::AllTopicsRequest => self.handle_all_topics_request(id),
             }
         }
 
@@ -343,24 +342,6 @@ impl Router {
             watermarks.update_cluster_offsets(id, ack.offset);
             self.fresh_acks_notification(&ack.topic);
         }
-    }
-
-    fn handle_all_topics_request(&mut self, id: ConnectionId) {
-        let request = TopicsRequest { offset: 0, count: 0 };
-
-        trace!("{:11} {:14} Id = {}, Offset = {}", "alltopics", "request", id, request.offset);
-
-        let reply = match self.topiclog.topics() {
-            Some((offset, topics)) => {
-                TopicsReply { offset: offset + 1, topics }
-            },
-            None => {
-                TopicsReply { offset: 0, topics: Vec::new() }
-            },
-        };
-
-        trace!("{:11} {:14} Id = {}, Offset = {}", "alltopics", "response", id, reply.offset);
-        self.reply(id, RouterOutMessage::AllTopicsReply(reply));
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {

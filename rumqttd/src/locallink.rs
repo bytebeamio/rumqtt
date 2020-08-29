@@ -102,11 +102,6 @@ impl LinkRx {
                 self.tracker.update_data_tracker(&reply);
                 Some(reply)
             }
-            RouterOutMessage::AllTopicsReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "alltopics", "reply", self.id, reply.topics.len());
-                self.tracker.track_all_topics(&reply);
-                None
-            }
             message => {
                 warn!("Message = {:?} not supported", message);
                 None

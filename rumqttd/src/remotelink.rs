@@ -1,4 +1,4 @@
-use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, PubAck, Incoming, SubscribeReturnCodes, SubAck, Connect};
+use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, PubAck, Incoming, Connect};
 use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
 use tokio::{select, time};
 use std::io;
@@ -184,10 +184,6 @@ impl RemoteLink {
                     self.network.fill2(ack)?;
                 }
             }
-            RouterOutMessage::AllTopicsReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "alltopics", "reply", self.id, reply.topics.len());
-                self.tracker.track_all_topics(&reply);
-            }
         }
 
         // FIXME Early returns above will prevent router send and network write
@@ -209,24 +205,14 @@ impl RemoteLink {
                     self.state.handle_network_puback(ack)?;
                 }
                 Incoming::Publish(publish) => {
-                    self.tracker.track_watermark(&publish.topic);
-                    let incoming = Incoming::Publish(publish);
                     // collect publishes from this batch
+                    let incoming = Incoming::Publish(publish);
                     data.push(incoming);
                 }
                 Incoming::Subscribe(subscribe) => {
                     trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
-                    let mut return_codes = Vec::new();
-                    for filter in subscribe.topics {
-                        let code = SubscribeReturnCodes::Success(filter.qos);
-                        return_codes.push(code);
-                        self.tracker.add_subscription(&filter.topic_path);
-                    }
-
-                    // println!("{:?}", self.tracker);
-                    let suback = SubAck::new(subscribe.pkid, return_codes);
-                    let suback = Request::SubAck(suback);
-                    self.network.fill2(suback)?;
+                    let incoming = Incoming::Subscribe(subscribe);
+                    data.push(incoming);
                 }
                 Incoming::PingReq => {
                     self.network.fill2(Request::PingResp)?;
