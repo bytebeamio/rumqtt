@@ -588,21 +588,7 @@ impl Router {
         let topic = &request.topic;
         let commitlog = &mut self.commitlog[native_id];
         let max_count = request.max_count;
-
-        let cursors = match request.cursors {
-            Some(cursors) => cursors,
-            None => {
-                let (base_offset, record_offset)  = match commitlog.last_offset(topic) {
-                    Some(v) => v,
-                    None => return None
-                };
-
-                let mut cursors = [(0, 0); 3];
-                cursors[native_id] = (base_offset, record_offset + 1);
-                request.cursors = Some(cursors);
-                return None
-            }
-        };
+        let cursors = request.cursors;
 
         let (segment, offset) = cursors[native_id];
         debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
@@ -646,23 +632,10 @@ impl Router {
 
         // Iterate through native and replica commitlogs to collect data (of a topic)
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
-            let (segment, offset) = match request.cursors {
-                Some(cursors) => cursors[i],
-                None => {
-                    let (base_offset, record_offset)  = match commitlog.last_offset(topic) {
-                        Some(v) => v,
-                        None => continue
-                    };
-
-                    // Uninitialized requests are always registered with next offset. Collect next offsets
-                    // in all the commitlogs. End logic will update request with these offsets
-                    cursors[i] = (base_offset, record_offset + 1);
-                    continue
-                }
-            };
-
+            let (segment, offset) = request.cursors[i];
             match commitlog.readv(topic, segment, offset, max_count) {
-                Ok(Some((jump, base_offset, record_offset, mut data))) => {
+                Ok(Some(v)) => {
+                    let (jump, base_offset, record_offset, mut data) = v;
                     match jump {
                         Some(next) => cursors[i] = (next, next),
                         None => cursors[i] = (base_offset, record_offset + 1),
@@ -682,11 +655,6 @@ impl Router {
         // because of uninitialized request, update request with
         // latest offsets and return None so that caller registers
         // the request with updated offsets
-        if request.cursors.is_none() {
-            request.cursors = Some(cursors);
-            return None
-        }
-
         match payload.is_empty() {
             true => {
                 None

@@ -102,7 +102,7 @@ pub struct DataRequest {
     /// Log to sweep
     pub topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    pub cursors: Option<[(u64, u64); 3]>,
+    pub cursors: [(u64, u64); 3],
     /// Maximum count of payload buffer per replica
     pub max_count: usize
 }
@@ -112,7 +112,7 @@ impl DataRequest {
     pub fn new(topic: String) -> DataRequest {
         DataRequest {
             topic,
-            cursors: None,
+            cursors: [(0, 0); 3],
             max_count: 100
         }
     }
@@ -120,7 +120,7 @@ impl DataRequest {
     pub fn with(topic: String, max_count: usize) -> DataRequest {
         DataRequest {
             topic,
-            cursors: None,
+            cursors: [(0, 0); 3],
             max_count
         }
     }
@@ -129,7 +129,7 @@ impl DataRequest {
     pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
-            cursors: Some(cursors),
+            cursors,
             max_count: 100
         }
     }
@@ -142,7 +142,7 @@ impl DataRequest {
     ) -> DataRequest {
         DataRequest {
             topic,
-            cursors: Some(cursors),
+            cursors,
             max_count
         }
     }
