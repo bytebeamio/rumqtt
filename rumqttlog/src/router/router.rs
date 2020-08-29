@@ -7,12 +7,13 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionAck, ConnectionType, DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
+use crate::router::connection::{ConnectionType, ConnectionAck};
+use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
 
 use crate::{Config, ReplicationData};
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use rumqttc::{Publish, Incoming};
+use rumqttc::{Publish, Incoming, Subscribe};
 use crate::router::watermarks::Watermarks;
 use std::sync::Arc;
 
@@ -186,6 +187,59 @@ impl Router {
         }
     }
 
+
+    /// Handles new incoming data on a topic
+    fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Incoming>) {
+        trace!("{:11} {:14} Id = {}, Count = {}", "data", "incoming", id, data.len());
+        let mut last_offset = (0, 0);
+        let mut count = 0;
+        for publish in data {
+            match publish {
+                Incoming::Publish(publish) => if let Some(offset) = self.handle_connection_publish(id, publish) {
+                        last_offset = offset;
+                        count += 1;
+                }
+                Incoming::Subscribe(subscribe) => {
+                    self.handle_connection_subscribe(id, subscribe);
+                }
+                Incoming::PingReq => {
+                    todo!()
+                }
+                incoming => {
+                    warn!("Packet = {:?} not supported by router yet", incoming);
+                }
+            }
+        }
+
+        trace!("{:11} {:14} Id = {}, Count = {}, Offset = {:?}", "data", "committed", id, count, last_offset);
+    }
+
+    fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
+        let (_offset, topics) = match self.topiclog.topics() {
+            Some(v) => v,
+            None => return
+        };
+
+        let connection = match self.connections.get_mut(id).unwrap() {
+            Some(c) => c,
+            None => {
+                error!("Invalid id to add new subscription = {:?}", id);
+                return;
+            }
+        };
+
+        // A new subscription should match with all the existing topics and take a snapshot of current
+        // offset of all the matched topics. Subscribers will receive data from that offset
+        connection.add_subscription(subscribe.topics, topics);
+
+        // Update matched topic offsets
+        for (topic, _, offset) in connection.untracked_new_subscription_matches.iter_mut() {
+            if let Some(last_offset) = self.commitlog[self.id].last_offset(topic) {
+                *offset = last_offset;
+            }
+        }
+    }
+
     fn handle_connection_publish(&mut self, id: ConnectionId, publish: Publish) -> Option<(u64, u64)> {
         if publish.payload.len() == 0 {
             error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
@@ -233,32 +287,6 @@ impl Router {
         // waiters registered. We shouldn't rely on replication acks for data acks in this case
         self.fresh_acks_notification(&topic);
         Some((base_offset, offset))
-    }
-
-    /// Handles new incoming data on a topic
-    fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Incoming>) {
-        trace!("{:11} {:14} Id = {}, Count = {}", "data", "incoming", id, data.len());
-        let mut last_offset = (0, 0);
-        let mut count = 0;
-        for publish in data {
-            match publish {
-                Incoming::Publish(publish) => if let Some(offset) = self.handle_connection_publish(id, publish) {
-                        last_offset = offset;
-                        count += 1;
-                }
-                Incoming::Subscribe(subscribe) => {
-                    todo!()
-                }
-                Incoming::PingReq => {
-                    todo!()
-                }
-                incoming => {
-                    warn!("Packet = {:?} not supported by router yet", incoming);
-                }
-            }
-        }
-
-        trace!("{:11} {:14} Id = {}, Count = {}, Offset = {:?}", "data", "committed", id, count, last_offset);
     }
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {

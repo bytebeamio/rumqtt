@@ -1,13 +1,14 @@
 extern crate bytes;
 
+mod connection;
 mod commitlog;
 mod watermarks;
 mod router;
 
 pub use router::Router;
+pub use connection::{Connection, ConnectionAck, ConnectionType};
 
 use self::bytes::Bytes;
-use async_channel::{Sender, bounded, Receiver};
 use rumqttc::{Publish, Incoming};
 use std::fmt;
 use std::collections::VecDeque;
@@ -241,61 +242,7 @@ pub struct AcksReply {
     pub offset: u64,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum ConnectionType {
-    Device(String),
-    Replicator(usize),
-}
 
-/// Used to register a new connection with the router
-/// Connection messages encompasses a handle for router to
-/// communicate with this connection
-#[derive(Clone)]
-pub struct Connection {
-    /// Kind of connection. A replicator connection or a device connection
-    /// Replicator connection are only created from inside this library.
-    /// All the external connections are of 'device' type
-    pub(crate) conn: ConnectionType,
-    /// Topics that this connection is tracking
-    pub(crate) topics: Vec<String>,
-    /// Concrete subscriptions on this topic
-    pub(crate) concrete_subscriptions: Vec<String>,
-    /// Wildcard subscriptions on this topic
-    pub(crate) wild_subscriptions: Vec<String>,
-    /// Handle which is given to router to allow router to comminicate with
-    /// this connection
-    pub handle: Sender<RouterOutMessage>,
-}
-
-impl Connection {
-    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
-        let (this_tx, this_rx) = bounded(capacity);
-
-        let connection = Connection {
-            conn: ConnectionType::Device(id.to_owned()),
-            topics: Vec::new(),
-            concrete_subscriptions: Vec::new(),
-            wild_subscriptions: Vec::new(),
-            handle: this_tx,
-        };
-
-        (connection , this_rx)
-    }
-}
-
-#[derive(Debug)]
-pub enum ConnectionAck {
-    /// Id assigned by the router for this connectiobackn
-    Success(usize),
-    /// Failure and reason for failure string
-    Failure(String),
-}
-
-impl fmt::Debug for Connection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.conn)
-    }
-}
 
 
 #[derive(Debug)]

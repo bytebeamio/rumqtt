@@ -2,8 +2,8 @@ use std::io;
 
 use crate::tracker::Tracker;
 use crate::mesh::ConnectionId;
-use crate::{RouterInMessage, Connection, RouterOutMessage};
-use crate::router::ConnectionType;
+use crate::{RouterInMessage, RouterOutMessage};
+use crate::router::{ConnectionType, Connection};
 use crate::router::ReplicationData;
 use crate::mesh::state::{State, StateError};
 use crate::router::ReplicationAck;
@@ -15,6 +15,7 @@ use tokio::{time, select};
 use std::time::Duration;
 use bytes::{BytesMut, BufMut, Buf};
 use thiserror::Error;
+use std::collections::{HashSet, HashMap};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -253,8 +254,10 @@ async fn register_with_router(id: usize, tx: &Sender<(usize, RouterInMessage)>) 
     let (link_tx, link_rx) = bounded(4);
     let connection = Connection {
         conn: ConnectionType::Replicator(id),
-        topics: vec![],
-        concrete_subscriptions: vec![],
+        topics: HashSet::new(),
+        untracked_existing_subscription_matches: vec![],
+        untracked_new_subscription_matches: vec![],
+        concrete_subscriptions: HashMap::new(),
         wild_subscriptions: vec![],
         handle: link_tx,
     };
