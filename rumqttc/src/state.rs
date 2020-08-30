@@ -132,6 +132,7 @@ impl MqttState {
             Request::PublishRaw(publish) => self.handle_outgoing_raw_publish(publish)?,
             Request::Subscribe(subscribe) => self.handle_outgoing_subscribe(subscribe)?,
             Request::PingReq => self.handle_outgoing_ping()?,
+            Request::Disconnect => self.handle_outgoing_disconnect()?,
             _ => unimplemented!(),
         };
 
@@ -398,6 +399,11 @@ impl MqttState {
             subscription.topics, subscription.pkid
         );
         Ok(Request::Subscribe(subscription))
+    }
+
+    fn handle_outgoing_disconnect(&self) -> Result<Request, StateError> {
+        debug!("Disconnect");
+        Ok(Request::Disconnect)
     }
 
     /// Add publish packet to the state and return the packet. This method clones the
