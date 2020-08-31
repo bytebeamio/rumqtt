@@ -32,8 +32,8 @@ use crate::*;
 use bytes::{Bytes, BytesMut, BufMut};
 use alloc::string::String;
 
-/// Reads a string from bytes stream
-fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
+/// Reads a series of bytes with a length from a byte stream
+fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
     let len = stream.get_u16() as usize;
     // Invalid packets which reached this point (simulated invalid packets actually triggered this)
     // should not cause the split to cross boundaries
@@ -41,17 +41,27 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
         return Err(Error::BoundaryCrossed);
     }
 
-    let s = stream.split_to(len);
+    Ok(stream.split_to(len))
+}
+
+/// Reads a string from bytes stream
+fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
+    let s = read_mqtt_bytes(stream)?;
     match String::from_utf8(s.to_vec()) {
         Ok(v) => Ok(v),
         Err(_e) => Err(Error::TopicNotUtf8),
     }
 }
 
+/// Serializes bytes to stream (including length)
+fn write_mqtt_bytes(stream: &mut BytesMut, bytes: &[u8]) {
+    stream.put_u16(bytes.len() as u16);
+    stream.extend_from_slice(bytes);
+}
+
 /// Serializes a string to stream
 fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
-    stream.put_u16(string.len() as u16);
-    stream.extend_from_slice(string.as_bytes());
+    write_mqtt_bytes(stream, string.as_bytes());
 }
 
 /// Writes remaining length to stream and returns number of bytes for remaining length
