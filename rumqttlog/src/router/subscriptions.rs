@@ -1,24 +1,11 @@
 use std::collections::{HashSet, HashMap};
-use crate::RouterOutMessage;
-use async_channel::{Sender, Receiver, bounded};
 use rumqttc::{has_wildcards, matches, SubscribeTopic};
-use std::fmt;
 
-#[derive(Debug, Clone)]
-pub enum ConnectionType {
-    Device(String),
-    Replicator(usize),
-}
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
 /// communicate with this connection
-#[derive(Clone)]
-pub struct Connection {
-    /// Kind of connection. A replicator connection or a device connection
-    /// Replicator connection are only created from inside this library.
-    /// All the external connections are of 'device' type
-    pub(crate) conn: ConnectionType,
+pub struct Subscription {
     /// Topics that this connection's coroutine tracks. There can be inconsitency
     /// with the coroutine due to pending topics request from connection coroutine
     /// Inconsistency is captured in `untracked_topics`
@@ -33,26 +20,17 @@ pub struct Connection {
     pub(crate) concrete_subscriptions: HashMap<String, u8>,
     /// Wildcard subscriptions on this topic
     pub(crate) wild_subscriptions: Vec<(String, u8)>,
-    /// Handle which is given to router to allow router to comminicate with
-    /// this connection
-    pub handle: Sender<RouterOutMessage>,
 }
 
-impl Connection {
-    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
-        let (this_tx, this_rx) = bounded(capacity);
-
-        let connection = Connection {
-            conn: ConnectionType::Device(id.to_owned()),
+impl Subscription {
+    pub fn new() -> Subscription {
+        Subscription {
             topics: HashSet::new(),
             untracked_existing_subscription_matches: Vec::new(),
             untracked_new_subscription_matches: Vec::new(),
             concrete_subscriptions: HashMap::new(),
             wild_subscriptions: Vec::new(),
-            handle: this_tx,
-        };
-
-        (connection , this_rx)
+        }
     }
 
     /// A new subscription should match all the existing topics. Tracker
@@ -104,19 +82,5 @@ impl Connection {
                 return
             }
         }
-    }
-}
-
-#[derive(Debug)]
-pub enum ConnectionAck {
-    /// Id assigned by the router for this connection
-    Success(usize),
-    /// Failure and reason for failure string
-    Failure(String),
-}
-
-impl fmt::Debug for Connection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.conn)
     }
 }

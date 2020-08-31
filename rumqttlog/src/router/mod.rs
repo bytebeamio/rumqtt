@@ -1,17 +1,17 @@
 extern crate bytes;
 
-mod connection;
+mod subscriptions;
 mod commitlog;
 mod watermarks;
 mod router;
 
 pub use router::Router;
-pub use connection::{Connection, ConnectionAck, ConnectionType};
+pub use subscriptions::Subscription;
 
 use self::bytes::Bytes;
-use rumqttc::{Publish, Incoming};
+use rumqttc::{Publish, Incoming, Request};
 use std::fmt;
-use std::collections::VecDeque;
+use async_channel::{Sender, Receiver, bounded};
 
 /// Messages going into router
 #[derive(Debug)]
@@ -233,13 +233,57 @@ impl fmt::Debug for AcksRequest {
 pub struct AcksReply {
     pub topic: String,
     /// packet ids that can be acked
-    pub pkids: VecDeque<u16>,
+    pub acks: Vec<(u16, Request)>,
     /// offset till which pkids are returned
     pub offset: u64,
 }
 
+#[derive(Debug, Clone)]
+pub enum ConnectionType {
+    Device(String),
+    Replicator(usize),
+}
 
+/// Used to register a new connection with the router
+/// Connection messages encompasses a handle for router to
+/// communicate with this connection
+#[derive(Clone)]
+pub struct Connection {
+    /// Kind of connection. A replicator connection or a device connection
+    /// Replicator connection are only created from inside this library.
+    /// All the external connections are of 'device' type
+    pub(crate) conn: ConnectionType,
+    /// Handle which is given to router to allow router to comminicate with
+    /// this connection
+    pub handle: Sender<RouterOutMessage>,
+}
 
+impl Connection {
+    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+        let (this_tx, this_rx) = bounded(capacity);
+
+        let connection = Connection {
+            conn: ConnectionType::Device(id.to_owned()),
+            handle: this_tx,
+        };
+
+        (connection , this_rx)
+    }
+}
+
+#[derive(Debug)]
+pub enum ConnectionAck {
+    /// Id assigned by the router for this connectiobackn
+    Success(usize),
+    /// Failure and reason for failure string
+    Failure(String),
+}
+
+impl fmt::Debug for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.conn)
+    }
+}
 
 #[derive(Debug)]
 pub struct Disconnection {

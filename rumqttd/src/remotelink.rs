@@ -1,4 +1,4 @@
-use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, PubAck, Incoming, Connect};
+use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, Incoming, Connect};
 use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
 use tokio::{select, time};
 use std::io;
@@ -176,11 +176,9 @@ impl RemoteLink {
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "reply", self.id, reply.topic, reply.pkids.len());
+                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "reply", self.id, reply.topic, reply.acks.len());
                 self.tracker.update_watermarks_tracker(&reply);
-                for ack in reply.pkids.into_iter().rev() {
-                    let ack = PubAck::new(ack);
-                    let ack = Request::PubAck(ack);
+                for (_pkid, ack) in reply.acks.into_iter().rev() {
                     self.network.fill2(ack)?;
                 }
             }

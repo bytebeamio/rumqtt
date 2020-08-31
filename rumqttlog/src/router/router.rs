@@ -7,13 +7,13 @@ use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
-use crate::router::connection::{ConnectionType, ConnectionAck};
+use crate::router::{ConnectionType, ConnectionAck, Subscription};
 use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
 
 use crate::{Config, ReplicationData};
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use rumqttc::{Publish, Incoming, Subscribe};
+use rumqttc::{Publish, Incoming, Subscribe, SubscribeReturnCodes, SubAck, Request};
 use crate::router::watermarks::Watermarks;
 use std::sync::Arc;
 
@@ -43,6 +43,12 @@ pub struct Router {
     /// Index of this array represents `ConnectionId`
     /// Replace this with [Option<Connection>, 10000] when `Connection` support `Copy`?
     connections: Vec<Option<Connection>>,
+    /// Subscriptions and matching topics maintained per connection
+    subscriptions: Vec<Option<Subscription>>,
+    /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
+    /// represents a router in the mesh
+    /// Watermark 'n' implies data till n-1 is synced with the other node
+    watermarks: Vec<Option<Watermarks>>,
     /// Waiter on a topic. These are used to wake connections/replicators
     /// which are caught up all the data on a topic. Map[topic]List[Connections Ids]
     data_waiters: HashMap<Topic, Vec<(ConnectionId, DataRequest)>>,
@@ -52,10 +58,6 @@ pub struct Router {
     /// Whenever a topic is replicated, it's watermark is updated till the offset
     /// that replication has happened
     ack_waiters: HashMap<Topic, Vec<(ConnectionId, AcksRequest)>>,
-    /// Watermarks of all the replicas. Map[topic]List[u64]. Each index
-    /// represents a router in the mesh
-    /// Watermark 'n' implies data till n-1 is synced with the other node
-    watermarks: HashMap<Topic, Watermarks>,
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
@@ -72,17 +74,27 @@ impl Router {
         let (router_tx, router_rx) = bounded(1000);
         let topiclog = TopicLog::new();
         let commitlog = [CommitLog::new(config.clone()), CommitLog::new(config.clone()), CommitLog::new(config.clone())];
+        let mut connections = Vec::with_capacity(config.max_connections);
+        let mut subscriptions = Vec::with_capacity(config.max_connections);
+        let mut watermarks = Vec::with_capacity(config.max_connections);
+
+        for _ in 0..config.max_connections {
+            connections.push(None);
+            subscriptions.push(None);
+            watermarks.push(None);
+        }
 
         let router = Router {
             config: config.clone(),
             id: config.id,
             commitlog,
             topiclog,
-            connections: vec![None; config.max_connections],
+            connections,
+            subscriptions,
+            watermarks,
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
             ack_waiters: HashMap::new(),
-            watermarks: HashMap::new(),
             router_rx,
             router_tx: router_tx.clone(),
         };
@@ -155,6 +167,10 @@ impl Router {
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             warn!("Replacing an existing connection with same ID");
         }
+
+        if let Some(_) = mem::replace(&mut self.watermarks[id], Some(Watermarks::new())) {
+            warn!("Replacing an existing watermarks with same ID");
+        }
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
@@ -163,9 +179,8 @@ impl Router {
             warn!("Weird, removing a non existent connection")
         }
 
-        // FIXME We are iterating through all the topics to remove this connection
-        for (_, watermarks) in self.watermarks.iter_mut() {
-            mem::replace(&mut watermarks.pkid_offset_map[id], None) ;
+        if mem::replace(&mut self.watermarks[id], None).is_none() {
+            warn!("Weird, removing a non existent watermark")
         }
 
         // FIXME iterates through all the topics and all the (pending) requests remove the request
@@ -195,14 +210,11 @@ impl Router {
         for publish in data {
             match publish {
                 Incoming::Publish(publish) => if let Some(offset) = self.handle_connection_publish(id, publish) {
-                        last_offset = offset;
-                        count += 1;
+                    last_offset = offset;
+                    count += 1;
                 }
                 Incoming::Subscribe(subscribe) => {
                     self.handle_connection_subscribe(id, subscribe);
-                }
-                Incoming::PingReq => {
-                    todo!()
                 }
                 incoming => {
                     warn!("Packet = {:?} not supported by router yet", incoming);
@@ -219,7 +231,7 @@ impl Router {
             None => return
         };
 
-        let connection = match self.connections.get_mut(id).unwrap() {
+        let subscriptions = match self.subscriptions.get_mut(id).unwrap() {
             Some(c) => c,
             None => {
                 error!("Invalid id to add new subscription = {:?}", id);
@@ -227,16 +239,26 @@ impl Router {
             }
         };
 
+        let mut return_codes = Vec::new();
+        for filter in subscribe.topics.iter() {
+            return_codes.push(SubscribeReturnCodes::Success(filter.qos));
+        }
+
         // A new subscription should match with all the existing topics and take a snapshot of current
         // offset of all the matched topics. Subscribers will receive data from that offset
-        connection.add_subscription(subscribe.topics, topics);
+        subscriptions.add_subscription(subscribe.topics, topics);
 
         // Update matched topic offsets
-        for (topic, _, offset) in connection.untracked_new_subscription_matches.iter_mut() {
+        for (topic, _, offset) in subscriptions.untracked_new_subscription_matches.iter_mut() {
             if let Some(last_offset) = self.commitlog[self.id].last_offset(topic) {
                 *offset = last_offset;
             }
         }
+
+        let suback = SubAck::new(subscribe.pkid, return_codes);
+        let suback = Request::SubAck(suback);
+        let watermarks = self.watermarks[id].as_mut().unwrap();
+        watermarks.push_ack(subscribe.pkid, suback);
     }
 
     fn handle_connection_publish(&mut self, id: ConnectionId, publish: Publish) -> Option<(u64, u64)> {
@@ -253,17 +275,8 @@ impl Router {
         };
 
         if qos as u8 > 0 {
-            let watermarks = match self.watermarks.get_mut(&topic) {
-                Some(w) => w,
-                None => {
-                    let replication_count = if self.config.mesh.is_some() { 1 } else { 0 };
-                    let watermarks = Watermarks::new(&topic, replication_count, self.config.max_connections);
-                    self.watermarks.insert(topic.clone(), watermarks);
-                    self.watermarks.get_mut(&topic).unwrap()
-                },
-            };
-
-            watermarks.update_pkid_offset_map(id, pkid, offset);
+            let watermarks = self.watermarks[id].as_mut().unwrap();
+            watermarks.update_pkid_offset_map(&topic, pkid, offset);
         }
 
         // If there is a new unique append, send it to connection waiting on it
@@ -305,17 +318,10 @@ impl Router {
             }
 
             // TODO: Is this necessary for replicated data
-            let watermarks = match self.watermarks.get_mut(&topic) {
-                Some(w) => w,
-                None => {
-                    let watermarks = Watermarks::new(&topic, 0, self.config.max_connections);
-                    self.watermarks.insert(topic.clone(), watermarks);
-                    self.watermarks.get_mut(&topic).unwrap()
-                },
-            };
+            let watermarks = self.watermarks[id].as_mut().unwrap();
 
-            // we can ignore offset mapping for replicated data
-            watermarks.update_pkid_offset_map(id, pkid, 0);
+            // TODO we can ignore offset mapping for replicated data
+            watermarks.update_pkid_offset_map(&topic, pkid, 0);
 
             if is_new_topic {
                 self.topiclog.append(&topic);
@@ -334,11 +340,8 @@ impl Router {
 
     fn handle_replication_acks(&mut self, id: ConnectionId, acks: Vec<ReplicationAck>) {
         for ack in acks {
-            let watermarks = match self.watermarks.get_mut(&ack.topic) {
-                Some(w) => w,
-                None => continue
-            };
-
+            // TODO: Move this out
+            let watermarks = self.watermarks[id].as_mut().unwrap();
             watermarks.update_cluster_offsets(id, ack.offset);
             self.fresh_acks_notification(&ack.topic);
         }
@@ -392,30 +395,20 @@ impl Router {
 
     pub fn handle_acks_request(&mut self, id: ConnectionId, request: AcksRequest) {
         trace!("{:11} {:14} Id = {}, Topic = {}", "acks", "request", id, request.topic);
-        // I don't think we'll need offset as next set of pkids will always be at head
-        let reply = match self.watermarks.get_mut(&request.topic) {
-            Some(watermarks) => {
-                let pkids = watermarks.acks(id);
+        let watermarks = self.watermarks[id].as_mut().unwrap();
+        let acks = watermarks.acks();
+        if acks.is_empty() {
+            self.register_acks_waiter(id, request);
+            return
+        }
 
-                // Caught up. Register for notifications when we can ack more
-                if pkids.is_empty() {
-                    self.register_acks_waiter(id, request);
-                    return
-                } else {
-                    AcksReply {
-                        topic: request.topic.clone(),
-                        pkids,
-                        offset: 100,
-                    }
-                }
-            }
-            None => {
-                self.register_acks_waiter(id, request);
-                return
-            },
+        let reply = AcksReply {
+            topic: request.topic.clone(),
+            acks,
+            offset: 100,
         };
 
-        trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "response", id, reply.topic, reply.pkids.len());
+        trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "response", id, reply.topic, reply.acks.len());
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
     }
@@ -525,23 +518,23 @@ impl Router {
         // mapping by connection id. We iterate through all the connections that are waiting for
         // acks for a give topic
         for (link_id, request) in waiters {
-            if let Some(watermarks) = self.watermarks.get_mut(&request.topic) {
-                let pkids = watermarks.acks(link_id);
+            let watermarks = self.watermarks[link_id].as_mut().unwrap();
+            watermarks.commit(&request.topic);
+            let acks = watermarks.acks();
 
-                // Even though watermarks are updated, replication count might not be enough for
-                // `watermarks.acks()` to return acks. Send empty pkids in that case. Tracker will
-                // just add a new AcksRequest
-                let reply = AcksReply {
-                    topic: request.topic,
-                    pkids,
-                    // I don't think we'll need offset as next set of pkids will always be at head
-                    offset: 100,
-                };
+            // Even though watermarks are updated, replication count might not be enough for
+            // `watermarks.acks()` to return acks. Send empty pkids in that case. Tracker will
+            // just add a new AcksRequest
+            let reply = AcksReply {
+                topic: request.topic,
+                acks,
+                // I don't think we'll need offset as next set of pkids will always be at head
+                offset: 100,
+            };
 
-                trace!("{:11} {:14} Id = {}, Topic = {}", "acks", "notification", link_id, reply.topic);
-                let reply = RouterOutMessage::AcksReply(reply);
-                self.reply(link_id, reply);
-            }
+            trace!("{:11} {:14} Id = {}, Topic = {}", "acks", "notification", link_id, reply.topic);
+            let reply = RouterOutMessage::AcksReply(reply);
+            self.reply(link_id, reply);
         }
     }
 

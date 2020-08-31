@@ -9,13 +9,12 @@ use crate::mesh::state::{State, StateError};
 use crate::router::ReplicationAck;
 
 use async_channel::{Sender, Receiver, SendError, RecvError, bounded};
-use rumqttc::{Connect, Incoming, Network, PubAck, Request, Publish, QoS};
+use rumqttc::{Connect, Incoming, Network, Request, Publish, QoS};
 use tokio::net::TcpStream;
 use tokio::{time, select};
 use std::time::Duration;
 use bytes::{BytesMut, BufMut, Buf};
 use thiserror::Error;
-use std::collections::{HashSet, HashMap};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -165,9 +164,7 @@ impl Replicator {
 
             RouterOutMessage::AcksReply(reply) => {
                 self.tracker.update_watermarks_tracker(&reply);
-                for ack in reply.pkids {
-                    let ack = PubAck::new(ack);
-                    let ack = Request::PubAck(ack);
+                for (_pkid, ack) in reply.acks {
                     self.network.fill2(ack)?;
                 }
             }
@@ -254,11 +251,6 @@ async fn register_with_router(id: usize, tx: &Sender<(usize, RouterInMessage)>) 
     let (link_tx, link_rx) = bounded(4);
     let connection = Connection {
         conn: ConnectionType::Replicator(id),
-        topics: HashSet::new(),
-        untracked_existing_subscription_matches: vec![],
-        untracked_new_subscription_matches: vec![],
-        concrete_subscriptions: HashMap::new(),
-        wild_subscriptions: vec![],
         handle: link_tx,
     };
 

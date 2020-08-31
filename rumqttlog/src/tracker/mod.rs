@@ -18,9 +18,13 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new(max_count: usize) -> Tracker {
+        let mut tracker = VecDeque::with_capacity(100);
+        let topics_request = RouterInMessage::TopicsRequest(TopicsRequest::new());
+        tracker.push_back(topics_request);
+
         // TODO: Don't allow more than allocated capacity in tracker
         Tracker {
-            tracker: VecDeque::with_capacity(100),
+            tracker,
             inflight: 0,
             max_count
         }
