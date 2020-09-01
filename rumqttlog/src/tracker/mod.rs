@@ -20,7 +20,9 @@ impl Tracker {
     pub fn new(max_count: usize) -> Tracker {
         let mut tracker = VecDeque::with_capacity(100);
         let topics_request = RouterInMessage::TopicsRequest(TopicsRequest::new());
+        let acks_request = RouterInMessage::AcksRequest(AcksRequest::new());
         tracker.push_back(topics_request);
+        tracker.push_back(acks_request);
 
         // TODO: Don't allow more than allocated capacity in tracker
         Tracker {
@@ -42,9 +44,9 @@ impl Tracker {
         self.inflight
     }
 
-    pub fn update_watermarks_tracker(&mut self, reply: &AcksReply) {
+    pub fn update_watermarks_tracker(&mut self, _reply: &AcksReply) {
         self.inflight -= 1;
-        let request = AcksRequest::new(reply.topic.clone(), reply.offset);
+        let request = AcksRequest::new();
         let request = RouterInMessage::AcksRequest(request);
         self.tracker.push_back(request);
     }

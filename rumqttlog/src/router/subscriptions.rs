@@ -61,26 +61,28 @@ impl Subscription {
 
     /// Matches existing subscription with a new topic. These
     /// topics should be tracked by tracker from offset 0
-    pub fn fill_matches(&mut self, topic: String) {
+    pub fn fill_matches(&mut self, topic: &str) -> bool {
         // ignore if the topic is already being tracked
-        if self.topics.contains(&topic) {
-            return
+        if self.topics.contains(topic) {
+            return false
         }
 
         // A concrete subscription match
-        if let Some(qos) = self.concrete_subscriptions.get(&topic) {
-            self.topics.insert(topic.clone());
-            self.untracked_existing_subscription_matches.push((topic, *qos, (0, 0)));
-            return
+        if let Some(qos) = self.concrete_subscriptions.get(topic) {
+            self.topics.insert(topic.to_owned());
+            self.untracked_existing_subscription_matches.push((topic.to_owned(), *qos, (0, 0)));
+            return true
         }
 
-        // Wildcard subscription match
+        // Wildcard subscription match. We return after first match
         for filter in self.wild_subscriptions.iter() {
             if matches(&topic, &filter.0) {
-                self.topics.insert(topic.clone());
-                self.untracked_existing_subscription_matches.push((topic, filter.1, (0, 0)));
-                return
+                self.topics.insert(topic.to_owned());
+                self.untracked_existing_subscription_matches.push((topic.to_owned(), filter.1, (0, 0)));
+                return true
             }
         }
+
+        false
     }
 }

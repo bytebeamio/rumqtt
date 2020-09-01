@@ -6,7 +6,7 @@ mod watermarks;
 mod router;
 
 pub use router::Router;
-pub use subscriptions::Subscription;
+use subscriptions::Subscription;
 
 use self::bytes::Bytes;
 use rumqttc::{Publish, Incoming, Request};
@@ -30,7 +30,7 @@ pub enum RouterInMessage {
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
-    /// Watermarks request
+    /// Acks request
     AcksRequest(AcksRequest),
     /// Disconnection request
     Disconnect(Disconnection)
@@ -203,39 +203,19 @@ pub struct TopicsReply {
     pub topics: Vec<String>,
 }
 
-#[derive(Clone)]
-pub struct AcksRequest {
-    /// Acks request topic
-    pub(crate) topic: String,
-    /// Router return acks after this offset
-    /// Registers this request if it can't return acks
-    /// yet due to incomplete replication
-    pub(crate) offset: u64,
-}
+#[derive(Clone, Debug)]
+pub struct AcksRequest;
 
 impl AcksRequest {
-    pub fn new(topic: String, offset: u64) -> AcksRequest {
-        AcksRequest {
-            topic,
-            offset
-        }
-    }
-}
-
-
-impl fmt::Debug for AcksRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Topic = {}, offset = {}", self.topic, self.offset)
+    pub fn new() -> AcksRequest {
+        AcksRequest
     }
 }
 
 #[derive(Debug)]
 pub struct AcksReply {
-    pub topic: String,
     /// packet ids that can be acked
     pub acks: Vec<(u16, Request)>,
-    /// offset till which pkids are returned
-    pub offset: u64,
 }
 
 #[derive(Debug, Clone)]

@@ -103,6 +103,12 @@ impl RemoteLink {
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
         let mut timeout = time::delay_for(keep_alive);
 
+        // Send initialization requests from tracker [topics request and acks request]
+        while let Some(message) = self.tracker.next() {
+            trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
+            self.router_tx.send((self.id, message)).await?;
+        }
+
         // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
         //         Router shouldn't drop messages
         // NOTE: Right now we request data by topic, instead if can request data
@@ -148,6 +154,7 @@ impl RemoteLink {
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
                 trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "data", "reply", self.id, reply.topic, reply.payload.len());
+                dbg!(&reply.cursors);
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count))
@@ -176,9 +183,9 @@ impl RemoteLink {
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "reply", self.id, reply.topic, reply.acks.len());
+                trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.acks.len());
                 self.tracker.update_watermarks_tracker(&reply);
-                for (_pkid, ack) in reply.acks.into_iter().rev() {
+                for (_pkid, ack) in reply.acks.into_iter() {
                     self.network.fill2(ack)?;
                 }
             }
