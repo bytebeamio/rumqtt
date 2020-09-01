@@ -403,10 +403,7 @@ impl Router {
             return
         }
 
-        let reply = AcksReply {
-            acks,
-        };
-
+        let reply = AcksReply::new(acks);
         trace!("{:11} {:14} Id = {}, Count = {}", "acks", "response", id, reply.acks.len());
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
@@ -506,10 +503,7 @@ impl Router {
         if watermarks.pending_acks_reply() {
             let acks = watermarks.acks();
 
-            let reply = AcksReply {
-                acks,
-            };
-
+            let reply = AcksReply::new(acks);
             watermarks.set_pending_acks_reply(false);
             trace!("{:11} {:14} Id = {}", "acks", "notification", id);
             let reply = RouterOutMessage::AcksReply(reply);
@@ -548,7 +542,7 @@ impl Router {
         let subscriptions = self.subscriptions[id].as_mut().unwrap();
         match subscriptions.readv(request.offset, request.count) {
             Some((_offset, topics)) if topics.is_empty() => None,
-            Some((offset, topics)) => Some(TopicsReply {offset: offset + 1, topics}),
+            Some((offset, topics)) => Some(TopicsReply::new(offset + 1, topics)),
             None => None,
         }
     }
@@ -564,12 +558,7 @@ impl Router {
 
         let (segment, offset) = cursors[native_id];
         debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
-        let mut reply = DataReply {
-            topic: request.topic.clone(),
-            cursors,
-            size: 0,
-            payload: Vec::new()
-        };
+        let mut reply = DataReply::new(request.topic.clone(), cursors, 0, Vec::new());
 
         match commitlog.readv(topic, segment, offset, max_count) {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
@@ -628,16 +617,9 @@ impl Router {
         // latest offsets and return None so that caller registers
         // the request with updated offsets
         match payload.is_empty() {
-            true => {
-                None
-            },
+            true => None,
             false => {
-                Some(DataReply {
-                    topic: request.topic.clone(),
-                    cursors,
-                    size: 0,
-                    payload
-                })
+                Some(DataReply::new(request.topic.clone(), cursors, 0, payload))
             }
         }
     }

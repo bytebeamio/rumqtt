@@ -53,11 +53,11 @@ pub enum RouterOutMessage {
 #[derive(Debug)]
 pub struct ReplicationData {
     /// Id of the packet that connection received
-    pub pkid: u16,
+    pkid: u16,
     /// Topic of publish
-    pub topic: String,
+    topic: String,
     /// Publish payload
-    pub payload: Vec<Bytes>,
+    payload: Vec<Bytes>,
 }
 
 impl ReplicationData {
@@ -79,9 +79,9 @@ impl ReplicationData {
 /// for replicated data
 #[derive(Debug)]
 pub struct ReplicationAck {
-    pub topic: String,
+    topic: String,
     /// Packet id that router assigned
-    pub offset: u64,
+    offset: u64,
 }
 
 impl ReplicationAck {
@@ -100,11 +100,11 @@ impl ReplicationAck {
 #[derive(Clone)]
 pub struct DataRequest {
     /// Log to sweep
-    pub topic: String,
+    topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    pub cursors: [(u64, u64); 3],
+    cursors: [(u64, u64); 3],
     /// Maximum count of payload buffer per replica
-    pub max_count: usize
+    max_count: usize
 }
 
 impl DataRequest {
@@ -165,6 +165,17 @@ pub struct DataReply {
     pub payload: Vec<Bytes>,
 }
 
+impl DataReply {
+    pub fn new(topic: String, cursors: [(u64, u64); 3], size:usize, payload: Vec<Bytes>) -> DataReply {
+        DataReply {
+            topic,
+            cursors,
+            size,
+            payload
+        }
+    }
+}
+
 impl fmt::Debug for DataReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}", self.topic, self.cursors, self.size, self.payload.len())
@@ -174,9 +185,9 @@ impl fmt::Debug for DataReply {
 #[derive(Debug, Clone)]
 pub struct TopicsRequest {
     /// Start from this offset
-    pub offset: usize,
+    offset: usize,
     /// Maximum number of topics to read
-    pub count: usize,
+    count: usize,
 }
 
 impl TopicsRequest {
@@ -203,6 +214,15 @@ pub struct TopicsReply {
     pub topics: Vec<String>,
 }
 
+impl TopicsReply {
+    fn new(offset: usize, topics: Vec<String>) -> TopicsReply {
+        TopicsReply {
+            offset,
+            topics
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AcksRequest;
 
@@ -216,6 +236,14 @@ impl AcksRequest {
 pub struct AcksReply {
     /// packet ids that can be acked
     pub acks: Vec<(u16, Request)>,
+}
+
+impl AcksReply {
+    pub fn new(acks: Vec<(u16, Request)>) -> AcksReply {
+        AcksReply {
+            acks
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
