@@ -102,22 +102,6 @@ impl TopicLog {
     pub fn append(&mut self, topic: &str) {
         self.topics.push(topic.to_owned());
     }
-
-    /// read n topics from a give offset along with offset of the last read topic
-    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
-        let len = self.topics.len();
-        if offset >= len || count == 0 {
-            return None;
-        }
-
-        let mut last_offset = offset + count;
-        if last_offset >= len {
-            last_offset = len;
-        }
-
-        let out = self.topics[offset..last_offset].to_vec();
-        Some((last_offset - 1, out))
-    }
 }
 
 type Topic = String;

@@ -544,15 +544,12 @@ impl Router {
     }
 
     /// Extracts topics from topics commitlog.Returns None if the log is caught up
-    /// TODO: Remove this for consistency with all_topics_request
-    fn extract_topics(&mut self, id: ConnectionId,request: &TopicsRequest) -> Option<TopicsReply> {
-        // TODO: Honour max topics in TopicsRequest
+    fn extract_topics(&mut self, id: ConnectionId, request: &TopicsRequest) -> Option<TopicsReply> {
         let subscriptions = self.subscriptions[id].as_mut().unwrap();
-        let topics: Vec<String> = subscriptions.topics.clone().into_iter().collect();
-        match topics.is_empty() {
-            true => None,
-            // TODO: Fix offset
-            false => Some(TopicsReply {offset: request.offset, topics}),
+        match subscriptions.readv(request.offset, request.count) {
+            Some((_offset, topics)) if topics.is_empty() => None,
+            Some((offset, topics)) => Some(TopicsReply {offset: offset + 1, topics}),
+            None => None,
         }
     }
 

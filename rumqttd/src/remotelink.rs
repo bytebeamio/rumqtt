@@ -153,8 +153,7 @@ impl RemoteLink {
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "data", "reply", self.id, reply.topic, reply.payload.len());
-                dbg!(&reply.cursors);
+                trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "reply", self.id, reply.topic, reply.cursors, reply.payload.len());
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count))
