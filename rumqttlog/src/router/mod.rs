@@ -9,7 +9,7 @@ pub use router::Router;
 use subscriptions::Subscription;
 
 use self::bytes::Bytes;
-use rumqttc::{Publish, Incoming, Request};
+use mqtt4bytes::{Packet, Publish};
 use std::fmt;
 use async_channel::{Sender, Receiver, bounded};
 
@@ -21,7 +21,7 @@ pub enum RouterInMessage {
     /// Data for native commitlog
     Publish(Publish),
     /// Data for native commitlog
-    Data(Vec<Incoming>),
+    Data(Vec<Packet>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
     /// Replication acks
@@ -235,11 +235,11 @@ impl AcksRequest {
 #[derive(Debug)]
 pub struct AcksReply {
     /// packet ids that can be acked
-    pub acks: Vec<(u16, Request)>,
+    pub acks: Vec<(u16, Packet)>,
 }
 
 impl AcksReply {
-    pub fn new(acks: Vec<(u16, Request)>) -> AcksReply {
+    pub fn new(acks: Vec<(u16, Packet)>) -> AcksReply {
         AcksReply {
             acks
         }

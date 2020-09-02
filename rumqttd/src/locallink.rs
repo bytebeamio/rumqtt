@@ -1,7 +1,7 @@
 use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, DataReply};
 use crate::Id;
 use tokio::select;
-use rumqttc::{Publish, QoS, Subscribe};
+use mqtt4bytes::{Publish, QoS, Subscribe};
 
 const MAX_INFLIGHT_REQUESTS: usize = 100;
 

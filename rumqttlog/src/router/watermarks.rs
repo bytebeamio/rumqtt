@@ -1,7 +1,6 @@
 use std::collections::{VecDeque, HashMap};
 use std::mem;
-use rumqttc::Request;
-use rumqttc::PubAck;
+use mqtt4bytes::{Packet, PubAck};
 
 type Pkid = u16;
 type Offset = u64;
@@ -14,7 +13,7 @@ pub struct Watermarks {
     /// are met, packet ids will be moved to acks
     pkid_offset_map: HashMap<Topic, (VecDeque<Pkid>, VecDeque<Offset>)>,
     /// Committed packet ids for acks
-    acks: Vec<(Pkid, Request)>,
+    acks: Vec<(Pkid, Packet)>,
     /// Offset till which replication has happened (per mesh node)
     cluster_offsets: Vec<Offset>
 }
@@ -65,17 +64,17 @@ impl Watermarks {
             let pkids = connection.0.split_off(index);
             for pkid in pkids {
                 let puback = PubAck::new(pkid);
-                self.acks.push((pkid, Request::PubAck(puback)));
+                self.acks.push((pkid, Packet::PubAck(puback)));
             }
         }
     }
 
-    pub fn push_ack(&mut self, pkid: u16, packet: Request) {
+    pub fn push_ack(&mut self, pkid: u16, packet: Packet) {
         self.acks.push((pkid, packet))
     }
 
     /// Returns committed acks by take
-    pub fn acks(&mut self) -> Vec<(Pkid, Request)> {
+    pub fn acks(&mut self) -> Vec<(Pkid, Packet)> {
         let acks = mem::replace(&mut self.acks, Vec::new());
         acks
     }

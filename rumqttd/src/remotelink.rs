@@ -1,4 +1,4 @@
-use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, Incoming, Connect};
+use mqtt4bytes::{Packet, ConnAck, ConnectReturnCode, Publish, QoS, Connect};
 use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
 use tokio::{select, time};
 use std::io;
@@ -6,6 +6,7 @@ use crate::{Id, ServerSettings};
 use crate::state::{self, State};
 use std::sync::Arc;
 use tokio::time::{Instant, Duration, Elapsed};
+use crate::network::Network;
 
 pub struct RemoteLink {
     config: Arc<ServerSettings>,
@@ -26,7 +27,7 @@ pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
     // #[error("Packet not supported yet")]
-    // UnsupportedPacket(Incoming),
+    // UnsupportedPacket(Packet),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("State error")]
@@ -177,15 +178,15 @@ impl RemoteLink {
                 for p in reply.payload {
                     let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
                     let publish = self.state.handle_router_data(publish)?;
-                    let publish = Request::Publish(publish);
-                    self.network.fill2(publish)?;
+                    let publish = Packet::Publish(publish);
+                    self.network.fill(publish)?;
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
                 trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.acks.len());
                 self.tracker.update_watermarks_tracker(&reply);
                 for (_pkid, ack) in reply.acks.into_iter() {
-                    self.network.fill2(ack)?;
+                    self.network.fill(ack)?;
                 }
             }
         }
@@ -195,33 +196,33 @@ impl RemoteLink {
         Ok(())
     }
 
-    async fn handle_network_data(&mut self, incoming: Vec<Incoming>) -> Result<(), Error> {
+    async fn handle_network_data(&mut self, incoming: Vec<Packet>) -> Result<(), Error> {
         let mut data = Vec::new();
 
         for packet in incoming {
-            // debug!("Id = {}[{}], Incoming packet = {:?}", self.connect.client_id, self.id, packet);
+            // debug!("Id = {}[{}], Packet packet = {:?}", self.connect.client_id, self.id, packet);
             match packet {
-                Incoming::PubAck(ack) => {
+                Packet::PubAck(ack) => {
                     if self.acks_required > 0 {
                         self.acks_required -= 1;
                     }
 
                     self.state.handle_network_puback(ack)?;
                 }
-                Incoming::Publish(publish) => {
+                Packet::Publish(publish) => {
                     // collect publishes from this batch
-                    let incoming = Incoming::Publish(publish);
+                    let incoming = Packet::Publish(publish);
                     data.push(incoming);
                 }
-                Incoming::Subscribe(subscribe) => {
+                Packet::Subscribe(subscribe) => {
                     trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
-                    let incoming = Incoming::Subscribe(subscribe);
+                    let incoming = Packet::Subscribe(subscribe);
                     data.push(incoming);
                 }
-                Incoming::PingReq => {
-                    self.network.fill2(Request::PingResp)?;
+                Packet::PingReq => {
+                    self.network.fill(Packet::PingResp)?;
                 }
-                Incoming::Disconnect => {
+                Packet::Disconnect => {
                     // TODO Add correct disconnection handling
                 }
                 packet => {

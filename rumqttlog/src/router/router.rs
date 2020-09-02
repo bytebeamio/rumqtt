@@ -1,11 +1,10 @@
 use async_channel::{bounded, Receiver, Sender, TrySendError};
 use std::collections::HashMap;
-use std::{io, mem, thread};
+use std::{io, mem};
 
 use super::bytes::Bytes;
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
-use crate::mesh::Mesh;
 use crate::router::commitlog::TopicLog;
 use crate::router::{ConnectionType, ConnectionAck, Subscription};
 use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
@@ -13,7 +12,7 @@ use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, AcksRepl
 use crate::{Config, ReplicationData};
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use rumqttc::{Publish, Incoming, Subscribe, SubscribeReturnCodes, SubAck, Request, PubAck};
+use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes, SubAck, PubAck};
 use crate::router::watermarks::Watermarks;
 use std::sync::Arc;
 
@@ -28,7 +27,7 @@ type Topic = String;
 
 pub struct Router {
     /// Router configuration
-    config: Arc<Config>,
+    _config: Arc<Config>,
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
     id: ConnectionId,
@@ -58,8 +57,6 @@ pub struct Router {
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
     router_rx: Receiver<(ConnectionId, RouterInMessage)>,
-    /// A sender to the router. This is handed to `Mesh`
-    router_tx: Sender<(ConnectionId, RouterInMessage)>,
 }
 
 /// Router is the central node where most of the state is held. Connections and
@@ -81,7 +78,7 @@ impl Router {
         }
 
         let router = Router {
-            config: config.clone(),
+            _config: config.clone(),
             id: config.id,
             commitlog,
             topiclog,
@@ -91,24 +88,12 @@ impl Router {
             data_waiters: HashMap::new(),
             topics_waiters: Vec::new(),
             router_rx,
-            router_tx: router_tx.clone(),
         };
 
         (router, router_tx)
     }
 
-    fn enable_replication(&mut self) {
-        let mut replicator = Mesh::new(self.config.clone(), self.router_tx.clone());
-        thread::spawn(move || {
-            replicator.start();
-        });
-    }
-
     pub async fn start(&mut self) {
-        if self.config.mesh.is_some() {
-            self.enable_replication();
-        }
-
         // All these methods will handle state and errors
         while let Some((id, data)) = self.router_rx.next().await {
             match data {
@@ -203,17 +188,17 @@ impl Router {
 
 
     /// Handles new incoming data on a topic
-    fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Incoming>) {
+    fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Packet>) {
         trace!("{:11} {:14} Id = {}, Count = {}", "data", "incoming", id, data.len());
         let mut last_offset = (0, 0);
         let mut count = 0;
         for publish in data {
             match publish {
-                Incoming::Publish(publish) => if let Some(offset) = self.handle_connection_publish(id, publish) {
+                Packet::Publish(publish) => if let Some(offset) = self.handle_connection_publish(id, publish) {
                     last_offset = offset;
                     count += 1;
                 }
-                Incoming::Subscribe(subscribe) => {
+                Packet::Subscribe(subscribe) => {
                     self.handle_connection_subscribe(id, subscribe);
                 }
                 incoming => {
@@ -245,7 +230,7 @@ impl Router {
         }
 
         let suback = SubAck::new(subscribe.pkid, return_codes);
-        let suback = Request::SubAck(suback);
+        let suback = Packet::SubAck(suback);
         let watermarks = self.watermarks[id].as_mut().unwrap();
         watermarks.push_ack(subscribe.pkid, suback);
 
@@ -268,7 +253,7 @@ impl Router {
 
         if qos as u8 > 0 {
             let watermarks = self.watermarks[id].as_mut().unwrap();
-            watermarks.push_ack(pkid, Request::PubAck(PubAck::new(pkid)));
+            watermarks.push_ack(pkid, Packet::PubAck(PubAck::new(pkid)));
             // watermarks.update_pkid_offset_map(&topic, pkid, offset);
         }
 

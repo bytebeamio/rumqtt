@@ -1,5 +1,5 @@
 use std::collections::{HashSet, HashMap};
-use rumqttc::{has_wildcards, matches, SubscribeTopic};
+use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
 
 
 /// Used to register a new connection with the router
