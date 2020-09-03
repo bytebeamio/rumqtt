@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 
 use super::bytes::Bytes;
@@ -79,8 +79,6 @@ impl CommitLog {
 /// A temporal list of unique new topics
 #[derive(Debug)]
 pub struct TopicLog {
-    /// Hashset of unique topics. Used to check if the topic is already seen
-    unique: HashSet<String>,
     /// List of new topics
     topics: Vec<String>,
 }
@@ -89,7 +87,6 @@ impl TopicLog {
     /// Create a new topic log
     pub fn new() -> TopicLog {
         TopicLog {
-            unique: HashSet::new(),
             topics: Vec::new(),
         }
     }
@@ -97,6 +94,24 @@ impl TopicLog {
     pub fn topics(&self) -> Vec<String> {
         self.topics.clone()
     }
+
+    /// read n topics from a give offset along with offset of the last read topic
+    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
+        // dbg!(&self.topics, &self.concrete_subscriptions);
+        let len = self.topics.len();
+        if offset >= len || count == 0 {
+            return None;
+        }
+
+        let mut last_offset = offset + count;
+        if last_offset >= len {
+            last_offset = len;
+        }
+
+        let out = self.topics[offset..last_offset].to_vec();
+        Some((last_offset - 1, out))
+    }
+
 
     /// Appends the topic if the topic isn't already seen
     pub fn append(&mut self, topic: &str) {

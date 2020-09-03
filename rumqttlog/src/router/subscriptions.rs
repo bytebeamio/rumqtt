@@ -1,27 +1,23 @@
 use std::collections::{HashSet, HashMap};
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
+use std::mem;
 
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
 /// communicate with this connection
+#[derive(Debug)]
 pub struct Subscription {
     /// Topics that this connection's coroutine tracks. There can be inconsitency
     /// with the coroutine due to pending topics request from connection coroutine
     /// Inconsistency is captured in `untracked_topics`
-    topics: Vec<String>,
+    pub(crate) topics: Vec<(String, u8, [(u64, u64); 3])>,
     /// Topics index to not add duplicates to topics
     topics_index: HashSet<String>,
-    /// New topics on existing subscriptions which aren't being tracked yet.
-    /// This is a result of new topic matches on existing subscriptions.
-    pub(crate) untracked_existing_subscription_matches: Vec<(String, u8, (u64, u64))>,
-    /// New subscription matches on existing topics
-    /// This is a result of subscriptions before next topics request
-    pub(crate) untracked_new_subscription_matches: Vec<(String, u8, (u64, u64))>,
     /// Concrete subscriptions on this topic
-    pub(crate) concrete_subscriptions: HashMap<String, u8>,
+    concrete_subscriptions: HashMap<String, u8>,
     /// Wildcard subscriptions on this topic
-    pub(crate) wild_subscriptions: Vec<(String, u8)>,
+    wild_subscriptions: Vec<(String, u8)>,
 }
 
 impl Subscription {
@@ -29,27 +25,19 @@ impl Subscription {
         Subscription {
             topics: Vec::new(),
             topics_index: HashSet::new(),
-            untracked_existing_subscription_matches: Vec::new(),
-            untracked_new_subscription_matches: Vec::new(),
             concrete_subscriptions: HashMap::new(),
             wild_subscriptions: Vec::new(),
         }
     }
 
-    /// read n topics from a give offset along with offset of the last read topic
-    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
-        let len = self.topics.len();
-        if offset >= len || count == 0 {
-            return None;
+    /// Topics which aren't sent to tracker yet
+    pub fn topics(&mut self) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
+        let topics = mem::replace(&mut self.topics, Vec::new());
+        if topics.is_empty() {
+            None
+        } else {
+            Some(topics)
         }
-
-        let mut last_offset = offset + count;
-        if last_offset >= len {
-            last_offset = len;
-        }
-
-        let out = self.topics[offset..last_offset].to_vec();
-        Some((last_offset - 1, out))
     }
 
     /// A new subscription should match all the existing topics. Tracker
@@ -71,8 +59,7 @@ impl Subscription {
 
                 if matches(&topic, &filter.topic_path) {
                     self.topics_index.insert(topic.clone());
-                    self.topics.push(topic.clone());
-                    self.untracked_new_subscription_matches.push((topic.clone(), filter.qos as u8, (0, 0)));
+                    self.topics.push((topic.clone(), filter.qos as u8, [(0, 0); 3]));
                     continue
                 }
             }
@@ -93,17 +80,15 @@ impl Subscription {
         // A concrete subscription match
         if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
-            self.untracked_existing_subscription_matches.push((topic.to_owned(), *qos, (0, 0)));
-            self.topics.push(topic.to_owned());
+            self.topics.push((topic.to_owned(), *qos, [(0, 0); 3]));
             return true
         }
 
         // Wildcard subscription match. We return after first match
-        for filter in self.wild_subscriptions.iter() {
-            if matches(&topic, &filter.0) {
+        for (filter, qos) in self.wild_subscriptions.iter() {
+            if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
-                self.untracked_existing_subscription_matches.push((topic.to_owned(), filter.1, (0, 0)));
-                self.topics.push(topic.to_owned());
+                self.topics.push((topic.to_owned(), *qos, [(0, 0); 3]));
                 return true
             }
         }

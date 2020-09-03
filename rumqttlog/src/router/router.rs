@@ -218,14 +218,15 @@ impl Router {
             return_codes.push(SubscribeReturnCodes::Success(filter.qos));
         }
 
+
         // A new subscription should match with all the existing topics and take a snapshot of current
         // offset of all the matched topics. Subscribers will receive data from that offset
         subscriptions.add_subscription(subscribe.topics, topics);
 
-        // Update matched topic offsets
-        for (topic, _, offset) in subscriptions.untracked_new_subscription_matches.iter_mut() {
+        // Update matched topic offsets to current offset of this topic's commitlog
+        for (topic, _, offset) in subscriptions.topics.iter_mut() {
             if let Some(last_offset) = self.commitlog[self.id].last_offset(topic) {
-                *offset = last_offset;
+                offset[self.id] = last_offset;
             }
         }
 
@@ -236,6 +237,8 @@ impl Router {
 
         // For suback
         self.fresh_acks_notification(id);
+        // A new subscription should notify for registered TopicsRequest
+        self.fresh_topics_notification(id);
     }
 
     fn handle_connection_publish(&mut self, id: ConnectionId, publish: Publish) -> Option<(u64, u64)> {
@@ -267,10 +270,9 @@ impl Router {
         // has duplicate topics. Tracker filters these duplicates though
         if is_new_topic {
             self.topiclog.append(&topic);
-            let subscriptions = self.subscriptions[id].as_mut().unwrap();
-            if subscriptions.fill_matches(&topic) {
-                self.fresh_topics_notification(id);
-            }
+            // TODO: This can probably moved outside main loop to send new topics
+            // TODO: notifications in bulk if possible
+            // self.fresh_topics_notification(id);
         }
 
         // Notify waiters on this topic of new data
@@ -306,10 +308,7 @@ impl Router {
 
             if is_new_topic {
                 self.topiclog.append(&topic);
-                let subscriptions = self.subscriptions[id].as_mut().unwrap();
-                if subscriptions.fill_matches(&topic) {
-                    self.fresh_topics_notification(id);
-                }
+                self.fresh_topics_notification(id);
             }
 
             // we can probably handle multiple requests better
@@ -336,7 +335,7 @@ impl Router {
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
         trace!("{:11} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
 
-        let reply = self.extract_topics(id, &request);
+        let reply = self.match_new_topics(id, &request);
         let reply = match reply {
             Some(r) => r,
             None => {
@@ -421,19 +420,30 @@ impl Router {
         watermarks.set_pending_acks_reply(true);
     }
 
-    /// Send notifications to links which registered them
+    /// Send notifications to links which registered them. Id is only used to
+    /// identify if new topics are from a replicator
     fn fresh_topics_notification(&mut self, id: ConnectionId) {
         let waiters = mem::replace(&mut self.topics_waiters, Vec::new());
         let replication_data = id < 10;
         for (link_id, request) in waiters {
-            // Don't send replicated topic notifications to replication link
+            // Don't send replicated topic notifications to replication link. Replicator 1
+            // should not track replicator 2's topics.
             // id 0-10 are reserved for replicators which are linked to other routers in the mesh
             if replication_data && link_id < 10 {
+                self.topics_waiters.push((link_id, request));
                 continue;
             }
 
-            // Send reply to the link which registered this notification
-            let reply = self.extract_topics(link_id, &request).unwrap();
+            // Match new topics with existing subscriptions of this link and reply.
+            // Even though there are new topics, it's possible that they didn't match
+            // subscriptions held by this connection. Push TopicsRequest back & continue
+            let reply = match self.match_new_topics(link_id, &request) {
+                Some(reply) => reply,
+                None => {
+                    self.topics_waiters.push((link_id, request));
+                    continue
+                }
+            };
 
             trace!("{:11} {:14} Id = {}, Topics = {:?}", "topics", "notification", link_id, reply.topics);
             let reply = RouterOutMessage::TopicsReply(reply);
@@ -522,13 +532,25 @@ impl Router {
         }
     }
 
-    /// Extracts topics from topics commitlog.Returns None if the log is caught up
-    fn extract_topics(&mut self, id: ConnectionId, request: &TopicsRequest) -> Option<TopicsReply> {
+    /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
+    /// them against subscriptions of this connection. Returns a TopicsReply if there
+    /// are matches
+    fn match_new_topics(&mut self, id: ConnectionId, request: &TopicsRequest) -> Option<TopicsReply> {
+        let (offset, topics) = match self.topiclog.readv(request.offset, request.count) {
+            Some((_, topics)) if topics.is_empty() => return None,
+            Some(v) => v,
+            None => return None,
+        };
+
         let subscriptions = self.subscriptions[id].as_mut().unwrap();
-        match subscriptions.readv(request.offset, request.count) {
-            Some((_offset, topics)) if topics.is_empty() => None,
-            Some((offset, topics)) => Some(TopicsReply::new(offset + 1, topics)),
-            None => None,
+        for topic in topics.into_iter() {
+            subscriptions.fill_matches(&topic);
+        }
+
+        let topics = subscriptions.topics();
+        match topics {
+            Some(topics) => Some(TopicsReply::new(offset + topics.len(), topics)),
+            None => None
         }
     }
 

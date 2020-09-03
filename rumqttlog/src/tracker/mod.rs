@@ -55,8 +55,8 @@ impl Tracker {
     /// a subscription.So, a TopicReply triggers DataRequest
     pub fn track_new_topics(&mut self, reply: &TopicsReply) {
         self.inflight -= 1;
-        for topic in reply.topics.iter() {
-            let request = DataRequest::new(topic.clone());
+        for (topic, _qos, cursors) in reply.topics.iter() {
+            let request = DataRequest::offsets(topic.clone(), *cursors);
 
             // Prioritize new matched topics
             let request = RouterInMessage::DataRequest(request);

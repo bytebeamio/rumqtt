@@ -211,11 +211,11 @@ pub struct TopicsReply {
     /// Last topic offset
     pub offset: usize,
     /// list of new topics
-    pub topics: Vec<String>,
+    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
 }
 
 impl TopicsReply {
-    fn new(offset: usize, topics: Vec<String>) -> TopicsReply {
+    fn new(offset: usize, topics: Vec<(String, u8, [(u64, u64); 3])>) -> TopicsReply {
         TopicsReply {
             offset,
             topics
