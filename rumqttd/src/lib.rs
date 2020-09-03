@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::time::Elapsed;
 use rumqttlog::*;
-use rumqttc::{Packet, Network};
+use mqtt4bytes::Packet;
 
 pub use rumqttlog::Config as RouterConfig;
 use tokio::time;
@@ -20,8 +20,10 @@ use crate::remotelink::RemoteLink;
 mod remotelink;
 mod locallink;
 mod state;
+mod network;
 
 pub use crate::locallink::{LinkTx, LinkRx, LinkError};
+use crate::network::Network;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]

@@ -1,7 +1,7 @@
 use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, DataReply};
 use crate::Id;
 use tokio::select;
-use rumqttc::{Publish, QoS, Subscribe};
+use mqtt4bytes::{Publish, QoS, Subscribe};
 
 const MAX_INFLIGHT_REQUESTS: usize = 100;
 
@@ -101,11 +101,6 @@ impl LinkRx {
                 trace!("{:11} {:14} Id = {}, Count = {}", "data", "reply", self.id, reply.payload.len());
                 self.tracker.update_data_tracker(&reply);
                 Some(reply)
-            }
-            RouterOutMessage::AllTopicsReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "alltopics", "reply", self.id, reply.topics.len());
-                self.tracker.track_all_topics(&reply);
-                None
             }
             message => {
                 warn!("Message = {:?} not supported", message);
