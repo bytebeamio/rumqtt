@@ -521,7 +521,7 @@ impl Router {
                 }
             }
         } else {
-            match self.commitlog[self.id].append(&topic, bytes) {
+            match self.commitlog[dbg!(self.id)].append(&topic, bytes) {
                 Ok(v) => Some(v),
                 Err(e) => {
                     error!("Commitlog append failed. Error = {:?}", e);
@@ -653,42 +653,42 @@ impl Router {
 
 #[cfg(test)]
 mod test {
-    /*
     use super::{ConnectionId, Router};
-    use crate::router::{
-        ConnectionAck, ConnectionType, Data, DataAck, TopicsReply, TopicsRequest, AcksReply,
-        AcksRequest,
-    };
-    use crate::{Config, Connection, DataReply, DataRequest, RouterInMessage, RouterOutMessage};
-    use async_channel::{bounded, Receiver, Sender};
+    use crate::router::*;
+    use crate::*;
+    use async_channel::{Receiver, Sender};
     use bytes::Bytes;
     use std::time::Duration;
+    use mqtt4bytes::QoS;
+    use std::sync::Arc;
 
     #[tokio::test(core_threads = 1)]
     async fn router_doesnt_give_data_when_not_asked() {
-        let (mut router_tx, _, _, connection_id, mut connection_rx) = setup().await;
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
-        assert!(wait_for_new_data(&mut connection_rx).await.is_none());
+        let mut broker = Broker::new().await;
+        let (connection_id, connection_rx) = broker.connection("1").await;
+        broker.write_to_commitlog(connection_id, "hello/world", vec![1, 2, 3]);
+        broker.write_to_commitlog(connection_id, "hello/world", vec![4, 5, 6]);
+        assert!(wait_for_new_data(&connection_rx).await.is_none());
     }
 
     #[tokio::test(core_threads = 1)]
     async fn router_registers_and_doesnt_repond_when_a_topic_is_caughtup() {
-        let (mut router_tx, _, _, connection_id, mut connection_rx) = setup().await;
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![1, 2, 3]);
-        write_to_commitlog(connection_id, &mut router_tx, "hello/world", vec![4, 5, 6]);
+        let mut broker = Broker::new().await;
+        let (connection_id, connection_rx) = broker.connection("1").await;
+        broker.write_to_commitlog(connection_id, "hello/world", vec![1, 2, 3]);
+        broker.write_to_commitlog(connection_id, "hello/world", vec![4, 5, 6]);
+        broker.new_data_request(connection_id, "hello/world", [(0, 0); 3]);
 
-        new_data_request(connection_id, &mut router_tx, "hello/world", 0, 0);
-        let reply = wait_for_new_data(&mut connection_rx).await.unwrap();
-        assert_eq!(reply.native_offset, 1);
+        let reply = wait_for_new_data(&connection_rx).await.unwrap();
+        assert_eq!(reply.cursors, [(0, 2), (0, 0), (0, 0)]);
         assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
         assert_eq!(reply.payload[1].as_ref(), &[4, 5, 6]);
 
-        new_data_request(connection_id, &mut router_tx, "hello/world", 2, 0);
-        let reply = wait_for_new_data(&mut connection_rx).await;
-        assert!(reply.is_none());
+        broker.new_data_request(connection_id, "hello/world", reply.cursors);
+        assert!(wait_for_new_data(&connection_rx).await.is_none());
     }
 
+    /*
     #[tokio::test(core_threads = 1)]
     async fn connection_reads_existing_native_and_replicated_data() {
         let (mut router_tx, replicator_id, mut replicator_rx, connection_id, mut connection_rx) =
@@ -842,159 +842,103 @@ mod test {
         let reply = wait_for_new_watermarks(&mut connection_rx).await.unwrap();
         assert_eq!(reply.offset, 3);
     }
+    */
 
-    // ---------------- All helper methods to make tests clean and readable ------------------
-
-    /// Creates a router, a connection link, a replicator link and returns them along with IDs
-    async fn setup() -> (
-        Sender<(ConnectionId, RouterInMessage)>,
-        ConnectionId,
-        Receiver<RouterOutMessage>,
-        ConnectionId,
-        Receiver<RouterOutMessage>,
-    ) {
-        let (router, router_tx) = Router::new(Config::default());
-        tokio::task::spawn(async move {
-            let mut router = router;
-            router.start().await;
-        });
-
-        let (link_tx, replicator_rx) = bounded(4);
-        let connection = Connection {
-            conn: ConnectionType::Replicator(0),
-            handle: link_tx,
-        };
-
-        let message = RouterInMessage::Connect(connection);
-        router_tx.send((0, message)).await.unwrap();
-
-        let replicator_id = match replicator_rx.recv().await.unwrap() {
-            RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-            o => panic!("Unexpected connection ack = {:?}", o),
-        };
-
-        let (link_tx, connection_rx) = bounded(4);
-        let connection = Connection {
-            conn: ConnectionType::Device("blah".to_string()),
-            handle: link_tx,
-        };
-
-        let message = RouterInMessage::Connect(connection);
-        router_tx.send((0, message)).await.unwrap();
-
-        let connection_id = match connection_rx.recv().await.unwrap() {
-            RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-            o => panic!("Unexpected connection ack = {:?}", o),
-        };
-
-        (
-            router_tx,
-            replicator_id,
-            replicator_rx,
-            connection_id,
-            connection_rx,
-        )
+    // Broker is used to test router
+    struct Broker {
+        router_tx: Sender<(ConnectionId, RouterInMessage)>,
     }
 
-    fn write_to_commitlog(
-        id: usize,
-        router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
-        topic: &str,
-        payload: Vec<u8>,
-    ) {
-        let message = (
-            id,
-            RouterInMessage::Data(Data {
-                pkid: 0,
-                topic: topic.to_string(),
-                payload: Bytes::from(payload),
-            }),
-        );
+    impl Broker {
+        async fn new() -> Broker {
+            let mut config = Config::default();
+            config.id = 0;
+            let (router, router_tx) = Router::new(Arc::new(config));
+            tokio::task::spawn(async move {
+                let mut router = router;
+                router.start().await;
+            });
 
-        router_tx.try_send(message).unwrap();
+            Broker {
+                router_tx
+            }
+        }
+
+        async fn connection(&mut self, id: &str) -> (ConnectionId, Receiver<RouterOutMessage>) {
+            let (connection, link_rx) = Connection::new(id, 5);
+            let message = RouterInMessage::Connect(connection);
+            self.router_tx.send((0, message)).await.unwrap();
+
+            let connection_id = match link_rx.recv().await.unwrap() {
+                RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
+                o => panic!("Unexpected connection ack = {:?}", o),
+            };
+
+            (connection_id, link_rx)
+        }
+
+        fn write_to_commitlog(
+            &mut self,
+            id: usize,
+            topic: &str,
+            payload: Vec<u8>,
+        ) {
+            let message = RouterInMessage::Publish(Publish::new(topic, QoS::AtLeastOnce, payload));
+            let message = (id, message);
+            self.router_tx.try_send(message).unwrap();
+        }
+
+        fn new_topics_request(
+            &mut self,
+            id: usize,
+        ) {
+            let message = RouterInMessage::TopicsRequest(TopicsRequest::new());
+            let message = (id, message);
+            self.router_tx.try_send(message).unwrap();
+        }
+
+        fn new_data_request(
+            &mut self,
+            id: usize,
+            topic: &str,
+            offsets: [(u64, u64); 3]
+        ) {
+            let message = RouterInMessage::DataRequest(DataRequest::offsets(topic.to_owned(), offsets));
+            let message = (id, message);
+            self.router_tx.try_send(message).unwrap();
+        }
+
+        fn new_acks_request(
+            &mut self,
+            id: usize,
+            router_tx: &Sender<(ConnectionId, RouterInMessage)>,
+        ) {
+            let message = (id, RouterInMessage::AcksRequest(AcksRequest::new()));
+            self.router_tx.try_send(message).unwrap();
+        }
     }
 
-    fn new_topics_request(id: usize, router_tx: &mut Sender<(ConnectionId, RouterInMessage)>) {
-        let message = (
-            id,
-            RouterInMessage::TopicsRequest(TopicsRequest {
-                offset: 0,
-                count: 10,
-            }),
-        );
-        router_tx.try_send(message).unwrap();
-    }
-
-    fn new_data_request(
-        id: usize,
-        router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
-        topic: &str,
-        native_offset: u64,
-        replica_offset: u64,
-    ) {
-        let message = (
-            id,
-            RouterInMessage::DataRequest(DataRequest {
-                topic: topic.to_string(),
-                native_segment: 0,
-                replica_segment: 0,
-                native_offset,
-                replica_offset,
-                size: 100 * 1024,
-            }),
-        );
-        router_tx.try_send(message).unwrap();
-    }
-
-    fn new_watermarks_request(
-        id: usize,
-        router_tx: &mut Sender<(ConnectionId, RouterInMessage)>,
-        topic: &str,
-    ) {
-        let message = (
-            id,
-            RouterInMessage::WatermarksRequest(AcksRequest {
-                topic: topic.to_owned(),
-                offset: 0,
-            }),
-        );
-        router_tx.try_send(message).unwrap();
-    }
-
-    async fn wait_for_new_topics(rx: &mut Receiver<RouterOutMessage>) -> Option<TopicsReply> {
+    async fn wait_for_new_topics(rx: &Receiver<RouterOutMessage>) -> Option<TopicsReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::TopicsReply(reply)) => Some(reply),
-            v => {
-                error!("{:?}", v);
-                None
-            }
+            _v => None
         }
     }
 
-    async fn wait_for_new_data(rx: &mut Receiver<RouterOutMessage>) -> Option<DataReply> {
+    async fn wait_for_new_data(rx: &Receiver<RouterOutMessage>) -> Option<DataReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::DataReply(reply)) => Some(reply),
-            v => {
-                error!("{:?}", v);
-                None
-            }
+            _v => None,
         }
     }
 
-    async fn wait_for_new_watermarks(
-        rx: &mut Receiver<RouterOutMessage>,
-    ) -> Option<AcksReply> {
+    async fn wait_for_new_watermarks(rx: &Receiver<RouterOutMessage>) -> Option<AcksReply> {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
-            Ok(RouterOutMessage::WatermarksReply(reply)) => Some(reply),
-            v => {
-                error!("{:?}", v);
-                None
-            }
+            Ok(RouterOutMessage::AcksReply(reply)) => Some(reply),
+            _v => None
         }
     }
-
-     */
 }
