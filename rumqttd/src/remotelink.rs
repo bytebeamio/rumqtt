@@ -64,7 +64,7 @@ impl RemoteLink {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new(&client_id, 10);
+        let (connection, link_rx) = Connection::new_remote(&client_id, 10);
         let message = (0, RouterInMessage::Connect(connection));
         router_tx.send(message).await.unwrap();
 

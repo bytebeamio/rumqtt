@@ -7,6 +7,7 @@ type Offset = u64;
 type Topic = String;
 
 /// Watermarks for a given topic
+#[derive(Debug)]
 pub struct Watermarks {
     pending_acks_reply: bool,
     /// Packet id to offset map per topic. When replication requirements

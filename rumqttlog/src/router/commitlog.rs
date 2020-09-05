@@ -96,7 +96,7 @@ impl TopicLog {
     }
 
     /// read n topics from a give offset along with offset of the last read topic
-    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
+    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, &[String])> {
         // dbg!(&self.topics, &self.concrete_subscriptions);
         let len = self.topics.len();
         if offset >= len || count == 0 {
@@ -108,7 +108,11 @@ impl TopicLog {
             last_offset = len;
         }
 
-        let out = self.topics[offset..last_offset].to_vec();
+        let out = self.topics[offset..last_offset].as_ref();
+        if out.is_empty() {
+            return None;
+        }
+
         Some((last_offset - 1, out))
     }
 

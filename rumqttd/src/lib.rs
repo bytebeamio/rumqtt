@@ -110,7 +110,7 @@ impl Broker {
     pub async fn link(&self, client_id: &str, capacity: usize) -> Result<(LinkTx, LinkRx), LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (connection, link_rx) = Connection::new(client_id, capacity);
+        let (connection, link_rx) = Connection::new_remote(client_id, capacity);
         let message = (0, RouterInMessage::Connect(connection));
         self.router_tx.send(message).await.unwrap();
 

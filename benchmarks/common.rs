@@ -23,7 +23,7 @@ pub async fn new_connection(
     cap: usize,
     router_tx: &Sender<(usize, RouterInMessage)>
 ) -> (usize, Receiver<RouterOutMessage>) {
-    let (connection, this_rx) = Connection::new(id, cap);
+    let (connection, this_rx) = Connection::new_remote(id, cap);
 
     // send a connection request with a dummy id
     let message = (0, RouterInMessage::Connect(connection));

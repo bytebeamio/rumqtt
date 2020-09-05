@@ -11,7 +11,7 @@ use subscriptions::Subscription;
 use self::bytes::Bytes;
 use mqtt4bytes::{Packet, Publish};
 use std::fmt;
-use async_channel::{Sender, Receiver, bounded};
+use async_channel::{Sender, Receiver, bounded, TrySendError};
 
 /// Messages going into router
 #[derive(Debug)]
@@ -210,7 +210,8 @@ impl TopicsRequest {
 pub struct TopicsReply {
     /// Last topic offset
     pub offset: usize,
-    /// list of new topics
+    /// list of new topics along with the offsets
+    /// that tracker should poll from
     pub topics: Vec<(String, u8, [(u64, u64); 3])>,
 }
 
@@ -267,7 +268,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
@@ -276,6 +277,27 @@ impl Connection {
         };
 
         (connection , this_rx)
+    }
+
+    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+        let (this_tx, this_rx) = bounded(capacity);
+
+        let connection = Connection {
+            conn: ConnectionType::Replicator(id),
+            handle: this_tx,
+        };
+
+        (connection , this_rx)
+    }
+
+    /// Send message to link
+    fn reply(&mut self, reply: RouterOutMessage) {
+        if let Err(e) = self.handle.try_send(reply) {
+            match e {
+                TrySendError::Full(e) => error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e),
+                TrySendError::Closed(e) => info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e),
+            }
+        }
     }
 }
 

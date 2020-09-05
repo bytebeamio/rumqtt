@@ -40,6 +40,22 @@ impl Subscription {
         }
     }
 
+    /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
+    /// them against subscriptions of this connection. Returns a TopicsReply if there
+    /// are matches
+    pub(crate) fn matched_topics(&mut self, topics: &[String]) -> Option<Vec<(String, u8, [(u64, u64); 3])>>  {
+        for topic in topics {
+            self.fill_matches(topic);
+        }
+
+        let topics = mem::replace(&mut self.topics, Vec::new());
+        if topics.is_empty() {
+            None
+        } else {
+            Some(topics)
+        }
+    }
+
     /// A new subscription should match all the existing topics. Tracker
     /// should track matched topics from current offset of that topic
     pub fn add_subscription(&mut self, filters: Vec<SubscribeTopic>, topics: Vec<String>) {
