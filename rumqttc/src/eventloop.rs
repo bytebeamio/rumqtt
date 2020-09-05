@@ -52,7 +52,7 @@ pub struct EventLoop {
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
-    pub(crate) keepalive_timeout: Delay,
+    pub(crate) keepalive_timeout: Instant,
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
@@ -84,7 +84,7 @@ impl EventLoop {
             pending,
             buffered,
             network: None,
-            keepalive_timeout: time::delay_for(keepalive),
+            keepalive_timeout: Instant::now() + keepalive,
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
@@ -200,8 +200,8 @@ impl EventLoop {
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
-            _ = &mut self.keepalive_timeout => {
-                self.keepalive_timeout.reset(Instant::now() + self.options.keep_alive);
+            _ = time::delay_until(self.keepalive_timeout) => {
+                self.keepalive_timeout = Instant::now() + self.options.keep_alive;
                 let request = self.state.handle_outgoing_packet(Request::PingReq)?;
                 let outgoing = network.write(request).await?;
                 Ok((None, Some(outgoing)))
