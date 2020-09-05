@@ -282,10 +282,7 @@ impl MqttState {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
-                mem::replace(
-                    &mut self.outgoing_rel[pubrec.pkid as usize],
-                    Some(pubrec.pkid),
-                );
+                self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 let response = Some(Request::PubRel(PubRel::new(pubrec.pkid)));
                 let incoming = Some(Incoming::PubRec(pubrec));
                 Ok((incoming, response))
@@ -320,7 +317,7 @@ impl MqttState {
                 let pkid = publish.pkid;
                 let response = Request::PubRec(PubRec::new(pkid));
                 let incoming = Incoming::Publish(publish);
-                mem::replace(&mut self.incoming_pub[pkid as usize], Some(pkid));
+                self.incoming_pub[pkid as usize] = Some(pkid);
                 Ok((Some(incoming), Some(response)))
             }
         }
