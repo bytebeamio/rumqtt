@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize, Throughput};
 use bytes::BytesMut;
-use mqtt4bytes::{Publish, QoS, mqtt_read};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
+use mqtt4bytes::{mqtt_read, Publish, QoS};
 
 fn publishes(count: usize, size: usize) -> BytesMut {
     let payload = vec![1; size];
@@ -28,17 +28,20 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("encode and decode throughput");
     group.throughput(Throughput::Bytes(1 * 1024));
     group.bench_function("decode 1 packet, 1024 bytes", move |b| {
-        b.iter_batched(|| publishes(1, 1024), |mut stream| {
-            black_box(mqtt_read(&mut stream, 2 * 1024).unwrap())
-        }, BatchSize::SmallInput)
+        b.iter_batched(
+            || publishes(1, 1024),
+            |mut stream| black_box(mqtt_read(&mut stream, 2 * 1024).unwrap()),
+            BatchSize::SmallInput,
+        )
     });
-
 
     group.throughput(Throughput::Bytes(1 * 1024));
     group.bench_function("encode 1 packet, 1024 bytes", move |b| {
-        b.iter_batched(|| publish(1024), |(publish, mut out)| {
-            black_box(publish.write(&mut out).unwrap())
-        }, BatchSize::SmallInput)
+        b.iter_batched(
+            || publish(1024),
+            |(publish, mut out)| black_box(publish.write(&mut out).unwrap()),
+            BatchSize::SmallInput,
+        )
     });
 }
 

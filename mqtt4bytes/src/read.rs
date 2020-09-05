@@ -18,7 +18,6 @@ pub fn mqtt_read(stream: &mut BytesMut, max_packet_size: usize) -> Result<Packet
         };
     }
 
-
     let packet = packet.freeze();
     let packet = match packet_type {
         PacketType::Connect => Packet::Connect(Connect::assemble(fixed_header, packet)?),
@@ -89,7 +88,6 @@ fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize, usize), Error> {
         if done {
             break;
         }
-
 
         shift += 7;
         if shift > 21 {

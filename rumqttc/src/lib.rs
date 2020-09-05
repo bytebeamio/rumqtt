@@ -80,22 +80,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod client;
-mod tls;
-mod framed;
-mod state;
 mod eventloop;
 #[cfg(feature = "passthrough")]
 mod eventloop2;
+mod framed;
+mod state;
+mod tls;
 
+pub use async_channel::{SendError, Sender, TrySendError};
+pub use client::{Client, ClientError, Connection};
+pub use eventloop::{ConnectionError, EventLoop};
 #[cfg(feature = "passthrough")]
 pub use framed::Network;
-pub use client::{Client, Connection, ClientError};
-pub use eventloop::{ConnectionError, EventLoop};
-pub use state::{MqttState, StateError};
 pub use mqtt4bytes::*;
-pub use async_channel::{Sender, SendError, TrySendError};
+pub use state::{MqttState, StateError};
+pub use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 pub use tokio_rustls::rustls::ClientConfig;
-pub use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
 
 #[derive(Debug, Clone)]
 pub enum Incoming {
@@ -151,7 +151,7 @@ pub enum Outgoing {
     /// Disconnect packet
     Disconnect,
     /// Notification if requests are internally batched
-    Batch
+    Batch,
 }
 
 /// Requests by the client to mqtt event loop. Request are
@@ -181,7 +181,7 @@ pub enum Request {
 
 /// Key type for TLS authentication
 #[derive(Debug, Copy, Clone)]
-pub enum Key{
+pub enum Key {
     RSA,
     ECC,
 }
@@ -255,7 +255,7 @@ pub struct MqttOptions {
     inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
-    /// Key type for TLS 
+    /// Key type for TLS
     key_type: Key,
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     tls_client_config: Option<Arc<ClientConfig>>,
@@ -461,7 +461,7 @@ impl MqttOptions {
     }
 
     /// get key type
-    pub fn get_key_type(&self) -> Key{
+    pub fn get_key_type(&self) -> Key {
         self.key_type
     }
 

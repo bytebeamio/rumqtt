@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf, BytesMut, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to QoS2 publish
 #[derive(Debug, Clone, PartialEq)]
@@ -32,4 +32,3 @@ impl PubRec {
         Ok(4)
     }
 }
-

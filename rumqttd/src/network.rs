@@ -1,6 +1,6 @@
-use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 use bytes::BytesMut;
 use mqtt4bytes::*;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use std::io;
 
@@ -31,7 +31,7 @@ impl Network {
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
-            max_readb_count:10
+            max_readb_count: 10,
         }
     }
 
@@ -66,16 +66,30 @@ impl Network {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Connection is explicitly handled by other methods. This read is used after establishing
                 // the link. Ignore connection related packets
-                Ok(Packet::Connect(_)) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Not expecting connect")),
-                Ok(Packet::ConnAck(_)) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Not expecting connack")),
+                Ok(Packet::Connect(_)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Not expecting connect",
+                    ))
+                }
+                Ok(Packet::ConnAck(_)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Not expecting connack",
+                    ))
+                }
                 Ok(packet) => {
                     out.push(packet);
-                    if out.len() >= self.max_readb_count { break }
+                    if out.len() >= self.max_readb_count {
+                        break;
+                    }
                     continue;
                 }
                 Err(Error::InsufficientBytes(required)) => {
                     self.pending = required;
-                    if out.len() > 0 { break }
+                    if out.len() > 0 {
+                        break;
+                    }
                 }
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
             };
@@ -99,9 +113,15 @@ impl Network {
         let read = self.socket.read_buf(&mut self.read).await?;
         if 0 == read {
             return if self.read.is_empty() {
-                Err(io::Error::new(io::ErrorKind::ConnectionAborted, "connection closed by peer"))
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "connection closed by peer",
+                ))
             } else {
-                Err(io::Error::new(io::ErrorKind::ConnectionReset, "connection reset by peer"))
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "connection reset by peer",
+                ))
             };
         }
 
@@ -117,7 +137,7 @@ impl Network {
             Packet::PingReq => {
                 let packet = PingReq;
                 packet.write(&mut self.write)?
-            },
+            }
             Packet::PingResp => {
                 let packet = PingResp;
                 packet.write(&mut self.write)?
@@ -129,11 +149,11 @@ impl Network {
             Packet::Disconnect => {
                 let packet = Disconnect;
                 packet.write(&mut self.write)?
-            },
+            }
             Packet::PubAck(packet) => packet.write(&mut self.write)?,
             Packet::PubRec(packet) => packet.write(&mut self.write)?,
             Packet::PubComp(packet) => packet.write(&mut self.write)?,
-            _packet => unimplemented!()
+            _packet => unimplemented!(),
         };
 
         Ok(size)
@@ -142,7 +162,7 @@ impl Network {
     pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {
         let len = match connack.write(&mut self.write) {
             Ok(size) => size,
-            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };
 
         self.flush().await?;
@@ -162,17 +182,16 @@ impl Network {
     }
 
     pub fn fill(&mut self, request: Packet) -> Result<(), io::Error> {
-        if let Err(e) =  self.write_fill(request) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        if let Err(e) = self.write_fill(request) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
         };
 
         Ok(())
     }
 
-
     pub async fn flush(&mut self) -> Result<(), io::Error> {
         if self.write.len() == 0 {
-            return Ok(())
+            return Ok(());
         }
 
         self.socket.write_all(&self.write[..]).await?;

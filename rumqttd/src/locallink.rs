@@ -1,7 +1,10 @@
-use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, DataReply};
 use crate::Id;
-use tokio::select;
 use mqtt4bytes::{Publish, QoS, Subscribe};
+use rumqttlog::{
+    tracker::Tracker, DataReply, Receiver, RecvError, RouterInMessage, RouterOutMessage, SendError,
+    Sender,
+};
+use tokio::select;
 
 const MAX_INFLIGHT_REQUESTS: usize = 100;
 
@@ -19,15 +22,12 @@ pub enum LinkError {
 
 pub struct LinkTx {
     id: usize,
-    router_tx: Sender<(Id, RouterInMessage)>
+    router_tx: Sender<(Id, RouterInMessage)>,
 }
 
 impl LinkTx {
     pub(crate) fn new(id: usize, router_tx: Sender<(Id, RouterInMessage)>) -> LinkTx {
-        LinkTx {
-            id,
-            router_tx
-        }
+        LinkTx { id, router_tx }
     }
 
     /// Sends a MQTT Publish to the router
@@ -37,9 +37,9 @@ impl LinkTx {
         retain: bool,
         payload: V,
     ) -> Result<(), LinkError>
-        where
-            S: Into<String>,
-            V: Into<Vec<u8>>,
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
     {
         let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.set_retain(retain);
@@ -93,12 +93,24 @@ impl LinkRx {
     fn handle_router_response(&mut self, message: RouterOutMessage) -> Option<DataReply> {
         match message {
             RouterOutMessage::TopicsReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "topics", "reply", self.id, reply.topics.len());
+                trace!(
+                    "{:11} {:14} Id = {}, Count = {}",
+                    "topics",
+                    "reply",
+                    self.id,
+                    reply.topics.len()
+                );
                 self.tracker.track_new_topics(&reply);
                 None
             }
             RouterOutMessage::DataReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "data", "reply", self.id, reply.payload.len());
+                trace!(
+                    "{:11} {:14} Id = {}, Count = {}",
+                    "data",
+                    "reply",
+                    self.id,
+                    reply.payload.len()
+                );
                 self.tracker.update_data_tracker(&reply);
                 Some(reply)
             }

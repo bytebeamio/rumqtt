@@ -1,10 +1,9 @@
+use super::*;
+use crate::*;
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::*;
-use super::*;
-use bytes::{Bytes, Buf};
+use bytes::{Buf, Bytes};
 use core::fmt;
-
 
 /// Connection packet initiated by the client
 #[derive(Clone, PartialEq)]
@@ -24,7 +23,6 @@ pub struct Connect {
     /// Password of the client
     pub password: Option<String>,
 }
-
 
 impl Connect {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
@@ -132,7 +130,7 @@ impl Connect {
         }
 
         buffer.put_u8(connect_flags);
-        buffer.put_u16( self.keep_alive);
+        buffer.put_u16(self.keep_alive);
         write_mqtt_string(buffer, &self.client_id);
 
         if let Some(ref last_will) = self.last_will {
@@ -161,7 +159,12 @@ pub struct LastWill {
 }
 
 impl LastWill {
-    pub fn new(topic: impl Into<String>, payload: impl Into<Vec<u8>>, qos: QoS, retain: bool) -> LastWill {
+    pub fn new(
+        topic: impl Into<String>,
+        payload: impl Into<Vec<u8>>,
+        qos: QoS,
+        retain: bool,
+    ) -> LastWill {
         LastWill {
             topic: topic.into(),
             message: Bytes::from(payload.into()),
@@ -223,10 +226,10 @@ impl fmt::Debug for Connect {
 #[cfg(test)]
 mod test {
     use crate::*;
-    use alloc::vec;
     use alloc::borrow::ToOwned;
-    use pretty_assertions::assert_eq;
+    use alloc::vec;
     use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn connect_stitching_works_correctlyl() {
@@ -293,12 +296,7 @@ mod test {
                 keep_alive: 10,
                 client_id: "test".to_owned(),
                 clean_session: true,
-                last_will: Some(LastWill::new(
-                    "/a",
-                    "offline",
-                    QoS::AtLeastOnce,
-                    false,
-                )),
+                last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false,)),
                 username: Some("rumq".to_owned()),
                 password: Some("mq".to_owned())
             }
@@ -342,12 +340,7 @@ mod test {
             keep_alive: 10,
             client_id: "test".to_owned(),
             clean_session: true,
-            last_will: Some(LastWill::new(
-                "/a",
-                "offline",
-                QoS::AtLeastOnce,
-                false,
-            )),
+            last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
             username: Some("rust".to_owned()),
             password: Some("mq".to_owned()),
         };

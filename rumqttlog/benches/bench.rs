@@ -60,6 +60,4 @@ benchmark_group!(benches, receive_and_store, read);
 benchmark_main!(benches);
  */
 
-fn main() {
-
-}
+fn main() {}

@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{BytesMut, BufMut};
+use bytes::{BufMut, BytesMut};
 
 pub struct Disconnect;
 

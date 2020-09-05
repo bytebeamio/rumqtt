@@ -1,10 +1,10 @@
-use rumqttc::{self, EventLoop, MqttOptions, Incoming, QoS, Request, PublishRaw};
-use std::time::{Duration, Instant};
+use rumqttc::{self, EventLoop, Incoming, MqttOptions, PublishRaw, QoS, Request};
 use std::error::Error;
+use std::time::{Duration, Instant};
 
+use async_channel::Sender;
 use tokio::task;
 use tokio::time;
-use async_channel::Sender;
 
 mod common;
 
@@ -19,7 +19,7 @@ async fn main() {
     // common::profile("bench.pb", guard);
 }
 
-pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
+pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
     mqttoptions.set_keep_alive(1000);
     mqttoptions.set_max_request_batch(10);
@@ -41,26 +41,21 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<() , B
         let (notifications, _) = eventloop.poll().await?;
         for notification in notifications {
             match notification {
-                Incoming::PingResp => {
-                    break 'main
-                }
+                Incoming::PingResp => break 'main,
                 _notification => {
                     continue;
                 }
             };
-
         }
-
     }
 
     let elapsed_ms = start.elapsed().as_millis();
     let throughput = count as usize / elapsed_ms as usize;
     let throughput = throughput * 1000;
-    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
-    id,
-    count,
-    payload_size,
-    throughput);
+    println!(
+        "Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
+        id, count, payload_size, throughput
+    );
     Ok(())
 }
 

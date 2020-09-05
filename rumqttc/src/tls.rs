@@ -1,10 +1,10 @@
 use tokio::net::TcpStream;
-use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
+use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use tokio_rustls::rustls::{ClientConfig, TLSError};
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
-use crate::{MqttOptions, Key};
+use crate::{Key, MqttOptions};
 
 use std::io;
 use std::io::{BufReader, Cursor};

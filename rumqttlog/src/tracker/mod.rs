@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::router::{TopicsReply, TopicsRequest, AcksReply, AcksRequest};
+use crate::router::{AcksReply, AcksRequest, TopicsReply, TopicsRequest};
 use crate::{DataReply, DataRequest, RouterInMessage};
 
 /// Tracker tracks current offsets of all the subscriptions of a connection
@@ -13,7 +13,7 @@ pub struct Tracker {
     /// number of inflight requests
     inflight: usize,
     /// max message count in data request
-    max_count: usize
+    max_count: usize,
 }
 
 impl Tracker {
@@ -28,13 +28,13 @@ impl Tracker {
         Tracker {
             tracker,
             inflight: 0,
-            max_count
+            max_count,
         }
     }
 
     pub fn has_next(&self) -> bool {
         if !self.tracker.is_empty() {
-            return true
+            return true;
         }
 
         false
@@ -76,10 +76,7 @@ impl Tracker {
     /// is new data)
     pub fn update_data_tracker(&mut self, reply: &DataReply) {
         self.inflight -= 1;
-        let request = DataRequest::offsets(
-            reply.topic.clone(),
-            reply.cursors
-        );
+        let request = DataRequest::offsets(reply.topic.clone(), reply.cursors);
 
         let request = RouterInMessage::DataRequest(request);
         self.tracker.push_back(request);

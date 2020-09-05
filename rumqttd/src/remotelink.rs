@@ -1,12 +1,15 @@
-use mqtt4bytes::{Packet, ConnAck, ConnectReturnCode, Publish, QoS, Connect};
-use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
-use tokio::{select, time};
-use std::io;
-use crate::{Id, ServerSettings};
-use crate::state::{self, State};
-use std::sync::Arc;
-use tokio::time::{Instant, Duration, Elapsed};
 use crate::network::Network;
+use crate::state::{self, State};
+use crate::{Id, ServerSettings};
+use mqtt4bytes::{ConnAck, Connect, ConnectReturnCode, Packet, Publish, QoS};
+use rumqttlog::{
+    tracker::Tracker, Connection, ConnectionAck, Receiver, RecvError, RouterInMessage,
+    RouterOutMessage, SendError, Sender,
+};
+use std::io;
+use std::sync::Arc;
+use tokio::time::{Duration, Elapsed, Instant};
+use tokio::{select, time};
 
 pub struct RemoteLink {
     config: Arc<ServerSettings>,
@@ -19,7 +22,7 @@ pub struct RemoteLink {
     link_rx: Receiver<RouterOutMessage>,
     acks_required: usize,
     stored_message: Option<RouterOutMessage>,
-    total: usize
+    total: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,14 +46,14 @@ pub enum Error {
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
     #[error("Payload count greater than max inflight")]
-    TooManyPayloads(usize)
- }
+    TooManyPayloads(usize),
+}
 
 impl RemoteLink {
     pub async fn new(
         config: Arc<ServerSettings>,
         router_tx: Sender<(Id, RouterInMessage)>,
-        mut network: Network
+        mut network: Network,
     ) -> Result<(String, Id, RemoteLink), Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
         // DOS attacks by filling total connections that the server can handle with idle open
@@ -59,7 +62,8 @@ impl RemoteLink {
         let connect = time::timeout(timeout, async {
             let connect = network.read_connect().await?;
             Ok::<_, Error>(connect)
-        }).await??;
+        })
+        .await??;
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
@@ -76,27 +80,31 @@ impl RemoteLink {
         // TODO if it exceeds maximum allowed active connections
         // Right now link identifies failure with dropped rx in router, which is probably ok for now
         let id = match link_rx.recv().await? {
-            RouterOutMessage::ConnectionAck(ack) =>  match ack {
+            RouterOutMessage::ConnectionAck(ack) => match ack {
                 ConnectionAck::Success(id) => id,
-                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason))
-            }
-            message => return Err(Error::RouterMessage(message))
+                ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason)),
+            },
+            message => return Err(Error::RouterMessage(message)),
         };
 
         let max_inflight_count = config.max_inflight_count;
-        Ok((client_id, id, RemoteLink {
-            config,
-            connect,
+        Ok((
+            client_id,
             id,
-            network,
-            tracker: Tracker::new(max_inflight_count as usize),
-            state: State::new(max_inflight_count),
-            router_tx,
-            link_rx,
-            acks_required: 0,
-            stored_message: None,
-            total: 0
-        }))
+            RemoteLink {
+                config,
+                connect,
+                id,
+                network,
+                tracker: Tracker::new(max_inflight_count as usize),
+                state: State::new(max_inflight_count),
+                router_tx,
+                link_rx,
+                acks_required: 0,
+                stored_message: None,
+                total: 0,
+            },
+        ))
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -106,7 +114,13 @@ impl RemoteLink {
 
         // Send initialization requests from tracker [topics request and acks request]
         while let Some(message) = self.tracker.next() {
-            trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
+            trace!(
+                "{:11} {:14} Id = {}, Message = {:?}",
+                "tacker",
+                "next",
+                self.id,
+                message
+            );
             self.router_tx.send((self.id, message)).await?;
         }
 
@@ -149,15 +163,29 @@ impl RemoteLink {
     async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
         match message {
             RouterOutMessage::TopicsReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "topics", "reply", self.id, reply.topics.len());
+                trace!(
+                    "{:11} {:14} Id = {}, Count = {}",
+                    "topics",
+                    "reply",
+                    self.id,
+                    reply.topics.len()
+                );
                 self.tracker.track_new_topics(&reply)
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "reply", self.id, reply.topic, reply.cursors, reply.payload.len());
+                trace!(
+                    "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
+                    "data",
+                    "reply",
+                    self.id,
+                    reply.topic,
+                    reply.cursors,
+                    reply.payload.len()
+                );
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
-                    return Err(Error::TooManyPayloads(payload_count))
+                    return Err(Error::TooManyPayloads(payload_count));
                 }
 
                 // Save this message and set collision flag to not receive any
@@ -166,10 +194,10 @@ impl RemoteLink {
                 // wont collide, collision flag is reset and the stored message
                 // is retrieved by looping logic to be sent to network again
                 let no_collision_count = self.state.no_collision_count(reply.payload.len());
-                if no_collision_count  > 0 {
+                if no_collision_count > 0 {
                     self.acks_required = no_collision_count;
                     self.stored_message = Some(RouterOutMessage::DataReply(reply));
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.tracker.update_data_tracker(&reply);
@@ -183,7 +211,13 @@ impl RemoteLink {
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.acks.len());
+                trace!(
+                    "{:11} {:14} Id = {}, Count = {}",
+                    "acks",
+                    "reply",
+                    self.id,
+                    reply.acks.len()
+                );
                 self.tracker.update_watermarks_tracker(&reply);
                 for (_pkid, ack) in reply.acks.into_iter() {
                     self.network.fill(ack)?;
@@ -215,7 +249,13 @@ impl RemoteLink {
                     data.push(incoming);
                 }
                 Packet::Subscribe(subscribe) => {
-                    trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
+                    trace!(
+                        "{:11} {:14} Id = {}, Topics = {:?}",
+                        "subscribe",
+                        "commit",
+                        self.id,
+                        subscribe.topics
+                    );
                     let incoming = Packet::Subscribe(subscribe);
                     data.push(incoming);
                 }
@@ -235,7 +275,13 @@ impl RemoteLink {
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
         if !data.is_empty() {
-            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, data.len());
+            trace!(
+                "{:11} {:14} Id = {}, Count = {}",
+                "data",
+                "commit",
+                self.id,
+                data.len()
+            );
             let message = RouterInMessage::Data(data);
             self.router_tx.send((self.id, message)).await?;
         }
