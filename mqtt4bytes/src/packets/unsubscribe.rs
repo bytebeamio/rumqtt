@@ -29,6 +29,12 @@ impl Unsubscribe {
         Ok(unsubscribe)
     }
 
+    pub fn new<S: Into<String>>(topic: S) -> Unsubscribe {
+        let mut topics = Vec::new();
+        topics.push(topic.into());
+        Unsubscribe { pkid: 0, topics }
+    }
+
     pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
         let remaining_len = 2 + self
             .topics
