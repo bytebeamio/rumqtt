@@ -1,4 +1,4 @@
-use rumqttc::{Network, ConnAck, ConnectReturnCode, Publish, QoS, Request, PubAck, Incoming, SubscribeReturnCodes, SubAck, Connect};
+use mqtt4bytes::{Packet, ConnAck, ConnectReturnCode, Publish, QoS, Connect};
 use rumqttlog::{Sender, Receiver, RouterInMessage, RouterOutMessage, tracker::Tracker, SendError, RecvError, ConnectionAck, Connection};
 use tokio::{select, time};
 use std::io;
@@ -6,6 +6,7 @@ use crate::{Id, ServerSettings};
 use crate::state::{self, State};
 use std::sync::Arc;
 use tokio::time::{Instant, Duration, Elapsed};
+use crate::network::Network;
 
 pub struct RemoteLink {
     config: Arc<ServerSettings>,
@@ -26,7 +27,7 @@ pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
     // #[error("Packet not supported yet")]
-    // UnsupportedPacket(Incoming),
+    // UnsupportedPacket(Packet),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("State error")]
@@ -63,7 +64,7 @@ impl RemoteLink {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new(&client_id, 10);
+        let (connection, link_rx) = Connection::new_remote(&client_id, 10);
         let message = (0, RouterInMessage::Connect(connection));
         router_tx.send(message).await.unwrap();
 
@@ -102,6 +103,12 @@ impl RemoteLink {
         let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
         let mut timeout = time::delay_for(keep_alive);
+
+        // Send initialization requests from tracker [topics request and acks request]
+        while let Some(message) = self.tracker.next() {
+            trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
+            self.router_tx.send((self.id, message)).await?;
+        }
 
         // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
         //         Router shouldn't drop messages
@@ -147,7 +154,7 @@ impl RemoteLink {
             }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "data", "reply", self.id, reply.topic, reply.payload.len());
+                trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "reply", self.id, reply.topic, reply.cursors, reply.payload.len());
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count))
@@ -171,22 +178,16 @@ impl RemoteLink {
                 for p in reply.payload {
                     let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
                     let publish = self.state.handle_router_data(publish)?;
-                    let publish = Request::Publish(publish);
-                    self.network.fill2(publish)?;
+                    let publish = Packet::Publish(publish);
+                    self.network.fill(publish)?;
                 }
             }
             RouterOutMessage::AcksReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Topic = {}, Count = {}", "acks", "reply", self.id, reply.topic, reply.pkids.len());
+                trace!("{:11} {:14} Id = {}, Count = {}", "acks", "reply", self.id, reply.acks.len());
                 self.tracker.update_watermarks_tracker(&reply);
-                for ack in reply.pkids.into_iter().rev() {
-                    let ack = PubAck::new(ack);
-                    let ack = Request::PubAck(ack);
-                    self.network.fill2(ack)?;
+                for (_pkid, ack) in reply.acks.into_iter() {
+                    self.network.fill(ack)?;
                 }
-            }
-            RouterOutMessage::AllTopicsReply(reply) => {
-                trace!("{:11} {:14} Id = {}, Count = {}", "alltopics", "reply", self.id, reply.topics.len());
-                self.tracker.track_all_topics(&reply);
             }
         }
 
@@ -195,42 +196,33 @@ impl RemoteLink {
         Ok(())
     }
 
-    async fn handle_network_data(&mut self, incoming: Vec<Incoming>) -> Result<(), Error> {
-        let mut publishes = Vec::new();
+    async fn handle_network_data(&mut self, incoming: Vec<Packet>) -> Result<(), Error> {
+        let mut data = Vec::new();
 
         for packet in incoming {
-            // debug!("Id = {}[{}], Incoming packet = {:?}", self.connect.client_id, self.id, packet);
+            // debug!("Id = {}[{}], Packet packet = {:?}", self.connect.client_id, self.id, packet);
             match packet {
-                Incoming::PubAck(ack) => {
+                Packet::PubAck(ack) => {
                     if self.acks_required > 0 {
                         self.acks_required -= 1;
                     }
 
                     self.state.handle_network_puback(ack)?;
                 }
-                Incoming::Publish(publish) => {
-                    self.tracker.track_watermark(&publish.topic);
+                Packet::Publish(publish) => {
                     // collect publishes from this batch
-                    publishes.push(publish);
+                    let incoming = Packet::Publish(publish);
+                    data.push(incoming);
                 }
-                Incoming::Subscribe(subscribe) => {
+                Packet::Subscribe(subscribe) => {
                     trace!("{:11} {:14} Id = {}, Topics = {:?}", "subscribe", "commit", self.id, subscribe.topics);
-                    let mut return_codes = Vec::new();
-                    for filter in subscribe.topics {
-                        let code = SubscribeReturnCodes::Success(filter.qos);
-                        return_codes.push(code);
-                        self.tracker.add_subscription(&filter.topic_path);
-                    }
-
-                    // println!("{:?}", self.tracker);
-                    let suback = SubAck::new(subscribe.pkid, return_codes);
-                    let suback = Request::SubAck(suback);
-                    self.network.fill2(suback)?;
+                    let incoming = Packet::Subscribe(subscribe);
+                    data.push(incoming);
                 }
-                Incoming::PingReq => {
-                    self.network.fill2(Request::PingResp)?;
+                Packet::PingReq => {
+                    self.network.fill(Packet::PingResp)?;
                 }
-                Incoming::Disconnect => {
+                Packet::Disconnect => {
                     // TODO Add correct disconnection handling
                 }
                 packet => {
@@ -242,9 +234,9 @@ impl RemoteLink {
 
         // FIXME Early returns above will prevent router send and network write
         self.network.flush().await?;
-        if !publishes.is_empty() {
-            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, publishes.len());
-            let message = RouterInMessage::ConnectionData(publishes);
+        if !data.is_empty() {
+            trace!("{:11} {:14} Id = {}, Count = {}", "data", "commit", self.id, data.len());
+            let message = RouterInMessage::Data(data);
             self.router_tx.send((self.id, message)).await?;
         }
 

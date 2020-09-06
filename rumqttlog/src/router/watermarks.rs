@@ -1,27 +1,30 @@
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 use std::mem;
+use mqtt4bytes::{Packet, PubAck};
 
 type Pkid = u16;
 type Offset = u64;
+type Topic = String;
 
 /// Watermarks for a given topic
+#[derive(Debug)]
 pub struct Watermarks {
-    /// Topic this watermarks is tracking. This is only for debug prints
-    topic: String,
-    /// Replication count for this topic
-    replication: usize,
-    /// A map of packet ids and commitlog offsets for a given connection (identified by index)
-    pub(crate) pkid_offset_map: Vec<Option<(VecDeque<Pkid>, VecDeque<Offset>)>>,
+    pending_acks_reply: bool,
+    /// Packet id to offset map per topic. When replication requirements
+    /// are met, packet ids will be moved to acks
+    pkid_offset_map: HashMap<Topic, (VecDeque<Pkid>, VecDeque<Offset>)>,
+    /// Committed packet ids for acks
+    acks: Vec<(Pkid, Packet)>,
     /// Offset till which replication has happened (per mesh node)
     cluster_offsets: Vec<Offset>
 }
 
 impl Watermarks {
-    pub fn new(topic: &str, replication: usize, max_connections: usize) -> Watermarks {
+    pub fn new() -> Watermarks {
         Watermarks {
-            topic: topic.to_owned(),
-            replication,
-            pkid_offset_map: vec![None; max_connections],
+            pending_acks_reply: false,
+            pkid_offset_map: HashMap::new(),
+            acks: Vec::new(),
             cluster_offsets: vec![0, 0, 0]
         }
     }
@@ -33,51 +36,63 @@ impl Watermarks {
             panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
         }
 
-        debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);
+        // debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);
     }
 
-    pub fn acks(&mut self, id: usize) -> VecDeque<Pkid> {
-        let is_replica = id < 10;
-        // ack immediately if replication factor is 0 or if acks are being asked by a
-        // replicator connection
-        if self.replication == 0 || is_replica {
-            if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
-                let new_ids = (VecDeque::new(), VecDeque::new());
-                let (pkids, _offsets) = mem::replace(connection, new_ids);
-                return pkids
-            }
-        } else {
-            if let Some(connection) = self.pkid_offset_map.get_mut(id).unwrap() {
-                let highest_replicated_offset = *self.cluster_offsets.iter().max().unwrap();
+    pub fn set_pending_acks_reply(&mut self, status: bool) {
+        self.pending_acks_reply = status
+    }
 
-                // cut offsets which are less than highest replicated offset
-                // e.g. For connection = 30, router id = 0, pkid_offset_map and replica offsets looks like this
-                // pkid offset map = [5, 4, 3, 2, 1] : [15, 14, 10, 9, 8]
-                // replica offsets = [0, 12, 8] implies replica 1 has replicated till 12 and replica 2 till 8
-                // the above example should return pkids [5, 4]
+    pub fn pending_acks_reply(&self) -> bool {
+        self.pending_acks_reply
+    }
 
-                // get index of offset less than replicated offset and split there
-                if let Some(index) = connection.1.iter().position(|x| *x <= highest_replicated_offset) {
-                    connection.1.truncate(index);
-                    let pkids = connection.0.split_off(index);
-                    return pkids
-                }
+    /// Commit acks with enough replication
+    pub fn commit(&mut self, topic: &str) {
+        let connection = self.pkid_offset_map.get_mut(topic).unwrap();
+        let highest_replicated_offset = *self.cluster_offsets.iter().max().unwrap();
+
+        // cut offsets which are less than highest replicated offset
+        // e.g. For connection = 30, router id = 0, pkid_offset_map and replica offsets looks like this
+        // pkid offset map = [5, 4, 3, 2, 1] : [15, 14, 10, 9, 8]
+        // replica offsets = [0, 12, 8] implies replica 1 has replicated till 12 and replica 2 till 8
+        // the above example should return pkids [5, 4]
+
+        // get index of offset less than replicated offset and split there
+        // TODO: Fix this with a normal loop as there is pkids loop anyway
+        if let Some(index) = connection.1.iter().position(|x| *x <= highest_replicated_offset) {
+            connection.1.truncate(index);
+            let pkids = connection.0.split_off(index);
+            for pkid in pkids {
+                let puback = PubAck::new(pkid);
+                self.acks.push((pkid, Packet::PubAck(puback)));
             }
         }
-
-        return VecDeque::new()
     }
 
-    pub fn update_pkid_offset_map(&mut self, id: usize, pkid: u16, offset: u64) {
+    pub fn push_ack(&mut self, pkid: u16, packet: Packet) {
+        self.acks.push((pkid, packet))
+    }
+
+    /// Returns committed acks by take
+    pub fn acks(&mut self) -> Vec<(Pkid, Packet)> {
+        let acks = mem::replace(&mut self.acks, Vec::new());
+        acks
+    }
+
+    pub fn update_pkid_offset_map(&mut self, topic: &str, pkid: u16, offset: u64) {
         // connection ids which are greater than supported count should be rejected during
         // connection itself. Crashing here is a bug
-        let connection = self.pkid_offset_map.get_mut(id).unwrap();
-        let map = connection.get_or_insert((VecDeque::new(), VecDeque::new()));
+        let map = match self.pkid_offset_map.get_mut(topic) {
+            Some(map) => map,
+            None => {
+                self.pkid_offset_map.insert(topic.to_owned(), (VecDeque::new(), VecDeque::new()));
+                self.pkid_offset_map.get_mut(topic).unwrap()
+            }
+        };
+
         map.0.push_front(pkid);
-        // save offsets only if replication > 0
-        if self.replication > 0 {
-            map.1.push_front(offset);
-        }
+        map.1.push_front(offset);
     }
 }
 

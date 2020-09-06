@@ -1,4 +1,4 @@
-use rumqttc::{PubAck, Publish};
+use mqtt4bytes::{PubAck, Publish};
 
 use std::mem;
 
