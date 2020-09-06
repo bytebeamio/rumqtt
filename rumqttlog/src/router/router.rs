@@ -228,7 +228,11 @@ impl Router {
         // Update matched topic offsets to current offset of this topic's commitlog
         for (topic, _, offset) in subscriptions.topics.iter_mut() {
             if let Some(last_offset) = self.commitlog[self.id].last_offset(topic) {
-                offset[self.id] = last_offset;
+                if last_offset == (0, 0) {
+                    offset[self.id] = last_offset;
+                } {
+                    offset[self.id] = (last_offset.0, last_offset.1 + 1);
+                }
             }
         }
 
