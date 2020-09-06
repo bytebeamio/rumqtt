@@ -1,7 +1,7 @@
 use crate::{Incoming, Request};
 
-use std::{time::Instant, mem};
 use mqtt4bytes::*;
+use std::{mem, time::Instant};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
@@ -114,7 +114,10 @@ impl MqttState {
         self.inflight
     }
 
-    pub(crate) fn _handle_outgoing_packets(&mut self, requests: Vec<Request>) -> Result<Vec<Request>, StateError> {
+    pub(crate) fn _handle_outgoing_packets(
+        &mut self,
+        requests: Vec<Request>,
+    ) -> Result<Vec<Request>, StateError> {
         let mut out = Vec::with_capacity(10);
         for request in requests {
             let o = self.handle_outgoing_packet(request)?;
@@ -142,7 +145,7 @@ impl MqttState {
 
     pub(crate) fn handle_incoming_packets(
         &mut self,
-        packets: Vec<Incoming>
+        packets: Vec<Incoming>,
     ) -> Result<(Vec<Incoming>, Vec<Request>), StateError> {
         let mut incoming = Vec::with_capacity(10);
         let mut outgoing = Vec::with_capacity(10);
@@ -204,16 +207,13 @@ impl MqttState {
 
         let publish = match publish.raw() {
             Ok(publish) => publish,
-            Err(e) => return Err(StateError::Mqtt4(e))
+            Err(e) => return Err(StateError::Mqtt4(e)),
         };
 
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
         };
-
-
-
 
         Ok(Request::PublishRaw(publish))
     }
@@ -239,7 +239,10 @@ impl MqttState {
     /// matching packet identifier. Removal is now a O(n) operation. This should be
     /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
     /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
-    fn handle_incoming_puback(&mut self, puback: PubAck) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    fn handle_incoming_puback(
+        &mut self,
+        puback: PubAck,
+    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
@@ -279,7 +282,7 @@ impl MqttState {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
-                mem::replace(&mut self.outgoing_rel[pubrec.pkid as usize], Some(pubrec.pkid));
+                self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 let response = Some(Request::PubRel(PubRel::new(pubrec.pkid)));
                 let incoming = Some(Incoming::PubRec(pubrec));
                 Ok((incoming, response))
@@ -314,7 +317,7 @@ impl MqttState {
                 let pkid = publish.pkid;
                 let response = Request::PubRec(PubRec::new(pkid));
                 let incoming = Incoming::Publish(publish);
-                mem::replace(&mut self.incoming_pub[pkid as usize], Some(pkid));
+                self.incoming_pub[pkid as usize] = Some(pkid);
                 Ok((Some(incoming), Some(response)))
             }
         }
@@ -408,7 +411,10 @@ impl MqttState {
 
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn add_packet_id_and_save(&mut self, mut publish: PublishRaw) -> Result<PublishRaw, StateError> {
+    fn add_packet_id_and_save(
+        &mut self,
+        mut publish: PublishRaw,
+    ) -> Result<PublishRaw, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) and None as uninitialized packets
             0 => {
@@ -426,7 +432,7 @@ impl MqttState {
         let pkid = publish.pkid as usize;
         if let Some(v) = mem::replace(&mut self.outgoing_pub[pkid], Some(publish.clone())) {
             error!("Replacing unacked packet {:?}", v);
-            return Err(StateError::Collision)
+            return Err(StateError::Collision);
         }
 
         self.inflight += 1;
@@ -446,7 +452,7 @@ impl MqttState {
         if next_pkid == self.max_inflight {
             self.await_acks = true;
             self.last_pkid = 0;
-            return next_pkid
+            return next_pkid;
         }
 
         self.last_pkid = next_pkid;
@@ -495,7 +501,7 @@ mod test {
             if expected == 0 {
                 // await flag is set at the border
                 assert!(mqtt.await_acks);
-                break
+                break;
             }
 
             assert_eq!(expected, pkid);
@@ -510,7 +516,7 @@ mod test {
             let request = mqtt.handle_outgoing_publish(publish).unwrap();
             let pkid = match request {
                 Request::PublishRaw(publish) => publish.pkid,
-                request => panic!("Expecting a publish. Found = {:?}", request)
+                request => panic!("Expecting a publish. Found = {:?}", request),
             };
 
             assert_eq!(i, pkid);
@@ -518,7 +524,8 @@ mod test {
 
         // all inflight publishes acked
         for i in 1..=10 {
-            mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(i))).unwrap();
+            mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(i)))
+                .unwrap();
         }
 
         // packet id starts from 1 again
@@ -527,7 +534,7 @@ mod test {
             let request = mqtt.handle_outgoing_publish(publish).unwrap();
             let pkid = match request {
                 Request::PublishRaw(publish) => publish.pkid,
-                request => panic!("Expecting a publish. Found = {:?}", request)
+                request => panic!("Expecting a publish. Found = {:?}", request),
             };
 
             assert_eq!(i, pkid);
@@ -615,9 +622,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_publish(publish).unwrap();
 
         match notification {
-            Some(Incoming::Publish(publish)) => {
-                assert_eq!(publish.pkid, 1)
-            }
+            Some(Incoming::Publish(publish)) => assert_eq!(publish.pkid, 1),
             _ => panic!("Invalid notification: {:?}", notification),
         }
 

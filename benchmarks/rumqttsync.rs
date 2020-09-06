@@ -1,10 +1,9 @@
-use rumqttc::{self, MqttOptions, Incoming, QoS, Client};
-use std::time::{Instant, Duration};
+use rumqttc::{self, Client, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::thread;
+use std::time::{Duration, Instant};
 
 mod common;
-
 
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -16,7 +15,7 @@ fn main() {
     common::profile("bench.pb", guard);
 }
 
-pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn Error>> {
+pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
     mqttoptions.set_keep_alive(20);
     mqttoptions.set_max_request_batch(10);
@@ -33,11 +32,11 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
 
     let mut acks_count = 0;
     let start = Instant::now();
-    for o in connection.iter()  {
+    for o in connection.iter() {
         let (notification, _) = o?;
         let notification = match notification {
             Some(n) => n,
-            None => continue
+            None => continue,
         };
 
         match notification {
@@ -57,11 +56,9 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<() , Box<dyn
 
     let elapsed_ms = start.elapsed().as_millis();
     let throughput = (acks_count as usize * 1000) / elapsed_ms as usize;
-    println!("Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
-             id,
-             acks_count,
-             payload_size,
-             throughput,
+    println!(
+        "Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
+        id, acks_count, payload_size, throughput,
     );
     Ok(())
 }

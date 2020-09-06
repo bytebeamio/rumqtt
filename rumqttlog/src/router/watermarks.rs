@@ -1,6 +1,6 @@
-use std::collections::{VecDeque, HashMap};
-use std::mem;
 use mqtt4bytes::{Packet, PubAck};
+use std::collections::{HashMap, VecDeque};
+use std::mem;
 
 type Pkid = u16;
 type Offset = u64;
@@ -16,7 +16,7 @@ pub struct Watermarks {
     /// Committed packet ids for acks
     acks: Vec<(Pkid, Packet)>,
     /// Offset till which replication has happened (per mesh node)
-    cluster_offsets: Vec<Offset>
+    cluster_offsets: Vec<Offset>,
 }
 
 impl Watermarks {
@@ -25,7 +25,7 @@ impl Watermarks {
             pending_acks_reply: false,
             pkid_offset_map: HashMap::new(),
             acks: Vec::new(),
-            cluster_offsets: vec![0, 0, 0]
+            cluster_offsets: vec![0, 0, 0],
         }
     }
 
@@ -33,7 +33,10 @@ impl Watermarks {
         if let Some(position) = self.cluster_offsets.get_mut(id) {
             *position = offset
         } else {
-            panic!("We only support a maximum of 3 nodes at the moment. Received id = {}", id);
+            panic!(
+                "We only support a maximum of 3 nodes at the moment. Received id = {}",
+                id
+            );
         }
 
         // debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);
@@ -60,7 +63,11 @@ impl Watermarks {
 
         // get index of offset less than replicated offset and split there
         // TODO: Fix this with a normal loop as there is pkids loop anyway
-        if let Some(index) = connection.1.iter().position(|x| *x <= highest_replicated_offset) {
+        if let Some(index) = connection
+            .1
+            .iter()
+            .position(|x| *x <= highest_replicated_offset)
+        {
             connection.1.truncate(index);
             let pkids = connection.0.split_off(index);
             for pkid in pkids {
@@ -86,7 +93,8 @@ impl Watermarks {
         let map = match self.pkid_offset_map.get_mut(topic) {
             Some(map) => map,
             None => {
-                self.pkid_offset_map.insert(topic.to_owned(), (VecDeque::new(), VecDeque::new()));
+                self.pkid_offset_map
+                    .insert(topic.to_owned(), (VecDeque::new(), VecDeque::new()));
                 self.pkid_offset_map.get_mut(topic).unwrap()
             }
         };
@@ -95,4 +103,3 @@ impl Watermarks {
         map.1.push_front(offset);
     }
 }
-

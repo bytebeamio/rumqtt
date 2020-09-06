@@ -1,17 +1,17 @@
 extern crate bytes;
 
-mod subscriptions;
 mod commitlog;
-mod watermarks;
 mod router;
+mod subscriptions;
+mod watermarks;
 
 pub use router::Router;
 use subscriptions::Subscription;
 
 use self::bytes::Bytes;
+use async_channel::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::{Packet, Publish};
 use std::fmt;
-use async_channel::{Sender, Receiver, bounded, TrySendError};
 
 /// Messages going into router
 #[derive(Debug)]
@@ -33,7 +33,7 @@ pub enum RouterInMessage {
     /// Acks request
     AcksRequest(AcksRequest),
     /// Disconnection request
-    Disconnect(Disconnection)
+    Disconnect(Disconnection),
 }
 
 /// Messages coming from router
@@ -65,7 +65,7 @@ impl ReplicationData {
         ReplicationData {
             pkid,
             topic,
-            payload: Vec::with_capacity(cap)
+            payload: Vec::with_capacity(cap),
         }
     }
 
@@ -86,10 +86,7 @@ pub struct ReplicationAck {
 
 impl ReplicationAck {
     pub fn new(topic: String, offset: u64) -> ReplicationAck {
-        ReplicationAck {
-            topic,
-            offset
-        }
+        ReplicationAck { topic, offset }
     }
 }
 
@@ -104,7 +101,7 @@ pub struct DataRequest {
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     cursors: [(u64, u64); 3],
     /// Maximum count of payload buffer per replica
-    max_count: usize
+    max_count: usize,
 }
 
 impl DataRequest {
@@ -113,7 +110,7 @@ impl DataRequest {
         DataRequest {
             topic,
             cursors: [(0, 0); 3],
-            max_count: 100
+            max_count: 100,
         }
     }
 
@@ -121,7 +118,7 @@ impl DataRequest {
         DataRequest {
             topic,
             cursors: [(0, 0); 3],
-            max_count
+            max_count,
         }
     }
 
@@ -130,27 +127,27 @@ impl DataRequest {
         DataRequest {
             topic,
             cursors,
-            max_count: 100
+            max_count: 100,
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets_with(
-        topic: String,
-        cursors: [(u64, u64); 3],
-        max_count: usize
-    ) -> DataRequest {
+    pub fn offsets_with(topic: String, cursors: [(u64, u64); 3], max_count: usize) -> DataRequest {
         DataRequest {
             topic,
             cursors,
-            max_count
+            max_count,
         }
     }
 }
 
 impl fmt::Debug for DataRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Topic = {}, cursors = {:?}, max_count = {}", self.topic, self.cursors, self.max_count)
+        write!(
+            f,
+            "Topic = {}, cursors = {:?}, max_count = {}",
+            self.topic, self.cursors, self.max_count
+        )
     }
 }
 
@@ -166,19 +163,31 @@ pub struct DataReply {
 }
 
 impl DataReply {
-    pub fn new(topic: String, cursors: [(u64, u64); 3], size:usize, payload: Vec<Bytes>) -> DataReply {
+    pub fn new(
+        topic: String,
+        cursors: [(u64, u64); 3],
+        size: usize,
+        payload: Vec<Bytes>,
+    ) -> DataReply {
         DataReply {
             topic,
             cursors,
             size,
-            payload
+            payload,
         }
     }
 }
 
 impl fmt::Debug for DataReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}", self.topic, self.cursors, self.size, self.payload.len())
+        write!(
+            f,
+            "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}",
+            self.topic,
+            self.cursors,
+            self.size,
+            self.payload.len()
+        )
     }
 }
 
@@ -194,15 +203,12 @@ impl TopicsRequest {
     pub fn new() -> TopicsRequest {
         TopicsRequest {
             offset: 0,
-            count: 10
+            count: 10,
         }
     }
 
     pub fn offset(offset: usize) -> TopicsRequest {
-        TopicsRequest {
-            offset,
-            count: 10
-        }
+        TopicsRequest { offset, count: 10 }
     }
 }
 
@@ -217,10 +223,7 @@ pub struct TopicsReply {
 
 impl TopicsReply {
     fn new(offset: usize, topics: Vec<(String, u8, [(u64, u64); 3])>) -> TopicsReply {
-        TopicsReply {
-            offset,
-            topics
-        }
+        TopicsReply { offset, topics }
     }
 }
 
@@ -241,9 +244,7 @@ pub struct AcksReply {
 
 impl AcksReply {
     pub fn new(acks: Vec<(u16, Packet)>) -> AcksReply {
-        AcksReply {
-            acks
-        }
+        AcksReply { acks }
     }
 }
 
@@ -276,7 +277,7 @@ impl Connection {
             handle: this_tx,
         };
 
-        (connection , this_rx)
+        (connection, this_rx)
     }
 
     pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
@@ -287,15 +288,19 @@ impl Connection {
             handle: this_tx,
         };
 
-        (connection , this_rx)
+        (connection, this_rx)
     }
 
     /// Send message to link
     fn reply(&mut self, reply: RouterOutMessage) {
         if let Err(e) = self.handle.try_send(reply) {
             match e {
-                TrySendError::Full(e) => error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e),
-                TrySendError::Closed(e) => info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e),
+                TrySendError::Full(e) => {
+                    error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e)
+                }
+                TrySendError::Closed(e) => {
+                    info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e)
+                }
             }
         }
     }
@@ -322,8 +327,6 @@ pub struct Disconnection {
 
 impl Disconnection {
     pub fn new(id: String) -> Disconnection {
-        Disconnection {
-            id
-        }
+        Disconnection { id }
     }
 }

@@ -1,8 +1,8 @@
-use crate::*;
 use super::*;
+use crate::*;
 use alloc::string::String;
 use alloc::vec::Vec;
-use bytes::{Bytes, Buf};
+use bytes::{Buf, Bytes};
 use core::fmt;
 
 /// Subscription packet
@@ -45,10 +45,7 @@ impl Subscribe {
 
         let mut topics = Vec::new();
         topics.push(topic);
-        Subscribe {
-            pkid: 0,
-            topics,
-        }
+        Subscribe { pkid: 0, topics }
     }
 
     pub fn empty_subscribe() -> Subscribe {
@@ -107,13 +104,12 @@ impl fmt::Debug for SubscribeTopic {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
     use alloc::borrow::ToOwned;
     use alloc::vec;
-    use bytes::{BytesMut};
+    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]

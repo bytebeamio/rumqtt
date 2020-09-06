@@ -1,8 +1,7 @@
-use crate::*;
 use super::*;
+use crate::*;
 use alloc::vec::Vec;
-use bytes::{Bytes, Buf, BytesMut, BufMut};
-
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to subscribe
 #[derive(Debug, Clone, PartialEq)]
@@ -10,7 +9,6 @@ pub struct SubAck {
     pub pkid: u16,
     pub return_codes: Vec<SubscribeReturnCodes>,
 }
-
 
 impl SubAck {
     pub fn new(pkid: u16, return_codes: Vec<SubscribeReturnCodes>) -> SubAck {
@@ -69,7 +67,7 @@ pub enum SubscribeReturnCodes {
 mod test {
     use super::*;
     use alloc::vec;
-    use bytes::{BytesMut};
+    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]

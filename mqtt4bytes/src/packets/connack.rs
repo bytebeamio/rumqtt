@@ -1,5 +1,5 @@
-use crate::{FixedHeader, Error};
-use bytes::{Bytes, Buf, BytesMut, BufMut};
+use crate::{Error, FixedHeader};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in connack
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -20,9 +20,7 @@ pub struct ConnAck {
     pub code: ConnectReturnCode,
 }
 
-impl ConnAck {
-
-}
+impl ConnAck {}
 
 impl ConnAck {
     pub fn new(code: ConnectReturnCode, session_present: bool) -> ConnAck {
@@ -75,12 +73,11 @@ fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use crate::{ConnAck, ConnectReturnCode};
-    use bytes::BytesMut;
     use alloc::vec;
+    use bytes::BytesMut;
 
     #[test]
     fn write_packet_connack_works() {

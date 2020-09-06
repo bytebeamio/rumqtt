@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to pubrel
 #[derive(Debug, Clone, PartialEq)]
@@ -32,7 +32,3 @@ impl PubComp {
         Ok(4)
     }
 }
-
-
-
-

@@ -6,15 +6,18 @@ use super::bytes::Bytes;
 use super::commitlog::CommitLog;
 use super::{Connection, RouterInMessage, RouterOutMessage};
 use crate::router::commitlog::TopicLog;
-use crate::router::{ConnectionType, ConnectionAck, Subscription};
-use crate::router::{DataReply, DataRequest, TopicsReply, TopicsRequest, AcksReply, AcksRequest, Disconnection, ReplicationAck};
+use crate::router::{
+    AcksReply, AcksRequest, DataReply, DataRequest, Disconnection, ReplicationAck, TopicsReply,
+    TopicsRequest,
+};
+use crate::router::{ConnectionAck, ConnectionType, Subscription};
 
+use crate::router::watermarks::Watermarks;
 use crate::{Config, ReplicationData};
+use mqtt4bytes::{Packet, PubAck, Publish, SubAck, Subscribe, SubscribeReturnCodes};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::stream::StreamExt;
-use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes, SubAck, PubAck};
-use crate::router::watermarks::Watermarks;
-use std::sync::Arc;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -67,7 +70,11 @@ impl Router {
     pub fn new(config: Arc<Config>) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
         let (router_tx, router_rx) = bounded(1000);
         let topiclog = TopicLog::new();
-        let commitlog = [CommitLog::new(config.clone()), CommitLog::new(config.clone()), CommitLog::new(config.clone())];
+        let commitlog = [
+            CommitLog::new(config.clone()),
+            CommitLog::new(config.clone()),
+            CommitLog::new(config.clone()),
+        ];
         let mut connections = Vec::with_capacity(config.max_connections);
         let mut subscriptions = Vec::with_capacity(config.max_connections);
         let mut watermarks = Vec::with_capacity(config.max_connections);
@@ -102,7 +109,7 @@ impl Router {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::Publish(data) => {
                     self.handle_connection_publish(id, data);
-                },
+                }
                 RouterInMessage::Data(data) => self.handle_connection_data(id, data),
                 RouterInMessage::ReplicationData(data) => self.handle_replication_data(id, data),
                 RouterInMessage::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
@@ -142,10 +149,13 @@ impl Router {
         let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
         if let Err(e) = connection.handle.try_send(message) {
             error!("Failed to send connection ack. Error = {:?}", e.to_string());
-            return
+            return;
         }
 
-        info!("New Connection. In ID = {:?}, Router assigned ID = {:?}", connection.conn, id);
+        info!(
+            "New Connection. In ID = {:?}, Router assigned ID = {:?}",
+            connection.conn, id
+        );
         if let Some(_) = mem::replace(&mut self.connections[id], Some(connection)) {
             warn!("Replacing an existing connection with same ID");
         }
@@ -171,7 +181,7 @@ impl Router {
 
         // FIXME iterates through all the topics and all the (pending) requests remove the request
         for waiters in self.data_waiters.values_mut() {
-            if let Some(index) =  waiters.iter().position(|x| x.0 == id) {
+            if let Some(index) = waiters.iter().position(|x| x.0 == id) {
                 waiters.swap_remove(index);
             }
         }
@@ -188,17 +198,24 @@ impl Router {
         }
     }
 
-
     /// Handles new incoming data on a topic
     fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Packet>) {
-        trace!("{:11} {:14} Id = {}, Count = {}", "data", "incoming", id, data.len());
+        trace!(
+            "{:11} {:14} Id = {}, Count = {}",
+            "data",
+            "incoming",
+            id,
+            data.len()
+        );
         let mut last_offset = (0, 0);
         let mut count = 0;
         for publish in data {
             match publish {
-                Packet::Publish(publish) => if let Some(offset) = self.handle_connection_publish(id, publish) {
-                    last_offset = offset;
-                    count += 1;
+                Packet::Publish(publish) => {
+                    if let Some(offset) = self.handle_connection_publish(id, publish) {
+                        last_offset = offset;
+                        count += 1;
+                    }
                 }
                 Packet::Subscribe(subscribe) => {
                     self.handle_connection_subscribe(id, subscribe);
@@ -209,7 +226,14 @@ impl Router {
             }
         }
 
-        trace!("{:11} {:14} Id = {}, Count = {}, Offset = {:?}", "data", "committed", id, count, last_offset);
+        trace!(
+            "{:11} {:14} Id = {}, Count = {}, Offset = {:?}",
+            "data",
+            "committed",
+            id,
+            count,
+            last_offset
+        );
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
@@ -220,7 +244,6 @@ impl Router {
             return_codes.push(SubscribeReturnCodes::Success(filter.qos));
         }
 
-
         // A new subscription should match with all the existing topics and take a snapshot of current
         // offset of all the matched topics. Subscribers will receive data from that offset
         subscriptions.add_subscription(subscribe.topics, topics);
@@ -230,7 +253,8 @@ impl Router {
             if let Some(last_offset) = self.commitlog[self.id].last_offset(topic) {
                 if last_offset == (0, 0) {
                     offset[self.id] = last_offset;
-                } {
+                }
+                {
                     offset[self.id] = (last_offset.0, last_offset.1 + 1);
                 }
             }
@@ -247,18 +271,29 @@ impl Router {
         self.fresh_topics_notification(id);
     }
 
-    fn handle_connection_publish(&mut self, id: ConnectionId, publish: Publish) -> Option<(u64, u64)> {
+    fn handle_connection_publish(
+        &mut self,
+        id: ConnectionId,
+        publish: Publish,
+    ) -> Option<(u64, u64)> {
         if publish.payload.len() == 0 {
             error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
             return None;
         }
 
-        let Publish { pkid, topic, payload, qos, .. } = publish;
+        let Publish {
+            pkid,
+            topic,
+            payload,
+            qos,
+            ..
+        } = publish;
 
-        let (is_new_topic, (base_offset, offset)) = match self.append_to_commitlog(id, &topic, payload) {
-            Some(v) => v,
-            None => return None
-        };
+        let (is_new_topic, (base_offset, offset)) =
+            match self.append_to_commitlog(id, &topic, payload) {
+                Some(v) => v,
+                None => return None,
+            };
 
         if qos as u8 > 0 {
             let watermarks = self.watermarks[id].as_mut().unwrap();
@@ -291,9 +326,20 @@ impl Router {
     }
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
-        trace!("{:11} {:14} Id = {}, Count = {}", "data", "replicacommit", id, data.len());
+        trace!(
+            "{:11} {:14} Id = {}, Count = {}",
+            "data",
+            "replicacommit",
+            id,
+            data.len()
+        );
         for data in data {
-            let ReplicationData { pkid, topic, payload, .. } = data;
+            let ReplicationData {
+                pkid,
+                topic,
+                payload,
+                ..
+            } = data;
             let mut is_new_topic = false;
             for payload in payload {
                 if payload.len() == 0 {
@@ -320,7 +366,6 @@ impl Router {
             // we can probably handle multiple requests better
             self.fresh_data_notification(id, &topic);
 
-
             // Replicated data should be acked immediately when there are pending requests
             // in waiters
             self.fresh_acks_notification(id);
@@ -339,7 +384,13 @@ impl Router {
     }
 
     fn handle_topics_request(&mut self, id: ConnectionId, request: TopicsRequest) {
-        trace!("{:11} {:14} Id = {}, Offset = {}", "topics", "request", id, request.offset);
+        trace!(
+            "{:11} {:14} Id = {}, Offset = {}",
+            "topics",
+            "request",
+            id,
+            request.offset
+        );
 
         let reply = self.match_new_topics(id, &request);
         let reply = match reply {
@@ -347,16 +398,30 @@ impl Router {
             None => {
                 // register the connection 'id' to notify when there are new topics
                 self.register_topics_waiter(id, request);
-                return
-            },
+                return;
+            }
         };
 
-        trace!("{:11} {:14} Id = {}, Offset = {}, Count = {}", "topics", "response", id, reply.offset, reply.topics.len());
+        trace!(
+            "{:11} {:14} Id = {}, Offset = {}, Count = {}",
+            "topics",
+            "response",
+            id,
+            reply.offset,
+            reply.topics.len()
+        );
         self.reply(id, RouterOutMessage::TopicsReply(reply));
     }
 
     fn handle_data_request(&mut self, id: ConnectionId, mut request: DataRequest) {
-        trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}", "data", "request", id, request.topic, request.cursors);
+        trace!(
+            "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
+            "data",
+            "request",
+            id,
+            request.topic,
+            request.cursors
+        );
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
@@ -375,11 +440,19 @@ impl Router {
             Some(r) => r,
             None => {
                 self.register_data_waiter(id, request);
-                return
-            },
+                return;
+            }
         };
 
-        trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "response", id, reply.topic, reply.cursors, reply.payload.len());
+        trace!(
+            "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
+            "data",
+            "response",
+            id,
+            reply.topic,
+            reply.cursors,
+            reply.payload.len()
+        );
         let reply = RouterOutMessage::DataReply(reply);
         self.reply(id, reply);
     }
@@ -390,11 +463,17 @@ impl Router {
         let acks = watermarks.acks();
         if acks.is_empty() {
             self.register_acks_waiter(id, request);
-            return
+            return;
         }
 
         let reply = AcksReply::new(acks);
-        trace!("{:11} {:14} Id = {}, Count = {}", "acks", "response", id, reply.acks.len());
+        trace!(
+            "{:11} {:14} Id = {}, Count = {}",
+            "acks",
+            "response",
+            id,
+            reply.acks.len()
+        );
         let reply = RouterOutMessage::AcksReply(reply);
         self.reply(id, reply);
     }
@@ -407,7 +486,13 @@ impl Router {
 
     /// Register data waiter
     fn register_data_waiter(&mut self, id: ConnectionId, request: DataRequest) {
-        trace!("{:11} {:14} Id = {}, Topic = {}", "data", "register", id, request.topic);
+        trace!(
+            "{:11} {:14} Id = {}, Topic = {}",
+            "data",
+            "register",
+            id,
+            request.topic
+        );
         let topic = request.topic.clone();
         let request = (id, request);
 
@@ -443,24 +528,37 @@ impl Router {
                 Some(v) => v,
                 None => {
                     self.next_topics_waiters.push_back((link_id, request));
-                    continue
-                },
+                    continue;
+                }
             };
 
             // Match new topics with existing subscriptions of this link and reply.
             // Even though there are new topics, it's possible that they didn't match
             // subscriptions held by this connection. Push TopicsRequest back & continue
-            let topics = match self.subscriptions[link_id].as_mut().unwrap().matched_topics(topics) {
+            let topics = match self.subscriptions[link_id]
+                .as_mut()
+                .unwrap()
+                .matched_topics(topics)
+            {
                 Some(topics) => topics,
                 None => {
                     self.next_topics_waiters.push_back((link_id, request));
-                    continue
+                    continue;
                 }
             };
 
             let reply = TopicsReply::new(offset + topics.len(), topics);
-            trace!("{:11} {:14} Id = {}, Topics = {:?}", "topics", "notification", link_id, reply.topics);
-            self.connections[link_id].as_mut().unwrap().reply(RouterOutMessage::TopicsReply(reply));
+            trace!(
+                "{:11} {:14} Id = {}, Topics = {:?}",
+                "topics",
+                "notification",
+                link_id,
+                reply.topics
+            );
+            self.connections[link_id]
+                .as_mut()
+                .unwrap()
+                .reply(RouterOutMessage::TopicsReply(reply));
 
             // Note: When the reply is empty don't register notification on behalf of the link.
             // This will cause the channel to be full. Register the notification only when
@@ -495,7 +593,15 @@ impl Router {
                 },
             };
 
-            trace!("{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}", "data", "notification", link_id, reply.topic, reply.cursors, reply.payload.len());
+            trace!(
+                "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
+                "data",
+                "notification",
+                link_id,
+                reply.topic,
+                reply.cursors,
+                reply.payload.len()
+            );
             let reply = RouterOutMessage::DataReply(reply);
             self.reply(link_id, reply);
 
@@ -523,7 +629,12 @@ impl Router {
     /// Connections pull logs from both replication and connections where as replicator
     /// only pull logs from connections.
     /// Data from replicator and data from connection are separated for this reason
-    fn append_to_commitlog(&mut self, id: ConnectionId, topic: &str, bytes: Bytes) -> Option<(bool, (u64, u64))> {
+    fn append_to_commitlog(
+        &mut self,
+        id: ConnectionId,
+        topic: &str,
+        bytes: Bytes,
+    ) -> Option<(bool, (u64, u64))> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         if replication_data {
@@ -542,14 +653,17 @@ impl Router {
                     None
                 }
             }
-
         }
     }
 
     /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
     /// them against subscriptions of this connection. Returns a TopicsReply if there
     /// are matches
-    fn match_new_topics(&mut self, id: ConnectionId, request: &TopicsRequest) -> Option<TopicsReply> {
+    fn match_new_topics(
+        &mut self,
+        id: ConnectionId,
+        request: &TopicsRequest,
+    ) -> Option<TopicsReply> {
         let (offset, topics) = match self.topiclog.readv(request.offset, request.count) {
             Some(v) => v,
             None => return None,
@@ -563,7 +677,7 @@ impl Router {
         let topics = subscriptions.topics();
         match topics {
             Some(topics) => Some(TopicsReply::new(offset + topics.len(), topics)),
-            None => None
+            None => None,
         }
     }
 
@@ -577,7 +691,10 @@ impl Router {
         let cursors = request.cursors;
 
         let (segment, offset) = cursors[native_id];
-        debug!("Pull native data. Topic = {}, seg = {}, offset = {}", topic, segment, offset);
+        debug!(
+            "Pull native data. Topic = {}, seg = {}, offset = {}",
+            topic, segment, offset
+        );
         let mut reply = DataReply::new(request.topic.clone(), cursors, 0, Vec::new());
 
         match commitlog.readv(topic, segment, offset, max_count) {
@@ -589,7 +706,9 @@ impl Router {
 
                 // Update reply's cursors only when read has returned some data
                 // Move the reply to next segment if we are done with the current one
-                if payload.is_empty() { return None }
+                if payload.is_empty() {
+                    return None;
+                }
                 reply.payload = payload;
                 Some(reply)
             }
@@ -606,7 +725,10 @@ impl Router {
     fn extract_all_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let max_count = request.max_count;
-        debug!("Pull data. Topic = {}, cursors = {:?}", topic, request.cursors);
+        debug!(
+            "Pull data. Topic = {}, cursors = {:?}",
+            topic, request.cursors
+        );
 
         let mut cursors = [(0, 0); 3];
         let mut payload = Vec::new();
@@ -622,7 +744,9 @@ impl Router {
                         None => cursors[i] = (base_offset, record_offset + 1),
                     }
 
-                    if data.is_empty() { continue }
+                    if data.is_empty() {
+                        continue;
+                    }
                     payload.append(&mut data);
                 }
                 Ok(None) => continue,
@@ -638,9 +762,7 @@ impl Router {
         // the request with updated offsets
         match payload.is_empty() {
             true => None,
-            false => {
-                Some(DataReply::new(request.topic.clone(), cursors, 0, payload))
-            }
+            false => Some(DataReply::new(request.topic.clone(), cursors, 0, payload)),
         }
     }
 
@@ -662,7 +784,6 @@ impl Router {
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -759,8 +880,14 @@ mod test {
         broker.new_topics_request(connection_2_id);
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_topics(&connection_1_rx).await.unwrap().topics[0].0, "hello/world");
-        assert_eq!(wait_for_new_topics(&connection_2_rx).await.unwrap().topics[0].0, "hello/world");
+        assert_eq!(
+            wait_for_new_topics(&connection_1_rx).await.unwrap().topics[0].0,
+            "hello/world"
+        );
+        assert_eq!(
+            wait_for_new_topics(&connection_2_rx).await.unwrap().topics[0].0,
+            "hello/world"
+        );
     }
 
     #[tokio::test(core_threads = 1)]
@@ -779,8 +906,14 @@ mod test {
         broker.write_to_commitlog(connection_1_id, "hello/world", vec![1, 2, 3], 2);
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_topics(&connection_1_rx).await.unwrap().topics[0].0, "hello/world");
-        assert_eq!(wait_for_new_topics(&connection_2_rx).await.unwrap().topics[0].0, "hello/world");
+        assert_eq!(
+            wait_for_new_topics(&connection_1_rx).await.unwrap().topics[0].0,
+            "hello/world"
+        );
+        assert_eq!(
+            wait_for_new_topics(&connection_2_rx).await.unwrap().topics[0].0,
+            "hello/world"
+        );
     }
 
     #[tokio::test(core_threads = 1)]
@@ -795,7 +928,10 @@ mod test {
         broker.new_topics_request(connection_2_id);
         broker.new_acks_request(connection_2_id);
         broker.write_to_commitlog(connection_1_id, "hello/world", vec![1, 2, 3], 1);
-        assert_eq!(wait_for_new_acks(&connection_1_rx).await.unwrap().acks[0].0, 1);
+        assert_eq!(
+            wait_for_new_acks(&connection_1_rx).await.unwrap().acks[0].0,
+            1
+        );
         broker.new_acks_request(connection_1_id);
 
         // Send request for new topics. Router should reply with new topics when there are any
@@ -803,10 +939,22 @@ mod test {
         broker.subscribe(connection_2_id, "hello/world", 1);
 
         // see if routers replys with topics
-        assert_eq!(wait_for_new_acks(&connection_1_rx).await.unwrap().acks[0].0, 2);
-        assert_eq!(wait_for_new_acks(&connection_2_rx).await.unwrap().acks[0].0, 1);
-        assert_eq!(wait_for_new_topics(&connection_1_rx).await.unwrap().topics[0].0, "hello/world");
-        assert_eq!(wait_for_new_topics(&connection_2_rx).await.unwrap().topics[0].0, "hello/world");
+        assert_eq!(
+            wait_for_new_acks(&connection_1_rx).await.unwrap().acks[0].0,
+            2
+        );
+        assert_eq!(
+            wait_for_new_acks(&connection_2_rx).await.unwrap().acks[0].0,
+            1
+        );
+        assert_eq!(
+            wait_for_new_topics(&connection_1_rx).await.unwrap().topics[0].0,
+            "hello/world"
+        );
+        assert_eq!(
+            wait_for_new_topics(&connection_2_rx).await.unwrap().topics[0].0,
+            "hello/world"
+        );
     }
 
     async fn wait_for_new_topics(rx: &Receiver<RouterOutMessage>) -> Option<TopicsReply> {
@@ -829,7 +977,7 @@ mod test {
         tokio::time::delay_for(Duration::from_secs(1)).await;
         match rx.try_recv() {
             Ok(RouterOutMessage::AcksReply(reply)) => Some(reply),
-            _v => None
+            _v => None,
         }
     }
 }
@@ -858,12 +1006,13 @@ mod broker {
                 router.start().await;
             });
 
-            Broker {
-                router_tx,
-            }
+            Broker { router_tx }
         }
 
-        pub(crate) async fn connection(&mut self, id: &str) -> (ConnectionId, Receiver<RouterOutMessage>) {
+        pub(crate) async fn connection(
+            &mut self,
+            id: &str,
+        ) -> (ConnectionId, Receiver<RouterOutMessage>) {
             let (connection, link_rx) = Connection::new_remote(id, 5);
             let message = RouterInMessage::Connect(connection);
             self.router_tx.send((0, message)).await.unwrap();
@@ -894,7 +1043,7 @@ mod broker {
             id: usize,
             topic: &str,
             payload: Vec<u8>,
-            pkid: u16
+            pkid: u16,
         ) {
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = pkid;
@@ -903,12 +1052,7 @@ mod broker {
             self.router_tx.try_send(message).unwrap();
         }
 
-        pub(crate) fn subscribe(
-            &mut self,
-            id: usize,
-            filter: &str,
-            pkid: u16,
-        ) {
+        pub(crate) fn subscribe(&mut self, id: usize, filter: &str, pkid: u16) {
             let mut subscribe = Subscribe::new(filter, QoS::AtLeastOnce);
             subscribe.pkid = pkid;
             let message = RouterInMessage::Data(vec![Packet::Subscribe(subscribe)]);
@@ -916,10 +1060,7 @@ mod broker {
             self.router_tx.try_send(message).unwrap();
         }
 
-        pub(crate) fn new_topics_request(
-            &mut self,
-            id: usize,
-        ) {
+        pub(crate) fn new_topics_request(&mut self, id: usize) {
             let message = RouterInMessage::TopicsRequest(TopicsRequest::new());
             let message = (id, message);
             self.router_tx.try_send(message).unwrap();
@@ -929,21 +1070,17 @@ mod broker {
             &mut self,
             id: usize,
             topic: &str,
-            offsets: [(u64, u64); 3]
+            offsets: [(u64, u64); 3],
         ) {
-            let message = RouterInMessage::DataRequest(DataRequest::offsets(topic.to_owned(), offsets));
+            let message =
+                RouterInMessage::DataRequest(DataRequest::offsets(topic.to_owned(), offsets));
             let message = (id, message);
             self.router_tx.try_send(message).unwrap();
         }
 
-        pub(crate) fn new_acks_request(
-            &mut self,
-            id: usize,
-        ) {
+        pub(crate) fn new_acks_request(&mut self, id: usize) {
             let message = (id, RouterInMessage::AcksRequest(AcksRequest::new()));
             self.router_tx.try_send(message).unwrap();
         }
     }
-
-
 }

@@ -51,7 +51,7 @@ impl CommitLog {
     pub fn last_offset(&mut self, topic: &str) -> Option<(u64, u64)> {
         let log = match self.logs.get_mut(topic) {
             Some(log) => log,
-            None => return None
+            None => return None,
         };
 
         Some(log.last_offset())
@@ -62,13 +62,13 @@ impl CommitLog {
         topic: &str,
         segment: u64,
         offset: u64,
-        max_count: usize
+        max_count: usize,
     ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
         // native and replica commitlog where this topic doesn't exist
         let log = match self.logs.get_mut(topic) {
             Some(log) => log,
-            None => return Ok(None)
+            None => return Ok(None),
         };
 
         let (jump, segment, offset, data) = log.readv(segment, offset, max_count);
@@ -86,9 +86,7 @@ pub struct TopicLog {
 impl TopicLog {
     /// Create a new topic log
     pub fn new() -> TopicLog {
-        TopicLog {
-            topics: Vec::new(),
-        }
+        TopicLog { topics: Vec::new() }
     }
 
     pub fn topics(&self) -> Vec<String> {
@@ -116,7 +114,6 @@ impl TopicLog {
         Some((last_offset - 1, out))
     }
 
-
     /// Appends the topic if the topic isn't already seen
     pub fn append(&mut self, topic: &str) {
         self.topics.push(topic.to_owned());
@@ -128,13 +125,13 @@ type Topic = String;
 /// Snapshots of topics grouped by cluster id
 #[derive(Debug, Clone)]
 pub struct Snapshots {
-    snapshots: HashMap<Topic, [(u64, u64); 3]>
+    snapshots: HashMap<Topic, [(u64, u64); 3]>,
 }
 
 impl Snapshots {
     pub fn _new() -> Snapshots {
         Snapshots {
-            snapshots: HashMap::new()
+            snapshots: HashMap::new(),
         }
     }
 

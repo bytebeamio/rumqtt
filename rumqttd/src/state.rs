@@ -14,7 +14,7 @@ pub enum Error {
     #[error("Received unsolicited ack from the device. {0}")]
     UnsolicitedAck(u16),
     #[error("Collision with an unacked packet")]
-    Collision
+    Collision,
 }
 
 impl State {
@@ -24,7 +24,7 @@ impl State {
             outgoing_pub: vec![None; max_inflight as usize + 1],
             max_inflight,
             inflight: 0,
-            last_pkid: 0
+            last_pkid: 0,
         }
     }
 
@@ -35,7 +35,7 @@ impl State {
     pub fn no_collision_count(&self, count: usize) -> usize {
         let free = self.max_inflight - self.inflight;
         if count < free as usize {
-            return 0
+            return 0;
         }
 
         count - free as usize
@@ -44,7 +44,7 @@ impl State {
     pub fn handle_network_puback(&mut self, ack: PubAck) -> Result<(), Error> {
         let pkid = ack.pkid as usize;
         if mem::replace(&mut self.outgoing_pub[pkid], None).is_none() {
-            return Err(Error::UnsolicitedAck(ack.pkid))
+            return Err(Error::UnsolicitedAck(ack.pkid));
         }
 
         self.inflight -= 1;
@@ -61,7 +61,7 @@ impl State {
         let index = publish.pkid as usize;
         if let Some(v) = mem::replace(&mut self.outgoing_pub[index], Some(pkid)) {
             error!("Replacing unacked packet {:?}", v);
-            return Err(Error::Collision)
+            return Err(Error::Collision);
         }
 
         self.inflight += 1;
@@ -77,7 +77,7 @@ impl State {
         // are acked
         if next_pkid == self.max_inflight {
             self.last_pkid = 0;
-            return next_pkid
+            return next_pkid;
         }
 
         self.last_pkid = next_pkid;

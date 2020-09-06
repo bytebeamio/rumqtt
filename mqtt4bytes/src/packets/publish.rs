@@ -1,8 +1,8 @@
-use crate::*;
 use super::*;
+use crate::*;
 use alloc::string::String;
-use bytes::{Bytes, Buf};
 use alloc::vec::Vec;
+use bytes::{Buf, Bytes};
 use core::fmt;
 
 /// Publish packet
@@ -32,8 +32,7 @@ impl Publish {
         let pkid = self.pkid;
         let dup = self.dup;
         let retain = self.retain;
-        PublishRaw::from_bytes(self.topic, self.qos, self.payload).map(|mut raw|
-        {
+        PublishRaw::from_bytes(self.topic, self.qos, self.payload).map(|mut raw| {
             raw.set_pkid(pkid);
             raw.set_dup(dup);
             raw.set_retain(retain);
@@ -50,7 +49,6 @@ impl Publish {
             topic: topic.into(),
             payload,
         }
-
     }
 
     pub fn set_pkid(&mut self, pkid: u16) -> &mut Self {
@@ -128,7 +126,6 @@ impl Publish {
     }
 }
 
-
 impl fmt::Debug for Publish {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -143,14 +140,13 @@ impl fmt::Debug for Publish {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
     use alloc::borrow::ToOwned;
+    use alloc::vec;
     use bytes::{Bytes, BytesMut};
     use pretty_assertions::assert_eq;
-    use alloc::vec;
 
     #[test]
     fn qos1_publish_stitching_works_correctly() {
@@ -299,4 +295,3 @@ mod test {
         );
     }
 }
-

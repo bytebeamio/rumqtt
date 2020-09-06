@@ -1,36 +1,36 @@
-mod ping;
-mod connect;
 mod connack;
+mod connect;
+mod disconnect;
+mod ping;
+mod puback;
+mod pubcomp;
 mod publish;
 mod publishraw;
-mod puback;
 mod pubrec;
 mod pubrel;
-mod pubcomp;
-mod subscribe;
 mod suback;
-mod unsubscribe;
+mod subscribe;
 mod unsuback;
-mod disconnect;
+mod unsubscribe;
 
-pub use connect::*;
 pub use connack::*;
-pub use publish::*;
-pub use publishraw::*;
-pub use puback::*;
-pub use pubrec::*;
-pub use pubrel::*;
-pub use pubcomp::*;
-pub use subscribe::*;
-pub use suback::*;
-pub use unsubscribe::*;
-pub use unsuback::*;
+pub use connect::*;
 pub use disconnect::*;
 pub use ping::*;
+pub use puback::*;
+pub use pubcomp::*;
+pub use publish::*;
+pub use publishraw::*;
+pub use pubrec::*;
+pub use pubrel::*;
+pub use suback::*;
+pub use subscribe::*;
+pub use unsuback::*;
+pub use unsubscribe::*;
 
 use crate::*;
-use bytes::{Bytes, BytesMut, BufMut};
 use alloc::string::String;
+use bytes::{BufMut, Bytes, BytesMut};
 
 /// Reads a series of bytes with a length from a byte stream
 fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {

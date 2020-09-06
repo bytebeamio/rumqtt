@@ -48,7 +48,7 @@ pub fn valid_filter(filter: &str) -> bool {
 }
 
 /// Checks if topic matches a filter. topic and filter validation isn't done here.
-/// 
+///
 /// **NOTE**: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe

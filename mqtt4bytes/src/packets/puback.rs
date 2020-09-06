@@ -1,5 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf, BytesMut, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to QoS1 publish
 #[derive(Debug, Clone, PartialEq)]
@@ -36,7 +36,7 @@ impl PubAck {
 #[cfg(test)]
 mod test {
     use super::*;
-    use bytes::{BytesMut};
+    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -62,4 +62,3 @@ mod test {
         assert_eq!(packet, PubAck { pkid: 10 });
     }
 }
-

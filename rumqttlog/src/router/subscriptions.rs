@@ -1,7 +1,6 @@
-use std::collections::{HashSet, HashMap};
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
+use std::collections::{HashMap, HashSet};
 use std::mem;
-
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
@@ -43,7 +42,10 @@ impl Subscription {
     /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
     /// them against subscriptions of this connection. Returns a TopicsReply if there
     /// are matches
-    pub(crate) fn matched_topics(&mut self, topics: &[String]) -> Option<Vec<(String, u8, [(u64, u64); 3])>>  {
+    pub(crate) fn matched_topics(
+        &mut self,
+        topics: &[String],
+    ) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
         for topic in topics {
             self.fill_matches(topic);
         }
@@ -61,26 +63,28 @@ impl Subscription {
     pub fn add_subscription(&mut self, filters: Vec<SubscribeTopic>, topics: Vec<String>) {
         for filter in filters {
             if has_wildcards(&filter.topic_path) {
-                self.wild_subscriptions.push((filter.topic_path.clone(), filter.qos as u8));
+                self.wild_subscriptions
+                    .push((filter.topic_path.clone(), filter.qos as u8));
             } else {
-                self.concrete_subscriptions.insert(filter.topic_path.clone(), filter.qos as u8);
+                self.concrete_subscriptions
+                    .insert(filter.topic_path.clone(), filter.qos as u8);
             }
 
             // Check and track matching topics from input
             for topic in topics.iter() {
                 // ignore if the topic is already being tracked
                 if self.topics_index.contains(topic) {
-                    continue
+                    continue;
                 }
 
                 if matches(&topic, &filter.topic_path) {
                     self.topics_index.insert(topic.clone());
-                    self.topics.push((topic.clone(), filter.qos as u8, [(0, 0); 3]));
-                    continue
+                    self.topics
+                        .push((topic.clone(), filter.qos as u8, [(0, 0); 3]));
+                    continue;
                 }
             }
         }
-
     }
 
     /// Matches existing subscription with a new topic. These
@@ -90,14 +94,14 @@ impl Subscription {
     pub fn fill_matches(&mut self, topic: &str) -> bool {
         // ignore if the topic is already being tracked
         if self.topics_index.contains(topic) {
-            return false
+            return false;
         }
 
         // A concrete subscription match
         if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
             self.topics.push((topic.to_owned(), *qos, [(0, 0); 3]));
-            return true
+            return true;
         }
 
         // Wildcard subscription match. We return after first match
@@ -105,7 +109,7 @@ impl Subscription {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
                 self.topics.push((topic.to_owned(), *qos, [(0, 0); 3]));
-                return true
+                return true;
             }
         }
 

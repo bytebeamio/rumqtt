@@ -1,28 +1,28 @@
 #[macro_use]
 extern crate log;
 
-use serde::{Serialize, Deserialize};
-use std::{thread, io};
-use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
+use std::{io, thread};
 
-use tokio::time::Elapsed;
-use rumqttlog::*;
 use mqtt4bytes::Packet;
+use rumqttlog::*;
+use tokio::time::Elapsed;
 
-pub use rumqttlog::Config as RouterConfig;
-use tokio::time;
-use tokio::net::TcpListener;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::task;
 use crate::remotelink::RemoteLink;
+pub use rumqttlog::Config as RouterConfig;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpListener;
+use tokio::task;
+use tokio::time;
 
-mod remotelink;
 mod locallink;
-mod state;
 mod network;
+mod remotelink;
+mod state;
 
-pub use crate::locallink::{LinkTx, LinkRx, LinkError};
+pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
 
 #[derive(Debug, thiserror::Error)]
@@ -40,7 +40,7 @@ pub enum Error {
     Send(#[from] SendError<(Id, RouterInMessage)>),
     Disconnected,
     NetworkClosed,
-    WrongPacket(Packet)
+    WrongPacket(Packet),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -85,7 +85,7 @@ impl Default for ServerSettings {
             cert_path: None,
             key_path: None,
             username: None,
-            password: None
+            password: None,
         }
     }
 }
@@ -93,21 +93,29 @@ impl Default for ServerSettings {
 pub struct Broker {
     config: Config,
     router_tx: Sender<(Id, RouterInMessage)>,
-    router: Option<Router>
+    router: Option<Router>,
 }
 
 impl Broker {
     pub fn new(config: Config) -> Broker {
         let router_config = Arc::new(config.router.clone());
         let (router, router_tx) = Router::new(router_config);
-        Broker { config, router_tx, router: Some(router) }
+        Broker {
+            config,
+            router_tx,
+            router: Some(router),
+        }
     }
 
     pub fn router_handle(&self) -> Sender<(Id, RouterInMessage)> {
         self.router_tx.clone()
     }
 
-    pub async fn link(&self, client_id: &str, capacity: usize) -> Result<(LinkTx, LinkRx), LinkError> {
+    pub async fn link(
+        &self,
+        client_id: &str,
+        capacity: usize,
+    ) -> Result<(LinkTx, LinkRx), LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let (connection, link_rx) = Connection::new_remote(client_id, capacity);
@@ -118,9 +126,9 @@ impl Broker {
         let id = match link_rx.recv().await? {
             RouterOutMessage::ConnectionAck(ack) => match ack {
                 ConnectionAck::Success(id) => id,
-                ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason))
-            }
-            message => return Err(LinkError::NotConnectionAck(message))
+                ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
+            },
+            message => return Err(LinkError::NotConnectionAck(message)),
         };
 
         let tx = LinkTx::new(id, self.router_tx.clone());
@@ -174,15 +182,12 @@ async fn router(mut router: Router) {
 
 struct Connector {
     config: Arc<ServerSettings>,
-    router_tx: Sender<(Id, RouterInMessage)>
+    router_tx: Sender<(Id, RouterInMessage)>,
 }
 
 impl Connector {
     fn new(config: Arc<ServerSettings>, router_tx: Sender<(Id, RouterInMessage)>) -> Connector {
-        Connector {
-            config,
-            router_tx
-        }
+        Connector { config, router_tx }
     }
 
     /// A new network connection should wait for mqtt connect packet. This handling should be handled
@@ -197,17 +202,16 @@ impl Connector {
         let (client_id, id, mut link) = RemoteLink::new(config, router_tx, network).await?;
         match link.start().await {
             // Connection get close. This shouldn't usually happen
-            Ok(_) => {
-                error!("Link stopped!! Id = {}, Client Id = {}", id, client_id)
-            },
+            Ok(_) => error!("Link stopped!! Id = {}, Client Id = {}", id, client_id),
             // We are representing clean close as Abort in `Network`
             Err(remotelink::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
                 info!("Link closed!! Id = {}, Client Id = {}", id, client_id)
-            },
+            }
             // Any other error
-            Err(e) => {
-                error!("Link stopped with error!! Id = {}, Client Id = {}, {:?}", id, client_id, e)
-            },
+            Err(e) => error!(
+                "Link stopped with error!! Id = {}, Client Id = {}, {:?}",
+                id, client_id, e
+            ),
         }
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);
@@ -218,4 +222,3 @@ impl Connector {
 
 pub trait IO: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> IO for T {}
-

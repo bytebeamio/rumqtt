@@ -1,9 +1,9 @@
 use pprof::ProfilerGuard;
 use prost::Message;
+use rumqttlog::router::ConnectionAck;
+use rumqttlog::{Connection, Receiver, RouterInMessage, RouterOutMessage, Sender};
 use std::fs::File;
 use std::io::Write;
-use rumqttlog::{Sender, RouterInMessage, Receiver, RouterOutMessage, Connection};
-use rumqttlog::router::ConnectionAck;
 
 #[allow(unused)]
 pub fn profile(name: &str, guard: ProfilerGuard) {
@@ -12,8 +12,8 @@ pub fn profile(name: &str, guard: ProfilerGuard) {
         let profile = report.pprof().unwrap();
 
         let mut content = Vec::new();
-        profile.encode( & mut content).unwrap();
-        file.write_all( & content).unwrap();
+        profile.encode(&mut content).unwrap();
+        file.write_all(&content).unwrap();
     };
 }
 
@@ -21,7 +21,7 @@ pub fn profile(name: &str, guard: ProfilerGuard) {
 pub async fn new_connection(
     id: &str,
     cap: usize,
-    router_tx: &Sender<(usize, RouterInMessage)>
+    router_tx: &Sender<(usize, RouterInMessage)>,
 ) -> (usize, Receiver<RouterOutMessage>) {
     let (connection, this_rx) = Connection::new_remote(id, cap);
 

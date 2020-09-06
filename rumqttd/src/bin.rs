@@ -1,13 +1,13 @@
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
 use argh::FromArgs;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use librumqttd::Broker;
+use pprof::ProfilerGuard;
+use prost::Message;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
-use pprof::ProfilerGuard;
-use prost::Message;
 use std::process::exit;
 
 #[global_allocator]
@@ -22,7 +22,11 @@ struct Config {
 /// Command line args for rumqttd
 struct CommandLine {
     /// path to config file
-    #[argh(option, short = 'c', default = "PathBuf::from(\"config/rumqttd.conf\")")]
+    #[argh(
+        option,
+        short = 'c',
+        default = "PathBuf::from(\"config/rumqttd.conf\")"
+    )]
     config: PathBuf,
 }
 
@@ -35,14 +39,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     ctrlc::set_handler(move || {
         profile("rumqttd.pb", &guard);
         exit(0);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     // Start the broker
     let mut broker = Broker::new(config.broker);
     broker.start()?;
     Ok(())
 }
-
 
 fn profile(name: &str, guard: &ProfilerGuard) {
     if let Ok(report) = guard.report().build() {

@@ -49,7 +49,7 @@ impl Segment {
     pub fn read(&mut self, offset: usize) -> Option<Bytes> {
         match self.file.get(offset) {
             Some(record) => Some(record.clone()),
-            None => None
+            None => None,
         }
     }
 
@@ -61,7 +61,7 @@ impl Segment {
             // End offset crosses boundary when trying fetch requested max count
             len if offset + max_count > len => len,
             // Return maximum number of elements
-            _ => offset + max_count
+            _ => offset + max_count,
         };
 
         self.file[offset..end].to_vec()
