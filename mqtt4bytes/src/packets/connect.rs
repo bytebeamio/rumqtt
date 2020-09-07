@@ -1,9 +1,9 @@
-use alloc::string::String;
-use crate::*;
 use super::*;
-use bytes::{Bytes, Buf};
+use crate::*;
+use alloc::string::String;
+use alloc::vec::Vec;
+use bytes::{Buf, Bytes};
 use core::fmt;
-
 
 /// Connection packet initiated by the client
 #[derive(Clone, PartialEq)]
@@ -23,7 +23,6 @@ pub struct Connect {
     /// Password of the client
     pub password: Option<String>,
 }
-
 
 impl Connect {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
@@ -131,12 +130,12 @@ impl Connect {
         }
 
         buffer.put_u8(connect_flags);
-        buffer.put_u16( self.keep_alive);
+        buffer.put_u16(self.keep_alive);
         write_mqtt_string(buffer, &self.client_id);
 
         if let Some(ref last_will) = self.last_will {
             write_mqtt_string(buffer, &last_will.topic);
-            write_mqtt_string(buffer, &last_will.message);
+            write_mqtt_bytes(buffer, &last_will.message);
         }
 
         if let Some(ref username) = self.username {
@@ -154,9 +153,25 @@ impl Connect {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LastWill {
     pub topic: String,
-    pub message: String,
+    pub message: Bytes,
     pub qos: QoS,
     pub retain: bool,
+}
+
+impl LastWill {
+    pub fn new(
+        topic: impl Into<String>,
+        payload: impl Into<Vec<u8>>,
+        qos: QoS,
+        retain: bool,
+    ) -> LastWill {
+        LastWill {
+            topic: topic.into(),
+            message: Bytes::from(payload.into()),
+            qos,
+            retain,
+        }
+    }
 }
 
 fn extract_last_will(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
@@ -167,7 +182,7 @@ fn extract_last_will(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<
         0 => None,
         _ => {
             let will_topic = read_mqtt_string(&mut bytes)?;
-            let will_message = read_mqtt_string(&mut bytes)?;
+            let will_message = read_mqtt_bytes(&mut bytes)?;
             let will_qos = qos((connect_flags & 0b11000) >> 3)?;
             Some(LastWill {
                 topic: will_topic,
@@ -211,10 +226,10 @@ impl fmt::Debug for Connect {
 #[cfg(test)]
 mod test {
     use crate::*;
-    use alloc::vec;
     use alloc::borrow::ToOwned;
-    use pretty_assertions::assert_eq;
+    use alloc::vec;
     use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn connect_stitching_works_correctlyl() {
@@ -281,12 +296,7 @@ mod test {
                 keep_alive: 10,
                 client_id: "test".to_owned(),
                 clean_session: true,
-                last_will: Some(LastWill {
-                    topic: "/a".to_owned(),
-                    message: "offline".to_owned(),
-                    retain: false,
-                    qos: QoS::AtLeastOnce
-                }),
+                last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false,)),
                 username: Some("rumq".to_owned()),
                 password: Some("mq".to_owned())
             }
@@ -330,12 +340,7 @@ mod test {
             keep_alive: 10,
             client_id: "test".to_owned(),
             clean_session: true,
-            last_will: Some(LastWill {
-                topic: "/a".to_owned(),
-                message: "offline".to_owned(),
-                retain: false,
-                qos: QoS::AtLeastOnce,
-            }),
+            last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
             username: Some("rust".to_owned()),
             password: Some("mq".to_owned()),
         };

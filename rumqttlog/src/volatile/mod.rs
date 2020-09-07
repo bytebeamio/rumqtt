@@ -74,12 +74,12 @@ impl Log {
     /// Read a record from correct segment
     pub fn read(&mut self, base_offset: u64, offset: usize) -> Option<Bytes> {
         if base_offset == self.active_segment.base_offset() {
-            return self.active_segment.read(offset as usize)
+            return self.active_segment.read(offset as usize);
         }
 
         match self.segments.get_mut(&base_offset) {
             Some(segment) => segment.read(offset),
-            None => None
+            None => None,
         }
     }
 
@@ -94,7 +94,12 @@ impl Log {
     /// connections mind (some runtimes support internal preemption using await points
     /// where this might not be a problem)
     /// **Note**: When data of deleted segment is asked, returns data of the current head
-    pub fn readv(&mut self, mut base_offset: u64, mut offset: u64, max_count: usize) -> (Option<u64>, u64, u64, Vec<Bytes>) {
+    pub fn readv(
+        &mut self,
+        mut base_offset: u64,
+        mut offset: u64,
+        max_count: usize,
+    ) -> (Option<u64>, u64, u64, Vec<Bytes>) {
         // TODO Fix usize to u64 conversions
 
         // jump to head if the caller is trying to read deleted segment
@@ -109,7 +114,12 @@ impl Log {
             let relative_offset = (offset - base_offset) as usize;
             let out = self.active_segment.readv(relative_offset, max_count);
             let last_record_offset = offset + out.len() as u64 - 1;
-            return (None, self.active_segment.base_offset(), last_record_offset, out)
+            return (
+                None,
+                self.active_segment.base_offset(),
+                last_record_offset,
+                out,
+            );
         }
 
         // read from backlog segments
@@ -120,12 +130,22 @@ impl Log {
             return if out.len() > 0 {
                 let last_record_offset = offset + out.len() as u64 - 1;
                 let next_segment_offset = segment.base_offset() + segment.len() as u64;
-                (Some(next_segment_offset), segment.base_offset(), last_record_offset, out)
+                (
+                    Some(next_segment_offset),
+                    segment.base_offset(),
+                    last_record_offset,
+                    out,
+                )
             } else {
                 let out = self.active_segment.readv(0, max_count);
                 let last_record_offset = offset + out.len() as u64 - 1;
-                (None, self.active_segment.base_offset(), last_record_offset, out)
-            }
+                (
+                    None,
+                    self.active_segment.base_offset(),
+                    last_record_offset,
+                    out,
+                )
+            };
         }
 
         (None, base_offset, offset, Vec::new())
@@ -282,7 +302,6 @@ mod test {
             let payload = Bytes::from(payload);
             log.append(payload);
         }
-
 
         // read active segment
         let (jump, segment, offset, data) = log.readv(80, 80, 10);

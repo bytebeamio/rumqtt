@@ -8,12 +8,12 @@ mod packets;
 mod read;
 mod topic;
 
-pub use packets::*;
-pub use read::*;
-pub use topic::*;
 use bytes::Buf;
 use core::fmt;
 use core::fmt::{Display, Formatter};
+pub use packets::*;
+pub use read::*;
+pub use topic::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -53,8 +53,6 @@ pub enum Packet {
     Disconnect,
 }
 
-
-
 /// MQTT packet type
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,14 +73,11 @@ pub enum PacketType {
     Disconnect,
 }
 
-
-
 /// Protocol type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     MQTT(u8),
 }
-
 
 /// Quality of service
 #[repr(u8)]
@@ -123,13 +118,12 @@ impl FixedHeader {
         FixedHeader {
             byte1,
             fixed_len: remaining_len_len + 1,
-            remaining_len
+            remaining_len,
         }
     }
 
-
     pub fn packet_type(&self) -> Result<PacketType, Error> {
-        let num = self. byte1 >> 4;
+        let num = self.byte1 >> 4;
         match num {
             1 => Ok(PacketType::Connect),
             2 => Ok(PacketType::ConnAck),
@@ -171,4 +165,3 @@ impl Display for Error {
         write!(f, "Error = {:?}", self)
     }
 }
-

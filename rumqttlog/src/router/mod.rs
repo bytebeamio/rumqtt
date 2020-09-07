@@ -1,16 +1,17 @@
 extern crate bytes;
 
 mod commitlog;
-mod watermarks;
 mod router;
+mod subscriptions;
+mod watermarks;
 
 pub use router::Router;
+use subscriptions::Subscription;
 
 use self::bytes::Bytes;
-use async_channel::{Sender, bounded, Receiver};
-use rumqttc::Publish;
+use async_channel::{bounded, Receiver, Sender, TrySendError};
+use mqtt4bytes::{Packet, Publish};
 use std::fmt;
-use std::collections::VecDeque;
 
 /// Messages going into router
 #[derive(Debug)]
@@ -18,7 +19,9 @@ pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
     /// Data for native commitlog
-    ConnectionData(Vec<Publish>),
+    Publish(Publish),
+    /// Data for native commitlog
+    Data(Vec<Packet>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
     /// Replication acks
@@ -27,12 +30,10 @@ pub enum RouterInMessage {
     DataRequest(DataRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
-    /// Request of all the topics in commitlog
-    AllTopicsRequest,
-    /// Watermarks request
+    /// Acks request
     AcksRequest(AcksRequest),
     /// Disconnection request
-    Disconnect(Disconnection)
+    Disconnect(Disconnection),
 }
 
 /// Messages coming from router
@@ -44,8 +45,6 @@ pub enum RouterOutMessage {
     DataReply(DataReply),
     /// Topics reply
     TopicsReply(TopicsReply),
-    /// Response with all the topics
-    AllTopicsReply(TopicsReply),
     /// Watermarks reply
     AcksReply(AcksReply),
 }
@@ -54,11 +53,11 @@ pub enum RouterOutMessage {
 #[derive(Debug)]
 pub struct ReplicationData {
     /// Id of the packet that connection received
-    pub pkid: u16,
+    pkid: u16,
     /// Topic of publish
-    pub topic: String,
+    topic: String,
     /// Publish payload
-    pub payload: Vec<Bytes>,
+    payload: Vec<Bytes>,
 }
 
 impl ReplicationData {
@@ -66,7 +65,7 @@ impl ReplicationData {
         ReplicationData {
             pkid,
             topic,
-            payload: Vec::with_capacity(cap)
+            payload: Vec::with_capacity(cap),
         }
     }
 
@@ -80,17 +79,14 @@ impl ReplicationData {
 /// for replicated data
 #[derive(Debug)]
 pub struct ReplicationAck {
-    pub topic: String,
+    topic: String,
     /// Packet id that router assigned
-    pub offset: u64,
+    offset: u64,
 }
 
 impl ReplicationAck {
     pub fn new(topic: String, offset: u64) -> ReplicationAck {
-        ReplicationAck {
-            topic,
-            offset
-        }
+        ReplicationAck { topic, offset }
     }
 }
 
@@ -101,11 +97,11 @@ impl ReplicationAck {
 #[derive(Clone)]
 pub struct DataRequest {
     /// Log to sweep
-    pub topic: String,
+    topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    pub cursors: Option<[(u64, u64); 3]>,
+    cursors: [(u64, u64); 3],
     /// Maximum count of payload buffer per replica
-    pub max_count: usize
+    max_count: usize,
 }
 
 impl DataRequest {
@@ -113,16 +109,16 @@ impl DataRequest {
     pub fn new(topic: String) -> DataRequest {
         DataRequest {
             topic,
-            cursors: None,
-            max_count: 100
+            cursors: [(0, 0); 3],
+            max_count: 100,
         }
     }
 
     pub fn with(topic: String, max_count: usize) -> DataRequest {
         DataRequest {
             topic,
-            cursors: None,
-            max_count
+            cursors: [(0, 0); 3],
+            max_count,
         }
     }
 
@@ -130,28 +126,28 @@ impl DataRequest {
     pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
-            cursors: Some(cursors),
-            max_count: 100
+            cursors,
+            max_count: 100,
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets_with(
-        topic: String,
-        cursors: [(u64, u64); 3],
-        max_count: usize
-    ) -> DataRequest {
+    pub fn offsets_with(topic: String, cursors: [(u64, u64); 3], max_count: usize) -> DataRequest {
         DataRequest {
             topic,
-            cursors: Some(cursors),
-            max_count
+            cursors,
+            max_count,
         }
     }
 }
 
 impl fmt::Debug for DataRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Topic = {}, cursors = {:?}, max_count = {}", self.topic, self.cursors, self.max_count)
+        write!(
+            f,
+            "Topic = {}, cursors = {:?}, max_count = {}",
+            self.topic, self.cursors, self.max_count
+        )
     }
 }
 
@@ -166,33 +162,53 @@ pub struct DataReply {
     pub payload: Vec<Bytes>,
 }
 
+impl DataReply {
+    pub fn new(
+        topic: String,
+        cursors: [(u64, u64); 3],
+        size: usize,
+        payload: Vec<Bytes>,
+    ) -> DataReply {
+        DataReply {
+            topic,
+            cursors,
+            size,
+            payload,
+        }
+    }
+}
+
 impl fmt::Debug for DataReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}", self.topic, self.cursors, self.size, self.payload.len())
+        write!(
+            f,
+            "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}",
+            self.topic,
+            self.cursors,
+            self.size,
+            self.payload.len()
+        )
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct TopicsRequest {
     /// Start from this offset
-    pub offset: usize,
+    offset: usize,
     /// Maximum number of topics to read
-    pub count: usize,
+    count: usize,
 }
 
 impl TopicsRequest {
     pub fn new() -> TopicsRequest {
         TopicsRequest {
             offset: 0,
-            count: 10
+            count: 10,
         }
     }
 
     pub fn offset(offset: usize) -> TopicsRequest {
-        TopicsRequest {
-            offset,
-            count: 10
-        }
+        TopicsRequest { offset, count: 10 }
     }
 }
 
@@ -200,47 +216,40 @@ impl TopicsRequest {
 pub struct TopicsReply {
     /// Last topic offset
     pub offset: usize,
-    /// list of new topics
-    pub topics: Vec<String>,
+    /// list of new topics along with the offsets
+    /// that tracker should poll from
+    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
 }
 
-#[derive(Clone)]
-pub struct AcksRequest {
-    /// Acks request topic
-    pub(crate) topic: String,
-    /// Router return acks after this offset
-    /// Registers this request if it can't return acks
-    /// yet due to incomplete replication
-    pub(crate) offset: u64,
-}
-
-impl AcksRequest {
-    pub fn new(topic: String, offset: u64) -> AcksRequest {
-        AcksRequest {
-            topic,
-            offset
-        }
+impl TopicsReply {
+    fn new(offset: usize, topics: Vec<(String, u8, [(u64, u64); 3])>) -> TopicsReply {
+        TopicsReply { offset, topics }
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct AcksRequest;
 
-impl fmt::Debug for AcksRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Topic = {}, offset = {}", self.topic, self.offset)
+impl AcksRequest {
+    pub fn new() -> AcksRequest {
+        AcksRequest
     }
 }
 
 #[derive(Debug)]
 pub struct AcksReply {
-    pub topic: String,
     /// packet ids that can be acked
-    pub pkids: VecDeque<u16>,
-    /// offset till which pkids are returned
-    pub offset: u64,
+    pub acks: Vec<(u16, Packet)>,
+}
+
+impl AcksReply {
+    pub fn new(acks: Vec<(u16, Packet)>) -> AcksReply {
+        AcksReply { acks }
+    }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ConnectionType {
+pub enum ConnectionType {
     Device(String),
     Replicator(usize),
 }
@@ -260,7 +269,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
@@ -268,7 +277,32 @@ impl Connection {
             handle: this_tx,
         };
 
-        (connection , this_rx)
+        (connection, this_rx)
+    }
+
+    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+        let (this_tx, this_rx) = bounded(capacity);
+
+        let connection = Connection {
+            conn: ConnectionType::Replicator(id),
+            handle: this_tx,
+        };
+
+        (connection, this_rx)
+    }
+
+    /// Send message to link
+    fn reply(&mut self, reply: RouterOutMessage) {
+        if let Err(e) = self.handle.try_send(reply) {
+            match e {
+                TrySendError::Full(e) => {
+                    error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e)
+                }
+                TrySendError::Closed(e) => {
+                    info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e)
+                }
+            }
+        }
     }
 }
 
@@ -286,7 +320,6 @@ impl fmt::Debug for Connection {
     }
 }
 
-
 #[derive(Debug)]
 pub struct Disconnection {
     id: String,
@@ -294,8 +327,6 @@ pub struct Disconnection {
 
 impl Disconnection {
     pub fn new(id: String) -> Disconnection {
-        Disconnection {
-            id
-        }
+        Disconnection { id }
     }
 }

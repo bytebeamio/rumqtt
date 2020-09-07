@@ -1,7 +1,5 @@
 use crate::*;
-use bytes::{Bytes, Buf, BufMut, BytesMut};
-
-
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to unsubscribe
 #[derive(Debug, Clone, PartialEq)]

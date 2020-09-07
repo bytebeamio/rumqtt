@@ -1,4 +1,4 @@
-use crate::{Network, EventLoop, Outgoing, ConnectionError, Incoming};
+use crate::{ConnectionError, EventLoop, Incoming, Network, Outgoing};
 
 use tokio::select;
 use tokio::stream::StreamExt;
@@ -14,22 +14,21 @@ impl EventLoop {
         // outgoing requests. Internal loops inside async functions are risky. Imagine this function
         // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
         // selected with other streams, can potentially do more internal polling (if the socket is ready)
-        if self.network.is_none(){
+        if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
-            return Ok((vec![connack], None))
+            return Ok((vec![connack], None));
         }
 
         let (incoming, outgoing) = match self.selectv().await {
             Ok((i, o)) => (i, o),
             Err(e) => {
                 self.network = None;
-                return Err(e)
+                return Err(e);
             }
         };
 
         Ok((incoming, outgoing))
     }
-
 
     /// Select on network and requests and generate keepalive pings when necessary
     async fn selectv(&mut self) -> Result<(Vec<Incoming>, Option<Outgoing>), ConnectionError> {

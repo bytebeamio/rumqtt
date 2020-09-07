@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 
 use super::bytes::Bytes;
@@ -51,7 +51,7 @@ impl CommitLog {
     pub fn last_offset(&mut self, topic: &str) -> Option<(u64, u64)> {
         let log = match self.logs.get_mut(topic) {
             Some(log) => log,
-            None => return None
+            None => return None,
         };
 
         Some(log.last_offset())
@@ -62,13 +62,13 @@ impl CommitLog {
         topic: &str,
         segment: u64,
         offset: u64,
-        max_count: usize
+        max_count: usize,
     ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
         // native and replica commitlog where this topic doesn't exist
         let log = match self.logs.get_mut(topic) {
             Some(log) => log,
-            None => return Ok(None)
+            None => return Ok(None),
         };
 
         let (jump, segment, offset, data) = log.readv(segment, offset, max_count);
@@ -79,8 +79,6 @@ impl CommitLog {
 /// A temporal list of unique new topics
 #[derive(Debug)]
 pub struct TopicLog {
-    /// Hashset of unique topics. Used to check if the topic is already seen
-    unique: HashSet<String>,
     /// List of new topics
     topics: Vec<String>,
 }
@@ -88,30 +86,16 @@ pub struct TopicLog {
 impl TopicLog {
     /// Create a new topic log
     pub fn new() -> TopicLog {
-        TopicLog {
-            unique: HashSet::new(),
-            topics: Vec::new(),
-        }
+        TopicLog { topics: Vec::new() }
     }
 
-    pub fn topics(&self) -> Option<(usize, Vec<String>)> {
-        let topics = self.topics.clone();
-        match topics.is_empty() {
-            true => None,
-            false => {
-                let last_offset = topics.len() - 1;
-                Some((last_offset, topics))
-            }
-        }
-    }
-
-    /// Appends the topic if the topic isn't already seen
-    pub fn append(&mut self, topic: &str) {
-        self.topics.push(topic.to_owned());
+    pub fn topics(&self) -> Vec<String> {
+        self.topics.clone()
     }
 
     /// read n topics from a give offset along with offset of the last read topic
-    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, Vec<String>)> {
+    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, &[String])> {
+        // dbg!(&self.topics, &self.concrete_subscriptions);
         let len = self.topics.len();
         if offset >= len || count == 0 {
             return None;
@@ -122,8 +106,17 @@ impl TopicLog {
             last_offset = len;
         }
 
-        let out = self.topics[offset..last_offset].to_vec();
+        let out = self.topics[offset..last_offset].as_ref();
+        if out.is_empty() {
+            return None;
+        }
+
         Some((last_offset - 1, out))
+    }
+
+    /// Appends the topic if the topic isn't already seen
+    pub fn append(&mut self, topic: &str) {
+        self.topics.push(topic.to_owned());
     }
 }
 
@@ -132,13 +125,13 @@ type Topic = String;
 /// Snapshots of topics grouped by cluster id
 #[derive(Debug, Clone)]
 pub struct Snapshots {
-    snapshots: HashMap<Topic, [(u64, u64); 3]>
+    snapshots: HashMap<Topic, [(u64, u64); 3]>,
 }
 
 impl Snapshots {
     pub fn _new() -> Snapshots {
         Snapshots {
-            snapshots: HashMap::new()
+            snapshots: HashMap::new(),
         }
     }
 

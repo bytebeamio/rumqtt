@@ -1,15 +1,17 @@
 #[macro_use]
 extern crate log;
 
-mod mesh;
 pub mod router;
 pub mod storage;
 pub mod tracker;
 pub mod volatile;
 
-pub use async_channel::{bounded, Receiver, Sender, RecvError, SendError};
+pub use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
 pub use mqtt4bytes;
-pub use router::{Connection, ConnectionAck, Disconnection, ReplicationData, DataReply, DataRequest, Router, RouterInMessage, RouterOutMessage};
+pub use router::{
+    Connection, ConnectionAck, DataReply, DataRequest, Disconnection, ReplicationData, Router,
+    RouterInMessage, RouterOutMessage,
+};
 pub use storage::segment::Segment;
 pub use storage::Log;
 

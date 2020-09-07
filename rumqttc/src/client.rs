@@ -70,10 +70,9 @@ impl Client {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-
         let mut publish = match PublishRaw::new(topic, qos, payload) {
             Ok(publish) => publish,
-            Err(e) => return Err(ClientError::Mqtt4(e))
+            Err(e) => return Err(ClientError::Mqtt4(e)),
         };
 
         publish.set_retain(retain);

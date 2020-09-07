@@ -1,5 +1,5 @@
-use bytes::{BufMut, BytesMut};
 use crate::*;
+use bytes::{BufMut, BytesMut};
 
 pub struct PingReq;
 

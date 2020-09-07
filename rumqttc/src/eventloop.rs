@@ -1,14 +1,14 @@
+use crate::framed::Network;
 use crate::state::{MqttState, StateError};
 use crate::{tls, Incoming, Request};
 use crate::{MqttOptions, Outgoing};
-use crate::framed::Network;
 
 use async_channel::{bounded, Receiver, Sender};
-use tokio::select;
-use tokio::time::{self, Delay, Elapsed, Instant};
-use tokio::net::TcpStream;
-use tokio::stream::{Stream, StreamExt};
 use mqtt4bytes::*;
+use tokio::net::TcpStream;
+use tokio::select;
+use tokio::stream::{Stream, StreamExt};
+use tokio::time::{self, Delay, Elapsed, Instant};
 
 use std::io;
 use std::time::Duration;
@@ -115,22 +115,21 @@ impl EventLoop {
         // outgoing requests. Internal loops inside async functions are risky. Imagine this function
         // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
         // selected with other streams, can potentially do more internal polling (if the socket is ready)
-        if self.network.is_none(){
+        if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
-            return Ok((Some(connack), None))
+            return Ok((Some(connack), None));
         }
 
         let (incoming, outgoing) = match self.select().await {
             Ok((i, o)) => (i, o),
             Err(e) => {
                 self.network = None;
-                return Err(e)
+                return Err(e);
             }
         };
 
         Ok((incoming, outgoing))
     }
-
 
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
@@ -212,8 +211,6 @@ impl EventLoop {
             }
         }
     }
-
-
 }
 
 impl EventLoop {
@@ -265,15 +262,15 @@ impl EventLoop {
     }
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
-       let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
-           let socket = tls::tls_connect(&self.options).await?;
-           Network::new(socket, self.options.max_incoming_packet_size)
-       } else {
-           let addr = self.options.broker_addr.as_str();
-           let port = self.options.port;
-           let socket = TcpStream::connect((addr, port)).await?;
-           Network::new(socket, self.options.max_incoming_packet_size)
-       };
+        let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
+            let socket = tls::tls_connect(&self.options).await?;
+            Network::new(socket, self.options.max_incoming_packet_size)
+        } else {
+            let addr = self.options.broker_addr.as_str();
+            let port = self.options.port;
+            let socket = TcpStream::connect((addr, port)).await?;
+            Network::new(socket, self.options.max_incoming_packet_size)
+        };
 
         self.network = Some(network);
         Ok(())
@@ -296,17 +293,23 @@ impl EventLoop {
         }
 
         // mqtt connection with timeout
-        time::timeout(Duration::from_secs(self.options.connection_timeout()), async {
-            network.connect(connect).await?;
-            Ok::<_, ConnectionError>(())
-        })
+        time::timeout(
+            Duration::from_secs(self.options.connection_timeout()),
+            async {
+                network.connect(connect).await?;
+                Ok::<_, ConnectionError>(())
+            },
+        )
         .await??;
 
         // wait for 'timeout' time to validate connack
-        let packet = time::timeout(Duration::from_secs(self.options.connection_timeout()), async {
-            let packet = network.read_connack().await?;
-            Ok::<_, ConnectionError>(packet)
-        })
+        let packet = time::timeout(
+            Duration::from_secs(self.options.connection_timeout()),
+            async {
+                let packet = network.read_connack().await?;
+                Ok::<_, ConnectionError>(packet)
+            },
+        )
         .await??;
 
         Ok(packet)
@@ -315,7 +318,10 @@ impl EventLoop {
 
 /// Returns the next pending packet asynchronously to be used in select!
 /// This is a synchronous function but made async to make it fit in select!
-pub(crate) async fn next_pending(delay: Duration, pending: &mut IntoIter<Request>) -> Option<Request> {
+pub(crate) async fn next_pending(
+    delay: Duration,
+    pending: &mut IntoIter<Request>,
+) -> Option<Request> {
     // return next packet with a delay
     time::delay_for(delay).await;
     pending.next()
@@ -337,16 +343,15 @@ fn bulk_fill(
     // OS tcp write buffer size to prevent bounded buffer deadlocks
     for _i in 0..options.max_request_batch {
         if state.inflight >= options.inflight {
-            break
+            break;
         }
 
         let request = match requests.try_recv() {
             Ok(r) => r,
-            Err(_) => break
+            Err(_) => break,
         };
         let request = state.handle_outgoing_packet(request)?;
         let _outgoing = network.fill(request);
-
     }
 
     Ok(())
@@ -443,7 +448,7 @@ mod test {
                     assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
                     break;
                 }
-                _ => ()
+                _ => (),
             }
         }
 
@@ -483,7 +488,7 @@ mod test {
                     assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
                     break;
                 }
-                _ => ()
+                _ => (),
             }
         }
 
@@ -509,7 +514,7 @@ mod test {
         let packet = broker.read_packet().await;
         match packet {
             Packet::PingReq => (),
-            packet => panic!("Expecting pingreq. Found = {:?}", packet)
+            packet => panic!("Expecting pingreq. Found = {:?}", packet),
         };
         assert_eq!(start.elapsed().as_secs(), keep_alive.as_secs());
     }
@@ -643,7 +648,6 @@ mod test {
             time::delay_for(Duration::from_secs(5)).await;
         });
 
-
         // panics because of
         time::delay_for(Duration::from_secs(1)).await;
         match run(eventloop, false).await {
@@ -730,14 +734,14 @@ mod test {
 
 #[cfg(test)]
 mod broker {
+    use crate::framed::Network;
+    use crate::Request;
     use mqtt4bytes::*;
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::select;
     use tokio::stream::StreamExt;
     use tokio::time;
-    use crate::framed::Network;
-    use crate::Request;
 
     pub struct Broker {
         pub(crate) framed: Network,
@@ -766,9 +770,7 @@ mod broker {
 
         // Reads a publish packet from the stream with 2 second timeout
         pub async fn read_publish(&mut self) -> Option<Publish> {
-            let packet = time::timeout(Duration::from_secs(2), async {
-                self.framed.read().await
-            });
+            let packet = time::timeout(Duration::from_secs(2), async { self.framed.read().await });
 
             match packet.await {
                 Ok(Ok(Packet::Publish(publish))) => Some(publish),
@@ -792,9 +794,7 @@ mod broker {
         }
 
         pub async fn read_packet_and_respond(&mut self) -> Packet {
-            let packet = time::timeout(Duration::from_secs(30), async {
-                self.framed.read().await
-            });
+            let packet = time::timeout(Duration::from_secs(30), async { self.framed.read().await });
             let packet = packet.await.unwrap().unwrap();
 
             match packet.clone() {

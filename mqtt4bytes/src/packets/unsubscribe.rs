@@ -1,8 +1,8 @@
-use crate::*;
 use super::*;
-use bytes::{Bytes, Buf};
-use alloc::vec::Vec;
+use crate::*;
 use alloc::string::String;
+use alloc::vec::Vec;
+use bytes::{Buf, Bytes};
 
 /// Unsubscribe packet
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +27,12 @@ impl Unsubscribe {
 
         let unsubscribe = Unsubscribe { pkid, topics };
         Ok(unsubscribe)
+    }
+
+    pub fn new<S: Into<String>>(topic: S) -> Unsubscribe {
+        let mut topics = Vec::new();
+        topics.push(topic.into());
+        Unsubscribe { pkid: 0, topics }
     }
 
     pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
