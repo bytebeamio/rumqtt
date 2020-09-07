@@ -35,7 +35,7 @@ impl Client {
     /// Create a new `Client`
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         // create MQTT eventloop and take cancellation handle
-        let mut runtime = runtime::Builder::new()
+        let runtime = runtime::Builder::new()
             .basic_scheduler()
             .enable_all()
             .build()

@@ -8,7 +8,7 @@ use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
-use tokio::time::{self, Delay, Elapsed, Instant};
+use tokio::time::{self, Elapsed, Instant};
 
 use std::io;
 use std::time::Duration;
