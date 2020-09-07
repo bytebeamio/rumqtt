@@ -13,7 +13,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions.set_keep_alive(5);
 
-    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+
+    let mut eventloop = EventLoop::new(mqttoptions, 10);
     let requests_tx = eventloop.handle();
     task::spawn(async move {
         requests(requests_tx).await;

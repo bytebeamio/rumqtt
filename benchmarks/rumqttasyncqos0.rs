@@ -27,7 +27,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     // NOTE More the inflight size, better the perf
     mqttoptions.set_inflight(100);
 
-    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+    let mut eventloop = EventLoop::new(mqttoptions, 10);
     let requests_tx = eventloop.handle();
     let client_id = id.to_owned();
     let payloads = generate_payloads(count, payload_size);

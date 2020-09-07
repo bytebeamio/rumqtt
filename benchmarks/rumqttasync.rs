@@ -27,7 +27,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     mqttoptions.set_inflight(1000);
     mqttoptions.set_max_request_batch(10);
 
-    let mut eventloop = EventLoop::new(mqttoptions, 10).await;
+    let mut eventloop = EventLoop::new(mqttoptions, 10);
     let requests_tx = eventloop.handle();
     let client_id = id.to_owned();
     let payloads = generate_payloads(count, payload_size);
