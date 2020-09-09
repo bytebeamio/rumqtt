@@ -1,8 +1,8 @@
 use crate::Id;
-use mqtt4bytes::{Publish, QoS, Subscribe};
+use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
 use rumqttlog::{
-    tracker::Tracker, DataReply, Receiver, RecvError, RouterInMessage, RouterOutMessage, SendError,
-    Sender,
+    tracker::Tracker, Connection, ConnectionAck, DataReply, Receiver, RecvError, RouterInMessage,
+    RouterOutMessage, SendError, Sender,
 };
 use tokio::select;
 
@@ -23,11 +23,46 @@ pub enum LinkError {
 pub struct LinkTx {
     id: usize,
     router_tx: Sender<(Id, RouterInMessage)>,
+    client_id: String,
+    capacity: usize,
 }
 
 impl LinkTx {
-    pub(crate) fn new(id: usize, router_tx: Sender<(Id, RouterInMessage)>) -> LinkTx {
-        LinkTx { id, router_tx }
+    pub(crate) fn new(
+        client_id: &str,
+        capacity: usize,
+        router_tx: Sender<(Id, RouterInMessage)>,
+    ) -> LinkTx {
+        LinkTx {
+            id: 0,
+            router_tx,
+            client_id: client_id.to_owned(),
+            capacity,
+        }
+    }
+
+    pub async fn connect(&mut self) -> Result<LinkRx, LinkError> {
+        let (connection, link_rx) = Connection::new_remote(&self.client_id, self.capacity);
+        let message = (0, RouterInMessage::Connect(connection));
+        self.router_tx.send(message).await.unwrap();
+        // Right now link identifies failure with dropped rx in router, which is probably ok
+        // We need this here to get id assigned by router
+        match link_rx.recv().await? {
+            RouterOutMessage::ConnectionAck(ack) => match ack {
+                ConnectionAck::Success(id) => self.id = id,
+                ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
+            },
+            message => return Err(LinkError::NotConnectionAck(message)),
+        };
+
+        // Send initialization requests from tracker [topics request and acks request]
+        let mut tracker = Tracker::new(100);
+        while let Some(message) = tracker.next() {
+            self.router_tx.send((self.id, message)).await?;
+        }
+
+        let rx = LinkRx::new(self.id, tracker, self.router_tx.clone(), link_rx);
+        Ok(rx)
     }
 
     /// Sends a MQTT Publish to the router
@@ -49,8 +84,11 @@ impl LinkTx {
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub fn subscribe<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
-        let _subscribe = Subscribe::new(filter.into(), QoS::AtMostOnce);
+    pub async fn subscribe<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
+        let subscribe = Subscribe::new(filter.into(), QoS::AtMostOnce);
+        let packet = Packet::Subscribe(subscribe);
+        let message = RouterInMessage::Data(vec![packet]);
+        self.router_tx.send((self.id, message)).await?;
         Ok(())
     }
 }
@@ -65,6 +103,7 @@ pub struct LinkRx {
 impl LinkRx {
     pub(crate) fn new(
         id: usize,
+        tracker: Tracker,
         router_tx: Sender<(Id, RouterInMessage)>,
         link_rx: Receiver<RouterOutMessage>,
     ) -> LinkRx {
@@ -72,9 +111,10 @@ impl LinkRx {
             id,
             router_tx,
             link_rx,
-            tracker: Tracker::new(100),
+            tracker,
         }
     }
+
     pub async fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
         select! {
             message = self.link_rx.recv() => {

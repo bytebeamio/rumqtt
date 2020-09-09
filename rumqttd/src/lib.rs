@@ -111,29 +111,12 @@ impl Broker {
         self.router_tx.clone()
     }
 
-    pub async fn link(
-        &self,
-        client_id: &str,
-        capacity: usize,
-    ) -> Result<(LinkTx, LinkRx), LinkError> {
+    pub fn link(&self, client_id: &str, capacity: usize) -> Result<LinkTx, LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (connection, link_rx) = Connection::new_remote(client_id, capacity);
-        let message = (0, RouterInMessage::Connect(connection));
-        self.router_tx.send(message).await.unwrap();
 
-        // Right now link identifies failure with dropped rx in router, which is probably ok for now
-        let id = match link_rx.recv().await? {
-            RouterOutMessage::ConnectionAck(ack) => match ack {
-                ConnectionAck::Success(id) => id,
-                ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
-            },
-            message => return Err(LinkError::NotConnectionAck(message)),
-        };
-
-        let tx = LinkTx::new(id, self.router_tx.clone());
-        let rx = LinkRx::new(id, self.router_tx.clone(), link_rx);
-        Ok((tx, rx))
+        let tx = LinkTx::new(client_id, capacity, self.router_tx.clone());
+        Ok(tx)
     }
 
     async fn accept_loop(&self, config: Arc<ServerSettings>) -> Result<(), Error> {
@@ -161,7 +144,6 @@ impl Broker {
         }
     }
 
-    #[tokio::main(core_threads = 4)]
     pub async fn start(&mut self) -> Result<(), Error> {
         let r = self.router.take().unwrap();
         thread::spawn(move || router(r));
