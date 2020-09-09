@@ -114,6 +114,7 @@ impl LinkRx {
             tracker,
         }
     }
+
     pub async fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
         select! {
             message = self.link_rx.recv() => {
