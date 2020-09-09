@@ -1,6 +1,9 @@
 use crate::Id;
-use mqtt4bytes::{Publish, QoS, Subscribe, Packet};
-use rumqttlog::{tracker::Tracker, DataReply, Receiver, RecvError, RouterInMessage, RouterOutMessage, SendError, Sender, ConnectionAck, Connection};
+use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
+use rumqttlog::{
+    tracker::Tracker, Connection, ConnectionAck, DataReply, Receiver, RecvError, RouterInMessage,
+    RouterOutMessage, SendError, Sender,
+};
 use tokio::select;
 
 const MAX_INFLIGHT_REQUESTS: usize = 100;
@@ -21,19 +24,28 @@ pub struct LinkTx {
     id: usize,
     router_tx: Sender<(Id, RouterInMessage)>,
     client_id: String,
-    capacity: usize
+    capacity: usize,
 }
 
 impl LinkTx {
-    pub(crate) fn new(client_id: &str, capacity: usize, router_tx: Sender<(Id, RouterInMessage)>) -> LinkTx {
-        LinkTx { id: 0, router_tx, client_id: client_id.to_owned(), capacity}
+    pub(crate) fn new(
+        client_id: &str,
+        capacity: usize,
+        router_tx: Sender<(Id, RouterInMessage)>,
+    ) -> LinkTx {
+        LinkTx {
+            id: 0,
+            router_tx,
+            client_id: client_id.to_owned(),
+            capacity,
+        }
     }
 
     pub async fn connect(&mut self) -> Result<LinkRx, LinkError> {
         let (connection, link_rx) = Connection::new_remote(&self.client_id, self.capacity);
         let message = (0, RouterInMessage::Connect(connection));
         self.router_tx.send(message).await.unwrap();
-        // Right now link identifies failure with dropped rx in router, which is probably ok for now
+        // Right now link identifies failure with dropped rx in router, which is probably ok
         // We need this here to get id assigned by router
         match link_rx.recv().await? {
             RouterOutMessage::ConnectionAck(ack) => match ack {
@@ -99,7 +111,7 @@ impl LinkRx {
             id,
             router_tx,
             link_rx,
-            tracker
+            tracker,
         }
     }
     pub async fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
