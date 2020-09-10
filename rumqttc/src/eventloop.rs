@@ -8,7 +8,7 @@ use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
-use tokio::time::{self, Elapsed, Instant};
+use tokio::time::{self, Elapsed, Instant, Delay};
 
 use std::io;
 use std::time::Duration;
@@ -52,7 +52,7 @@ pub struct EventLoop {
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
-    pub(crate) keepalive_timeout: Instant,
+    pub(crate) keepalive_timeout: Option<Delay>,
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
@@ -67,7 +67,6 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
         let buffered = Vec::new();
@@ -84,7 +83,7 @@ impl EventLoop {
             pending,
             buffered,
             network: None,
-            keepalive_timeout: Instant::now() + keepalive,
+            keepalive_timeout: None,
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
@@ -117,8 +116,14 @@ impl EventLoop {
         // selected with other streams, can potentially do more internal polling (if the socket is ready)
         if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
+
+            if self.keepalive_timeout.is_none() {
+                self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
+            }
+
             return Ok((Some(connack), None));
         }
+
 
         let (incoming, outgoing) = match self.select().await {
             Ok((i, o)) => (i, o),
@@ -199,8 +204,9 @@ impl EventLoop {
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
-            _ = time::delay_until(self.keepalive_timeout) => {
-                self.keepalive_timeout = Instant::now() + self.options.keep_alive;
+            _ = self.keepalive_timeout.as_mut().unwrap() => {
+                let timeout = self.keepalive_timeout.as_mut().unwrap();
+                timeout.reset(Instant::now() + self.options.keep_alive);
                 let request = self.state.handle_outgoing_packet(Request::PingReq)?;
                 let outgoing = network.write(request).await?;
                 Ok((None, Some(outgoing)))
