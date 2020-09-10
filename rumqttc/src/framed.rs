@@ -3,8 +3,8 @@ use mqtt4bytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{Incoming, Outgoing, Request};
-use std::io;
 use std::collections::VecDeque;
+use std::io;
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -18,8 +18,6 @@ pub struct Network {
     read: BytesMut,
     /// Buffered writes
     write: BytesMut,
-    /// Parsed incoming packets
-    incoming: VecDeque<Incoming>,
     /// Maximum packet size
     max_incoming_size: usize,
     /// Maximum readv count
@@ -34,7 +32,6 @@ impl Network {
             pending: 0,
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
-            incoming: VecDeque::with_capacity(100),
             max_incoming_size,
             max_readb_count: 10,
         }
@@ -52,7 +49,6 @@ impl Network {
             pending: 0,
             read: BytesMut::with_capacity(read),
             write: BytesMut::with_capacity(write),
-            incoming: VecDeque::with_capacity(100),
             max_incoming_size,
             max_readb_count: 10,
         }
@@ -86,12 +82,7 @@ impl Network {
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(&mut self) -> Result<Incoming, io::Error> {
-        // Read already parsed packet in buffer
-        if let Some(incoming) = self.incoming.pop_front() {
-            return Ok(incoming)
-        }
-
+    pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> Result<(), io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Connection is explicitly handled by other methods. This read is used after establishing
@@ -109,8 +100,8 @@ impl Network {
                     ))
                 }
                 Ok(packet) => {
-                    self.incoming.push_back(packet);
-                    if self.incoming.len() >= self.max_readb_count {
+                    incoming.push_back(packet);
+                    if incoming.len() >= self.max_readb_count {
                         break;
                     }
 
@@ -119,7 +110,7 @@ impl Network {
                 Err(Error::InsufficientBytes(required)) => {
                     self.pending = required;
                     // Not `max_readb_count` but we have atleast one packet.
-                    if self.incoming.len() > 0 {
+                    if incoming.len() > 0 {
                         break;
                     }
                 }
@@ -137,7 +128,7 @@ impl Network {
             }
         }
 
-        Ok(self.incoming.pop_front().unwrap())
+        Ok(())
     }
 
     /// Fills the read buffer with more bytes

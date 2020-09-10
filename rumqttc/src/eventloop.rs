@@ -1,6 +1,5 @@
 use crate::framed::Network;
-use crate::state::{MqttState, StateError};
-use crate::{tls, Incoming, Request};
+use crate::{tls, Incoming, MqttState, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
@@ -8,8 +7,9 @@ use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
-use tokio::time::{self, Elapsed, Instant, Delay};
+use tokio::time::{self, Delay, Elapsed, Instant};
 
+use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
 use std::vec::IntoIter;
@@ -45,6 +45,8 @@ pub struct EventLoop {
     pub requests_rx: Receiver<Request>,
     /// Requests handle to send requests
     pub requests_tx: Sender<Request>,
+    /// Incoming packets
+    pub incoming: VecDeque<Incoming>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
@@ -76,6 +78,7 @@ impl EventLoop {
             state: MqttState::new(max_inflight),
             requests_tx,
             requests_rx,
+            incoming: VecDeque::with_capacity(100),
             pending,
             network: None,
             keepalive_timeout: None,
@@ -119,7 +122,6 @@ impl EventLoop {
             return Ok((Some(connack), None));
         }
 
-
         let (incoming, outgoing) = match self.select().await {
             Ok((i, o)) => (i, o),
             Err(e) => {
@@ -139,19 +141,23 @@ impl EventLoop {
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
 
+        if let Some(incoming) = self.incoming.pop_front() {
+            return Ok((Some(incoming), None));
+        }
+
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb() => match o {
-                Ok(packet) => {
-                    let (incoming, outgoing) = self.state.handle_incoming_packet(packet)?;
-                    if let Some(o) = outgoing {
-                        network.fill2(o)?;
-                        network.flush().await?;
+            o = network.readb(&mut self.incoming), if self.incoming.len() == 0 => {
+                let _ = o?;
+                for incoming in self.incoming.iter() {
+                    if let Some(outgoing) = self.state.handle_incoming_packet(incoming)? {
+                        network.fill2(outgoing)?;
                     }
-
-                    return Ok((Some(incoming), None))
                 }
-                Err(e) => return Err(ConnectionError::Io(e))
+
+                // flush all the acks
+                network.flush().await?;
+                return Ok((self.incoming.pop_front(), None))
             },
             // Pull next request from user requests channel.
             // If condition in the below branch if for flow control. We read next user request
@@ -180,7 +186,6 @@ impl EventLoop {
                     if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
                         bulk_fill(&self.options, &mut self.state, &self.requests_rx, network)?;
                         network.flush().await?;
-                        // Ids are not available when individual request batching is enabled
                         return Ok((None, Some(Outgoing::Batch)))
                     }
 
