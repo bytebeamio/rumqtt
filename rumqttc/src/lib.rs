@@ -97,35 +97,7 @@ pub use state::{MqttState, StateError};
 pub use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 pub use tokio_rustls::rustls::ClientConfig;
 
-#[derive(Debug, Clone)]
-pub enum Incoming {
-    /// Connection successful
-    Connected,
-    /// Incoming publish from the broker
-    Publish(Publish),
-    /// Incoming puback from the broker
-    PubAck(PubAck),
-    /// Incoming pubrec from the broker
-    PubRec(PubRec),
-    /// Incoming pubrel
-    PubRel(PubRel),
-    /// Incoming pubcomp from the broker
-    PubComp(PubComp),
-    /// Incoming subscribe packet
-    Subscribe(Subscribe),
-    /// Incoming suback from the broker
-    SubAck(SubAck),
-    /// Incoming unsubscribe
-    Unsubscribe(Unsubscribe),
-    /// Incoming unsuback from the broker
-    UnsubAck(UnsubAck),
-    /// Ping request
-    PingReq,
-    /// Ping response
-    PingResp,
-    /// Disconnect packet
-    Disconnect,
-}
+pub type Incoming = Packet;
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]

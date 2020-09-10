@@ -215,23 +215,11 @@ impl Network {
         Ok(len)
     }
 
-    pub async fn read_connect(&mut self) -> Result<Connect, io::Error> {
-        let packet = self.read().await?;
-
-        match packet {
-            Packet::Connect(connect) => Ok(connect),
-            packet => {
-                let error = format!("Expecting connack. Received = {:?}", packet);
-                Err(io::Error::new(io::ErrorKind::InvalidData, error))
-            }
-        }
-    }
-
     pub async fn read_connack(&mut self) -> Result<Incoming, io::Error> {
         match self.read().await {
             Ok(Packet::ConnAck(connack)) => {
                 if connack.code == ConnectReturnCode::Accepted {
-                    Ok(Incoming::Connected)
+                    Ok(Incoming::ConnAck(connack))
                 } else {
                     let error = format!("Broker rejected connection. Reason = {:?}", connack.code);
                     Err(io::Error::new(io::ErrorKind::InvalidData, error))
@@ -315,28 +303,6 @@ fn outgoing(packet: &Request) -> Outgoing {
         Request::PingReq => Outgoing::PingReq,
         Request::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
-    }
-}
-
-// TODO Replace this by framing Incoming packets in this module direcly. Like what `write_fill` does
-impl From<Packet> for Incoming {
-    fn from(packet: Packet) -> Self {
-        match packet {
-            Packet::ConnAck(_) => Incoming::Connected,
-            Packet::Publish(publish) => Incoming::Publish(publish),
-            Packet::PubAck(ack) => Incoming::PubAck(ack),
-            Packet::PubRec(rec) => Incoming::PubRec(rec),
-            Packet::PubRel(rel) => Incoming::PubRel(rel),
-            Packet::PubComp(comp) => Incoming::PubComp(comp),
-            Packet::Subscribe(subscribe) => Incoming::Subscribe(subscribe),
-            Packet::SubAck(suback) => Incoming::SubAck(suback),
-            Packet::Unsubscribe(unsub) => Incoming::Unsubscribe(unsub),
-            Packet::UnsubAck(unsuback) => Incoming::UnsubAck(unsuback),
-            Packet::PingReq => Incoming::PingReq,
-            Packet::PingResp => Incoming::PingResp,
-            Packet::Disconnect => Incoming::Disconnect,
-            _ => todo!(),
-        }
     }
 }
 
