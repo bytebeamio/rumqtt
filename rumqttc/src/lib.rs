@@ -120,8 +120,6 @@ pub enum Outgoing {
     PingReq,
     /// Disconnect packet
     Disconnect,
-    /// Notification if requests are internally batched
-    Batch,
 }
 
 /// Requests by the client to mqtt event loop. Request are

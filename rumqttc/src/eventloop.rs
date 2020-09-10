@@ -45,8 +45,10 @@ pub struct EventLoop {
     pub requests_rx: Receiver<Request>,
     /// Requests handle to send requests
     pub requests_tx: Sender<Request>,
-    /// Incoming packets
+    /// Buffered incoming packets
     pub incoming: VecDeque<Incoming>,
+    /// Buffered outgoing packets
+    pub outgoing: VecDeque<Outgoing>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
@@ -79,6 +81,7 @@ impl EventLoop {
             requests_tx,
             requests_rx,
             incoming: VecDeque::with_capacity(100),
+            outgoing: VecDeque::with_capacity(100),
             pending,
             network: None,
             keepalive_timeout: None,
@@ -141,6 +144,12 @@ impl EventLoop {
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
 
+        // return buffered outgoing packets first
+        if let Some(outgoing) = self.outgoing.pop_front() {
+            return Ok((None, Some(outgoing)));
+        }
+
+        // return buffered incoming packets
         if let Some(incoming) = self.incoming.pop_front() {
             return Ok((Some(incoming), None));
         }
@@ -182,11 +191,22 @@ impl EventLoop {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
                     let outgoing = network.fill(request)?;
-                    // bulk up publish requests
-                    if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
-                        bulk_fill(&self.options, &mut self.state, &self.requests_rx, network)?;
-                        network.flush().await?;
-                        return Ok((None, Some(Outgoing::Batch)))
+                    // During high load, pull more data from channel to batch more requests.
+                    // Note: Make sure size of total inflight messages isn't greater than
+                    // OS tcp write buffer size to prevent bounded buffer deadlocks
+                    for _ in 0..self.options.max_request_batch {
+                        // Honor inflight limitations during batching
+                        if self.state.inflight >= self.options.inflight { break }
+                        match self.requests_rx.try_recv() {
+                            Ok(r) => {
+                                // handle, send and buffer outgoing packet ids
+                                let request = self.state.handle_outgoing_packet(r)?;
+                                let outgoing = network.fill(request)?;
+                                self.outgoing.push_back(outgoing);
+                            }
+                            Err(_) => break,
+                        };
+
                     }
 
                     network.flush().await?;
@@ -330,31 +350,6 @@ pub(crate) async fn next_pending(
     // return next packet with a delay
     time::delay_for(delay).await;
     pending.next()
-}
-
-fn bulk_fill(
-    options: &MqttOptions,
-    state: &mut MqttState,
-    requests: &Receiver<Request>,
-    network: &mut Network,
-) -> Result<(), ConnectionError> {
-    // Be eager in reading more data till inflight buffers are full.
-    // Make sure size of total inflight messages isn't greater than
-    // OS tcp write buffer size to prevent bounded buffer deadlocks
-    for _i in 0..options.max_request_batch {
-        if state.inflight >= options.inflight {
-            break;
-        }
-
-        let request = match requests.try_recv() {
-            Ok(r) => r,
-            Err(_) => break,
-        };
-        let request = state.handle_outgoing_packet(request)?;
-        let _outgoing = network.fill(request);
-    }
-
-    Ok(())
 }
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send {}
