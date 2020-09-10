@@ -114,19 +114,6 @@ impl MqttState {
         self.inflight
     }
 
-    pub(crate) fn _handle_outgoing_packets(
-        &mut self,
-        requests: Vec<Request>,
-    ) -> Result<Vec<Request>, StateError> {
-        let mut out = Vec::with_capacity(10);
-        for request in requests {
-            let o = self.handle_outgoing_packet(request)?;
-            out.push(o);
-        }
-
-        Ok(out)
-    }
-
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<Request, StateError> {
@@ -143,26 +130,6 @@ impl MqttState {
         Ok(out)
     }
 
-    pub(crate) fn handle_incoming_packets(
-        &mut self,
-        packets: Vec<Incoming>,
-    ) -> Result<(Vec<Incoming>, Vec<Request>), StateError> {
-        let mut incoming = Vec::with_capacity(10);
-        let mut outgoing = Vec::with_capacity(10);
-        for packet in packets {
-            let (i, o) = self.handle_incoming_packet(packet)?;
-            if let Some(i) = i {
-                incoming.push(i);
-            }
-
-            if let Some(o) = o {
-                outgoing.push(o);
-            }
-        }
-
-        Ok((incoming, outgoing))
-    }
-
     /// Consolidates handling of all incoming mqtt packets. Returns a `Notification` which for the
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
@@ -170,7 +137,7 @@ impl MqttState {
     pub fn handle_incoming_packet(
         &mut self,
         packet: Incoming,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    ) -> Result<(Incoming, Option<Request>), StateError> {
         let out = match packet {
             Incoming::PingResp => self.handle_incoming_pingresp(),
             Incoming::Publish(publish) => self.handle_incoming_publish(publish),
@@ -182,7 +149,7 @@ impl MqttState {
             Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
-                Ok((None, None))
+                return Err(StateError::WrongPacket)
             }
         };
 
@@ -242,12 +209,12 @@ impl MqttState {
     fn handle_incoming_puback(
         &mut self,
         puback: PubAck,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    ) -> Result<(Incoming, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
                 let request = None;
-                let incoming = Some(Incoming::PubAck(puback));
+                let incoming = Incoming::PubAck(puback);
                 Ok((incoming, request))
             }
             None => {
@@ -260,8 +227,8 @@ impl MqttState {
     fn handle_incoming_suback(
         &mut self,
         suback: SubAck,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
-        let incoming = Some(Incoming::SubAck(suback));
+    ) -> Result<(Incoming, Option<Request>), StateError> {
+        let incoming = Incoming::SubAck(suback);
         let response = None;
         Ok((incoming, response))
     }
@@ -269,8 +236,8 @@ impl MqttState {
     fn handle_incoming_unsuback(
         &mut self,
         unsuback: UnsubAck,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
-        let incoming = Some(Incoming::UnsubAck(unsuback));
+    ) -> Result<(Incoming, Option<Request>), StateError> {
+        let incoming = Incoming::UnsubAck(unsuback);
         let response = None;
         Ok((incoming, response))
     }
@@ -278,13 +245,13 @@ impl MqttState {
     fn handle_incoming_pubrec(
         &mut self,
         pubrec: PubRec,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    ) -> Result<(Incoming, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 let response = Some(Request::PubRel(PubRel::new(pubrec.pkid)));
-                let incoming = Some(Incoming::PubRec(pubrec));
+                let incoming = Incoming::PubRec(pubrec);
                 Ok((incoming, response))
             }
             None => {
@@ -299,26 +266,26 @@ impl MqttState {
     fn handle_incoming_publish(
         &mut self,
         publish: Publish,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    ) -> Result<(Incoming, Option<Request>), StateError> {
         let qos = publish.qos;
 
         match qos {
             QoS::AtMostOnce => {
                 let incoming = Incoming::Publish(publish);
-                Ok((Some(incoming), None))
+                Ok((incoming, None))
             }
             QoS::AtLeastOnce => {
                 let pkid = publish.pkid;
                 let response = Request::PubAck(PubAck::new(pkid));
                 let incoming = Incoming::Publish(publish);
-                Ok((Some(incoming), Some(response)))
+                Ok((incoming, Some(response)))
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
                 let response = Request::PubRec(PubRec::new(pkid));
                 let incoming = Incoming::Publish(publish);
                 self.incoming_pub[pkid as usize] = Some(pkid);
-                Ok((Some(incoming), Some(response)))
+                Ok((incoming, Some(response)))
             }
         }
     }
@@ -326,11 +293,12 @@ impl MqttState {
     fn handle_incoming_pubrel(
         &mut self,
         pubrel: PubRel,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    ) -> Result<(Incoming, Option<Request>), StateError> {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
                 let response = Request::PubComp(PubComp::new(pubrel.pkid));
-                Ok((None, Some(response)))
+                let incoming = Incoming::PubRel(pubrel);
+                Ok((incoming, Some(response)))
             }
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
@@ -342,10 +310,10 @@ impl MqttState {
     fn handle_incoming_pubcomp(
         &mut self,
         pubcomp: PubComp,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    ) -> Result<(Incoming, Option<Request>), StateError> {
         match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
             Some(_) => {
-                let incoming = Some(Incoming::PubComp(pubcomp));
+                let incoming = Incoming::PubComp(pubcomp);
                 let response = None;
                 Ok((incoming, response))
             }
@@ -382,12 +350,9 @@ impl MqttState {
         Ok(Request::PingReq)
     }
 
-    fn handle_incoming_pingresp(
-        &mut self,
-    ) -> Result<(Option<Incoming>, Option<Request>), StateError> {
+    fn handle_incoming_pingresp(&mut self) -> Result<(Incoming, Option<Request>), StateError> {
         self.await_pingresp = false;
-        let incoming = Some(Incoming::PingResp);
-        Ok((incoming, None))
+        Ok((Incoming::PingResp, None))
     }
 
     fn handle_outgoing_subscribe(
@@ -622,7 +587,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_publish(publish).unwrap();
 
         match notification {
-            Some(Incoming::Publish(publish)) => assert_eq!(publish.pkid, 1),
+            Incoming::Publish(publish) => assert_eq!(publish.pkid, 1),
             _ => panic!("Invalid notification: {:?}", notification),
         }
 
@@ -684,7 +649,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_pubrec(PubRec::new(1)).unwrap();
 
         match notification {
-            Some(Incoming::PubRec(pubrec)) => assert_eq!(pubrec.pkid, 1),
+            Incoming::PubRec(pubrec) => assert_eq!(pubrec.pkid, 1),
             _ => panic!("Invalid notification"),
         }
 
@@ -703,7 +668,7 @@ mod test {
         let (notification, request) = mqtt.handle_incoming_pubrel(PubRel::new(1)).unwrap();
 
         match notification {
-            None => assert!(true),
+            Incoming::PubRel(pubrel) => assert_eq!(pubrel.pkid, 1),
             _ => panic!("Invalid notification: {:?}", notification),
         }
 

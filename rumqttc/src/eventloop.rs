@@ -47,8 +47,6 @@ pub struct EventLoop {
     pub requests_tx: Sender<Request>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
-    /// Buffered packets
-    pub buffered: IntoIter<Incoming>,
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
@@ -69,8 +67,6 @@ impl EventLoop {
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
         let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
-        let buffered = Vec::new();
-        let buffered = buffered.into_iter();
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = options.inflight;
@@ -81,7 +77,6 @@ impl EventLoop {
             requests_tx,
             requests_rx,
             pending,
-            buffered,
             network: None,
             keepalive_timeout: None,
             cancel_rx,
@@ -146,19 +141,18 @@ impl EventLoop {
 
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(), if self.buffered.len() == 0 => match o {
-                Ok(packets) => {
-                    let (incoming, outgoing) = self.state.handle_incoming_packets(packets)?;
-                    self.buffered = incoming.into_iter();
-                    network.writeb(outgoing).await?;
-                    return Ok((self.buffered.next(), None))
+            o = network.readb() => match o {
+                Ok(packet) => {
+                    let (incoming, outgoing) = self.state.handle_incoming_packet(packet)?;
+                    if let Some(o) = outgoing {
+                        network.fill2(o)?;
+                        network.flush().await?;
+                    }
+
+                    return Ok((Some(incoming), None))
                 }
                 Err(e) => return Err(ConnectionError::Io(e))
             },
-            // yield the next incoming packet of already (handled) buffered incoming packets
-            o = next_buffered(&mut self.buffered), if self.buffered.len() > 0 => {
-                    return Ok((o, None))
-            }
             // Pull next request from user requests channel.
             // If condition in the below branch if for flow control. We read next user request
             // only when max inflight settings are honoured.
@@ -331,11 +325,6 @@ pub(crate) async fn next_pending(
     // return next packet with a delay
     time::delay_for(delay).await;
     pending.next()
-}
-
-/// Returns the next buffered packet from last buffered read
-pub(crate) async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {
-    incoming.next()
 }
 
 fn bulk_fill(

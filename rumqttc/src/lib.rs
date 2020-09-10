@@ -81,8 +81,6 @@ use std::time::Duration;
 
 mod client;
 mod eventloop;
-#[cfg(feature = "passthrough")]
-mod eventloop2;
 mod framed;
 mod state;
 mod tls;
