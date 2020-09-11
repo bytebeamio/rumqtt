@@ -1,4 +1,4 @@
-use rumqttc::{self, Client, Incoming, MqttOptions, QoS};
+use rumqttc::{self, Client, Event, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -32,25 +32,13 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
 
     let mut acks_count = 0;
     let start = Instant::now();
-    for o in connection.iter() {
-        let (notification, _) = o?;
-        let notification = match notification {
-            Some(n) => n,
-            None => continue,
-        };
+    for event in connection.iter() {
+        if let Ok(Event::Incoming(Incoming::PubAck(_))) = event {
+            acks_count += 1;
 
-        match notification {
-            Incoming::PubAck(_puback) => {
-                acks_count += 1;
+            if acks_count == count {
+                break;
             }
-            _notification => {
-                continue;
-            }
-        };
-
-        // println!("{}, {}", count, acks_count);
-        if acks_count == count {
-            break;
         }
     }
 

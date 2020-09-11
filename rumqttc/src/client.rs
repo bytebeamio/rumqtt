@@ -1,7 +1,7 @@
 //! This module offers a high level synchronous abstraction to async eventloop.
 //! Uses channels internally to get `Requests` and send `Notifications`
 
-use crate::{ConnectionError, EventLoop, Incoming, MqttOptions, Outgoing, Request};
+use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender};
 use mqtt4bytes::*;
@@ -137,7 +137,7 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = Result<(Option<Incoming>, Option<Outgoing>), ConnectionError>;
+    type Item = Result<Event, ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.connection.eventloop.poll();
