@@ -3,6 +3,7 @@ use mqtt4bytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{Incoming, Outgoing, Request};
+use std::collections::VecDeque;
 use std::io;
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -57,7 +58,6 @@ impl Network {
         self.max_readb_count = count;
     }
 
-    // TODO make this equivalent to `mqtt_read` to frame `Incoming` directly
     pub async fn read(&mut self) -> Result<Packet, io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
@@ -82,8 +82,7 @@ impl Network {
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(&mut self) -> Result<Vec<Incoming>, io::Error> {
-        let mut out = Vec::with_capacity(self.max_readb_count);
+    pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> Result<(), io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Connection is explicitly handled by other methods. This read is used after establishing
@@ -101,15 +100,17 @@ impl Network {
                     ))
                 }
                 Ok(packet) => {
-                    out.push(packet.into());
-                    if out.len() >= self.max_readb_count {
+                    incoming.push_back(packet);
+                    if incoming.len() >= self.max_readb_count {
                         break;
                     }
+
                     continue;
                 }
                 Err(Error::InsufficientBytes(required)) => {
                     self.pending = required;
-                    if out.len() > 0 {
+                    // Not `max_readb_count` but we have atleast one packet.
+                    if incoming.len() > 0 {
                         break;
                     }
                 }
@@ -127,7 +128,7 @@ impl Network {
             }
         }
 
-        Ok(out)
+        Ok(())
     }
 
     /// Fills the read buffer with more bytes
@@ -215,23 +216,11 @@ impl Network {
         Ok(len)
     }
 
-    pub async fn read_connect(&mut self) -> Result<Connect, io::Error> {
-        let packet = self.read().await?;
-
-        match packet {
-            Packet::Connect(connect) => Ok(connect),
-            packet => {
-                let error = format!("Expecting connack. Received = {:?}", packet);
-                Err(io::Error::new(io::ErrorKind::InvalidData, error))
-            }
-        }
-    }
-
     pub async fn read_connack(&mut self) -> Result<Incoming, io::Error> {
         match self.read().await {
             Ok(Packet::ConnAck(connack)) => {
                 if connack.code == ConnectReturnCode::Accepted {
-                    Ok(Incoming::Connected)
+                    Ok(Incoming::ConnAck(connack))
                 } else {
                     let error = format!("Broker rejected connection. Reason = {:?}", connack.code);
                     Err(io::Error::new(io::ErrorKind::InvalidData, error))
@@ -315,28 +304,6 @@ fn outgoing(packet: &Request) -> Outgoing {
         Request::PingReq => Outgoing::PingReq,
         Request::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
-    }
-}
-
-// TODO Replace this by framing Incoming packets in this module direcly. Like what `write_fill` does
-impl From<Packet> for Incoming {
-    fn from(packet: Packet) -> Self {
-        match packet {
-            Packet::ConnAck(_) => Incoming::Connected,
-            Packet::Publish(publish) => Incoming::Publish(publish),
-            Packet::PubAck(ack) => Incoming::PubAck(ack),
-            Packet::PubRec(rec) => Incoming::PubRec(rec),
-            Packet::PubRel(rel) => Incoming::PubRel(rel),
-            Packet::PubComp(comp) => Incoming::PubComp(comp),
-            Packet::Subscribe(subscribe) => Incoming::Subscribe(subscribe),
-            Packet::SubAck(suback) => Incoming::SubAck(suback),
-            Packet::Unsubscribe(unsub) => Incoming::Unsubscribe(unsub),
-            Packet::UnsubAck(unsuback) => Incoming::UnsubAck(unsuback),
-            Packet::PingReq => Incoming::PingReq,
-            Packet::PingResp => Incoming::PingResp,
-            Packet::Disconnect => Incoming::Disconnect,
-            _ => todo!(),
-        }
     }
 }
 

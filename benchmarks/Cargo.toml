@@ -31,11 +31,6 @@ path = "rumqttasync.rs"
 name = "rumqttasyncqos0"
 path = "rumqttasyncqos0.rs"
 
-
-[[bin]]
-name = "rumqttasyncbulk"
-path = "rumqttasyncbulk.rs"
-
 [[bin]]
 name = "rumqttsync"
 path = "rumqttsync.rs"

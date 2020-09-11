@@ -1,6 +1,5 @@
 use crate::framed::Network;
-use crate::state::{MqttState, StateError};
-use crate::{tls, Incoming, Request};
+use crate::{tls, Incoming, MqttState, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
@@ -8,8 +7,9 @@ use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
-use tokio::time::{self, Elapsed, Instant};
+use tokio::time::{self, Delay, Elapsed, Instant};
 
+use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
 use std::vec::IntoIter;
@@ -45,14 +45,16 @@ pub struct EventLoop {
     pub requests_rx: Receiver<Request>,
     /// Requests handle to send requests
     pub requests_tx: Sender<Request>,
+    /// Buffered incoming packets
+    pub incoming: VecDeque<Incoming>,
+    /// Buffered outgoing packets
+    pub outgoing: VecDeque<Outgoing>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
-    /// Buffered packets
-    pub buffered: IntoIter<Incoming>,
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
-    pub(crate) keepalive_timeout: Instant,
+    pub(crate) keepalive_timeout: Option<Delay>,
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
@@ -67,11 +69,8 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let keepalive = options.keep_alive;
         let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
-        let buffered = Vec::new();
-        let buffered = buffered.into_iter();
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = options.inflight;
@@ -81,10 +80,11 @@ impl EventLoop {
             state: MqttState::new(max_inflight),
             requests_tx,
             requests_rx,
+            incoming: VecDeque::with_capacity(100),
+            outgoing: VecDeque::with_capacity(100),
             pending,
-            buffered,
             network: None,
-            keepalive_timeout: Instant::now() + keepalive,
+            keepalive_timeout: None,
             cancel_rx,
             cancel_tx: Some(cancel_tx),
             reconnection_delay: Duration::from_secs(0),
@@ -117,6 +117,11 @@ impl EventLoop {
         // selected with other streams, can potentially do more internal polling (if the socket is ready)
         if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
+
+            if self.keepalive_timeout.is_none() {
+                self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
+            }
+
             return Ok((Some(connack), None));
         }
 
@@ -139,21 +144,30 @@ impl EventLoop {
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
 
+        // return buffered outgoing packets first
+        if let Some(outgoing) = self.outgoing.pop_front() {
+            return Ok((None, Some(outgoing)));
+        }
+
+        // return buffered incoming packets
+        if let Some(incoming) = self.incoming.pop_front() {
+            return Ok((Some(incoming), None));
+        }
+
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(), if self.buffered.len() == 0 => match o {
-                Ok(packets) => {
-                    let (incoming, outgoing) = self.state.handle_incoming_packets(packets)?;
-                    self.buffered = incoming.into_iter();
-                    network.writeb(outgoing).await?;
-                    return Ok((self.buffered.next(), None))
+            o = network.readb(&mut self.incoming), if self.incoming.len() == 0 => {
+                let _ = o?;
+                for incoming in self.incoming.iter() {
+                    if let Some(outgoing) = self.state.handle_incoming_packet(incoming)? {
+                        network.fill2(outgoing)?;
+                    }
                 }
-                Err(e) => return Err(ConnectionError::Io(e))
+
+                // flush all the acks
+                network.flush().await?;
+                return Ok((self.incoming.pop_front(), None))
             },
-            // yield the next incoming packet of already (handled) buffered incoming packets
-            o = next_buffered(&mut self.buffered), if self.buffered.len() > 0 => {
-                    return Ok((o, None))
-            }
             // Pull next request from user requests channel.
             // If condition in the below branch if for flow control. We read next user request
             // only when max inflight settings are honoured.
@@ -177,12 +191,22 @@ impl EventLoop {
                 Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
                     let outgoing = network.fill(request)?;
-                    // bulk up publish requests
-                    if self.options.max_request_batch > 0 && self.requests_rx.len() > 0 {
-                        bulk_fill(&self.options, &mut self.state, &self.requests_rx, network)?;
-                        network.flush().await?;
-                        // Ids are not available when individual request batching is enabled
-                        return Ok((None, Some(Outgoing::Batch)))
+                    // During high load, pull more data from channel to batch more requests.
+                    // Note: Make sure size of total inflight messages isn't greater than
+                    // OS tcp write buffer size to prevent bounded buffer deadlocks
+                    for _ in 0..self.options.max_request_batch {
+                        // Honor inflight limitations during batching
+                        if self.state.inflight >= self.options.inflight { break }
+                        match self.requests_rx.try_recv() {
+                            Ok(r) => {
+                                // handle, send and buffer outgoing packet ids
+                                let request = self.state.handle_outgoing_packet(r)?;
+                                let outgoing = network.fill(request)?;
+                                self.outgoing.push_back(outgoing);
+                            }
+                            Err(_) => break,
+                        };
+
                     }
 
                     network.flush().await?;
@@ -199,8 +223,9 @@ impl EventLoop {
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
-            _ = time::delay_until(self.keepalive_timeout) => {
-                self.keepalive_timeout = Instant::now() + self.options.keep_alive;
+            _ = self.keepalive_timeout.as_mut().unwrap() => {
+                let timeout = self.keepalive_timeout.as_mut().unwrap();
+                timeout.reset(Instant::now() + self.options.keep_alive);
                 let request = self.state.handle_outgoing_packet(Request::PingReq)?;
                 let outgoing = network.write(request).await?;
                 Ok((None, Some(outgoing)))
@@ -325,36 +350,6 @@ pub(crate) async fn next_pending(
     // return next packet with a delay
     time::delay_for(delay).await;
     pending.next()
-}
-
-/// Returns the next buffered packet from last buffered read
-pub(crate) async fn next_buffered(incoming: &mut IntoIter<Incoming>) -> Option<Incoming> {
-    incoming.next()
-}
-
-fn bulk_fill(
-    options: &MqttOptions,
-    state: &mut MqttState,
-    requests: &Receiver<Request>,
-    network: &mut Network,
-) -> Result<(), ConnectionError> {
-    // Be eager in reading more data till inflight buffers are full.
-    // Make sure size of total inflight messages isn't greater than
-    // OS tcp write buffer size to prevent bounded buffer deadlocks
-    for _i in 0..options.max_request_batch {
-        if state.inflight >= options.inflight {
-            break;
-        }
-
-        let request = match requests.try_recv() {
-            Ok(r) => r,
-            Err(_) => break,
-        };
-        let request = state.handle_outgoing_packet(request)?;
-        let _outgoing = network.fill(request);
-    }
-
-    Ok(())
 }
 
 pub trait Requests: Stream<Item = Request> + Unpin + Send {}
