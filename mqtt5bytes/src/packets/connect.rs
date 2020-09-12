@@ -13,7 +13,7 @@ pub struct Connect {
     /// Mqtt keep alive time
     pub keep_alive: u16,
     /// Properties
-    pub properties: ConnectProperties,
+    pub properties: Option<ConnectProperties>,
     /// Client Id
     pub client_id: String,
     /// Clean session. Asks the broker to clear previous state
@@ -69,7 +69,7 @@ impl Connect {
         Connect {
             protocol: Protocol::MQTT(4),
             keep_alive: 10,
-            properties: ConnectProperties::new(),
+            properties: None,
             client_id: id.into(),
             clean_session: true,
             last_will: None,
@@ -254,7 +254,7 @@ pub struct ConnectProperties {
 }
 
 impl ConnectProperties {
-    fn new() -> ConnectProperties {
+    fn _new() -> ConnectProperties {
         ConnectProperties {
             session_expiry_interval: None,
             receive_maximum: None,
@@ -268,7 +268,7 @@ impl ConnectProperties {
         }
     }
 
-    fn extract(mut bytes: &mut Bytes) -> Result<ConnectProperties, Error> {
+    fn extract(mut bytes: &mut Bytes) -> Result<Option<ConnectProperties>, Error> {
         let mut session_expiry_interval = None;
         let mut receive_maximum = None;
         let mut max_packet_size = None;
@@ -281,6 +281,10 @@ impl ConnectProperties {
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
         bytes.advance(properties_len_len);
+        if properties_len == 0 {
+            return Ok(None);
+        }
+
         let mut cursor = 0;
         // read until cursor reaches property length. properties_len = 0 will skip this loop
         while properties_len >= cursor {
@@ -332,7 +336,7 @@ impl ConnectProperties {
             }
         }
 
-        Ok(ConnectProperties {
+        Ok(Some(ConnectProperties {
             session_expiry_interval,
             receive_maximum,
             max_packet_size,
@@ -342,7 +346,7 @@ impl ConnectProperties {
             user_properties,
             authentication_method,
             authentication_data,
-        })
+        }))
     }
 }
 
