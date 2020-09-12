@@ -62,9 +62,67 @@ impl Connect {
         let keep_alive = bytes.get_u16();
 
         // Properties in variable header
+        let mut session_expiry_interval = None;
+        let mut receive_maximum = None;
+        let mut max_packet_size = None;
+        let mut topic_alias_max = None;
+        let mut request_response_info = None;
+        let mut request_problem_info = None;
+        let mut user_properties = Vec::new();
+        let mut authentication_method = None;
+        let mut authentication_data = None;
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
         bytes.advance(properties_len_len);
+        let mut cursor = 0;
+        // read until cursor reaches property length. properties_len = 0 will skip this loop
+        while properties_len >= cursor {
+            let prop = bytes.get_u8();
+            cursor += 1;
+            match property(prop)? {
+                PropertyType::SessionExpiryInterval => {
+                    session_expiry_interval = Some(bytes.get_u32());
+                    cursor += 4;
+                }
+                PropertyType::ReceiveMaximum => {
+                    receive_maximum = Some(bytes.get_u16());
+                    cursor += 2;
+                }
+                PropertyType::MaximumPacketSize => {
+                    max_packet_size = Some(bytes.get_u32());
+                    cursor += 4;
+                }
+                PropertyType::TopicAliasMaximum => {
+                    topic_alias_max = Some(bytes.get_u16());
+                    cursor += 2;
+                }
+                PropertyType::RequestResponseInformation => {
+                    request_response_info = Some(bytes.get_u8());
+                    cursor += 1;
+                }
+                PropertyType::RequestProblemInformation => {
+                    request_problem_info = Some(bytes.get_u8());
+                    cursor += 1;
+                }
+                PropertyType::UserProperty => {
+                    let key = read_mqtt_string(&mut bytes)?;
+                    let value = read_mqtt_string(&mut bytes)?;
+                    cursor += 2 + key.len() + 2 + value.len();
+                    user_properties.push((key, value));
+                }
+                PropertyType::AuthenticationMethod => {
+                    let method = read_mqtt_string(&mut bytes)?;
+                    cursor += 2 + method.len();
+                    authentication_method = Some(method);
+                }
+                PropertyType::AuthenticationData => {
+                    let data = read_mqtt_bytes(&mut bytes)?;
+                    cursor += 2 + data.len();
+                    authentication_data = Some(data);
+                }
+                _ => return Err(Error::InvalidPropertyType(prop))
+            }
+        }
 
 
         let client_id = read_mqtt_string(&mut bytes)?;
@@ -79,6 +137,15 @@ impl Connect {
             last_will,
             username,
             password,
+            session_expiry_interval,
+            receive_maximum,
+            max_packet_size,
+            topic_alias_max,
+            request_response_info,
+            request_problem_info,
+            user_properties,
+            authentication_method,
+            authentication_data
         };
 
         Ok(connect)

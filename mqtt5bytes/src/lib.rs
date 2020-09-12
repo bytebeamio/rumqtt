@@ -22,6 +22,7 @@ pub enum Error {
     InvalidProtocolLevel(u8),
     IncorrectPacketFormat,
     InvalidPacketType(u8),
+    InvalidPropertyType(u8),
     InvalidQoS(u8),
     PacketIdZero,
     PayloadSizeIncorrect,
@@ -109,6 +110,41 @@ pub enum PropertyType {
     WildcardSubscriptionAvailable = 40,
     SubscriptionIdentifierAvailable = 41,
     SharedSubscriptionAvailable = 42,
+}
+
+fn property(num: u8) -> Result<PropertyType, Error> {
+    let property = match num {
+        1 => PropertyType::PayloadFormatIndicator,
+        2 => PropertyType::MessageExpiryInterval,
+        3 => PropertyType::ContentType,
+        8 => PropertyType::ResponseTopic,
+        9 => PropertyType::CorrelationData,
+        11 => PropertyType::SubscriptionIdentifier,
+        17 => PropertyType::SessionExpiryInterval,
+        18 => PropertyType::AssignedClientIdentifier,
+        19 => PropertyType::ServerKeepAlive,
+        21 => PropertyType::AuthenticationMethod,
+        22 => PropertyType::AuthenticationData,
+        23 => PropertyType::RequestProblemInformation,
+        24 => PropertyType::WillDelayInterval,
+        25 => PropertyType::RequestResponseInformation,
+        26 => PropertyType::ResponseInformation,
+        28 => PropertyType::ServerReference,
+        31 => PropertyType::ReasonString,
+        33 => PropertyType::ReceiveMaximum,
+        34 => PropertyType::TopicAliasMaximum,
+        35 => PropertyType::TopicAlias,
+        36 => PropertyType::MaximumQos,
+        37 => PropertyType::RetainAvailable,
+        38 => PropertyType::UserProperty,
+        39 => PropertyType::MaximumPacketSize,
+        40 => PropertyType::WildcardSubscriptionAvailable,
+        41 => PropertyType::SubscriptionIdentifierAvailable,
+        42 => PropertyType::SharedSubscriptionAvailable,
+        num => return Err(Error::InvalidPropertyType(num))
+    };
+
+    Ok(property)
 }
 
 /// Quality of service
