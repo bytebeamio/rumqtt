@@ -153,6 +153,7 @@ pub struct LastWill {
     pub message: Bytes,
     pub qos: QoS,
     pub retain: bool,
+    pub properties: Option<WillProperties>,
 }
 
 impl LastWill {
@@ -167,6 +168,7 @@ impl LastWill {
             message: Bytes::from(payload.into()),
             qos,
             retain,
+            properties: None,
         }
     }
 
@@ -177,6 +179,7 @@ impl LastWill {
             }
             0 => None,
             _ => {
+                let properties = WillProperties::extract(&mut bytes)?;
                 let will_topic = read_mqtt_string(&mut bytes)?;
                 let will_message = read_mqtt_bytes(&mut bytes)?;
                 let will_qos = qos((connect_flags & 0b11000) >> 3)?;
@@ -185,6 +188,7 @@ impl LastWill {
                     message: will_message,
                     qos: will_qos,
                     retain: (connect_flags & 0b0010_0000) != 0,
+                    properties,
                 })
             }
         };
@@ -207,6 +211,89 @@ impl LastWill {
         write_mqtt_string(buffer, &self.topic);
         write_mqtt_bytes(buffer, &self.message);
         connect_flags
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WillProperties {
+    delay_interval: Option<u32>,
+    payload_format_indicator: Option<u8>,
+    message_expiry_interval: Option<u32>,
+    content_type: Option<String>,
+    response_topic: Option<String>,
+    correlation_data: Option<Bytes>,
+    user_properties: Vec<(String, String)>,
+}
+
+impl WillProperties {
+    fn extract(mut bytes: &mut Bytes) -> Result<Option<WillProperties>, Error> {
+        let mut delay_interval = None;
+        let mut payload_format_indicator = None;
+        let mut message_expiry_interval = None;
+        let mut content_type = None;
+        let mut response_topic = None;
+        let mut correlation_data = None;
+        let mut user_properties = Vec::new();
+
+        let (properties_len_len, properties_len) = length(bytes.iter())?;
+        bytes.advance(properties_len_len);
+        if properties_len == 0 {
+            return Ok(None);
+        }
+
+        let mut cursor = 0;
+        // read until cursor reaches property length. properties_len = 0 will skip this loop
+        while properties_len >= cursor {
+            let prop = bytes.get_u8();
+            cursor += 1;
+
+            match property(prop)? {
+                PropertyType::WillDelayInterval => {
+                    delay_interval = Some(bytes.get_u32());
+                    cursor += 4;
+                }
+                PropertyType::PayloadFormatIndicator => {
+                    payload_format_indicator = Some(bytes.get_u8());
+                    cursor += 1;
+                }
+                PropertyType::MessageExpiryInterval => {
+                    message_expiry_interval = Some(bytes.get_u32());
+                    cursor += 4;
+                }
+                PropertyType::ContentType => {
+                    let typ = read_mqtt_string(&mut bytes)?;
+                    cursor += 2 + typ.len();
+                    content_type = Some(typ);
+                }
+                PropertyType::ResponseTopic => {
+                    let topic = read_mqtt_string(&mut bytes)?;
+                    cursor += 2 + topic.len();
+                    response_topic = Some(topic);
+                }
+                PropertyType::CorrelationData => {
+                    let data = read_mqtt_bytes(&mut bytes)?;
+                    cursor += 2 + data.len();
+                    correlation_data = Some(data);
+                }
+                PropertyType::UserProperty => {
+                    let key = read_mqtt_string(&mut bytes)?;
+                    let value = read_mqtt_string(&mut bytes)?;
+                    cursor += 2 + key.len() + 2 + value.len();
+                    user_properties.push((key, value));
+                }
+                _ => return Err(Error::InvalidPropertyType(prop)),
+            }
+        }
+
+        Ok(Some(WillProperties {
+            delay_interval,
+            payload_format_indicator,
+            message_expiry_interval,
+            content_type,
+            response_topic,
+            correlation_data,
+            user_properties,
+        }))
     }
 }
 
