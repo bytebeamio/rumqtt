@@ -77,6 +77,16 @@ impl ConnAck {
         let code = self.code as u8;
         let o: &[u8] = &[0x20, 0x02, session_present, code];
         buffer.put_slice(o);
+        match &self.properties {
+            Some(properties) => {
+                write_remaining_length(buffer, properties.len())?;
+                properties.write(buffer)?;
+            }
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        }
+
         Ok(4)
     }
 }
@@ -123,6 +133,80 @@ impl ConnAckProperties {
             authentication_method: None,
             authentication_data: None,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        let mut len = 0;
+
+        if let Some(_) = &self.session_expiry_interval {
+            len += 1 + 4;
+        }
+
+        if let Some(_) = &self.receive_max {
+            len += 1 + 2;
+        }
+
+        if let Some(_) = &self.max_qos {
+            len += 1 + 1;
+        }
+
+        if let Some(_) = &self.retain_available {
+            len += 1 + 1;
+        }
+
+        if let Some(_) = &self.max_packet_size {
+            len += 1 + 4;
+        }
+
+        if let Some(id) = &self.assigned_client_identifier {
+            len += 1 + id.len();
+        }
+
+        if let Some(_) = &self.topic_alias_max {
+            len += 1 + 2;
+        }
+
+        if let Some(reason) = &self.reason_string {
+            len += 1 + reason.len();
+        }
+
+        for (key, value) in self.user_properties.iter() {
+            len += 1 + key.len() + value.len();
+        }
+
+        if let Some(_) = &self.wildcard_subscription_available {
+            len += 1 + 1;
+        }
+
+        if let Some(_) = &self.subscription_identifiers_available {
+            len += 1 + 1;
+        }
+
+        if let Some(_) = &self.shared_subscription_available {
+            len += 1 + 1;
+        }
+
+        if let Some(_) = &self.server_keep_alive {
+            len += 1 + 2;
+        }
+
+        if let Some(info) = &self.response_information {
+            len += 1 + info.len();
+        }
+
+        if let Some(reference) = &self.server_reference {
+            len += 1 + reference.len();
+        }
+
+        if let Some(authentication_method) = &self.authentication_method {
+            len += 1 + authentication_method.len();
+        }
+
+        if let Some(authentication_data) = &self.authentication_data {
+            len += 1 + authentication_data.len();
+        }
+
+        len
     }
 
     pub fn extract(mut bytes: &mut Bytes) -> Result<Option<ConnAckProperties>, Error> {
@@ -256,6 +340,99 @@ impl ConnAckProperties {
             authentication_method,
             authentication_data,
         }))
+    }
+
+    fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
+        write_remaining_length(buffer, len)?;
+
+        if let Some(session_expiry_interval) = self.session_expiry_interval {
+            buffer.put_u8(PropertyType::SessionExpiryInterval as u8);
+            buffer.put_u32(session_expiry_interval);
+        }
+
+        if let Some(receive_maximum) = self.receive_max {
+            buffer.put_u8(PropertyType::ReceiveMaximum as u8);
+            buffer.put_u16(receive_maximum);
+        }
+
+        if let Some(qos) = self.max_qos {
+            buffer.put_u8(PropertyType::MaximumQos as u8);
+            buffer.put_u8(qos);
+        }
+
+        if let Some(retain_available) = self.retain_available {
+            buffer.put_u8(PropertyType::RetainAvailable as u8);
+            buffer.put_u8(retain_available);
+        }
+
+        if let Some(max_packet_size) = self.max_packet_size {
+            buffer.put_u8(PropertyType::MaximumPacketSize as u8);
+            buffer.put_u32(max_packet_size);
+        }
+
+        if let Some(id) = &self.assigned_client_identifier {
+            buffer.put_u8(PropertyType::AssignedClientIdentifier as u8);
+            write_mqtt_string(buffer, id);
+        }
+
+        if let Some(topic_alias_max) = self.topic_alias_max {
+            buffer.put_u8(PropertyType::TopicAliasMaximum as u8);
+            buffer.put_u16(topic_alias_max);
+        }
+
+        if let Some(reason) = &self.reason_string {
+            buffer.put_u8(PropertyType::ReasonString as u8);
+            write_mqtt_string(buffer, reason);
+        }
+
+        for (key, value) in self.user_properties.iter() {
+            buffer.put_u8(PropertyType::UserProperty as u8);
+            write_mqtt_string(buffer, key);
+            write_mqtt_string(buffer, value);
+        }
+
+        if let Some(w) = self.wildcard_subscription_available {
+            buffer.put_u8(PropertyType::WildcardSubscriptionAvailable as u8);
+            buffer.put_u8(w);
+        }
+
+        if let Some(s) = self.subscription_identifiers_available {
+            buffer.put_u8(PropertyType::SubscriptionIdentifierAvailable as u8);
+            buffer.put_u8(s);
+        }
+
+        if let Some(s) = self.shared_subscription_available {
+            buffer.put_u8(PropertyType::SharedSubscriptionAvailable as u8);
+            buffer.put_u8(s);
+        }
+
+        if let Some(keep_alive) = self.server_keep_alive {
+            buffer.put_u8(PropertyType::ServerKeepAlive as u8);
+            buffer.put_u16(keep_alive);
+        }
+
+        if let Some(info) = &self.response_information {
+            buffer.put_u8(PropertyType::ResponseInformation as u8);
+            write_mqtt_string(buffer, info);
+        }
+
+        if let Some(reference) = &self.server_reference {
+            buffer.put_u8(PropertyType::ServerReference as u8);
+            write_mqtt_string(buffer, reference);
+        }
+
+        if let Some(authentication_method) = &self.authentication_method {
+            buffer.put_u8(PropertyType::AuthenticationMethod as u8);
+            write_mqtt_string(buffer, authentication_method);
+        }
+
+        if let Some(authentication_data) = &self.authentication_data {
+            buffer.put_u8(PropertyType::AuthenticationData as u8);
+            write_mqtt_bytes(buffer, authentication_data);
+        }
+
+        Ok(())
     }
 }
 

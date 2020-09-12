@@ -124,7 +124,10 @@ impl Connect {
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
         if let Some(properties) = &self.properties {
+            write_remaining_length(buffer, properties.len())?;
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         write_mqtt_string(buffer, &self.client_id);
@@ -455,15 +458,18 @@ impl ConnectProperties {
         }
 
         for (key, value) in self.user_properties.iter() {
+            buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
 
         if let Some(authentication_method) = &self.authentication_method {
+            buffer.put_u8(PropertyType::AuthenticationMethod as u8);
             write_mqtt_string(buffer, authentication_method);
         }
 
         if let Some(authentication_data) = &self.authentication_data {
+            buffer.put_u8(PropertyType::AuthenticationData as u8);
             write_mqtt_bytes(buffer, authentication_data);
         }
 
