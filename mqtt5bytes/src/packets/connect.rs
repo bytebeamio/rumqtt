@@ -90,20 +90,18 @@ impl Connect {
     pub fn len(&self) -> usize {
         let mut len = 8 + "MQTT".len() + self.client_id.len();
 
-        // lastwill len
-        if let Some(ref last_will) = self.last_will {
-            len += 4 + last_will.topic.len() + last_will.message.len();
+        if let Some(properties) = &self.properties {
+            len += properties.len();
         }
 
-        // username len
-        if let Some(ref login) = self.login {
-            if !login.username.is_empty() {
-                len += 2 + login.username.len();
-            }
+        // last will len
+        if let Some(last_will) = &self.last_will {
+            len += last_will.len();
+        }
 
-            if !login.password.is_empty() {
-                len += 2 + login.password.len();
-            }
+        // username and password len
+        if let Some(login) = &self.login {
+            len += login.len();
         }
 
         len
@@ -113,49 +111,34 @@ impl Connect {
         let len = self.len();
         buffer.reserve(len);
         buffer.put_u8(0b0001_0000);
-        write_remaining_length(buffer, len)?;
+        let count = write_remaining_length(buffer, len)?;
         write_mqtt_string(buffer, "MQTT");
         buffer.put_u8(0x04);
+        let flags_index = 1 + count + 4 + 1;
 
         let mut connect_flags = 0;
         if self.clean_session {
             connect_flags |= 0x02;
         }
 
-        match &self.last_will {
-            Some(w) if w.retain => connect_flags |= 0x04 | (w.qos as u8) << 3 | 0x20,
-            Some(w) => connect_flags |= 0x04 | (w.qos as u8) << 3,
-            None => (),
-        }
-
-        if let Some(login) = &self.login {
-            if !login.username.is_empty() {
-                connect_flags |= 0x80;
-            }
-            if !login.password.is_empty() {
-                connect_flags |= 0x40;
-            }
-        }
-
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
+        }
+
         write_mqtt_string(buffer, &self.client_id);
 
-        if let Some(ref last_will) = self.last_will {
-            write_mqtt_string(buffer, &last_will.topic);
-            write_mqtt_bytes(buffer, &last_will.message);
+        if let Some(last_will) = &self.last_will {
+            connect_flags |= last_will.write(buffer);
         }
 
         if let Some(login) = &self.login {
-            if !login.username.is_empty() {
-                write_mqtt_string(buffer, &login.username);
-            }
-
-            if !login.password.is_empty() {
-                write_mqtt_string(buffer, &login.password);
-            }
+            connect_flags |= login.write(buffer);
         }
 
+        // update connect flags
+        buffer[flags_index] = connect_flags;
         Ok(len)
     }
 }
@@ -205,6 +188,23 @@ impl LastWill {
 
         Ok(last_will)
     }
+
+    fn len(&self) -> usize {
+        4 + self.topic.len() + self.message.len()
+    }
+
+    fn write(&self, buffer: &mut BytesMut) -> u8 {
+        let mut connect_flags = 0;
+
+        connect_flags |= 0x04 | (self.qos as u8) << 3;
+        if self.retain {
+            connect_flags |= 0x20;
+        }
+
+        write_mqtt_string(buffer, &self.topic);
+        write_mqtt_bytes(buffer, &self.message);
+        connect_flags
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -230,6 +230,35 @@ impl Login {
         } else {
             Ok(Some(Login { username, password }))
         }
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 0;
+
+        if !self.username.is_empty() {
+            len += 2 + self.username.len();
+        }
+
+        if !self.password.is_empty() {
+            len += 2 + self.password.len();
+        }
+
+        len
+    }
+
+    fn write(&self, buffer: &mut BytesMut) -> u8 {
+        let mut connect_flags = 0;
+        if !self.username.is_empty() {
+            connect_flags |= 0x80;
+            write_mqtt_string(buffer, &self.username);
+        }
+
+        if !self.password.is_empty() {
+            connect_flags |= 0x40;
+            write_mqtt_string(buffer, &self.password);
+        }
+
+        connect_flags
     }
 }
 
@@ -347,6 +376,98 @@ impl ConnectProperties {
             authentication_method,
             authentication_data,
         }))
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 0;
+
+        if self.session_expiry_interval.is_some() {
+            len += 1 + 4;
+        }
+
+        if self.receive_maximum.is_some() {
+            len += 1 + 2;
+        }
+
+        if self.max_packet_size.is_some() {
+            len += 1 + 4;
+        }
+
+        if self.topic_alias_max.is_some() {
+            len += 1 + 2;
+        }
+
+        if self.request_response_info.is_some() {
+            len += 1 + 1;
+        }
+
+        if self.request_problem_info.is_some() {
+            len += 1 + 1;
+        }
+
+        for (key, value) in self.user_properties.iter() {
+            len += 1 + key.len() + value.len();
+        }
+
+        if let Some(authentication_method) = &self.authentication_method {
+            len += 1 + authentication_method.len();
+        }
+
+        if let Some(authentication_data) = &self.authentication_data {
+            len += 1 + authentication_data.len();
+        }
+
+        len
+    }
+
+    fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
+        write_remaining_length(buffer, len)?;
+
+        if let Some(session_expiry_interval) = self.session_expiry_interval {
+            buffer.put_u8(PropertyType::SessionExpiryInterval as u8);
+            buffer.put_u32(session_expiry_interval);
+        }
+
+        if let Some(receive_maximum) = self.receive_maximum {
+            buffer.put_u8(PropertyType::ReceiveMaximum as u8);
+            buffer.put_u16(receive_maximum);
+        }
+
+        if let Some(max_packet_size) = self.max_packet_size {
+            buffer.put_u8(PropertyType::MaximumPacketSize as u8);
+            buffer.put_u32(max_packet_size);
+        }
+
+        if let Some(topic_alias_max) = self.topic_alias_max {
+            buffer.put_u8(PropertyType::TopicAliasMaximum as u8);
+            buffer.put_u16(topic_alias_max);
+        }
+
+        if let Some(request_problem_info) = self.request_response_info {
+            buffer.put_u8(PropertyType::RequestProblemInformation as u8);
+            buffer.put_u8(request_problem_info);
+        }
+
+        if let Some(request_problem_info) = self.request_problem_info {
+            buffer.put_u8(PropertyType::RequestProblemInformation as u8);
+            buffer.put_u8(request_problem_info);
+        }
+
+        for (key, value) in self.user_properties.iter() {
+            write_mqtt_string(buffer, key);
+            write_mqtt_string(buffer, value);
+        }
+
+        if let Some(authentication_method) = &self.authentication_method {
+            write_mqtt_string(buffer, authentication_method);
+        }
+
+        if let Some(authentication_data) = &self.authentication_data {
+            write_mqtt_bytes(buffer, authentication_data);
+        }
+
+        Ok(())
     }
 }
 
