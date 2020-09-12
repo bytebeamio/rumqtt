@@ -72,4 +72,3 @@ fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
         num => Err(Error::InvalidConnectReturnCode(num)),
     }
 }
-

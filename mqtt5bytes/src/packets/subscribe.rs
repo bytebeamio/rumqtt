@@ -103,4 +103,3 @@ impl fmt::Debug for SubscribeTopic {
         write!(f, "Filter = {}, Qos = {:?}", self.topic_path, self.qos)
     }
 }
-

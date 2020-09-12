@@ -139,4 +139,3 @@ impl fmt::Debug for Publish {
         )
     }
 }
-

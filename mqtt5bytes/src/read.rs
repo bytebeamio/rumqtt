@@ -45,7 +45,9 @@ pub fn mqtt_read(stream: &mut BytesMut, max_packet_size: usize) -> Result<Packet
 /// Checks if the stream has enough bytes to frame a packet and returns fixed header
 pub fn check(stream: &mut BytesMut, max_packet_size: usize) -> Result<FixedHeader, Error> {
     let stream_len = stream.len();
-    if stream_len < 2 { return Err(Error::InsufficientBytes(2)); }
+    if stream_len < 2 {
+        return Err(Error::InsufficientBytes(2));
+    }
 
     // Read the initial bytes necessary from the stream with out mutating the stream cursor
     let (byte1, remaining_len_len, remaining_len) = parse_fixed_header(stream.iter())?;
@@ -100,7 +102,9 @@ pub(crate) fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     }
 
     // TODO: Fix stream length + 1 in mqtt4bytes and write a test
-    if !done { return Err(Error::InsufficientBytes(1)); }
+    if !done {
+        return Err(Error::InsufficientBytes(1));
+    }
     Ok((remaining_len_len, remaining_len))
 }
 
@@ -116,4 +120,3 @@ fn _header_len(remaining_len: usize) -> usize {
         1 + 1
     }
 }
-

@@ -32,4 +32,3 @@ impl PubAck {
         Ok(4)
     }
 }
-

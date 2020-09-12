@@ -88,4 +88,3 @@ impl fmt::Debug for PublishRaw {
         write!(f, "raw publish")
     }
 }
-

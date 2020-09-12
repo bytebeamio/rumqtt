@@ -141,7 +141,7 @@ fn property(num: u8) -> Result<PropertyType, Error> {
         40 => PropertyType::WildcardSubscriptionAvailable,
         41 => PropertyType::SubscriptionIdentifierAvailable,
         42 => PropertyType::SharedSubscriptionAvailable,
-        num => return Err(Error::InvalidPropertyType(num))
+        num => return Err(Error::InvalidPropertyType(num)),
     };
 
     Ok(property)
