@@ -22,12 +22,30 @@ pub struct Connect {
     pub username: Option<String>,
     /// Password of the client
     pub password: Option<String>,
+    /// Expiry interval property after loosing connection
+    pub session_expiry_interval: Option<u32>,
+    /// Maximum simultaneous packets
+    pub receive_maximum: Option<u16>,
+    /// Maximum packet size
+    pub max_packet_size: Option<u32>,
+    /// Maximum mapping integer for a topic
+    pub topic_alias_max: Option<u16>,
+    pub request_response_info: Option<u8>,
+    pub request_problem_info: Option<u8>,
+    /// List of user properties
+    pub user_properties: Vec<(String, String)>,
+    /// Method of authentication
+    pub authentication_method: Option<String>,
+    /// Authentication data
+    pub authentication_data: Option<Bytes>,
 }
 
 impl Connect {
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
         let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
+
+        // Variable header
         let protocol_name = read_mqtt_string(&mut bytes)?;
         let protocol_level = bytes.get_u8();
         if protocol_name != "MQTT" {
@@ -35,13 +53,20 @@ impl Connect {
         }
 
         let protocol = match protocol_level {
-            4 => Protocol::MQTT(4),
+            5 => Protocol::MQTT(5),
             num => return Err(Error::InvalidProtocolLevel(num)),
         };
 
         let connect_flags = bytes.get_u8();
-        let keep_alive = bytes.get_u16();
         let clean_session = (connect_flags & 0b10) != 0;
+        let keep_alive = bytes.get_u16();
+
+        // Properties in variable header
+
+        let (properties_len_len, properties_len) = length(bytes.iter())?;
+        bytes.advance(properties_len_len);
+
+
         let client_id = read_mqtt_string(&mut bytes)?;
         let last_will = extract_last_will(connect_flags, &mut bytes)?;
         let (username, password) = extract_username_password(connect_flags, &mut bytes)?;
@@ -68,6 +93,15 @@ impl Connect {
             last_will: None,
             username: None,
             password: None,
+            session_expiry_interval: None,
+            receive_maximum: None,
+            max_packet_size: None,
+            topic_alias_max: None,
+            request_response_info: None,
+            request_problem_info: None,
+            user_properties: Vec::new(),
+            authentication_method: None,
+            authentication_data: None
         }
     }
 

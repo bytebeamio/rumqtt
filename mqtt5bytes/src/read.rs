@@ -1,5 +1,6 @@
 use crate::*;
 use bytes::BytesMut;
+use core::slice::Iter;
 
 /// Reads a stream of bytes and extracts MQTT packets
 pub fn mqtt_read(stream: &mut BytesMut, max_packet_size: usize) -> Result<Packet, Error> {
@@ -43,8 +44,11 @@ pub fn mqtt_read(stream: &mut BytesMut, max_packet_size: usize) -> Result<Packet
 
 /// Checks if the stream has enough bytes to frame a packet and returns fixed header
 pub fn check(stream: &mut BytesMut, max_packet_size: usize) -> Result<FixedHeader, Error> {
+    let stream_len = stream.len();
+    if stream_len < 2 { return Err(Error::InsufficientBytes(2)); }
+
     // Read the initial bytes necessary from the stream with out mutating the stream cursor
-    let (byte1, remaining_len_len, remaining_len) = parse_fixed_header(stream)?;
+    let (byte1, remaining_len_len, remaining_len) = parse_fixed_header(stream.iter())?;
     let fixed_header = FixedHeader::new(byte1, remaining_len_len, remaining_len);
 
     // Don't let rogue connections attack with huge payloads. Disconnect them before reading all
@@ -56,27 +60,27 @@ pub fn check(stream: &mut BytesMut, max_packet_size: usize) -> Result<FixedHeade
     // If the current call fails due to insufficient bytes in the stream, after calculating
     // remaining length, we extend the stream
     let frame_length = fixed_header.frame_length();
-    let stream_length = stream.len();
-    if stream_length < frame_length {
-        return Err(Error::InsufficientBytes(frame_length - stream_length));
+    if stream_len < frame_length {
+        return Err(Error::InsufficientBytes(frame_length - stream_len));
     }
 
     Ok(fixed_header)
 }
 
 /// Parses fixed header. Doesn't modify the source
-fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize, usize), Error> {
-    let stream_len = stream.len();
-    if stream_len < 2 {
-        return Err(Error::InsufficientBytes(2));
-    }
+fn parse_fixed_header(mut stream: Iter<u8>) -> Result<(u8, usize, usize), Error> {
+    let byte1 = stream.next().unwrap();
+    let (remaining_len_len, remaining_len) = length(stream)?;
+    Ok((*byte1, remaining_len_len, remaining_len))
+}
 
+/// Parses variable byte integer in the stream to calculate length
+/// of the trailing stream. Used for remaining length calculation
+/// as well as for calculating property lengths
+pub(crate) fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     let mut remaining_len: usize = 0;
     let mut remaining_len_len = 0;
     let mut done = false;
-    let mut stream = stream.iter();
-
-    let byte1 = *stream.next().unwrap();
     let mut shift = 0;
     for byte in stream {
         remaining_len_len += 1;
@@ -95,11 +99,9 @@ fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize, usize), Error> {
         }
     }
 
-    if !done {
-        return Err(Error::InsufficientBytes(stream_len + 1));
-    }
-
-    Ok((byte1, remaining_len_len, remaining_len))
+    // TODO: Fix stream length + 1 in mqtt4bytes and write a test
+    if !done { return Err(Error::InsufficientBytes(1)); }
+    Ok((remaining_len_len, remaining_len))
 }
 
 /// Header length from remaining length.
@@ -115,28 +117,3 @@ fn _header_len(remaining_len: usize) -> usize {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::parse_fixed_header;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn fixed_header_is_parsed_as_expected() {
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x00").unwrap();
-        assert_eq!(remaining_len, 0);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x7f").unwrap();
-        assert_eq!(remaining_len, 127);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x80\x01").unwrap();
-        assert_eq!(remaining_len, 128);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\xff\x7f").unwrap();
-        assert_eq!(remaining_len, 16383);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x01").unwrap();
-        assert_eq!(remaining_len, 16384);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\xff\xff\x7f").unwrap();
-        assert_eq!(remaining_len, 2_097_151);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\x80\x80\x80\x01").unwrap();
-        assert_eq!(remaining_len, 2_097_152);
-        let (_, _, remaining_len) = parse_fixed_header(b"\x10\xff\xff\xff\x7f").unwrap();
-        assert_eq!(remaining_len, 268_435_455);
-    }
-}
