@@ -5,7 +5,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 /// Return code in connack
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
-pub enum Reason {
+pub enum PubAckReason {
     Success = 0,
     NoMatchingSubscribers = 16,
     UnspecifiedError = 128,
@@ -21,7 +21,7 @@ pub enum Reason {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubAck {
     pub pkid: u16,
-    pub reason: Reason,
+    pub reason: PubAckReason,
     pub properties: Option<PubAckProperties>,
 }
 
@@ -29,7 +29,7 @@ impl PubAck {
     pub fn new(pkid: u16) -> PubAck {
         PubAck {
             pkid,
-            reason: Reason::Success,
+            reason: PubAckReason::Success,
             properties: None,
         }
     }
@@ -155,17 +155,17 @@ impl PubAckProperties {
     }
 }
 /// Connection return code type
-fn reason(num: u8) -> Result<Reason, Error> {
+fn reason(num: u8) -> Result<PubAckReason, Error> {
     let code = match num {
-        0 => Reason::Success,
-        16 => Reason::NoMatchingSubscribers,
-        128 => Reason::UnspecifiedError,
-        131 => Reason::ImplementationSpecificError,
-        135 => Reason::NotAuthorized,
-        144 => Reason::TopicNameInvalid,
-        145 => Reason::PacketIdentifierInUse,
-        151 => Reason::QuotaExceeded,
-        153 => Reason::PayloadFormatInvalid,
+        0 => PubAckReason::Success,
+        16 => PubAckReason::NoMatchingSubscribers,
+        128 => PubAckReason::UnspecifiedError,
+        131 => PubAckReason::ImplementationSpecificError,
+        135 => PubAckReason::NotAuthorized,
+        144 => PubAckReason::TopicNameInvalid,
+        145 => PubAckReason::PacketIdentifierInUse,
+        151 => PubAckReason::QuotaExceeded,
+        153 => PubAckReason::PayloadFormatInvalid,
         num => return Err(Error::InvalidConnectReturnCode(num)),
     };
 
@@ -187,7 +187,7 @@ mod test {
 
         PubAck {
             pkid: 42,
-            reason: Reason::NoMatchingSubscribers,
+            reason: PubAckReason::NoMatchingSubscribers,
             properties: Some(properties),
         }
     }
