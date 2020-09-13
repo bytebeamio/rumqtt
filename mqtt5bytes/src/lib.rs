@@ -17,6 +17,7 @@ pub use topic::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     InvalidConnectReturnCode(u8),
+    InvalidReason(u8),
     InvalidProtocol,
     InvalidProtocolLevel(u8),
     IncorrectPacketFormat,

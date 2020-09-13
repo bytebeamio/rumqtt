@@ -86,7 +86,7 @@ impl ConnAck {
         let len = self.len();
         buffer.reserve(len);
         buffer.put_u8(0x20);
-        write_remaining_length(buffer, len)?;
+        let count = write_remaining_length(buffer, len)?;
         buffer.put_u8(self.session_present as u8);
         buffer.put_u8(self.code as u8);
 
@@ -94,7 +94,7 @@ impl ConnAck {
             properties.write(buffer)?;
         }
 
-        Ok(4)
+        Ok(1 + count + len)
     }
 }
 
