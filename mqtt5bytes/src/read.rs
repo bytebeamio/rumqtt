@@ -107,16 +107,3 @@ pub(crate) fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     }
     Ok((remaining_len_len, remaining_len))
 }
-
-/// Header length from remaining length.
-fn _header_len(remaining_len: usize) -> usize {
-    if remaining_len >= 2_097_152 {
-        4 + 1
-    } else if remaining_len >= 16_384 {
-        3 + 1
-    } else if remaining_len >= 128 {
-        2 + 1
-    } else {
-        1 + 1
-    }
-}
