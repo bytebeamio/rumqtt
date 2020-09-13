@@ -12,6 +12,7 @@ description = "MQTT 5 core serialization and deserialization"
 bytes = { version = "0.5", default-features = false }
 
 [dev-dependencies]
+tokio = { version = "0.2", features = ["full"] }
 pretty_assertions = "0.6.1"
 rand = "0.7"
 criterion = "0.3"
