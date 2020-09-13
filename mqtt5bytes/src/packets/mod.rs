@@ -89,15 +89,15 @@ fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Er
     Ok(count)
 }
 
-/// Header length from remaining length.
+/// Return number of remaining length bytes required for encoding length
 fn remaining_len_len(remaining_len: usize) -> usize {
     if remaining_len >= 2_097_152 {
-        4 + 1
+        4
     } else if remaining_len >= 16_384 {
-        3 + 1
+        3
     } else if remaining_len >= 128 {
-        2 + 1
+        2
     } else {
-        1 + 1
+        1
     }
 }

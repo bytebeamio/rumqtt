@@ -53,10 +53,6 @@ impl ConnAck {
         let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
 
-        if fixed_header.remaining_len != 2 {
-            return Err(Error::PayloadSizeIncorrect);
-        }
-
         let flags = bytes.get_u8();
         let return_code = bytes.get_u8();
 
@@ -72,19 +68,30 @@ impl ConnAck {
         Ok(connack)
     }
 
+    fn len(&self) -> usize {
+        let mut len = 1  // sesssion present
+                        + 1; // code
+
+        if let Some(properties) = &self.properties {
+            let properties_len = properties.len();
+            let properties_len_len = remaining_len_len(properties_len);
+            len += properties_len_len + properties_len;
+        }
+
+        len
+    }
+
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
-        let session_present = self.session_present as u8;
-        let code = self.code as u8;
-        let o: &[u8] = &[0x20, 0x02, session_present, code];
-        buffer.put_slice(o);
-        match &self.properties {
-            Some(properties) => {
-                write_remaining_length(buffer, properties.len())?;
-                properties.write(buffer)?;
-            }
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
+        // TODO reserve buffer of fixed header in all the packets for perf
+        let len = self.len();
+        buffer.reserve(len);
+        buffer.put_u8(0x20);
+        write_remaining_length(buffer, len)?;
+        buffer.put_u8(self.session_present as u8);
+        buffer.put_u8(self.code as u8);
+
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
         }
 
         Ok(4)
@@ -159,7 +166,7 @@ impl ConnAckProperties {
         }
 
         if let Some(id) = &self.assigned_client_identifier {
-            len += 1 + id.len();
+            len += 1 + 2 + id.len();
         }
 
         if let Some(_) = &self.topic_alias_max {
@@ -167,11 +174,11 @@ impl ConnAckProperties {
         }
 
         if let Some(reason) = &self.reason_string {
-            len += 1 + reason.len();
+            len += 1 + 2 + reason.len();
         }
 
         for (key, value) in self.user_properties.iter() {
-            len += 1 + key.len() + value.len();
+            len += 1 + 2 + key.len() + 2 + value.len();
         }
 
         if let Some(_) = &self.wildcard_subscription_available {
@@ -191,19 +198,19 @@ impl ConnAckProperties {
         }
 
         if let Some(info) = &self.response_information {
-            len += 1 + info.len();
+            len += 1 + 2 + info.len();
         }
 
         if let Some(reference) = &self.server_reference {
-            len += 1 + reference.len();
+            len += 1 + 2 + reference.len();
         }
 
         if let Some(authentication_method) = &self.authentication_method {
-            len += 1 + authentication_method.len();
+            len += 1 + 2 + authentication_method.len();
         }
 
         if let Some(authentication_data) = &self.authentication_data {
-            len += 1 + authentication_data.len();
+            len += 1 + 2 + authentication_data.len();
         }
 
         len
@@ -236,7 +243,7 @@ impl ConnAckProperties {
 
         let mut cursor = 0;
         // read until cursor reaches property length. properties_len = 0 will skip this loop
-        while properties_len >= cursor {
+        while cursor < properties_len {
             let prop = bytes.get_u8();
             cursor += 1;
 
@@ -465,4 +472,90 @@ fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
     };
 
     Ok(code)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::*;
+    use alloc::vec;
+    use bytes::{Bytes, BytesMut};
+    use pretty_assertions::assert_eq;
+
+    fn sample() -> ConnAck {
+        let properties = ConnAckProperties {
+            session_expiry_interval: Some(1234),
+            receive_max: Some(432),
+            max_qos: Some(2),
+            retain_available: Some(1),
+            max_packet_size: Some(100),
+            assigned_client_identifier: Some("test".to_owned()),
+            topic_alias_max: Some(456),
+            reason_string: Some("test".to_owned()),
+            user_properties: vec![("test".to_owned(), "test".to_owned())],
+            wildcard_subscription_available: Some(1),
+            subscription_identifiers_available: Some(1),
+            shared_subscription_available: Some(0),
+            server_keep_alive: Some(1234),
+            response_information: Some("test".to_owned()),
+            server_reference: Some("test".to_owned()),
+            authentication_method: Some("test".to_owned()),
+            authentication_data: Some(Bytes::from(vec![1, 2, 3, 4])),
+        };
+
+        ConnAck {
+            session_present: false,
+            code: ConnectReturnCode::Success,
+            properties: Some(properties),
+        }
+    }
+
+    fn sample_bytes() -> Vec<u8> {
+        vec![
+            0x20, // Packet type
+            0x57, // Remaining length
+            0x00, 0x00, // Session, code
+            0x54, // Properties length
+            0x11, 0x00, 0x00, 0x04, 0xd2, // Session expiry interval
+            0x21, 0x01, 0xb0, // Receive maximum
+            0x24, 0x02, // Maximum qos
+            0x25, 0x01, // Retain available
+            0x27, 0x00, 0x00, 0x00, 0x64, // Maximum packet size
+            0x12, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // Assigned client identifier
+            0x22, 0x01, 0xc8, // Topic alias max
+            0x1f, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // Reason string
+            0x26, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x04, 0x74, 0x65, 0x73,
+            0x74, // user properties
+            0x28, 0x01, // wildcard_subscription_available
+            0x29, 0x01, // subscription_identifiers_available
+            0x2a, 0x00, // shared_subscription_available
+            0x13, 0x04, 0xd2, // server keep_alive
+            0x1a, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // response_information
+            0x1c, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // server reference
+            0x15, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // authentication method
+            0x16, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04, // authentication data
+        ]
+    }
+
+    #[test]
+    fn connack_parsing_works_correctly() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+        let packet = mqtt_read(&mut stream, 200).unwrap();
+        let packet = match packet {
+            Packet::ConnAck(connect) => connect,
+            packet => panic!("Invalid packet = {:?}", packet),
+        };
+
+        let connect = sample();
+        assert_eq!(packet, connect);
+    }
+
+    #[test]
+    fn connack_encoding_works_correctly() {
+        let connack = sample();
+        let mut buf = BytesMut::new();
+        connack.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
+    }
 }

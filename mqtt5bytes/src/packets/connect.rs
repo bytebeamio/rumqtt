@@ -87,7 +87,6 @@ impl Connect {
     }
 
     pub fn len(&self) -> usize {
-        // TODO: Verify with keep alive in encoding test in mqtt 4
         let mut len = 2 + "MQTT".len() // protocol name
                               + 1            // protocol version
                               + 1            // connect flags
@@ -99,7 +98,7 @@ impl Connect {
             len += properties_len_len + properties_len;
         }
 
-        len += self.client_id.len();
+        len += 2 + self.client_id.len();
 
         // last will len
         if let Some(last_will) = &self.last_will {
@@ -773,8 +772,7 @@ mod test {
     fn connect_encoding_works_correctly() {
         let connect = sample();
         let mut buf = BytesMut::new();
-        let frame = connect.write(&mut buf).unwrap();
-        let connect = sample_bytes();
+        connect.write(&mut buf).unwrap();
         assert_eq!(&buf[..], sample_bytes());
     }
 
