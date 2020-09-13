@@ -192,7 +192,7 @@ mod test {
     }
 
     #[test]
-    fn pubrec_parsing_works_correctly() {
+    fn pubrel_parsing_works_correctly() {
         let mut stream = bytes::BytesMut::new();
         let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
@@ -207,7 +207,7 @@ mod test {
     }
 
     #[test]
-    fn pubrec_encoding_works_correctly() {
+    fn pubrel_encoding_works_correctly() {
         let pubrel = sample();
         let mut buf = BytesMut::new();
         pubrel.write(&mut buf).unwrap();
