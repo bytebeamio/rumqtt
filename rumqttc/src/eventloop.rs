@@ -63,6 +63,13 @@ pub struct EventLoop {
     pub(crate) reconnection_delay: Duration,
 }
 
+/// Events which can be yielded by the event loop
+#[derive(Debug)]
+pub enum Event {
+    Incoming(Incoming),
+    Outgoing(Outgoing),
+}
+
 impl EventLoop {
     /// New MQTT `EventLoop`
     ///
@@ -110,11 +117,7 @@ impl EventLoop {
     }
 
     /// Next notification or outgoing request
-    pub async fn poll(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
-        // This method used to return only incoming network notification while silently looping through
-        // outgoing requests. Internal loops inside async functions are risky. Imagine this function
-        // with 100 requests and 1 incoming packet. If this `Stream` (which internally loops) is
-        // selected with other streams, can potentially do more internal polling (if the socket is ready)
+    pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
 
@@ -122,22 +125,17 @@ impl EventLoop {
                 self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
             }
 
-            return Ok((Some(connack), None));
+            return Ok(Event::Incoming(connack));
         }
-
-        let (incoming, outgoing) = match self.select().await {
-            Ok((i, o)) => (i, o),
-            Err(e) => {
-                self.network = None;
-                return Err(e);
-            }
-        };
-
-        Ok((incoming, outgoing))
+        let result = self.select().await;
+        if result.is_err() {
+            self.network = None;
+        }
+        result
     }
 
     /// Select on network and requests and generate keepalive pings when necessary
-    async fn select(&mut self) -> Result<(Option<Incoming>, Option<Outgoing>), ConnectionError> {
+    async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.options.inflight;
@@ -146,93 +144,100 @@ impl EventLoop {
 
         // return buffered outgoing packets first
         if let Some(outgoing) = self.outgoing.pop_front() {
-            return Ok((None, Some(outgoing)));
+            return Ok(Event::Outgoing(outgoing));
         }
 
         // return buffered incoming packets
         if let Some(incoming) = self.incoming.pop_front() {
-            return Ok((Some(incoming), None));
+            return Ok(Event::Incoming(incoming));
         }
 
-        select! {
-            // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.incoming), if self.incoming.len() == 0 => {
-                let _ = o?;
-                for incoming in self.incoming.iter() {
-                    if let Some(outgoing) = self.state.handle_incoming_packet(incoming)? {
-                        network.fill2(outgoing)?;
-                    }
-                }
-
-                // flush all the acks
-                network.flush().await?;
-                return Ok((self.incoming.pop_front(), None))
-            },
-            // Pull next request from user requests channel.
-            // If condition in the below branch if for flow control. We read next user request
-            // only when max inflight settings are honoured.
-            // Flow control is based on ack count. As long as number of inflight packets in buffer
-            // are less than max_inflight setting, next request will progress. For this
-            // to work correctly, broker should ack in sequence and any sane broker will do so
-            // If it doesn't, this will result in connection drop. Use should decide
-            // E.g If max inflight = 5, requests will be blocked when inflight queue looks like this
-            // [1, 2, 3, 4, 5]. Assume broker acking 2 instead of 1 -> [1, x, 3, 4, 5]. While
-            // rolling pkid, next packet will be written in 1 (which is unacked) and results in
-            // an error
-            // This can be fixed by using packet id boundary instead of count for flow control.
-            // This trick will make the client robust against brokers which doesn't ack sequentially
-            // at the cost of throughput. Consider an example with max inflight of 5.
-            // Full inflight queue will look like -> [1, 2, 3, 4, 5].
-            // If 3 is acked instead of 1 first -> [1, 2, 4, 5].
-            // If we flow control at boundary (5), Every ack should be received before rolling pkid
-            // and hence overwrites aren't a problem anymore
-            // Also note that, next_packet_id resets to 1 every time inflight packets are acked
-            o = self.requests_rx.next(), if !inflight_full && !pending => match o {
-                Some(request) => {
-                    let request = self.state.handle_outgoing_packet(request)?;
-                    let outgoing = network.fill(request)?;
-                    // During high load, pull more data from channel to batch more requests.
-                    // Note: Make sure size of total inflight messages isn't greater than
-                    // OS tcp write buffer size to prevent bounded buffer deadlocks
-                    for _ in 0..self.options.max_request_batch {
-                        // Honor inflight limitations during batching
-                        if self.state.inflight >= self.options.inflight { break }
-                        match self.requests_rx.try_recv() {
-                            Ok(r) => {
-                                // handle, send and buffer outgoing packet ids
-                                let request = self.state.handle_outgoing_packet(r)?;
-                                let outgoing = network.fill(request)?;
-                                self.outgoing.push_back(outgoing);
-                            }
-                            Err(_) => break,
-                        };
-
+        // this loop is necessary since self.incoming.pop_front() might return None. In that case,
+        // instead of returning a None event, we try again.
+        loop {
+            select! {
+                // Pull a bunch of packets from network, reply in bunch and yield the first item
+                o = network.readb(&mut self.incoming), if self.incoming.len() == 0 => {
+                    let _ = o?;
+                    for incoming in self.incoming.iter() {
+                        if let Some(outgoing) = self.state.handle_incoming_packet(incoming)? {
+                            network.fill2(outgoing)?;
+                        }
                     }
 
+                    // flush all the acks
                     network.flush().await?;
-                    return Ok((None, Some(outgoing)))
+                    match self.incoming.pop_front() {
+                        Some(i) => return Ok(Event::Incoming(i)),
+                        None => continue
+                    }
+                },
+                // Pull next request from user requests channel.
+                // If condition in the below branch if for flow control. We read next user request
+                // only when max inflight settings are honoured.
+                // Flow control is based on ack count. As long as number of inflight packets in buffer
+                // are less than max_inflight setting, next request will progress. For this
+                // to work correctly, broker should ack in sequence and any sane broker will do so
+                // If it doesn't, this will result in connection drop. Use should decide
+                // E.g If max inflight = 5, requests will be blocked when inflight queue looks like this
+                // [1, 2, 3, 4, 5]. Assume broker acking 2 instead of 1 -> [1, x, 3, 4, 5]. While
+                // rolling pkid, next packet will be written in 1 (which is unacked) and results in
+                // an error
+                // This can be fixed by using packet id boundary instead of count for flow control.
+                // This trick will make the client robust against brokers which doesn't ack sequentially
+                // at the cost of throughput. Consider an example with max inflight of 5.
+                // Full inflight queue will look like -> [1, 2, 3, 4, 5].
+                // If 3 is acked instead of 1 first -> [1, 2, 4, 5].
+                // If we flow control at boundary (5), Every ack should be received before rolling pkid
+                // and hence overwrites aren't a problem anymore
+                // Also note that, next_packet_id resets to 1 every time inflight packets are acked
+                o = self.requests_rx.next(), if !inflight_full && !pending => match o {
+                    Some(request) => {
+                        let request = self.state.handle_outgoing_packet(request)?;
+                        let outgoing = network.fill(request)?;
+                        // During high load, pull more data from channel to batch more requests.
+                        // Note: Make sure size of total inflight messages isn't greater than
+                        // OS tcp write buffer size to prevent bounded buffer deadlocks
+                        for _ in 0..self.options.max_request_batch {
+                            // Honor inflight limitations during batching
+                            if self.state.inflight >= self.options.inflight { break }
+                            match self.requests_rx.try_recv() {
+                                Ok(r) => {
+                                    // handle, send and buffer outgoing packet ids
+                                    let request = self.state.handle_outgoing_packet(r)?;
+                                    let outgoing = network.fill(request)?;
+                                    self.outgoing.push_back(outgoing);
+                                }
+                                Err(_) => break,
+                            };
+
+                        }
+
+                        network.flush().await?;
+                        return Ok(Event::Outgoing(outgoing))
+                    }
+                    None => return Err(ConnectionError::RequestsDone),
+                },
+                // Handle the next pending packet from previous session. Disable
+                // this branch when done with all the pending packets
+                Some(request) = next_pending(throttle, &mut self.pending), if pending => {
+                    let request = self.state.handle_outgoing_packet(request)?;
+                    let outgoing = network.write(request).await?;
+                    return Ok(Event::Outgoing(outgoing));
+                },
+                // We generate pings irrespective of network activity. This keeps the ping logic
+                // simple. We can change this behavior in future if necessary (to prevent extra pings)
+                _ = self.keepalive_timeout.as_mut().unwrap() => {
+                    let timeout = self.keepalive_timeout.as_mut().unwrap();
+                    timeout.reset(Instant::now() + self.options.keep_alive);
+                    let request = self.state.handle_outgoing_packet(Request::PingReq)?;
+                    let outgoing = network.write(request).await?;
+                    return Ok(Event::Outgoing(outgoing));
                 }
-                None => return Err(ConnectionError::RequestsDone),
-            },
-            // Handle the next pending packet from previous session. Disable
-            // this branch when done with all the pending packets
-            Some(request) = next_pending(throttle, &mut self.pending), if pending => {
-                let request = self.state.handle_outgoing_packet(request)?;
-                let outgoing = network.write(request).await?;
-                Ok((None, Some(outgoing)))
-            },
-            // We generate pings irrespective of network activity. This keeps the ping logic
-            // simple. We can change this behavior in future if necessary (to prevent extra pings)
-            _ = self.keepalive_timeout.as_mut().unwrap() => {
-                let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.reset(Instant::now() + self.options.keep_alive);
-                let request = self.state.handle_outgoing_packet(Request::PingReq)?;
-                let outgoing = network.write(request).await?;
-                Ok((None, Some(outgoing)))
-            }
-            // cancellation requests to stop the polling
-            _ = self.cancel_rx.next() => {
-                return Err(ConnectionError::Cancel)
+                // cancellation requests to stop the polling
+                _ = self.cancel_rx.next() => {
+                    return Err(ConnectionError::Cancel);
+                }
             }
         }
     }

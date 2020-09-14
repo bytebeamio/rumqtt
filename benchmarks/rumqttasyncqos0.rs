@@ -1,4 +1,4 @@
-use rumqttc::{self, EventLoop, Incoming, MqttOptions, PublishRaw, QoS, Request};
+use rumqttc::{self, Event, EventLoop, Incoming, MqttOptions, PublishRaw, QoS, Request};
 use std::error::Error;
 use std::time::{Duration, Instant};
 
@@ -37,15 +37,9 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     });
 
     let start = Instant::now();
-    'main: loop {
-        let (notifications, _) = eventloop.poll().await?;
-        for notification in notifications {
-            match notification {
-                Incoming::PingResp => break 'main,
-                _notification => {
-                    continue;
-                }
-            };
+    loop {
+        if let Event::Incoming(Incoming::PingResp) = eventloop.poll().await? {
+            break;
         }
     }
 

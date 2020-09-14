@@ -1,7 +1,7 @@
 use async_channel::Sender;
 use tokio::{task, time};
 
-use rumqttc::{self, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe};
+use rumqttc::{self, Event, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe};
 use std::error::Error;
 use std::time::Duration;
 
@@ -21,8 +21,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     loop {
-        let (incoming, outgoing) = eventloop.poll().await?;
-        println!("Incoming = {:?}, Outgoing = {:?}", incoming, outgoing);
+        match eventloop.poll().await? {
+            Event::Incoming(i) => println!("Incoming = {:?}", i),
+            Event::Outgoing(o) => println!("Outgoing = {:?}", o),
+        }
     }
 }
 
