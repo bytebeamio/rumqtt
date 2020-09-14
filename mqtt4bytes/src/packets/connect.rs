@@ -23,6 +23,17 @@ pub struct Connect {
 }
 
 impl Connect {
+    pub fn new<S: Into<String>>(id: S) -> Connect {
+        Connect {
+            protocol: Protocol::MQTT(4),
+            keep_alive: 10,
+            client_id: id.into(),
+            clean_session: true,
+            last_will: None,
+            login: None
+        }
+    }
+
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
         let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
@@ -56,23 +67,8 @@ impl Connect {
         Ok(connect)
     }
 
-    pub fn new<S: Into<String>>(id: S) -> Connect {
-        Connect {
-            protocol: Protocol::MQTT(4),
-            keep_alive: 10,
-            client_id: id.into(),
-            clean_session: true,
-            last_will: None,
-            login: None
-        }
-    }
-
-    pub fn set_login<S: Into<String>>(&mut self, u: S, p: S) -> &mut Connect {
-        self.login = Some(Login::new(u, p));
-        self
-    }
-
-    pub fn len(&self) -> usize {
+    /// Variable header length
+    fn len(&self) -> usize {
         let mut len = 2 + "MQTT".len() // protocol name
                               + 1  // protocol version
                               + 1  // connect flags
@@ -122,7 +118,7 @@ impl Connect {
 
         // update connect flags
         buffer[flags_index] = connect_flags;
-        Ok(len)
+        Ok(1 + count + len)
     }
 }
 
@@ -200,7 +196,7 @@ pub struct Login {
 }
 
 impl Login {
-    fn new<S: Into<String>>(u: S, p: S) -> Login {
+    pub fn new<S: Into<String>>(u: S, p: S) -> Login {
         Login {
             username: u.into(),
             password: p.into()

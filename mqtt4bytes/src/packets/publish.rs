@@ -29,15 +29,7 @@ impl Publish {
     }
 
     pub fn raw(self) -> Result<PublishRaw, Error> {
-        let pkid = self.pkid;
-        let dup = self.dup;
-        let retain = self.retain;
-        PublishRaw::from_bytes(self.topic, self.qos, self.payload).map(|mut raw| {
-            raw.set_pkid(pkid);
-            raw.set_dup(dup);
-            raw.set_retain(retain);
-            raw
-        })
+        PublishRaw::from_publish(self)
     }
 
     pub fn from_bytes<S: Into<String>>(topic: S, qos: QoS, payload: Bytes) -> Publish {
@@ -49,21 +41,6 @@ impl Publish {
             topic: topic.into(),
             payload,
         }
-    }
-
-    pub fn set_pkid(&mut self, pkid: u16) -> &mut Self {
-        self.pkid = pkid;
-        self
-    }
-
-    pub fn set_retain(&mut self, retain: bool) -> &mut Self {
-        self.retain = retain;
-        self
-    }
-
-    pub fn set_dup(&mut self, dup: bool) -> &mut Self {
-        self.dup = dup;
-        self
     }
 
     pub(crate) fn assemble(fixed_header: FixedHeader, bytes: Bytes) -> Result<Self, Error> {
@@ -98,31 +75,33 @@ impl Publish {
         Ok(publish)
     }
 
-    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
-        let dup = self.dup as u8;
-        let qos = self.qos as u8;
-        let retain = self.retain as u8;
-        payload.put_u8(0b0011_0000 | retain | qos << 1 | dup << 3);
-
-        // for publish, variable header = 2 + topic + packet id (optional) + payload
-        let mut remaining_len = self.topic.len() + 2 + self.payload.len();
-        if self.qos != QoS::AtMostOnce && self.pkid != 0 {
-            remaining_len += 2;
+    pub(crate) fn len(&self) -> usize {
+        let mut len = 2 + self.topic.len();
+        if self.qos != QoS::AtMostOnce {
+            len += 2;
         }
 
-        let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
-        write_mqtt_string(payload, self.topic.as_str());
+        len += self.payload.len();
+        len
+    }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let len = self.len();
+        // reserve for maximum possible fixed header
+        buffer.reserve(5 + len);
+
+        buffer.put_u8(0x30 | (self.retain as u8) | (self.qos as u8) << 1 | (self.dup as u8) << 3);
+        let count = write_remaining_length(buffer, len)?;
+        write_mqtt_string(buffer, self.topic.as_str());
+
         if self.qos != QoS::AtMostOnce {
             let pkid = self.pkid;
-            if pkid == 0 {
-                return Err(Error::PacketIdZero);
-            }
-
-            payload.put_u16(pkid);
+            if pkid == 0 { return Err(Error::PacketIdZero); }
+            buffer.put_u16(pkid);
         }
 
-        payload.extend_from_slice(&self.payload);
-        Ok(1 + remaining_len_bytes + remaining_len)
+        buffer.extend_from_slice(&self.payload);
+        Ok(1 + count + len)
     }
 }
 

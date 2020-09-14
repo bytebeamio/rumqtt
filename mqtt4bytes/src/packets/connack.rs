@@ -1,4 +1,5 @@
-use crate::{Error, FixedHeader};
+use super::*;
+use crate::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in connack
@@ -19,8 +20,6 @@ pub struct ConnAck {
     pub session_present: bool,
     pub code: ConnectReturnCode,
 }
-
-impl ConnAck {}
 
 impl ConnAck {
     pub fn new(code: ConnectReturnCode, session_present: bool) -> ConnAck {
@@ -51,12 +50,22 @@ impl ConnAck {
         Ok(connack)
     }
 
+    /// Length of variable header
+    fn len(&self) -> usize {
+        let len = 1 + 1; // sesssion present + code
+        len
+    }
+
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
-        let session_present = self.session_present as u8;
-        let code = self.code as u8;
-        let o: &[u8] = &[0x20, 0x02, session_present, code];
-        buffer.put_slice(o);
-        Ok(4)
+        // TODO reserve buffer of fixed header in all the packets for perf
+        let len = self.len();
+        buffer.reserve(len);
+        buffer.put_u8(0x20);
+        let count = write_remaining_length(buffer, len)?;
+        buffer.put_u8(self.session_present as u8);
+        buffer.put_u8(self.code as u8);
+
+        Ok(1 + count + len)
     }
 }
 
