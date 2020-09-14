@@ -26,13 +26,13 @@ impl PublishRaw {
         write_mqtt_string(&mut header, &publish.topic);
 
         if publish.qos != QoS::AtMostOnce {
-            header.put_u16(0);
+            header.put_u16(publish.pkid);
         }
 
         Ok(PublishRaw {
             header,
             qos: publish.qos,
-            pkid: 0,
+            pkid: publish.pkid,
             payload: publish.payload,
         })
     }
@@ -68,7 +68,7 @@ impl PublishRaw {
     }
 
     pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
-        if self.pkid == 0 { return Err(Error::PacketIdZero); }
+        if self.qos != QoS::AtMostOnce && self.pkid == 0 { return Err(Error::PacketIdZero); }
 
         let len = self.header.len() + self.payload.len();
         payload.extend_from_slice(&self.header);

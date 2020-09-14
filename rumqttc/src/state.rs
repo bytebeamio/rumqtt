@@ -346,7 +346,7 @@ impl MqttState {
         mut publish: PublishRaw,
     ) -> Result<PublishRaw, StateError> {
         let publish = match publish.pkid {
-            // consider PacketIdentifier(0) and None as uninitialized packets
+            // consider PacketIdentifier(0) as uninitialized packets
             0 => {
                 let pkid = self.next_pkid();
                 publish.set_pkid(pkid);
