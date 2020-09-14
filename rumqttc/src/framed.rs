@@ -58,47 +58,26 @@ impl Network {
         self.max_readb_count = count;
     }
 
-    pub async fn read(&mut self) -> Result<Packet, io::Error> {
-        loop {
-            match mqtt_read(&mut self.read, self.max_incoming_size) {
-                Ok(packet) => return Ok(packet),
-                Err(Error::InsufficientBytes(required)) => self.pending = required,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-            }
-
-            // read more packets until a frame can be created. This functions blocks until a frame
-            // can be created. Use this in a select! branch
-            let mut total_read = 0;
-            loop {
-                let read = self.read_fill().await?;
-                total_read += read;
-                if total_read >= self.pending {
-                    self.pending = 0;
-                    break;
-                }
-            }
-        }
-    }
-
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> Result<(), io::Error> {
+    pub async fn readb(
+        &mut self,
+        incoming: &mut VecDeque<Incoming>,
+    ) -> Result<Incoming, io::Error> {
+        // Ensures that duplicate readb call without emptying `incoming` buffer
+        // doesn't hit network causing indefinite block when there is no network
+        // activity. But this triggers duplicate state handling in case this
+        // function is called before emptying buffered `incoming` causing errors.
+        // This block is left here as fixing errors is easier than fixing blocks.
+        // Note: This might be removed in future
+        // Note: `incoming` is passed by the caller instead of embedding in `self`
+        // to prevent bringing state into `self` (network)
+        if let Some(incoming) = incoming.pop_front() {
+            return Ok(incoming);
+        }
+
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
-                // Connection is explicitly handled by other methods. This read is used after establishing
-                // the link. Ignore connection related packets
-                Ok(Packet::Connect(_)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Not expecting connect",
-                    ))
-                }
-                Ok(Packet::ConnAck(_)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Not expecting connack",
-                    ))
-                }
                 Ok(packet) => {
                     incoming.push_back(packet);
                     if incoming.len() >= self.max_readb_count {
@@ -128,7 +107,7 @@ impl Network {
             }
         }
 
-        Ok(())
+        Ok(incoming.pop_front().unwrap())
     }
 
     /// Fills the read buffer with more bytes
@@ -214,24 +193,6 @@ impl Network {
 
         self.flush().await?;
         Ok(len)
-    }
-
-    pub async fn read_connack(&mut self) -> Result<Incoming, io::Error> {
-        match self.read().await {
-            Ok(Packet::ConnAck(connack)) => {
-                if connack.code == ConnectReturnCode::Accepted {
-                    Ok(Incoming::ConnAck(connack))
-                } else {
-                    let error = format!("Broker rejected connection. Reason = {:?}", connack.code);
-                    Err(io::Error::new(io::ErrorKind::InvalidData, error))
-                }
-            }
-            Ok(packet) => {
-                let error = format!("Expecting connack. Received = {:?}", packet);
-                Err(io::Error::new(io::ErrorKind::InvalidData, error))
-            }
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-        }
     }
 
     pub fn fill(&mut self, request: Request) -> Result<Outgoing, io::Error> {
