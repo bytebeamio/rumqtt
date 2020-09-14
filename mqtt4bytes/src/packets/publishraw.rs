@@ -3,7 +3,9 @@ use crate::*;
 use bytes::{BufMut, BytesMut};
 
 /// Raw publish is used to perform serialization in current
-/// thread rather the eventloop
+/// thread rather the eventloop. Also client's eventloop stores
+/// serialized `PublishRaw` in state to prevent computation while
+/// retrying
 #[derive(Clone, PartialEq)]
 pub struct PublishRaw {
     pub header: BytesMut,
@@ -15,25 +17,36 @@ pub struct PublishRaw {
 
 impl PublishRaw {
     pub fn from_publish(publish: Publish) -> Result<PublishRaw, Error> {
-        let mut header = BytesMut::with_capacity(5);
-        let len = publish.len();
-
+        let len = PublishRaw::len(&publish.topic, publish.qos, &publish.payload);
+        // FIX: allocating only len - payload.len() is resulting in perf degrade
+        let mut header = BytesMut::with_capacity(len);
         header.put_u8(0x30 | (publish.retain as u8) | (publish.qos as u8) << 1 | (publish.dup as u8) << 3);
+
         write_remaining_length(&mut header, len)?;
         write_mqtt_string(&mut header, &publish.topic);
 
         if publish.qos != QoS::AtMostOnce {
-            header.put_u16(publish.pkid);
+            header.put_u16(0);
         }
 
         Ok(PublishRaw {
             header,
             qos: publish.qos,
-            pkid: publish.pkid,
+            pkid: 0,
             payload: publish.payload,
         })
     }
 
+    pub(crate) fn len(topic: &str, qos: QoS, payload: &Bytes) -> usize {
+        let mut len = 2 + topic.len();
+        if qos != QoS::AtMostOnce {
+            len += 2;
+        }
+
+        len += payload.len();
+        len
+    }
+    
     pub fn set_pkid(&mut self, pkid: u16) -> &mut Self {
         if self.qos != QoS::AtMostOnce {
             self.pkid = pkid;
