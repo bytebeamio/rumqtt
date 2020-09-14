@@ -96,7 +96,7 @@ fn parse_fixed_header(stream: &[u8]) -> Result<(u8, usize, usize), Error> {
     }
 
     if !done {
-        return Err(Error::InsufficientBytes(stream_len + 1));
+        return Err(Error::InsufficientBytes(1));
     }
 
     Ok((byte1, remaining_len_len, remaining_len))

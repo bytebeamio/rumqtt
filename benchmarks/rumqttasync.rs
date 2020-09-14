@@ -1,4 +1,4 @@
-use rumqttc::{self, Event, EventLoop, Incoming, MqttOptions, PublishRaw, QoS, Request};
+use rumqttc::*;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
@@ -62,7 +62,7 @@ async fn requests(id: &str, payloads: Vec<Vec<u8>>, requests_tx: Sender<Request>
     // let subscription = rumqttc::Subscribe::new(&topic, QoS::AtLeastOnce);
     // let _ = requests_tx.send(Request::Subscribe(subscription)).await;
     for payload in payloads.into_iter() {
-        let publish = PublishRaw::new(&topic, QoS::AtLeastOnce, payload).unwrap();
+        let publish = Publish::new(&topic, QoS::AtLeastOnce, payload).raw().unwrap();
         let publish = Request::PublishRaw(publish);
         if let Err(_) = requests_tx.send(publish).await {
             break;

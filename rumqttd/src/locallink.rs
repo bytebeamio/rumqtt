@@ -77,7 +77,7 @@ impl LinkTx {
         V: Into<Vec<u8>>,
     {
         let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
-        publish.set_retain(retain);
+        publish.retain = retain;
         let message = RouterInMessage::Publish(publish);
         self.router_tx.send((self.id, message)).await?;
         Ok(())

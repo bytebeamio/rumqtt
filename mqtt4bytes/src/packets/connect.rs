@@ -18,13 +18,22 @@ pub struct Connect {
     pub clean_session: bool,
     /// Will that broker needs to publish when the client disconnects
     pub last_will: Option<LastWill>,
-    /// Username of the client
-    pub username: Option<String>,
-    /// Password of the client
-    pub password: Option<String>,
+    /// Username and password
+    pub login: Option<Login>,
 }
 
 impl Connect {
+    pub fn new<S: Into<String>>(id: S) -> Connect {
+        Connect {
+            protocol: Protocol::MQTT(4),
+            keep_alive: 10,
+            client_id: id.into(),
+            clean_session: true,
+            last_will: None,
+            login: None
+        }
+    }
+
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
         let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
@@ -40,11 +49,11 @@ impl Connect {
         };
 
         let connect_flags = bytes.get_u8();
-        let keep_alive = bytes.get_u16();
         let clean_session = (connect_flags & 0b10) != 0;
+        let keep_alive = bytes.get_u16();
         let client_id = read_mqtt_string(&mut bytes)?;
-        let last_will = extract_last_will(connect_flags, &mut bytes)?;
-        let (username, password) = extract_username_password(connect_flags, &mut bytes)?;
+        let last_will = LastWill::extract(connect_flags, &mut bytes)?;
+        let login = Login::extract(connect_flags, &mut bytes)?;
 
         let connect = Connect {
             protocol,
@@ -52,51 +61,30 @@ impl Connect {
             client_id,
             clean_session,
             last_will,
-            username,
-            password,
+            login
         };
 
         Ok(connect)
     }
 
-    pub fn new<S: Into<String>>(id: S) -> Connect {
-        Connect {
-            protocol: Protocol::MQTT(4),
-            keep_alive: 10,
-            client_id: id.into(),
-            clean_session: true,
-            last_will: None,
-            username: None,
-            password: None,
-        }
-    }
+    /// Variable header length
+    fn len(&self) -> usize {
+        let mut len = 2 + "MQTT".len() // protocol name
+                              + 1  // protocol version
+                              + 1  // connect flags
+                              + 2; // keep alive
 
-    pub fn set_username<S: Into<String>>(&mut self, u: S) -> &mut Connect {
-        self.username = Some(u.into());
-        self
-    }
 
-    pub fn set_password<S: Into<String>>(&mut self, p: S) -> &mut Connect {
-        self.password = Some(p.into());
-        self
-    }
+        len += 2 + self.client_id.len();
 
-    pub fn len(&self) -> usize {
-        let mut len = 8 + "MQTT".len() + self.client_id.len();
-
-        // lastwill len
-        if let Some(ref last_will) = self.last_will {
-            len += 4 + last_will.topic.len() + last_will.message.len();
+        // last will len
+        if let Some(last_will) = &self.last_will {
+            len += last_will.len();
         }
 
-        // username len
-        if let Some(ref username) = self.username {
-            len += 2 + username.len();
-        }
-
-        // password len
-        if let Some(ref password) = self.password {
-            len += 2 + password.len();
+        // username and password len
+        if let Some(login) = &self.login {
+            len += login.len();
         }
 
         len
@@ -106,46 +94,31 @@ impl Connect {
         let len = self.len();
         buffer.reserve(len);
         buffer.put_u8(0b0001_0000);
-        write_remaining_length(buffer, len)?;
+        let count = write_remaining_length(buffer, len)?;
         write_mqtt_string(buffer, "MQTT");
         buffer.put_u8(0x04);
+        let flags_index = 1 + count + 2 + 4 + 1;
 
         let mut connect_flags = 0;
         if self.clean_session {
             connect_flags |= 0x02;
         }
 
-        match &self.last_will {
-            Some(w) if w.retain => connect_flags |= 0x04 | (w.qos as u8) << 3 | 0x20,
-            Some(w) => connect_flags |= 0x04 | (w.qos as u8) << 3,
-            None => (),
-        }
-
-        if self.password.is_some() {
-            connect_flags |= 0x40;
-        }
-
-        if self.username.is_some() {
-            connect_flags |= 0x80;
-        }
-
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
         write_mqtt_string(buffer, &self.client_id);
 
-        if let Some(ref last_will) = self.last_will {
-            write_mqtt_string(buffer, &last_will.topic);
-            write_mqtt_bytes(buffer, &last_will.message);
+        if let Some(last_will) = &self.last_will {
+            connect_flags |= last_will.write(buffer)?;
         }
 
-        if let Some(ref username) = self.username {
-            write_mqtt_string(buffer, username);
-        }
-        if let Some(ref password) = self.password {
-            write_mqtt_string(buffer, password);
+        if let Some(login) = &self.login {
+            connect_flags |= login.write(buffer);
         }
 
-        Ok(len)
+        // update connect flags
+        buffer[flags_index] = connect_flags;
+        Ok(1 + count + len)
     }
 }
 
@@ -172,45 +145,111 @@ impl LastWill {
             retain,
         }
     }
+
+    fn len(&self) -> usize {
+        let mut len = 0;
+        len += 2 + self.topic.len() + 2 + self.message.len();
+        len
+    }
+
+    fn extract(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
+        let last_will = match connect_flags & 0b100 {
+            0 if (connect_flags & 0b0011_1000) != 0 => {
+                return Err(Error::IncorrectPacketFormat);
+            }
+            0 => None,
+            _ => {
+                let will_topic = read_mqtt_string(&mut bytes)?;
+                let will_message = read_mqtt_bytes(&mut bytes)?;
+                let will_qos = qos((connect_flags & 0b11000) >> 3)?;
+                Some(LastWill {
+                    topic: will_topic,
+                    message: will_message,
+                    qos: will_qos,
+                    retain: (connect_flags & 0b0010_0000) != 0,
+                })
+            }
+        };
+
+        Ok(last_will)
+    }
+
+    fn write(&self, buffer: &mut BytesMut) -> Result<u8, Error> {
+        let mut connect_flags = 0;
+
+        connect_flags |= 0x04 | (self.qos as u8) << 3;
+        if self.retain {
+            connect_flags |= 0x20;
+        }
+
+        write_mqtt_string(buffer, &self.topic);
+        write_mqtt_bytes(buffer, &self.message);
+        Ok(connect_flags)
+    }
 }
 
-fn extract_last_will(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
-    let last_will = match connect_flags & 0b100 {
-        0 if (connect_flags & 0b0011_1000) != 0 => {
-            return Err(Error::IncorrectPacketFormat);
-        }
-        0 => None,
-        _ => {
-            let will_topic = read_mqtt_string(&mut bytes)?;
-            let will_message = read_mqtt_bytes(&mut bytes)?;
-            let will_qos = qos((connect_flags & 0b11000) >> 3)?;
-            Some(LastWill {
-                topic: will_topic,
-                message: will_message,
-                qos: will_qos,
-                retain: (connect_flags & 0b0010_0000) != 0,
-            })
-        }
-    };
 
-    Ok(last_will)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Login {
+    username: String,
+    password: String,
 }
 
-fn extract_username_password(
-    connect_flags: u8,
-    mut bytes: &mut Bytes,
-) -> Result<(Option<String>, Option<String>), Error> {
-    let username = match connect_flags & 0b1000_0000 {
-        0 => None,
-        _ => Some(read_mqtt_string(&mut bytes)?),
-    };
+impl Login {
+    pub fn new<S: Into<String>>(u: S, p: S) -> Login {
+        Login {
+            username: u.into(),
+            password: p.into()
+        }
 
-    let password = match connect_flags & 0b0100_0000 {
-        0 => None,
-        _ => Some(read_mqtt_string(&mut bytes)?),
-    };
+    }
 
-    Ok((username, password))
+    fn extract(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<Login>, Error> {
+        let username = match connect_flags & 0b1000_0000 {
+            0 => String::new(),
+            _ => read_mqtt_string(&mut bytes)?,
+        };
+
+        let password = match connect_flags & 0b0100_0000 {
+            0 => String::new(),
+            _ => read_mqtt_string(&mut bytes)?,
+        };
+
+        if username.is_empty() && password.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Login { username, password }))
+        }
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 0;
+
+        if !self.username.is_empty() {
+            len += 2 + self.username.len();
+        }
+
+        if !self.password.is_empty() {
+            len += 2 + self.password.len();
+        }
+
+        len
+    }
+
+    fn write(&self, buffer: &mut BytesMut) -> u8 {
+        let mut connect_flags = 0;
+        if !self.username.is_empty() {
+            connect_flags |= 0x80;
+            write_mqtt_string(buffer, &self.username);
+        }
+
+        if !self.password.is_empty() {
+            connect_flags |= 0x40;
+            write_mqtt_string(buffer, &self.password);
+        }
+
+        connect_flags
+    }
 }
 
 impl fmt::Debug for Connect {
@@ -297,8 +336,7 @@ mod test {
                 client_id: "test".to_owned(),
                 clean_session: true,
                 last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false,)),
-                username: Some("rumq".to_owned()),
-                password: Some("mq".to_owned())
+                login: Some(Login::new("rumq", "mq"))
             }
         );
     }
@@ -341,8 +379,7 @@ mod test {
             client_id: "test".to_owned(),
             clean_session: true,
             last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
-            username: Some("rust".to_owned()),
-            password: Some("mq".to_owned()),
+            login: Some(Login::new("rust", "mq"))
         };
 
         let mut buf = BytesMut::new();

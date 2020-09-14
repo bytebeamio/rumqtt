@@ -88,7 +88,6 @@ mod tls;
 pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
-#[cfg(feature = "passthrough")]
 pub use framed::Network;
 pub use mqtt4bytes::*;
 pub use state::{MqttState, StateError};

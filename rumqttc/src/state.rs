@@ -165,12 +165,7 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, publish: Publish) -> Result<Request, StateError> {
-        debug!(
-            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
-            publish.topic,
-            publish.pkid,
-            publish.payload.len()
-        );
+        debug!("Publish. Topc = {}", publish.topic);
 
         let publish = match publish.raw() {
             Ok(publish) => publish,
@@ -181,6 +176,12 @@ impl MqttState {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
         };
+
+        debug!(
+            "Publish. Pkid = {:?}, Payload Size = {:?}",
+            publish.pkid,
+            publish.payload.len()
+        );
 
         Ok(Request::PublishRaw(publish))
     }
@@ -346,7 +347,7 @@ impl MqttState {
         mut publish: PublishRaw,
     ) -> Result<PublishRaw, StateError> {
         let publish = match publish.pkid {
-            // consider PacketIdentifier(0) and None as uninitialized packets
+            // consider PacketIdentifier(0) as uninitialized packets
             0 => {
                 let pkid = self.next_pkid();
                 publish.set_pkid(pkid);

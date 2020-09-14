@@ -1,64 +1,56 @@
 use super::*;
 use crate::*;
-use alloc::string::String;
-use alloc::vec::Vec;
 use bytes::{BufMut, BytesMut};
 
+/// Raw publish is used to perform serialization in current
+/// thread rather the eventloop. Also client's eventloop stores
+/// serialized `PublishRaw` in state to prevent computation while
+/// retrying
 #[derive(Clone, PartialEq)]
 pub struct PublishRaw {
     pub header: BytesMut,
+    pub payload: Bytes,
+    /// Packet properties which are part of the header
     pub qos: QoS,
     pub pkid: u16,
-    pub payload: Bytes,
 }
 
 impl PublishRaw {
-    pub fn new<S: Into<String>, P: Into<Vec<u8>>>(
-        topic: S,
-        qos: QoS,
-        payload: P,
-    ) -> Result<PublishRaw, Error> {
-        PublishRaw::from_bytes(topic, qos, Bytes::from(payload.into()))
-    }
+    pub fn from_publish(publish: Publish) -> Result<PublishRaw, Error> {
+        let len = PublishRaw::len(&publish.topic, publish.qos, &publish.payload);
+        // FIX: allocating only len - payload.len() is resulting in perf degrade
+        let mut header = BytesMut::with_capacity(len);
+        header.put_u8(0x30 | (publish.retain as u8) | (publish.qos as u8) << 1 | (publish.dup as u8) << 3);
 
-    pub fn from_bytes<S: Into<String>>(
-        topic: S,
-        qos: QoS,
-        payload: Bytes,
-    ) -> Result<PublishRaw, Error> {
-        let dup = false as u8;
-        let qos_raw = qos as u8;
-        let retain = false as u8;
-        let topic = topic.into();
+        write_remaining_length(&mut header, len)?;
+        write_mqtt_string(&mut header, &publish.topic);
 
-        // for publish, variable header = 2 + topic + packet id (optional) + payload
-        let mut remaining_len = topic.len() + 2 + payload.len();
-        if qos != QoS::AtMostOnce {
-            remaining_len += 2;
-        }
-
-        let mut header = BytesMut::with_capacity(4 + remaining_len);
-        header.put_u8(0b0011_0000 | retain | qos_raw << 1 | dup << 3);
-        write_remaining_length(&mut header, remaining_len)?;
-
-        write_mqtt_string(&mut header, topic.as_str());
-        if qos != QoS::AtMostOnce {
-            header.put_u16(0);
+        if publish.qos != QoS::AtMostOnce {
+            header.put_u16(publish.pkid);
         }
 
         Ok(PublishRaw {
             header,
-            qos,
-            pkid: 0,
-            payload: Bytes::from(payload),
+            qos: publish.qos,
+            pkid: publish.pkid,
+            payload: publish.payload,
         })
     }
 
+    pub(crate) fn len(topic: &str, qos: QoS, payload: &Bytes) -> usize {
+        let mut len = 2 + topic.len();
+        if qos != QoS::AtMostOnce {
+            len += 2;
+        }
+
+        len += payload.len();
+        len
+    }
+    
     pub fn set_pkid(&mut self, pkid: u16) -> &mut Self {
         if self.qos != QoS::AtMostOnce {
             self.pkid = pkid;
-            let len = self.header.len();
-            self.header.truncate(len - 2);
+            self.header.truncate(self.header.len() - 2);
             self.header.put_u16(pkid);
         }
 
@@ -76,6 +68,8 @@ impl PublishRaw {
     }
 
     pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
+        if self.qos != QoS::AtMostOnce && self.pkid == 0 { return Err(Error::PacketIdZero); }
+
         let len = self.header.len() + self.payload.len();
         payload.extend_from_slice(&self.header);
         payload.extend_from_slice(&self.payload);
@@ -96,17 +90,19 @@ mod test {
 
     #[test]
     fn write_packet_publish_at_least_once_works() {
-        let mut publish =
-            PublishRaw::new("a/b", QoS::AtLeastOnce, vec![0xF1, 0xF2, 0xF3, 0xF4]).unwrap();
+        let publish = Publish::new("a/b", QoS::AtLeastOnce, vec![0xF1, 0xF2, 0xF3, 0xF4]);
+        let mut publish = publish.raw().unwrap();
         publish.set_pkid(10);
+        publish.set_retain(true);
+        publish.set_dup(true);
 
         let mut buf = BytesMut::new();
         publish.write(&mut buf).unwrap();
 
         assert_eq!(
-            buf,
+            &buf[..],
             vec![
-                0b0011_0010,
+                0b0011_1011,
                 11,
                 0x00,
                 0x03,

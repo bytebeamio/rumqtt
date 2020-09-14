@@ -142,12 +142,16 @@ impl EventLoop {
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
 
-        // return buffered outgoing packets first
+        // Return buffered outgoing notification first so that, if incoming
+        // packets 1, 2, 3 are acked in bulk before reading new incoming packet,
+        // we return buffered outgoing notifications of sent packets first before
+        // new incoming notification. This ensures that notification order is in
+        // sync with the order in which select is doing things
         if let Some(outgoing) = self.outgoing.pop_front() {
             return Ok(Event::Outgoing(outgoing));
         }
 
-        // return buffered incoming packets
+        // Return buffered incoming packets before hitting network again
         if let Some(incoming) = self.incoming.pop_front() {
             return Ok(Event::Incoming(incoming));
         }
@@ -157,20 +161,24 @@ impl EventLoop {
         loop {
             select! {
                 // Pull a bunch of packets from network, reply in bunch and yield the first item
-                o = network.readb(&mut self.incoming), if self.incoming.len() == 0 => {
-                    let _ = o?;
+                o = network.readb(&mut self.incoming) => {
+                    let incoming = o?;
+
+                    // handle 1st incoming packet
+                    if let Some(outgoing) = self.state.handle_incoming_packet(&incoming)? {
+                        network.fill2(outgoing)?;
+                    }
+
+                    // be eager to handle more incoming packets
                     for incoming in self.incoming.iter() {
                         if let Some(outgoing) = self.state.handle_incoming_packet(incoming)? {
                             network.fill2(outgoing)?;
                         }
                     }
 
-                    // flush all the acks
+                    // flush all the acks and return first incoming packet
                     network.flush().await?;
-                    match self.incoming.pop_front() {
-                        Some(i) => return Ok(Event::Incoming(i)),
-                        None => continue
-                    }
+                    return Ok(Event::Incoming(incoming))
                 },
                 // Pull next request from user requests channel.
                 // If condition in the below branch if for flow control. We read next user request
@@ -319,7 +327,8 @@ impl EventLoop {
         connect.last_will = last_will;
 
         if let Some((username, password)) = self.options.credentials() {
-            connect.set_username(username).set_password(password);
+            let login = Login::new(username, password);
+            connect.login = Some(login);
         }
 
         // mqtt connection with timeout
@@ -333,11 +342,25 @@ impl EventLoop {
         .await??;
 
         // wait for 'timeout' time to validate connack
+        let incoming = &mut self.incoming;
         let packet = time::timeout(
             Duration::from_secs(self.options.connection_timeout()),
             async {
-                let packet = network.read_connack().await?;
-                Ok::<_, ConnectionError>(packet)
+                let packet = match network.readb(incoming).await? {
+                    Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Accepted => {
+                        Packet::ConnAck(connack)
+                    }
+                    Incoming::ConnAck(connack) => {
+                        let error = format!("Broker rejected. Reason = {:?}", connack.code);
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                    }
+                    packet => {
+                        let error = format!("Expecting connack. Received = {:?}", packet);
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                    }
+                };
+
+                Ok::<_, io::Error>(packet)
             },
         )
         .await??;
@@ -737,6 +760,7 @@ mod broker {
     use crate::framed::Network;
     use crate::Request;
     use mqtt4bytes::*;
+    use std::collections::VecDeque;
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::select;
@@ -745,6 +769,7 @@ mod broker {
 
     pub struct Broker {
         pub(crate) framed: Network,
+        pub(crate) incoming: VecDeque<Packet>,
     }
 
     impl Broker {
@@ -754,8 +779,9 @@ mod broker {
             let mut listener = TcpListener::bind(&addr).await.unwrap();
             let (stream, _) = listener.accept().await.unwrap();
             let mut framed = Network::new(stream, 10 * 1024);
+            let mut incoming = VecDeque::new();
 
-            let packet = framed.read().await.unwrap();
+            let packet = framed.readb(&mut incoming).await.unwrap();
             if let Packet::Connect(_) = packet {
                 if send_connack {
                     let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
@@ -765,12 +791,14 @@ mod broker {
                 panic!("Expecting connect packet");
             }
 
-            Broker { framed }
+            Broker { framed, incoming }
         }
 
         // Reads a publish packet from the stream with 2 second timeout
         pub async fn read_publish(&mut self) -> Option<Publish> {
-            let packet = time::timeout(Duration::from_secs(2), async { self.framed.read().await });
+            let packet = time::timeout(Duration::from_secs(2), async {
+                self.framed.readb(&mut self.incoming).await
+            });
 
             match packet.await {
                 Ok(Ok(Packet::Publish(publish))) => Some(publish),
@@ -784,7 +812,7 @@ mod broker {
         /// Reads next packet from the stream
         pub async fn read_packet(&mut self) -> Packet {
             let packet = time::timeout(Duration::from_secs(30), async {
-                let p = self.framed.read().await;
+                let p = self.framed.readb(&mut self.incoming).await;
                 // println!("Broker read = {:?}", p);
                 p.unwrap()
             });
@@ -794,7 +822,9 @@ mod broker {
         }
 
         pub async fn read_packet_and_respond(&mut self) -> Packet {
-            let packet = time::timeout(Duration::from_secs(30), async { self.framed.read().await });
+            let packet = time::timeout(Duration::from_secs(30), async {
+                self.framed.readb(&mut self.incoming).await
+            });
             let packet = packet.await.unwrap().unwrap();
 
             match packet.clone() {
@@ -813,7 +843,7 @@ mod broker {
         /// Reads next packet from the stream
         pub async fn blackhole(&mut self) -> Packet {
             loop {
-                let _packet = self.framed.read().await.unwrap();
+                let _packet = self.framed.readb(&mut self.incoming).await.unwrap();
             }
         }
 
@@ -835,7 +865,7 @@ mod broker {
                         let packet = Request::Publish(publish);
                         self.framed.write(packet).await.unwrap();
                     }
-                    packet = self.framed.read() => match packet.unwrap() {
+                    packet = self.framed.readb(&mut self.incoming) => match packet.unwrap() {
                         Packet::PingReq => {
                             self.framed.write(Request::PingResp).await.unwrap();
                         }

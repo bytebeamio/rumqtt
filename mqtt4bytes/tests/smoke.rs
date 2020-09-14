@@ -45,7 +45,7 @@ pub fn publishes(size: usize, count: usize) -> BytesMut {
     for i in 0..count {
         let payload = vec![i as u8; size];
         let mut packet = Publish::new("hello/mqtt/topic/bytes", QoS::AtLeastOnce, payload);
-        packet.set_pkid((i % 65000) as u16 + 1);
+        packet.pkid = (i % 65000) as u16 + 1;
         packet.write(&mut stream).unwrap();
     }
 
