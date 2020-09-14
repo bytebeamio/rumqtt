@@ -319,7 +319,8 @@ impl EventLoop {
         connect.last_will = last_will;
 
         if let Some((username, password)) = self.options.credentials() {
-            connect.set_username(username).set_password(password);
+            let login = Login::new(username, password);
+            connect.login = Some(login);
         }
 
         // mqtt connection with timeout
@@ -375,7 +376,8 @@ mod test {
             let topic = "hello/world".to_owned();
             let payload = vec![i, 1, 2, 3];
 
-            let publish = Publish::new(topic, qos, payload);
+            let mut publish = Publish::new(topic, qos, payload);
+            publish.pkid = i as u16;
             let request = Request::Publish(publish);
             let _ = requests_tx.send(request).await;
             time::delay_for(Duration::from_secs(delay)).await;

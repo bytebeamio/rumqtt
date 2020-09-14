@@ -70,7 +70,7 @@ impl Client {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = match PublishRaw::new(topic, qos, payload) {
+        let mut publish = match Publish::new(topic, qos, payload).raw() {
             Ok(publish) => publish,
             Err(e) => return Err(ClientError::Mqtt4(e)),
         };

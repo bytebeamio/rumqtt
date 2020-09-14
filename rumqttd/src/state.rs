@@ -53,7 +53,7 @@ impl State {
 
     pub fn handle_router_data(&mut self, mut publish: Publish) -> Result<Publish, Error> {
         let pkid = self.next_pkid();
-        publish.set_pkid(pkid);
+        publish.pkid = pkid;
 
         // if there is an existing publish at this pkid, this implies that broker hasn't acked this
         // packet yet. Make this an error in future. This error is possible only when broker isn't
