@@ -13,30 +13,6 @@ pub struct Subscribe {
 }
 
 impl Subscribe {
-    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
-        let variable_header_index = fixed_header.fixed_len;
-        bytes.advance(variable_header_index);
-        let pkid = bytes.get_u16();
-
-        // variable header size = 2 (packet identifier)
-        let mut payload_bytes = fixed_header.remaining_len - 2;
-        let mut topics = Vec::new();
-
-        while payload_bytes > 0 {
-            let topic_filter = read_mqtt_string(&mut bytes)?;
-            let requested_qos = bytes.get_u8();
-            payload_bytes -= topic_filter.len() + 3;
-            topics.push(SubscribeTopic {
-                topic_path: topic_filter,
-                qos: qos(requested_qos)?,
-            });
-        }
-
-        let subscribe = Subscribe { pkid, topics };
-
-        Ok(subscribe)
-    }
-
     pub fn new<S: Into<String>>(topic: S, qos: QoS) -> Subscribe {
         let topic = SubscribeTopic {
             topic_path: topic.into(),
@@ -64,20 +40,51 @@ impl Subscribe {
         self
     }
 
-    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
-        let remaining_len = 2 + self
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+        let variable_header_index = fixed_header.fixed_len;
+        bytes.advance(variable_header_index);
+        let pkid = bytes.get_u16();
+
+        // variable header size = 2 (packet identifier)
+        let mut payload_bytes = fixed_header.remaining_len - 2;
+        let mut topics = Vec::new();
+
+        while payload_bytes > 0 {
+            let topic_filter = read_mqtt_string(&mut bytes)?;
+            let requested_qos = bytes.get_u8();
+            payload_bytes -= topic_filter.len() + 3;
+            topics.push(SubscribeTopic {
+                topic_path: topic_filter,
+                qos: qos(requested_qos)?,
+            });
+        }
+
+        let subscribe = Subscribe { pkid, topics };
+
+        Ok(subscribe)
+    }
+
+    fn len(&self) -> usize {
+        let len = 2 + self
             .topics
             .iter()
             .fold(0, |s, ref t| s + t.topic_path.len() + 3);
-        payload.put_u8(0x82);
-        let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
-        payload.put_u16(self.pkid);
+
+        len
+    }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let len = self.len();
+        buffer.reserve(len);
+        buffer.put_u8(0x82);
+        let count = write_remaining_length(buffer, len)?;
+        buffer.put_u16(self.pkid);
         for topic in self.topics.iter() {
-            write_mqtt_string(payload, topic.topic_path.as_str());
-            payload.put_u8(topic.qos as u8);
+            write_mqtt_string(buffer, topic.topic_path.as_str());
+            buffer.put_u8(topic.qos as u8);
         }
 
-        Ok(1 + remaining_len_bytes + remaining_len)
+        Ok(1 + count + len)
     }
 }
 
