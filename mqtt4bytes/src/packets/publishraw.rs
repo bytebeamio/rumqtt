@@ -79,7 +79,7 @@ impl PublishRaw {
 
 impl fmt::Debug for PublishRaw {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "raw publish")
+        write!(f, "Qos = {:?}, Pkid = {}, Payload Size = {}", self.qos, self.pkid, self.payload.len())
     }
 }
 

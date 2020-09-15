@@ -35,7 +35,7 @@ pub enum Error {
 }
 
 /// Encapsulates all MQTT packet types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Packet {
     Connect(Connect),
     ConnAck(ConnAck),
