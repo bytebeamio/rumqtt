@@ -1,2 +1,0 @@
-    Finished release [optimized] target(s) in 0.07s
-     Running `/home/tekjar/Workspace/rumqtt/target/release/rumqttd`

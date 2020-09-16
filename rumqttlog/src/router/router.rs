@@ -201,7 +201,7 @@ impl Router {
     /// Handles new incoming data on a topic
     fn handle_connection_data(&mut self, id: ConnectionId, data: Vec<Packet>) {
         trace!(
-            "{:11} {:14} Id = {}, Count = {}",
+            "{:11} {:14} Id = {} Count = {}",
             "data",
             "incoming",
             id,
@@ -227,7 +227,7 @@ impl Router {
         }
 
         trace!(
-            "{:11} {:14} Id = {}, Count = {}, Offset = {:?}",
+            "{:11} {:14} Id = {} Count = {}, Offset = {:?}",
             "data",
             "committed",
             id,
@@ -327,7 +327,7 @@ impl Router {
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
         trace!(
-            "{:11} {:14} Id = {}, Count = {}",
+            "{:11} {:14} Id = {} Count = {}",
             "data",
             "replicacommit",
             id,
@@ -468,7 +468,7 @@ impl Router {
 
         let reply = AcksReply::new(acks);
         trace!(
-            "{:11} {:14} Id = {}, Count = {}",
+            "{:11} {:14} Id = {} Count = {}",
             "acks",
             "response",
             id,
@@ -548,12 +548,13 @@ impl Router {
             };
 
             let reply = TopicsReply::new(offset + topics.len(), topics);
+
             trace!(
-                "{:11} {:14} Id = {}, Topics = {:?}",
+                "{:11} {:14} Id = {}, Count = {}",
                 "topics",
                 "notification",
                 link_id,
-                reply.topics
+                reply.topics.len()
             );
             self.connections[link_id]
                 .as_mut()
@@ -676,7 +677,7 @@ impl Router {
 
         let topics = subscriptions.topics();
         match topics {
-            Some(topics) => Some(TopicsReply::new(offset + topics.len(), topics)),
+            Some(topics) => Some(TopicsReply::new(offset + 1, topics)),
             None => None,
         }
     }
