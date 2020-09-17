@@ -43,8 +43,7 @@ impl Publish {
         }
     }
 
-    pub(crate) fn assemble(fixed_header: FixedHeader, bytes: Bytes) -> Result<Self, Error> {
-        let mut payload = bytes.clone();
+    pub(crate) fn assemble(fixed_header: FixedHeader, mut payload: Bytes) -> Result<Self, Error> {
         let qos = qos((fixed_header.byte1 & 0b0110) >> 1)?;
         let dup = (fixed_header.byte1 & 0b1000) != 0;
         let retain = (fixed_header.byte1 & 0b0001) != 0;
