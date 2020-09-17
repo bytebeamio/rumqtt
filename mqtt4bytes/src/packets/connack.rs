@@ -52,7 +52,7 @@ impl ConnAck {
 
     /// Length of variable header
     fn len(&self) -> usize {
-        let len = 1 + 1; // sesssion present + code
+        let len = 1 + 1; // session present + code
         len
     }
 
