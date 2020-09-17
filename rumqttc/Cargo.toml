@@ -13,7 +13,7 @@ edition = "2018"
 tokio = { version = "0.2", features = ["full"] }
 bytes = "0.5"
 webpki = "0.21"
-tokio-rustls = "0.13"
+tokio-rustls = "0.14"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.1"}
 async-channel = "1.4"
 blocking = "0.4"

@@ -52,8 +52,8 @@ impl ConnAck {
 
     /// Length of variable header
     fn len(&self) -> usize {
-        let len = 1 + 1; // sesssion present + code
-        len
+        // session present + code
+        1 + 1
     }
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {

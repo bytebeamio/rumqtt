@@ -155,19 +155,19 @@ pub enum Key {
 
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
-        return Request::Publish(publish);
+        Request::Publish(publish)
     }
 }
 
 impl From<Subscribe> for Request {
     fn from(subscribe: Subscribe) -> Request {
-        return Request::Subscribe(subscribe);
+        Request::Subscribe(subscribe)
     }
 }
 
 impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
-        return Request::Unsubscribe(unsubscribe);
+        Request::Unsubscribe(unsubscribe)
     }
 }
 
