@@ -175,6 +175,7 @@ impl Router {
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
         info!("Cleaning ID [{}] = {:?} from router", disconnect.id, id);
+
         if mem::replace(&mut self.connections[id], None).is_none() {
             warn!("Weird, removing a non existent connection")
         }
@@ -183,19 +184,16 @@ impl Router {
             warn!("Weird, removing a non existent watermark")
         }
 
+        if mem::replace(&mut self.subscriptions[id], None).is_none() {
+            warn!("Weird, removing a non existent subscription")
+        }
+
         // FIXME iterates through all the topics and all the (pending) requests remove the request
         for waiters in self.data_waiters.values_mut() {
             if let Some(index) = waiters.iter().position(|x| x.0 == id) {
                 waiters.swap_remove(index);
             }
         }
-
-        // FIXME: Maintain topic to connections map to clean ack waiters in subscriptions
-        // for waiters in self.ack_waiters.values_mut() {
-        //     if let Some(index) = waiters.iter().position(|x| x.0 == id) {
-        //         waiters.swap_remove(index);
-        //     }
-        // }
 
         if let Some(index) = self.topics_waiters.iter().position(|x| x.0 == id) {
             self.topics_waiters.swap_remove_back(index);
@@ -378,13 +376,13 @@ impl Router {
     /// Replies connection with existing topics that are matched against new
     /// subscription.
     fn handle_subscription_request(&mut self, id: ConnectionId, _request: SubscriptionRequest) {
-        trace!("{:11} {:14} Id = {}", "subscription", "request", id);
+        trace!("{:11} {:14} Id = {}", "subscr", "request", id);
         let subscription = self.subscriptions[id].as_mut().unwrap();
         let topics = match subscription.take_topics() {
             Some(topics) => topics,
             None => {
-                trace!("{:11} {:14} Id = {}", "subscription", "register", id);
-                subscription.register_notification();
+                trace!("{:11} {:14} Id = {}", "subscr", "register", id);
+                subscription.register_pending_subscription_request();
                 return;
             }
         };
@@ -596,14 +594,14 @@ impl Router {
     fn fresh_subscription_notification(&mut self, id: ConnectionId) {
         let subscription = self.subscriptions[id].as_mut().unwrap();
 
-        if !subscription.notification_registration {
+        if !subscription.pending_subscription_request() {
             return;
         }
 
         let topics = match subscription.take_topics() {
             Some(topics) => topics,
             None => {
-                subscription.register_notification();
+                subscription.register_pending_subscription_request();
                 return;
             }
         };
@@ -715,13 +713,8 @@ impl Router {
             None => return None,
         };
 
-        let subscriptions = self.subscriptions[id].as_mut().unwrap();
-        for topic in topics.into_iter() {
-            subscriptions.fill_matches(&topic);
-        }
-
-        let topics = subscriptions.take_topics();
-        match topics {
+        let subscription = self.subscriptions[id].as_mut().unwrap();
+        match subscription.matched_topics(&topics) {
             Some(topics) => Some(TopicsReply::new(offset + 1, topics)),
             None => None,
         }

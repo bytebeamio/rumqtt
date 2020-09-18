@@ -8,7 +8,7 @@ use std::mem;
 #[derive(Debug)]
 pub struct Subscription {
     /// Flag used to notify pending subscription request
-    pub(crate) notification_registration: bool,
+    pending_subscription_request: bool,
     /// Pending topics for connection. These are matched against
     /// subscriptions but are yet to be pulled by connection
     pub(crate) topics: Vec<(String, u8, [(u64, u64); 3])>,
@@ -23,7 +23,7 @@ pub struct Subscription {
 impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
-            notification_registration: false,
+            pending_subscription_request: false,
             topics: Vec::new(),
             topics_index: HashSet::new(),
             concrete_subscriptions: HashMap::new(),
@@ -38,7 +38,7 @@ impl Subscription {
 
     /// Topics which aren't sent to tracker yet
     pub fn take_topics(&mut self) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
-        self.notification_registration = false;
+        self.pending_subscription_request = false;
         let topics = mem::replace(&mut self.topics, Vec::new());
         if topics.is_empty() {
             None
@@ -47,14 +47,18 @@ impl Subscription {
         }
     }
 
-    pub fn register_notification(&mut self) {
-        self.notification_registration = true;
+    pub fn pending_subscription_request(&self) -> bool {
+        self.pending_subscription_request
+    }
+
+    pub fn register_pending_subscription_request(&mut self) {
+        self.pending_subscription_request = true;
     }
 
     /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
     /// them against subscriptions of this connection. Returns a TopicsReply if there
     /// are matches
-    pub(crate) fn matched_topics(
+    pub fn matched_topics(
         &mut self,
         topics: &[String],
     ) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
@@ -105,7 +109,7 @@ impl Subscription {
     /// topics should be tracked by tracker from offset 0.
     /// Returns true if this topic matches a subscription for
     /// router to trigger new topic notification
-    pub fn fill_matches(&mut self, topic: &str) -> bool {
+    fn fill_matches(&mut self, topic: &str) -> bool {
         // ignore if the topic is already being tracked
         if self.topics_index.contains(topic) {
             return false;
