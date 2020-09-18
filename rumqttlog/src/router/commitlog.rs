@@ -8,13 +8,15 @@ use std::sync::Arc;
 
 // TODO change config to Arc
 pub(crate) struct CommitLog {
+    id: usize,
     config: Arc<Config>,
     logs: HashMap<String, Log>,
 }
 
 impl CommitLog {
-    pub fn new(config: Arc<Config>) -> CommitLog {
+    pub fn new(config: Arc<Config>, id: usize) -> CommitLog {
         CommitLog {
+            id,
             config,
             logs: HashMap::new(),
         }
@@ -48,13 +50,30 @@ impl CommitLog {
         }
     }
 
-    pub fn last_offset(&mut self, topic: &str) -> Option<(u64, u64)> {
-        let log = match self.logs.get_mut(topic) {
+    fn _last_offset(&self, topic: &str) -> Option<(u64, u64)> {
+        let log = match self.logs.get(topic) {
             Some(log) => log,
             None => return None,
         };
 
         Some(log.last_offset())
+    }
+
+    fn next_offset(&self, topic: &str) -> Option<(u64, u64)> {
+        let log = match self.logs.get(topic) {
+            Some(log) => log,
+            None => return None,
+        };
+
+        Some(log.next_offset())
+    }
+
+    pub fn seek_offsets_to_end(&self, topics: &mut Vec<(String, u8, [(u64, u64); 3])>) {
+        for (topic, _, offset) in topics.iter_mut() {
+            if let Some(last_offset) = self.next_offset(topic) {
+                offset[self.id] = last_offset;
+            }
+        }
     }
 
     pub fn readv(
@@ -95,7 +114,6 @@ impl TopicLog {
 
     /// read n topics from a give offset along with offset of the last read topic
     pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, &[String])> {
-        // dbg!(&self.topics, &self.concrete_subscriptions);
         let len = self.topics.len();
         if offset >= len || count == 0 {
             return None;

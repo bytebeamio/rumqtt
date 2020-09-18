@@ -7,9 +7,10 @@ use std::mem;
 /// communicate with this connection
 #[derive(Debug)]
 pub struct Subscription {
-    /// Topics that this connection's coroutine tracks. There can be inconsitency
-    /// with the coroutine due to pending topics request from connection coroutine
-    /// Inconsistency is captured in `untracked_topics`
+    /// Flag used to notify pending subscription request
+    pending_subscription_request: bool,
+    /// Pending topics for connection. These are matched against
+    /// subscriptions but are yet to be pulled by connection
     pub(crate) topics: Vec<(String, u8, [(u64, u64); 3])>,
     /// Topics index to not add duplicates to topics
     topics_index: HashSet<String>,
@@ -22,6 +23,7 @@ pub struct Subscription {
 impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
+            pending_subscription_request: false,
             topics: Vec::new(),
             topics_index: HashSet::new(),
             concrete_subscriptions: HashMap::new(),
@@ -29,8 +31,14 @@ impl Subscription {
         }
     }
 
+    /// Returns current number of subscriptions
+    pub fn count(&self) -> usize {
+        self.concrete_subscriptions.len() + self.wild_subscriptions.len()
+    }
+
     /// Topics which aren't sent to tracker yet
-    pub fn topics(&mut self) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
+    pub fn take_topics(&mut self) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
+        self.pending_subscription_request = false;
         let topics = mem::replace(&mut self.topics, Vec::new());
         if topics.is_empty() {
             None
@@ -39,10 +47,18 @@ impl Subscription {
         }
     }
 
+    pub fn pending_subscription_request(&self) -> bool {
+        self.pending_subscription_request
+    }
+
+    pub fn register_pending_subscription_request(&mut self) {
+        self.pending_subscription_request = true;
+    }
+
     /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
     /// them against subscriptions of this connection. Returns a TopicsReply if there
     /// are matches
-    pub(crate) fn matched_topics(
+    pub fn matched_topics(
         &mut self,
         topics: &[String],
     ) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
@@ -63,11 +79,13 @@ impl Subscription {
     pub fn add_subscription(&mut self, filters: Vec<SubscribeTopic>, topics: Vec<String>) {
         for filter in filters {
             if has_wildcards(&filter.topic_path) {
+                let subscription = filter.topic_path.clone();
                 self.wild_subscriptions
-                    .push((filter.topic_path.clone(), filter.qos as u8));
+                    .push((subscription, filter.qos as u8));
             } else {
+                let subscription = filter.topic_path.clone();
                 self.concrete_subscriptions
-                    .insert(filter.topic_path.clone(), filter.qos as u8);
+                    .insert(subscription, filter.qos as u8);
             }
 
             // Check and track matching topics from input
@@ -89,9 +107,9 @@ impl Subscription {
 
     /// Matches existing subscription with a new topic. These
     /// topics should be tracked by tracker from offset 0.
-    /// Returns to if this topic matches a subscription for
+    /// Returns true if this topic matches a subscription for
     /// router to trigger new topic notification
-    pub fn fill_matches(&mut self, topic: &str) -> bool {
+    fn fill_matches(&mut self, topic: &str) -> bool {
         // ignore if the topic is already being tracked
         if self.topics_index.contains(topic) {
             return false;

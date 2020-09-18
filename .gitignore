@@ -16,4 +16,4 @@ Cargo.lock
 perf.data*
 utils/benchmark/benchmark
 cachegrind.out
-log.txt
+*.txt

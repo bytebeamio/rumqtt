@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::router::{AcksReply, AcksRequest, TopicsReply, TopicsRequest};
+use crate::router::{AcksReply, AcksRequest, SubscriptionRequest, TopicsReply, SubscriptionReply, TopicsRequest};
 use crate::{DataReply, DataRequest, RouterInMessage};
 
 /// Tracker tracks current offsets of all the subscriptions of a connection
@@ -19,8 +19,11 @@ pub struct Tracker {
 impl Tracker {
     pub fn new(max_count: usize) -> Tracker {
         let mut tracker = VecDeque::with_capacity(100);
+        let subscription_request = RouterInMessage::SubscriptionRequest(SubscriptionRequest);
         let topics_request = RouterInMessage::TopicsRequest(TopicsRequest::new());
         let acks_request = RouterInMessage::AcksRequest(AcksRequest::new());
+
+        tracker.push_back(subscription_request);
         tracker.push_back(topics_request);
         tracker.push_back(acks_request);
 
@@ -53,6 +56,23 @@ impl Tracker {
 
     /// Updates data tracker to track new topics in the commitlog if they match
     /// a subscription.So, a TopicReply triggers DataRequest
+    pub fn track_existing_topics(&mut self, reply: &SubscriptionReply) {
+        self.inflight -= 1;
+        for (topic, _qos, cursors) in reply.topics.iter() {
+            let request = DataRequest::offsets(topic.clone(), *cursors);
+
+            // Prioritize new matched topics
+            let request = RouterInMessage::DataRequest(request);
+            self.tracker.push_back(request);
+        }
+
+        let request = RouterInMessage::SubscriptionRequest(SubscriptionRequest);
+        self.tracker.push_front(request);
+    }
+
+
+    /// Updates data tracker to track new topics in the commitlog if they match
+    /// a subscription.So, a TopicReply triggers DataRequest
     pub fn track_new_topics(&mut self, reply: &TopicsReply) {
         self.inflight -= 1;
         for (topic, _qos, cursors) in reply.topics.iter() {
@@ -60,12 +80,12 @@ impl Tracker {
 
             // Prioritize new matched topics
             let request = RouterInMessage::DataRequest(request);
-            self.tracker.push_front(request);
+            self.tracker.push_back(request);
         }
 
         let request = TopicsRequest::offset(reply.offset);
         let request = RouterInMessage::TopicsRequest(request);
-        self.tracker.push_back(request);
+        self.tracker.push_front(request);
     }
 
     /// Updates offset of this topic for the next data request

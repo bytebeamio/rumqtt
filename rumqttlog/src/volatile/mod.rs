@@ -71,6 +71,15 @@ impl Log {
         (base_offset, relative_offset)
     }
 
+    pub fn next_offset(&self) -> (u64, u64) {
+        let base_offset = self.active_segment.base_offset();
+        // Segment will always have at least 1 element as it's lazily
+        // created with append. Hence we can ignore -ve overflow
+        let relative_offset = base_offset + self.active_segment.len() as u64;
+
+        (base_offset, relative_offset)
+    }
+
     /// Read a record from correct segment
     pub fn read(&mut self, base_offset: u64, offset: usize) -> Option<Bytes> {
         if base_offset == self.active_segment.base_offset() {

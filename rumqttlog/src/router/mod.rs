@@ -28,6 +28,8 @@ pub enum RouterInMessage {
     ReplicationAcks(Vec<ReplicationAck>),
     /// Data request
     DataRequest(DataRequest),
+    /// Subscription request
+    SubscriptionRequest(SubscriptionRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
     /// Acks request
@@ -43,6 +45,8 @@ pub enum RouterOutMessage {
     ConnectionAck(ConnectionAck),
     /// Data reply
     DataReply(DataReply),
+    /// Subscription reply
+    SubscriptionReply(SubscriptionReply),
     /// Topics reply
     TopicsReply(TopicsReply),
     /// Watermarks reply
@@ -207,6 +211,10 @@ impl TopicsRequest {
         }
     }
 
+    pub fn set_count(&mut self, count: usize) {
+        self.count = count;
+    }
+
     pub fn offset(offset: usize) -> TopicsRequest {
         TopicsRequest { offset, count: 10 }
     }
@@ -224,6 +232,20 @@ pub struct TopicsReply {
 impl TopicsReply {
     fn new(offset: usize, topics: Vec<(String, u8, [(u64, u64); 3])>) -> TopicsReply {
         TopicsReply { offset, topics }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriptionRequest;
+
+#[derive(Debug, Clone)]
+pub struct SubscriptionReply {
+    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
+}
+
+impl SubscriptionReply {
+    fn new(topics: Vec<(String, u8, [(u64, u64); 3])>) -> SubscriptionReply {
+        SubscriptionReply { topics }
     }
 }
 

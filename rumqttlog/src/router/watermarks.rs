@@ -1,4 +1,4 @@
-use mqtt4bytes::{Packet, PubAck};
+use mqtt4bytes::*;
 use std::collections::{HashMap, VecDeque};
 use std::mem;
 
@@ -77,8 +77,15 @@ impl Watermarks {
         }
     }
 
-    pub fn push_ack(&mut self, pkid: u16, packet: Packet) {
-        self.acks.push((pkid, packet))
+    pub fn push_publish_ack(&mut self, pkid: u16) {
+        let puback = Packet::PubAck(PubAck::new(pkid));
+        self.acks.push((pkid, puback))
+    }
+
+    pub fn push_subscribe_ack(&mut self, pkid: u16, return_codes: Vec<SubscribeReturnCodes>) {
+        let suback = SubAck::new(pkid, return_codes);
+        let suback = Packet::SubAck(suback);
+        self.acks.push((pkid, suback))
     }
 
     /// Returns committed acks by take
