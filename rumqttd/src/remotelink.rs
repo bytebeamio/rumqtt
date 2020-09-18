@@ -138,6 +138,8 @@ impl RemoteLink {
                 }
             }
 
+            trace!("topics {} {} {}", self.id, self.tracker.has_next(), self.tracker.inflight());
+
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),
                 packets = self.network.readb() => {
@@ -170,8 +172,21 @@ impl RemoteLink {
                     self.id,
                     reply.topics.len()
                 );
-                self.tracker.track_new_topics(&reply)
+                self.tracker.track_new_topics(&reply);
+                // trace!("topics Id = {} {:?}", self.id, self.tracker);
             }
+            RouterOutMessage::SubscriptionReply(reply) => {
+                trace!(
+                    "{:11} {:14} Id = {}, Count = {}",
+                    "subscription",
+                    "reply",
+                    self.id,
+                    reply.topics.len()
+                );
+                self.tracker.track_existing_topics(&reply);
+                // trace!("topics Id = {} {:?}", self.id, self.tracker);
+            }
+
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
                 trace!(
