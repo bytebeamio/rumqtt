@@ -226,7 +226,8 @@ pub struct MqttOptions {
     key_type: Key,
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     tls_client_config: Option<Arc<ClientConfig>>,
-
+    /// Enabling will wait for incoming packets to avoid collisions
+    collision_safety: bool,
     conn_timeout: u64,
 }
 
@@ -257,6 +258,7 @@ impl MqttOptions {
             last_will: None,
             key_type: Key::RSA,
             tls_client_config: None,
+            collision_safety: false,
             conn_timeout: 5,
         }
     }
@@ -456,6 +458,15 @@ impl MqttOptions {
     /// Get the ClientConfig which was previously set, if any.
     pub fn tls_client_config(&self) -> Option<Arc<ClientConfig>> {
         self.tls_client_config.clone()
+    }
+
+    pub fn set_collision_safety(&mut self, c: bool) -> &mut Self {
+        self.collision_safety = c;
+        self
+    }
+
+    pub fn collision_safety(&self) -> bool {
+        self.collision_safety
     }
 
     /// set connection timeout in secs

@@ -13,7 +13,7 @@ pub enum StateError {
     InvalidState,
     /// Received a packet (ack) which isn't asked for
     #[error("Received a packet (ack) which isn't asked for")]
-    Unsolicited,
+    Unsolicited(u16),
     /// Last pingreq isn't acked
     #[error("Last pingreq isn't acked")]
     AwaitPingResp,
@@ -22,7 +22,9 @@ pub enum StateError {
     WrongPacket,
     /// Collision due to broker not acking in sequence
     #[error("Broker not acking in order. Packet id collision")]
-    Collision,
+    Collision(u16),
+    #[error("Timeout while waiting to resolve collision")]
+    CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
     Mqtt4(mqtt4bytes::Error),
 }
@@ -37,10 +39,11 @@ pub enum StateError {
 pub struct MqttState {
     /// Status of last ping
     pub await_pingresp: bool,
-    /// Flag to indicate that inflight queue is full
-    /// and eventloop should not process new requests
-    pub await_acks: bool,
+    /// Collision ping count. Collisions stop user requests
+    /// which inturn trigger pings. Multiple pings without
+    /// resolving collisions will result in error
     /// Last incoming packet time
+    pub collision_ping_count: usize,
     last_incoming: Instant,
     /// Last outgoing packet time
     last_outgoing: Instant,
@@ -50,14 +53,14 @@ pub struct MqttState {
     pub(crate) inflight: u16,
     /// Maximum number of allowed inflight
     pub(crate) max_inflight: u16,
-    /// Inflight queue full flag
-    pub(crate) recycle: bool,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
     pub(crate) outgoing_pub: Vec<Option<PublishRaw>>,
     /// Packet ids of released QoS 2 publishes
     pub(crate) outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
     pub incoming_pub: Vec<Option<u16>>,
+    /// Last collision due to broker not acking in order
+    pub collision: Option<PublishRaw>,
 }
 
 impl MqttState {
@@ -67,17 +70,17 @@ impl MqttState {
     pub fn new(max_inflight: u16) -> Self {
         MqttState {
             await_pingresp: false,
-            await_acks: false,
+            collision_ping_count: 0,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: 0,
             inflight: 0,
             max_inflight,
-            recycle: false,
-            // index 0 is wasted as 0 not a valid packet id
+            // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
             incoming_pub: vec![None; std::u16::MAX as usize + 1],
+            collision: None,
         }
     }
 
@@ -106,6 +109,7 @@ impl MqttState {
         }
 
         self.await_pingresp = false;
+        self.collision_ping_count = 0;
         self.inflight = 0;
         pending
     }
@@ -154,11 +158,6 @@ impl MqttState {
         };
 
         self.last_incoming = Instant::now();
-        if self.inflight == 0 {
-            self.await_acks = false;
-            self.last_pkid = 0;
-        }
-
         out
     }
 
@@ -203,11 +202,21 @@ impl MqttState {
         Ok(Request::PublishRaw(publish))
     }
 
-    /// Iterates through the list of stored publishes and removes the publish with the
-    /// matching packet identifier. Removal is now a O(n) operation. This should be
-    /// usually ok in case of acks due to ack ordering in normal conditions. But in cases
-    /// where the broker doesn't guarantee the order of acks, the performance won't be optimal
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<Option<Request>, StateError> {
+        //dbg!(puback);
+        if let Some(publish) = &self.collision {
+            if publish.pkid == puback.pkid {
+                // remove acked, previously collided packet from the state
+                self.collision.take().unwrap();
+                self.collision_ping_count = 0;
+                // get previously failed publish due to collision for
+                // eventloop to send it
+                let publish = self.outgoing_pub[puback.pkid as usize].clone().take();
+                let request = Request::PublishRaw(publish.unwrap());
+                return Ok(Some(request));
+            }
+        }
+
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
@@ -215,7 +224,7 @@ impl MqttState {
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", puback.pkid);
-                Err(StateError::Unsolicited)
+                Err(StateError::Unsolicited(puback.pkid))
             }
         }
     }
@@ -231,14 +240,14 @@ impl MqttState {
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<Option<Request>, StateError> {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             Some(_) => {
-                self.inflight -= 1;
+                // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 let response = Some(Request::PubRel(PubRel::new(pubrec.pkid)));
                 Ok(response)
             }
             None => {
                 error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
-                Err(StateError::Unsolicited)
+                Err(StateError::Unsolicited(pubrec.pkid))
             }
         }
     }
@@ -275,7 +284,7 @@ impl MqttState {
             }
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-                Err(StateError::Unsolicited)
+                Err(StateError::Unsolicited(pubrel.pkid))
             }
         }
     }
@@ -284,11 +293,27 @@ impl MqttState {
         &mut self,
         pubcomp: &PubComp,
     ) -> Result<Option<Request>, StateError> {
+        if let Some(publish) = &self.collision {
+            if publish.pkid == pubcomp.pkid {
+                // remove acked, previously collided packet from the state
+                self.collision.take().unwrap();
+                self.collision_ping_count = 0;
+                // get previously failed publish due to collision for
+                // eventloop to send it
+                let publish = self.outgoing_pub[pubcomp.pkid as usize].clone().take();
+                let request = Request::PublishRaw(publish.unwrap());
+                return Ok(Some(request));
+            }
+        }
+
         match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
-            Some(_) => Ok(None),
+            Some(_) => {
+                self.inflight -= 1;
+                Ok(None)
+            }
             None => {
                 error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
-                Err(StateError::Unsolicited)
+                Err(StateError::Unsolicited(pubcomp.pkid))
             }
         }
     }
@@ -300,9 +325,15 @@ impl MqttState {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
+        if self.collision.is_some() {
+            self.collision_ping_count += 1;
+            if self.collision_ping_count >= 2 {
+                return Err(StateError::CollisionTimeout);
+            }
+        }
+
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
-            error!("Error awaiting for last ping response");
             return Err(StateError::AwaitPingResp);
         }
 
@@ -357,13 +388,12 @@ impl MqttState {
         };
 
         // if there is an existing publish at this pkid, this implies that broker hasn't acked this
-        // packet yet. Make this an error in future. This error is possible only when broker isn't
-        // acking sequentially
-        // TODO: Make this an error by storing replaced packet and returning an error
+        // packet yet. This error is possible only when broker isn't acking sequentially
         let pkid = publish.pkid as usize;
         if let Some(v) = mem::replace(&mut self.outgoing_pub[pkid], Some(publish.clone())) {
-            error!("Replacing unacked packet {:?}", v);
-            return Err(StateError::Collision);
+            warn!("Replacing unacked packet {:?}", v);
+            self.collision = Some(v);
+            return Err(StateError::Collision(publish.pkid));
         }
 
         self.inflight += 1;
@@ -381,7 +411,6 @@ impl MqttState {
         // processing requests until all the inflight publishes
         // are acked
         if next_pkid == self.max_inflight {
-            self.await_acks = true;
             self.last_pkid = 0;
             return next_pkid;
         }
@@ -430,45 +459,10 @@ mod test {
             // loops between 0-99. % 100 == 0 implies border
             let expected = i % 100;
             if expected == 0 {
-                // await flag is set at the border
-                assert!(mqtt.await_acks);
                 break;
             }
 
             assert_eq!(expected, pkid);
-        }
-    }
-
-    #[test]
-    fn next_packet_id_resets_when_inflight_is_zero() {
-        let mut mqtt = build_mqttstate();
-        for i in 1..=10 {
-            let publish = build_outgoing_publish(QoS::AtLeastOnce);
-            let request = mqtt.outgoing_publish(publish).unwrap();
-            let pkid = match request {
-                Request::PublishRaw(publish) => publish.pkid,
-                request => panic!("Expecting a publish. Found = {:?}", request),
-            };
-
-            assert_eq!(i, pkid);
-        }
-
-        // all inflight publishes acked
-        for i in 1..=10 {
-            mqtt.handle_incoming_packet(&Incoming::PubAck(PubAck::new(i)))
-                .unwrap();
-        }
-
-        // packet id starts from 1 again
-        for i in 1..=10 {
-            let publish = build_outgoing_publish(QoS::AtLeastOnce);
-            let request = mqtt.outgoing_publish(publish).unwrap();
-            let pkid = match request {
-                Request::PublishRaw(publish) => publish.pkid,
-                request => panic!("Expecting a publish. Found = {:?}", request),
-            };
-
-            assert_eq!(i, pkid);
         }
     }
 
@@ -589,7 +583,7 @@ mod test {
         let _publish_out = mqtt.outgoing_publish(publish2);
 
         mqtt.handle_incoming_pubrec(&PubRec::new(2)).unwrap();
-        assert_eq!(mqtt.inflight, 1);
+        assert_eq!(mqtt.inflight, 2);
 
         // check if the remaining element's pkid is 1
         let backup = mqtt.outgoing_pub[1].clone();

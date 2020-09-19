@@ -64,7 +64,7 @@ pub struct EventLoop {
 }
 
 /// Events which can be yielded by the event loop
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Event {
     Incoming(Incoming),
     Outgoing(Outgoing),
@@ -127,11 +127,20 @@ impl EventLoop {
 
             return Ok(Event::Incoming(connack));
         }
-        let result = self.select().await;
-        if result.is_err() {
-            self.network = None;
+
+        match self.select().await {
+            Ok(v) => Ok(v),
+            Err(ConnectionError::MqttState(StateError::Collision(pkid)))
+                if self.options.collision_safety() =>
+            {
+                // don't disconnect the network in case collision safety is enabled
+                Err(ConnectionError::MqttState(StateError::Collision(pkid)))
+            }
+            Err(e) => {
+                self.network = None;
+                Err(e)
+            }
         }
-        result
     }
 
     /// Select on network and requests and generate keepalive pings when necessary
@@ -141,6 +150,7 @@ impl EventLoop {
         let inflight_full = self.state.inflight >= self.options.inflight;
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
+        let collision = self.state.collision.is_some();
 
         // Return buffered outgoing notification first so that, if incoming
         // packets 1, 2, 3 are acked in bulk before reading new incoming packet,
@@ -158,94 +168,113 @@ impl EventLoop {
 
         // this loop is necessary since self.incoming.pop_front() might return None. In that case,
         // instead of returning a None event, we try again.
-        loop {
-            select! {
-                // Pull a bunch of packets from network, reply in bunch and yield the first item
-                o = network.readb(&mut self.incoming) => {
-                    let incoming = o?;
+        select! {
+            // Pull a bunch of packets from network, reply in bunch and yield the first item
+            o = network.readb(&mut self.incoming) => {
+                let incoming = o?;
 
-                    // handle 1st incoming packet
-                    if let Some(outgoing) = self.state.handle_incoming_packet(&incoming)? {
-                        network.fill2(outgoing)?;
-                    }
+                // handle 1st incoming packet
+                if let Some(request) = self.state.handle_incoming_packet(&incoming)? {
+                    let outgoing = network.fill(request)?;
+                    self.outgoing.push_back(outgoing)
+                }
 
-                    // be eager to handle more incoming packets
-                    for incoming in self.incoming.iter() {
-                        if let Some(outgoing) = self.state.handle_incoming_packet(incoming)? {
-                            network.fill2(outgoing)?;
-                        }
-                    }
-
-                    // flush all the acks and return first incoming packet
-                    network.flush().await?;
-                    return Ok(Event::Incoming(incoming))
-                },
-                // Pull next request from user requests channel.
-                // If condition in the below branch if for flow control. We read next user request
-                // only when max inflight settings are honoured.
-                // Flow control is based on ack count. As long as number of inflight packets in buffer
-                // are less than max_inflight setting, next request will progress. For this
-                // to work correctly, broker should ack in sequence and any sane broker will do so
-                // If it doesn't, this will result in connection drop. Use should decide
-                // E.g If max inflight = 5, requests will be blocked when inflight queue looks like this
-                // [1, 2, 3, 4, 5]. Assume broker acking 2 instead of 1 -> [1, x, 3, 4, 5]. While
-                // rolling pkid, next packet will be written in 1 (which is unacked) and results in
-                // an error
-                // This can be fixed by using packet id boundary instead of count for flow control.
-                // This trick will make the client robust against brokers which doesn't ack sequentially
-                // at the cost of throughput. Consider an example with max inflight of 5.
-                // Full inflight queue will look like -> [1, 2, 3, 4, 5].
-                // If 3 is acked instead of 1 first -> [1, 2, 4, 5].
-                // If we flow control at boundary (5), Every ack should be received before rolling pkid
-                // and hence overwrites aren't a problem anymore
-                // Also note that, next_packet_id resets to 1 every time inflight packets are acked
-                o = self.requests_rx.next(), if !inflight_full && !pending => match o {
-                    Some(request) => {
-                        let request = self.state.handle_outgoing_packet(request)?;
+                // be eager to handle more incoming packets
+                for incoming in self.incoming.iter() {
+                    if let Some(request) = self.state.handle_incoming_packet(incoming)? {
                         let outgoing = network.fill(request)?;
-                        // During high load, pull more data from channel to batch more requests.
-                        // Note: Make sure size of total inflight messages isn't greater than
-                        // OS tcp write buffer size to prevent bounded buffer deadlocks
-                        for _ in 0..self.options.max_request_batch {
-                            // Honor inflight limitations during batching
-                            if self.state.inflight >= self.options.inflight { break }
-                            match self.requests_rx.try_recv() {
-                                Ok(r) => {
-                                    // handle, send and buffer outgoing packet ids
-                                    let request = self.state.handle_outgoing_packet(r)?;
-                                    let outgoing = network.fill(request)?;
-                                    self.outgoing.push_back(outgoing);
-                                }
-                                Err(_) => break,
-                            };
-
-                        }
-
-                        network.flush().await?;
-                        return Ok(Event::Outgoing(outgoing))
+                        self.outgoing.push_back(outgoing)
                     }
-                    None => return Err(ConnectionError::RequestsDone),
-                },
-                // Handle the next pending packet from previous session. Disable
-                // this branch when done with all the pending packets
-                Some(request) = next_pending(throttle, &mut self.pending), if pending => {
+                }
+
+                // flush all the acks and return first incoming packet
+                network.flush().await?;
+                return Ok(Event::Incoming(incoming))
+            },
+            // Pull next request from user requests channel.
+            // If conditions in the below branch are for flow control. We read next user
+            // user request only when inflight messages are < configured inflight and there
+            // are no collisions while handling previous outgoing requests.
+            //
+            // Flow control is based on ack count. If inflight packet count in the buffer is
+            // less than max_inflight setting, next outgoing request will progress. For this
+            // to work correctly, broker should ack in sequence (a lot of brokers won't)
+            //
+            // E.g If max inflight = 5, user requests will be blocked when inflight queue
+            // looks like this                 -> [1, 2, 3, 4, 5].
+            // If broker acking 2 instead of 1 -> [1, x, 3, 4, 5].
+            // This pulls next user request. But because max packet id = max_inflight, next
+            // user request's packet id will roll to 1. This replaces existing packet id 1.
+            // Resulting in a collision
+            //
+            // This can be fixed in 2 ways
+            //
+            // 1. using packet id boundary instead of count for flow control
+            // ---------------------
+            // Full inflight queue will look like -> [1, 2, 3, 4, 5].
+            // If 3 is acked instead of 1 first   -> [1, 2, x, 4, 5].
+            // If we flow control at boundary (5) to make sure that all the packet ids before
+            // 5 are acked, there would be no collisions.
+            // But this method comes at the cost of throughput. Synchronizing all the acks
+            // everytime at boundary will affect throughput, even if the broker is acking in
+            // sequence
+            //
+            // 2. using collisions for flow control
+            // ---------------------
+            // Eventloop can stop receiving outgoing user requests when previous outgoing
+            // request collided. I.e collision state. Collision state will be cleared only
+            // when correct ack is received
+            // Full inflight queue will look like -> [1a, 2, 3, 4, 5].
+            // If 3 is acked instead of 1 first   -> [1a, 2, x, 4, 5].
+            // After collision with pkid 1        -> [1b ,2, x, 4, 5].
+            // 1a is saved to state and event loop is set to collision mode stopping new
+            // outgoing requests (along with 1b).
+            o = self.requests_rx.next(), if !inflight_full && !pending && !collision => match o {
+                Some(request) => {
                     let request = self.state.handle_outgoing_packet(request)?;
-                    let outgoing = network.write(request).await?;
-                    return Ok(Event::Outgoing(outgoing));
-                },
-                // We generate pings irrespective of network activity. This keeps the ping logic
-                // simple. We can change this behavior in future if necessary (to prevent extra pings)
-                _ = self.keepalive_timeout.as_mut().unwrap() => {
-                    let timeout = self.keepalive_timeout.as_mut().unwrap();
-                    timeout.reset(Instant::now() + self.options.keep_alive);
-                    let request = self.state.handle_outgoing_packet(Request::PingReq)?;
-                    let outgoing = network.write(request).await?;
-                    return Ok(Event::Outgoing(outgoing));
+                    let outgoing = network.fill(request)?;
+                    // During high load, pull more data from channel to batch more requests.
+                    // Note: Make sure size of total inflight messages isn't greater than
+                    // OS tcp write buffer size to prevent bounded buffer deadlocks
+                    for _ in 0..self.options.max_request_batch {
+                        // Honor inflight limitations during batching
+                        if self.state.inflight >= self.options.inflight { break }
+                        match self.requests_rx.try_recv() {
+                            Ok(r) => {
+                                // handle, send and buffer outgoing packet ids
+                                let request = self.state.handle_outgoing_packet(r)?;
+                                let outgoing = network.fill(request)?;
+                                self.outgoing.push_back(outgoing);
+                            }
+                            Err(_) => break,
+                        };
+
+                    }
+
+                    network.flush().await?;
+                    return Ok(Event::Outgoing(outgoing))
                 }
-                // cancellation requests to stop the polling
-                _ = self.cancel_rx.next() => {
-                    return Err(ConnectionError::Cancel);
-                }
+                None => return Err(ConnectionError::RequestsDone),
+            },
+            // Handle the next pending packet from previous session. Disable
+            // this branch when done with all the pending packets
+            Some(request) = next_pending(throttle, &mut self.pending), if pending => {
+                let request = self.state.handle_outgoing_packet(request)?;
+                let outgoing = network.write(request).await?;
+                return Ok(Event::Outgoing(outgoing));
+            },
+            // We generate pings irrespective of network activity. This keeps the ping logic
+            // simple. We can change this behavior in future if necessary (to prevent extra pings)
+            _ = self.keepalive_timeout.as_mut().unwrap() => {
+                let timeout = self.keepalive_timeout.as_mut().unwrap();
+                timeout.reset(Instant::now() + self.options.keep_alive);
+                let request = self.state.handle_outgoing_packet(Request::PingReq)?;
+                let outgoing = network.write(request).await?;
+                return Ok(Event::Outgoing(outgoing));
+            }
+            // cancellation requests to stop the polling
+            _ = self.cancel_rx.next() => {
+                return Err(ConnectionError::Cancel);
             }
         }
     }
@@ -405,7 +434,7 @@ mod test {
         }
     }
 
-    async fn run(mut eventloop: EventLoop, reconnect: bool) -> Result<(), ConnectionError> {
+    async fn run(eventloop: &mut EventLoop, reconnect: bool) -> Result<(), ConnectionError> {
         'reconnect: loop {
             loop {
                 let o = eventloop.poll().await;
@@ -417,6 +446,28 @@ mod test {
                 }
             }
         }
+    }
+
+    async fn tick(
+        eventloop: &mut EventLoop,
+        reconnect: bool,
+        count: usize,
+    ) -> Result<(), ConnectionError> {
+        'reconnect: loop {
+            for i in 0..count {
+                let o = eventloop.poll().await;
+                println!("{}. Polled = {:?}", i, o);
+                match o {
+                    Ok(_) => continue,
+                    Err(_) if reconnect => continue 'reconnect,
+                    Err(e) => return Err(e),
+                }
+            }
+
+            break;
+        }
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -450,10 +501,10 @@ mod test {
         let keep_alive = options.keep_alive();
 
         // start sending requests
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await.unwrap();
+            run(&mut eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1885, true).await;
@@ -486,7 +537,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incomin activity
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
@@ -494,7 +545,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await.unwrap();
+            run(&mut eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1886, true).await;
@@ -524,9 +575,9 @@ mod test {
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         task::spawn(async move {
-            run(eventloop, false).await.unwrap();
+            run(&mut eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(2000, true).await;
@@ -576,7 +627,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incoming activity
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -584,7 +635,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, false).await.unwrap();
+            run(&mut eventloop, false).await.unwrap();
         });
 
         let mut broker = Broker::new(1887, true).await;
@@ -602,7 +653,7 @@ mod test {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
         options.set_inflight(3);
 
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
 
         task::spawn(async move {
@@ -612,7 +663,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, true).await.unwrap();
+            run(&mut eventloop, true).await.unwrap();
         });
 
         let mut broker = Broker::new(1888, true).await;
@@ -647,34 +698,110 @@ mod test {
     }
 
     #[tokio::test]
-    async fn packet_id_collisions_are_detected() {
+    async fn packet_id_collisions_are_detected_and_flow_control_is_applied_correctly() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
-        options.set_inflight(4);
+        options.set_inflight(4).set_collision_safety(true);
 
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
 
         task::spawn(async move {
-            start_requests(5, QoS::AtLeastOnce, 1, requests_tx).await;
+            start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
             time::delay_for(Duration::from_secs(60)).await;
         });
 
         task::spawn(async move {
             let mut broker = Broker::new(1891, true).await;
-            for _ in 1..=4 {
+            // read all incoming packets first
+            for i in 1..=4 {
                 let packet = broker.read_publish().await;
-                assert!(packet.is_some());
+                assert_eq!(packet.unwrap().payload[0], i);
             }
 
             // out of order ack
+            broker.ack(3).await;
+            broker.ack(4).await;
+            time::delay_for(Duration::from_secs(5)).await;
+            broker.ack(1).await;
             broker.ack(2).await;
+
+            // read and ack remaining packets in order
+            for i in 5..=10 {
+                let packet = broker.read_publish().await;
+                let packet = packet.unwrap();
+                assert_eq!(packet.payload[0], i);
+                broker.ack(packet.pkid).await;
+            }
+
             time::delay_for(Duration::from_secs(5)).await;
         });
 
-        // panics because of
         time::delay_for(Duration::from_secs(1)).await;
-        match run(eventloop, false).await {
-            Err(ConnectionError::MqttState(StateError::Collision)) => (),
+        // sends 4 requests and receives ack 3, 4
+        // 5th request will trigger collision
+        match run(&mut eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::Collision(1))) => (),
+            o => panic!("Expecting collision error. Found = {:?}", o),
+        }
+
+        // Next poll will receive ack = 1 in 5 seconds and fixes collision
+        let start = Instant::now();
+        assert_eq!(
+            eventloop.poll().await.unwrap(),
+            Event::Incoming(Packet::PubAck(PubAck::new(1)))
+        );
+        assert_eq!(start.elapsed().as_secs(), 5);
+
+        // Next poll unblocks failed publish due to collision
+        assert_eq!(
+            eventloop.poll().await.unwrap(),
+            Event::Outgoing(Outgoing::Publish(1))
+        );
+
+        // handle remaining outgoing and incoming packets
+        tick(&mut eventloop, false, 10).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn packet_id_collisions_are_timedout_on_second_ping() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
+        options
+            .set_inflight(4)
+            .set_collision_safety(true)
+            .set_keep_alive(5);
+
+        let mut eventloop = EventLoop::new(options, 5);
+        let requests_tx = eventloop.handle();
+
+        task::spawn(async move {
+            start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
+            time::delay_for(Duration::from_secs(60)).await;
+        });
+
+        task::spawn(async move {
+            let mut broker = Broker::new(1891, true).await;
+            // read all incoming packets first
+            for i in 1..=4 {
+                let packet = broker.read_publish().await;
+                assert_eq!(packet.unwrap().payload[0], i);
+            }
+
+            // out of order ack
+            broker.ack(3).await;
+            broker.ack(4).await;
+            time::delay_for(Duration::from_secs(15)).await;
+        });
+
+        time::delay_for(Duration::from_secs(1)).await;
+
+        // Collision error but no network disconneciton
+        match run(&mut eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::Collision(1))) => (),
+            o => panic!("Expecting collision error. Found = {:?}", o),
+        }
+
+        match run(&mut eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::CollisionTimeout)) => (),
             o => panic!("Expecting collision error. Found = {:?}", o),
         }
     }
@@ -685,7 +812,7 @@ mod test {
         options.set_keep_alive(5);
 
         // start sending qos0 publishes. Makes sure that there is out activity but no in activity
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -694,7 +821,7 @@ mod test {
 
         // start the eventloop
         task::spawn(async move {
-            run(eventloop, true).await.unwrap();
+            run(&mut eventloop, true).await.unwrap();
         });
 
         // broker connection 1
@@ -727,7 +854,7 @@ mod test {
 
         // start sending qos0 publishes. this makes sure that there is
         // outgoing activity but no incoming activity
-        let eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         let requests_tx = eventloop.handle();
         task::spawn(async move {
             start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
@@ -736,7 +863,7 @@ mod test {
 
         // start the client eventloop
         task::spawn(async move {
-            run(eventloop, true).await.unwrap();
+            run(&mut eventloop, true).await.unwrap();
         });
 
         // broker connection 1. receive but don't ack
@@ -796,16 +923,22 @@ mod broker {
 
         // Reads a publish packet from the stream with 2 second timeout
         pub async fn read_publish(&mut self) -> Option<Publish> {
-            let packet = time::timeout(Duration::from_secs(2), async {
-                self.framed.readb(&mut self.incoming).await
-            });
+            loop {
+                let packet = time::timeout(Duration::from_secs(2), async {
+                    self.framed.readb(&mut self.incoming).await
+                });
 
-            match packet.await {
-                Ok(Ok(Packet::Publish(publish))) => Some(publish),
-                Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
-                Ok(Err(e)) => panic!("Error = {:?}", e),
-                // timedout
-                Err(_) => None,
+                match packet.await {
+                    Ok(Ok(Packet::Publish(publish))) => return Some(publish),
+                    Ok(Ok(Packet::PingReq)) => {
+                        self.framed.write(Request::PingResp).await.unwrap();
+                        continue;
+                    }
+                    Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
+                    Ok(Err(e)) => panic!("Error = {:?}", e),
+                    // timed out
+                    Err(_) => return None,
+                }
             }
         }
 
@@ -834,6 +967,7 @@ mod broker {
                         self.framed.write(Request::PubAck(packet)).await.unwrap();
                     }
                 }
+
                 _ => (),
             }
 
