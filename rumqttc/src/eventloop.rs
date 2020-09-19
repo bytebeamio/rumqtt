@@ -763,6 +763,50 @@ mod test {
     }
 
     #[tokio::test]
+    async fn packet_id_collisions_are_timedout_on_second_ping() {
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
+        options
+            .set_inflight(4)
+            .set_collision_safety(true)
+            .set_keep_alive(5);
+
+        let mut eventloop = EventLoop::new(options, 5);
+        let requests_tx = eventloop.handle();
+
+        task::spawn(async move {
+            start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
+            time::delay_for(Duration::from_secs(60)).await;
+        });
+
+        task::spawn(async move {
+            let mut broker = Broker::new(1891, true).await;
+            // read all incoming packets first
+            for i in 1..=4 {
+                let packet = broker.read_publish().await;
+                assert_eq!(packet.unwrap().payload[0], i);
+            }
+
+            // out of order ack
+            broker.ack(3).await;
+            broker.ack(4).await;
+            time::delay_for(Duration::from_secs(15)).await;
+        });
+
+        time::delay_for(Duration::from_secs(1)).await;
+
+        // Collision error but no network disconneciton
+        match run(&mut eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::Collision(1))) => (),
+            o => panic!("Expecting collision error. Found = {:?}", o),
+        }
+
+        match run(&mut eventloop, false).await {
+            Err(ConnectionError::MqttState(StateError::CollisionTimeout)) => (),
+            o => panic!("Expecting collision error. Found = {:?}", o),
+        }
+    }
+
+    #[tokio::test]
     async fn reconnection_resumes_from_the_previous_state() {
         let mut options = MqttOptions::new("dummy", "127.0.0.1", 1889);
         options.set_keep_alive(5);
@@ -879,16 +923,22 @@ mod broker {
 
         // Reads a publish packet from the stream with 2 second timeout
         pub async fn read_publish(&mut self) -> Option<Publish> {
-            let packet = time::timeout(Duration::from_secs(2), async {
-                self.framed.readb(&mut self.incoming).await
-            });
+            loop {
+                let packet = time::timeout(Duration::from_secs(2), async {
+                    self.framed.readb(&mut self.incoming).await
+                });
 
-            match packet.await {
-                Ok(Ok(Packet::Publish(publish))) => Some(publish),
-                Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
-                Ok(Err(e)) => panic!("Error = {:?}", e),
-                // timedout
-                Err(_) => None,
+                match packet.await {
+                    Ok(Ok(Packet::Publish(publish))) => return Some(publish),
+                    Ok(Ok(Packet::PingReq)) => {
+                        self.framed.write(Request::PingResp).await.unwrap();
+                        continue;
+                    }
+                    Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
+                    Ok(Err(e)) => panic!("Error = {:?}", e),
+                    // timed out
+                    Err(_) => return None,
+                }
             }
         }
 
@@ -917,6 +967,7 @@ mod broker {
                         self.framed.write(Request::PubAck(packet)).await.unwrap();
                     }
                 }
+
                 _ => (),
             }
 

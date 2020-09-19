@@ -23,6 +23,8 @@ pub enum StateError {
     /// Collision due to broker not acking in sequence
     #[error("Broker not acking in order. Packet id collision")]
     Collision(u16),
+    #[error("Timeout while waiting to resolve collision")]
+    CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
     Mqtt4(mqtt4bytes::Error),
 }
@@ -74,7 +76,7 @@ impl MqttState {
             last_pkid: 0,
             inflight: 0,
             max_inflight,
-            // index 0 is wasted as 0 not a valid packet id
+            // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
             incoming_pub: vec![None; std::u16::MAX as usize + 1],
@@ -107,6 +109,7 @@ impl MqttState {
         }
 
         self.await_pingresp = false;
+        self.collision_ping_count = 0;
         self.inflight = 0;
         pending
     }
@@ -205,6 +208,7 @@ impl MqttState {
             if publish.pkid == puback.pkid {
                 // remove acked, previously collided packet from the state
                 self.collision.take().unwrap();
+                self.collision_ping_count = 0;
                 // get previously failed publish due to collision for
                 // eventloop to send it
                 let publish = self.outgoing_pub[puback.pkid as usize].clone().take();
@@ -293,6 +297,7 @@ impl MqttState {
             if publish.pkid == pubcomp.pkid {
                 // remove acked, previously collided packet from the state
                 self.collision.take().unwrap();
+                self.collision_ping_count = 0;
                 // get previously failed publish due to collision for
                 // eventloop to send it
                 let publish = self.outgoing_pub[pubcomp.pkid as usize].clone().take();
@@ -320,9 +325,15 @@ impl MqttState {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
+        if self.collision.is_some() {
+            self.collision_ping_count += 1;
+            if self.collision_ping_count >= 2 {
+                return Err(StateError::CollisionTimeout);
+            }
+        }
+
         // raise error if last ping didn't receive ack
         if self.await_pingresp {
-            error!("Error awaiting for last ping response");
             return Err(StateError::AwaitPingResp);
         }
 
