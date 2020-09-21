@@ -1,6 +1,5 @@
 //! This module offers a high level synchronous abstraction to async eventloop.
 //! Uses channels internally to get `Requests` and send `Notifications`
-
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender};
@@ -21,45 +20,28 @@ pub enum ClientError {
     Mqtt4(mqtt4bytes::Error),
 }
 
-/// `Client` to communicate with MQTT eventloop `Connection`.
-///
-/// Client is cloneable and can be used to synchronously Publish, Subscribe.
-/// Asynchronous channel handle can also be extracted if necessary
 #[derive(Clone)]
-pub struct Client {
+pub struct AsyncClient {
     request_tx: Sender<Request>,
     cancel_tx: Sender<()>,
 }
 
-impl Client {
-    /// Create a new `Client`
-    pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
-        // create MQTT eventloop and take cancellation handle
-        let runtime = runtime::Builder::new()
-            .basic_scheduler()
-            .enable_all()
-            .build()
-            .unwrap();
+impl AsyncClient {
+    pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
         let cancel_tx = eventloop.take_cancel_handle().unwrap();
 
-        let client = Client {
+        let client = AsyncClient {
             request_tx,
             cancel_tx,
         };
 
-        let connection = Connection::new(eventloop, runtime);
-        (client, connection)
-    }
-
-    /// Returns an asynchronous `Sender` to send MQTT requests to `Connection` eventloop
-    pub fn async_requests(&self) -> async_channel::Sender<Request> {
-        self.request_tx.clone()
+        (client, eventloop)
     }
 
     /// Sends a MQTT Publish to the eventloop
-    pub fn publish<S, V>(
+    pub async fn publish<S, V>(
         &mut self,
         topic: S,
         qos: QoS,
@@ -77,21 +59,78 @@ impl Client {
 
         publish.set_retain(retain);
         let publish = Request::PublishRaw(publish);
-        blocking::block_on(self.request_tx.send(publish))?;
+        self.request_tx.send(publish).await?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Subscribe to the eventloop
+    pub async fn subscribe<S: Into<String>>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<(), ClientError> {
+        let subscribe = Subscribe::new(topic.into(), qos);
+        let request = Request::Subscribe(subscribe);
+        self.request_tx.send(request).await?;
+        Ok(())
+    }
+
+    /// Stops the eventloop right away
+    pub async fn cancel(&mut self) -> Result<(), ClientError> {
+        self.cancel_tx.send(()).await?;
+        Ok(())
+    }
+}
+
+/// `Client` to communicate with MQTT eventloop `Connection`.
+///
+/// Client is cloneable and can be used to synchronously Publish, Subscribe.
+/// Asynchronous channel handle can also be extracted if necessary
+#[derive(Clone)]
+pub struct Client {
+    client: AsyncClient,
+}
+
+impl Client {
+    /// Create a new `Client`
+    pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
+        let (client, eventloop) = AsyncClient::new(options, cap);
+        let client = Client { client };
+        let runtime = runtime::Builder::new()
+            .basic_scheduler()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let connection = Connection::new(eventloop, runtime);
+        (client, connection)
+    }
+
+    /// Sends a MQTT Publish to the eventloop
+    pub fn publish<S, V>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
+    {
+        pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
         Ok(())
     }
 
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-        let request = Request::Subscribe(subscribe);
-        blocking::block_on(self.request_tx.send(request))?;
+        pollster::block_on(self.client.subscribe(topic, qos))?;
         Ok(())
     }
 
     /// Stops the eventloop right away
     pub fn cancel(&mut self) -> Result<(), ClientError> {
-        blocking::block_on(self.cancel_tx.send(()))?;
+        pollster::block_on(self.client.cancel())?;
         Ok(())
     }
 }
@@ -159,6 +198,7 @@ impl<'a> Iterator for Iter<'a> {
 
 impl<'a> Drop for Iter<'a> {
     fn drop(&mut self) {
+        // TODO: Don't create new runtime in drop
         let runtime = runtime::Builder::new().basic_scheduler().build().unwrap();
         self.connection.runtime = Some(mem::replace(&mut self.runtime, runtime));
     }
