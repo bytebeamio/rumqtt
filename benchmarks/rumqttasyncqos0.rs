@@ -58,7 +58,9 @@ async fn requests(id: &str, payloads: Vec<Vec<u8>>, requests_tx: Sender<Request>
     // let subscription = rumqttc::Subscribe::new(&topic, QoS::AtLeastOnce);
     // let _ = requests_tx.send(Request::Subscribe(subscription)).await;
     for payload in payloads.into_iter() {
-        let publish = Publish::new(&topic, QoS::AtMostOnce, payload).raw().unwrap();
+        let publish = Publish::new(&topic, QoS::AtMostOnce, payload)
+            .raw()
+            .unwrap();
         let publish = Request::PublishRaw(publish);
         requests_tx.send(publish).await.unwrap();
     }

@@ -95,7 +95,9 @@ impl Publish {
 
         if self.qos != QoS::AtMostOnce {
             let pkid = self.pkid;
-            if pkid == 0 { return Err(Error::PacketIdZero); }
+            if pkid == 0 {
+                return Err(Error::PacketIdZero);
+            }
             buffer.put_u16(pkid);
         }
 

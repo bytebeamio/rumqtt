@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
-use crate::router::{AcksReply, AcksRequest, SubscriptionRequest, TopicsReply, SubscriptionReply, TopicsRequest};
+use crate::router::{
+    AcksReply, AcksRequest, SubscriptionReply, SubscriptionRequest, TopicsReply, TopicsRequest,
+};
 use crate::{DataReply, DataRequest, RouterInMessage};
 
 /// Tracker tracks current offsets of all the subscriptions of a connection
@@ -69,7 +71,6 @@ impl Tracker {
         let request = RouterInMessage::SubscriptionRequest(SubscriptionRequest);
         self.tracker.push_front(request);
     }
-
 
     /// Updates data tracker to track new topics in the commitlog if they match
     /// a subscription.So, a TopicReply triggers DataRequest

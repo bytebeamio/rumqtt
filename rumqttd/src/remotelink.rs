@@ -138,7 +138,12 @@ impl RemoteLink {
                 }
             }
 
-            trace!("topics {} {} {}", self.id, self.tracker.has_next(), self.tracker.inflight());
+            trace!(
+                "topics {} {} {}",
+                self.id,
+                self.tracker.has_next(),
+                self.tracker.inflight()
+            );
 
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),

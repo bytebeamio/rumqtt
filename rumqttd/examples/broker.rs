@@ -1,7 +1,6 @@
 use librumqttd::Broker;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tokio::task;
-
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Config {
@@ -20,7 +19,10 @@ async fn main() {
         tx.subscribe("#").await.unwrap();
         loop {
             if let Some(message) = rx.recv().await.unwrap() {
-                println!("Incoming. Topic = {}, Payload = {:?}", message.topic, message.payload);
+                println!(
+                    "Incoming. Topic = {}, Payload = {:?}",
+                    message.topic, message.payload
+                );
             }
         }
     });
