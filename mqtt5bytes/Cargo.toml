@@ -5,6 +5,8 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 license = "Apache-2.0"
 description = "MQTT 5 core serialization and deserialization"
+keywords = ["mqtt"]
+categories = ["network-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
