@@ -30,7 +30,7 @@ impl Connect {
             client_id: id.into(),
             clean_session: true,
             last_will: None,
-            login: None
+            login: None,
         }
     }
 
@@ -61,7 +61,7 @@ impl Connect {
             client_id,
             clean_session,
             last_will,
-            login
+            login,
         };
 
         Ok(connect)
@@ -73,7 +73,6 @@ impl Connect {
                               + 1  // protocol version
                               + 1  // connect flags
                               + 2; // keep alive
-
 
         len += 2 + self.client_id.len();
 
@@ -188,7 +187,6 @@ impl LastWill {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Login {
     username: String,
@@ -199,9 +197,8 @@ impl Login {
     pub fn new<S: Into<String>>(u: S, p: S) -> Login {
         Login {
             username: u.into(),
-            password: p.into()
+            password: p.into(),
         }
-
     }
 
     fn extract(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<Login>, Error> {
@@ -379,7 +376,7 @@ mod test {
             client_id: "test".to_owned(),
             clean_session: true,
             last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
-            login: Some(Login::new("rust", "mq"))
+            login: Some(Login::new("rust", "mq")),
         };
 
         let mut buf = BytesMut::new();

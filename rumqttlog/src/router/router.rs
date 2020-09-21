@@ -171,6 +171,13 @@ impl Router {
         if let Some(_) = mem::replace(&mut self.watermarks[id], Some(Watermarks::new())) {
             warn!("Replacing an existing watermarks with same ID");
         }
+
+        let subscription_request = SubscriptionRequest;
+        let topics_request = TopicsRequest::new();
+        let acks_request = AcksRequest::new();
+        self.handle_subscription_request(id, subscription_request);
+        self.handle_topics_request(id, topics_request);
+        self.handle_acks_request(id, acks_request);
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
@@ -712,6 +719,7 @@ impl Router {
             Some(v) => v,
             None => return None,
         };
+        println!("{:?}, {:?}", offset, topics);
 
         let subscription = self.subscriptions[id].as_mut().unwrap();
         match subscription.matched_topics(&topics) {
@@ -846,6 +854,8 @@ mod test {
         let (connection_id, connection_rx) = broker.connection("1").await;
         broker.write_to_commitlog(connection_id, "hello/world", vec![1, 2, 3], 1);
         broker.write_to_commitlog(connection_id, "hello/world", vec![4, 5, 6], 2);
+        wait_for_new_acks(&connection_rx).await.unwrap();
+
         broker.new_data_request(connection_id, "hello/world", [(0, 0); 3]);
 
         let reply = wait_for_new_data(&connection_rx).await.unwrap();
@@ -912,6 +922,8 @@ mod test {
         // Send request for new topics. Router should reply with new topics when there are any
         broker.subscribe(connection_1_id, "hello/1/world", 1);
         broker.subscribe(connection_2_id, "#", 1);
+        wait_for_new_acks(&connection_1_rx).await.unwrap();
+        wait_for_new_acks(&connection_2_rx).await.unwrap();
 
         // Send new data to router to be written to commitlog
         for i in 0..20 {
@@ -919,34 +931,42 @@ mod test {
             broker.write_to_commitlog(connection_1_id, &topic, vec![1, 2, 3], 2);
         }
 
-        broker.new_topics_request(connection_1_id, 0);
-        broker.new_topics_request(connection_2_id, 0);
+        // Notifications with 1 topic
+        let reply = wait_for_new_topics(&connection_1_rx).await.unwrap();
+        assert_eq!(reply.topics.len(), 1);
+        assert_eq!(reply.topics[0].0, "hello/1/world");
 
-        // Returns only 1 matching topic
-        let topics = wait_for_new_topics(&connection_1_rx).await.unwrap().topics;
+        // Notifications with 1 topic
+        let reply = wait_for_new_topics(&connection_2_rx).await.unwrap();
+        let topics = reply.topics;
+        let offset = reply.offset;
         assert_eq!(topics.len(), 1);
-        assert_eq!(topics[0].0, "hello/1/world");
+        assert_eq!(topics[0].0, "hello/0/world");
 
-        // Return all matching topics (a max of 10)
+        // Return all matching topics (a max of 10). hello/1/world to hello/10/world
+        broker.new_topics_request(connection_2_id, offset);
         let reply = wait_for_new_topics(&connection_2_rx).await.unwrap();
         let topics = reply.topics;
         let offset = reply.offset;
         assert_eq!(topics.len(), 10);
         for (i, t) in topics.into_iter().enumerate() {
-            assert_eq!(format!("hello/{}/world", i), t.0);
+            assert_eq!(format!("hello/{}/world", i + 1), t.0);
             assert_eq!([(0, 0), (0, 0), (0, 0)], t.2);
         }
 
-        // remaining hello/10/world to hello/19/world
+        // Remaining hello/11/world to hello/19/world
         broker.new_topics_request(connection_2_id, offset);
         let reply = wait_for_new_topics(&connection_2_rx).await.unwrap();
         let topics = reply.topics;
-        assert_eq!(topics.len(), 10);
+        assert_eq!(topics.len(), 9);
         // hello/1/world to hello/10/world
         for (i, t) in topics.into_iter().enumerate() {
-            assert_eq!(format!("hello/{}/world", i + 10), t.0);
+            assert_eq!(format!("hello/{}/world", i + 11), t.0);
             assert_eq!([(0, 0), (0, 0), (0, 0)], t.2);
         }
+
+        broker.new_topics_request(connection_1_id, 0);
+        assert!(wait_for_new_topics(&connection_1_rx).await.is_none());
     }
 
     #[tokio::test(core_threads = 1)]
@@ -955,11 +975,10 @@ mod test {
         let (connection_1_id, connection_1_rx) = broker.connection("1").await;
         let (connection_2_id, connection_2_rx) = broker.connection("2").await;
 
-        // Send request for new topics. Router should reply with new topics when there are any
-        broker.new_topics_request(connection_1_id, 0);
-        broker.new_topics_request(connection_2_id, 0);
         broker.subscribe(connection_1_id, "hello/1/world", 1);
         broker.subscribe(connection_2_id, "#", 1);
+        wait_for_new_acks(&connection_1_rx).await.unwrap();
+        wait_for_new_acks(&connection_2_rx).await.unwrap();
 
         // Send new data to router to be written to commitlog
         for i in 0..20 {
@@ -1007,9 +1026,6 @@ mod test {
         let mut broker = Broker::new().await;
         let (connection_1_id, connection_1_rx) = broker.connection("1").await;
 
-        // Register a new subscription. Noting to match in `Subscription`. Register
-        broker.new_subscription_request(connection_1_id);
-
         // Write data of 15 topics
         for i in 0..15 {
             let topic = format!("hello/{}/world", i);
@@ -1020,6 +1036,7 @@ mod test {
         // this subscription
         broker.subscribe(connection_1_id, "#", 2);
 
+        wait_for_new_acks(&connection_1_rx).await.unwrap();
         let topics = wait_for_existing_topics(&connection_1_rx)
             .await
             .unwrap()

@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 
-use crate::router::{AcksReply, AcksRequest, SubscriptionRequest, TopicsReply, SubscriptionReply, TopicsRequest};
+use crate::router::{
+    AcksReply, AcksRequest, SubscriptionReply, SubscriptionRequest, TopicsReply, TopicsRequest,
+};
 use crate::{DataReply, DataRequest, RouterInMessage};
 
 /// Tracker tracks current offsets of all the subscriptions of a connection
@@ -18,19 +20,13 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new(max_count: usize) -> Tracker {
-        let mut tracker = VecDeque::with_capacity(100);
-        let subscription_request = RouterInMessage::SubscriptionRequest(SubscriptionRequest);
-        let topics_request = RouterInMessage::TopicsRequest(TopicsRequest::new());
-        let acks_request = RouterInMessage::AcksRequest(AcksRequest::new());
-
-        tracker.push_back(subscription_request);
-        tracker.push_back(topics_request);
-        tracker.push_back(acks_request);
-
         // TODO: Don't allow more than allocated capacity in tracker
+
         Tracker {
-            tracker,
-            inflight: 0,
+            tracker: VecDeque::with_capacity(100),
+            // Router registers SubscriptionRequest, TopicsRequest
+            // AcksRequest on behalf of connection
+            inflight: 3,
             max_count,
         }
     }
@@ -69,7 +65,6 @@ impl Tracker {
         let request = RouterInMessage::SubscriptionRequest(SubscriptionRequest);
         self.tracker.push_front(request);
     }
-
 
     /// Updates data tracker to track new topics in the commitlog if they match
     /// a subscription.So, a TopicReply triggers DataRequest

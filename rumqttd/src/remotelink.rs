@@ -112,18 +112,6 @@ impl RemoteLink {
         let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
         let mut timeout = time::delay_for(keep_alive);
 
-        // Send initialization requests from tracker [topics request and acks request]
-        while let Some(message) = self.tracker.next() {
-            trace!(
-                "{:11} {:14} Id = {}, Message = {:?}",
-                "tacker",
-                "next",
-                self.id,
-                message
-            );
-            self.router_tx.send((self.id, message)).await?;
-        }
-
         // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
         //         Router shouldn't drop messages
         // NOTE: Right now we request data by topic, instead if can request data
@@ -138,7 +126,12 @@ impl RemoteLink {
                 }
             }
 
-            trace!("topics {} {} {}", self.id, self.tracker.has_next(), self.tracker.inflight());
+            trace!(
+                "topics {} {} {}",
+                self.id,
+                self.tracker.has_next(),
+                self.tracker.inflight()
+            );
 
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),
@@ -173,7 +166,6 @@ impl RemoteLink {
                     reply.topics.len()
                 );
                 self.tracker.track_new_topics(&reply);
-                // trace!("topics Id = {} {:?}", self.id, self.tracker);
             }
             RouterOutMessage::SubscriptionReply(reply) => {
                 trace!(
@@ -186,7 +178,19 @@ impl RemoteLink {
                 self.tracker.track_existing_topics(&reply);
                 // trace!("topics Id = {} {:?}", self.id, self.tracker);
             }
-
+            RouterOutMessage::AcksReply(reply) => {
+                trace!(
+                    "{:11} {:14} Id = {}, Count = {}",
+                    "acks",
+                    "reply",
+                    self.id,
+                    reply.acks.len()
+                );
+                self.tracker.update_watermarks_tracker(&reply);
+                for (_pkid, ack) in reply.acks.into_iter() {
+                    self.network.fill(ack)?;
+                }
+            }
             RouterOutMessage::ConnectionAck(_) => {}
             RouterOutMessage::DataReply(reply) => {
                 trace!(
@@ -223,19 +227,6 @@ impl RemoteLink {
                     let publish = self.state.handle_router_data(publish)?;
                     let publish = Packet::Publish(publish);
                     self.network.fill(publish)?;
-                }
-            }
-            RouterOutMessage::AcksReply(reply) => {
-                trace!(
-                    "{:11} {:14} Id = {}, Count = {}",
-                    "acks",
-                    "reply",
-                    self.id,
-                    reply.acks.len()
-                );
-                self.tracker.update_watermarks_tracker(&reply);
-                for (_pkid, ack) in reply.acks.into_iter() {
-                    self.network.fill(ack)?;
                 }
             }
         }
