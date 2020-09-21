@@ -6,6 +6,8 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 license = "Apache-2.0"
 description = "MQTT 4 core serialization and deserialization"
+keywords = ["mqtt"]
+categories = ["network-programming", "no-std"]
 
 [lib]
 bench = false
