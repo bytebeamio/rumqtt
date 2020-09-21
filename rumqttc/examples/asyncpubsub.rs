@@ -1,7 +1,6 @@
-use async_channel::Sender;
 use tokio::{task, time};
 
-use rumqttc::{self, Event, EventLoop, MqttOptions, Publish, QoS, Request, Subscribe};
+use rumqttc::{self, AsyncClient, Event, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -13,10 +12,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions.set_keep_alive(5);
 
-    let mut eventloop = EventLoop::new(mqttoptions, 10);
-    let requests_tx = eventloop.handle();
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     task::spawn(async move {
-        requests(requests_tx).await;
+        requests(client).await;
         time::delay_for(Duration::from_secs(3)).await;
     });
 
@@ -28,13 +26,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn requests(requests_tx: Sender<Request>) {
-    let subscription = Subscribe::new("hello/world", QoS::AtMostOnce);
-    let _ = requests_tx.send(Request::Subscribe(subscription)).await;
+async fn requests(mut client: AsyncClient) {
+    client
+        .subscribe("hello/world", QoS::AtMostOnce)
+        .await
+        .unwrap();
 
-    for i in 0..10 {
-        let publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![i; i as usize]);
-        requests_tx.send(Request::Publish(publish)).await.unwrap();
+    for i in 1..=10 {
+        client
+            .publish("hello/world", QoS::AtLeastOnce, false, vec![i; i as usize])
+            .await
+            .unwrap();
         time::delay_for(Duration::from_secs(1)).await;
     }
 

@@ -17,8 +17,8 @@ bytes = "0.5"
 webpki = "0.21"
 tokio-rustls = "0.14"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.1"}
+pollster = "0.2"
 async-channel = "1.4"
-blocking = "0.4"
 log = "0.4"
 thiserror = "1.0.15"
 
