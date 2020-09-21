@@ -171,6 +171,13 @@ impl Router {
         if let Some(_) = mem::replace(&mut self.watermarks[id], Some(Watermarks::new())) {
             warn!("Replacing an existing watermarks with same ID");
         }
+
+        let subscription_request = SubscriptionRequest;
+        let topics_request = TopicsRequest::new();
+        let acks_request = AcksRequest::new();
+        self.handle_subscription_request(id, subscription_request);
+        self.handle_topics_request(id, topics_request);
+        self.handle_acks_request(id, acks_request);
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {

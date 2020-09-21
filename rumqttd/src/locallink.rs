@@ -56,12 +56,7 @@ impl LinkTx {
         };
 
         // Send initialization requests from tracker [topics request and acks request]
-        let mut tracker = Tracker::new(100);
-        while let Some(message) = tracker.next() {
-            self.router_tx.send((self.id, message)).await?;
-        }
-
-        let rx = LinkRx::new(self.id, tracker, self.router_tx.clone(), link_rx);
+        let rx = LinkRx::new(self.id, self.router_tx.clone(), link_rx);
         Ok(rx)
     }
 
@@ -103,7 +98,6 @@ pub struct LinkRx {
 impl LinkRx {
     pub(crate) fn new(
         id: usize,
-        tracker: Tracker,
         router_tx: Sender<(Id, RouterInMessage)>,
         link_rx: Receiver<RouterOutMessage>,
     ) -> LinkRx {
@@ -111,7 +105,7 @@ impl LinkRx {
             id,
             router_tx,
             link_rx,
-            tracker,
+            tracker: Tracker::new(100),
         }
     }
 
