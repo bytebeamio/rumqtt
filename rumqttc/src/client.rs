@@ -52,13 +52,9 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = match Publish::new(topic, qos, payload).raw() {
-            Ok(publish) => publish,
-            Err(e) => return Err(ClientError::Mqtt4(e)),
-        };
-
-        publish.set_retain(retain);
-        let publish = Request::PublishRaw(publish);
+        let mut publish = Publish::new(topic, qos, payload);
+        publish.retain = retain;
+        let publish = Request::Publish(publish);
         self.request_tx.send(publish).await?;
         Ok(())
     }
