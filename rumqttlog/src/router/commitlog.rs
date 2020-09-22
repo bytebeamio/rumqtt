@@ -22,17 +22,6 @@ impl CommitLog {
         }
     }
 
-    /// Returns all the topics in the commitlog along with their current offsets
-    pub fn _topics_snapshot(&self) -> Vec<(String, (u64, u64))> {
-        let mut out = Vec::new();
-        for (topic, log) in self.logs.iter() {
-            let offset = log.last_offset();
-            out.push((topic.clone(), offset));
-        }
-
-        out
-    }
-
     /// Appends the record to correct commitlog and returns a boolean to indicate
     /// if this topic is new along with the offset of append
     pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<(bool, (u64, u64))> {
@@ -48,15 +37,6 @@ impl CommitLog {
             self.logs.insert(topic.to_owned(), log);
             Ok((true, offsets))
         }
-    }
-
-    fn _last_offset(&self, topic: &str) -> Option<(u64, u64)> {
-        let log = match self.logs.get(topic) {
-            Some(log) => log,
-            None => return None,
-        };
-
-        Some(log.last_offset())
     }
 
     fn next_offset(&self, topic: &str) -> Option<(u64, u64)> {
@@ -135,36 +115,5 @@ impl TopicLog {
     /// Appends the topic if the topic isn't already seen
     pub fn append(&mut self, topic: &str) {
         self.topics.push(topic.to_owned());
-    }
-}
-
-type Topic = String;
-
-/// Snapshots of topics grouped by cluster id
-#[derive(Debug, Clone)]
-pub struct Snapshots {
-    snapshots: HashMap<Topic, [(u64, u64); 3]>,
-}
-
-impl Snapshots {
-    pub fn _new() -> Snapshots {
-        Snapshots {
-            snapshots: HashMap::new(),
-        }
-    }
-
-    fn _fill(&mut self, commitlog_id: usize, snapshot: Vec<(String, (u64, u64))>) {
-        for (topic, offset) in snapshot.into_iter() {
-            match self.snapshots.get_mut(&topic) {
-                Some(offsets) => {
-                    offsets[commitlog_id] = offset;
-                }
-                None => {
-                    let mut offsets = [(0, 0); 3];
-                    offsets[commitlog_id] = offset;
-                    self.snapshots.insert(topic, offsets);
-                }
-            }
-        }
     }
 }
