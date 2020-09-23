@@ -12,33 +12,7 @@ pub struct Slab<T> {
 }
 
 impl<T> Slab<T> {
-    /// Construct a new, empty `Slab` with the specified capacity.
-    ///
-    /// The returned slab will be able to store exactly `capacity` without
-    /// reallocating. If `capacity` is 0, the slab will not allocate.
-    ///
-    /// It is important to note that this function does not specify the *length*
-    /// of the returned slab, but only the capacity. For an explanation of the
-    /// difference between length and capacity, see [Capacity and
-    /// reallocation](index.html#capacity-and-reallocation).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use slab::*;
-    /// let mut slab = Slab::with_capacity(10);
-    ///
-    /// // The slab contains no values, even though it has capacity for more
-    /// assert_eq!(slab.len(), 0);
-    ///
-    /// // These are all done without reallocating...
-    /// for i in 0..10 {
-    ///     slab.insert(i);
-    /// }
-    ///
-    /// // ...but this may make the slab reallocate
-    /// slab.insert(11);
-    /// ```
+    /// Constructs a new initialized slab
     pub fn with_capacity(mut capacity: usize) -> Slab<T> {
         // slots for replicators
         capacity = 10 + capacity;
@@ -53,17 +27,6 @@ impl<T> Slab<T> {
     ///
     /// If the given key is not associated with a value, then `None` is
     /// returned.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use slab::*;
-    /// let mut slab = Slab::new();
-    /// let key = slab.insert("hello");
-    ///
-    /// assert_eq!(slab.get(key), Some(&"hello"));
-    /// assert_eq!(slab.get(123), None);
-    /// ```
     pub fn _get(&self, key: usize) -> Option<&T> {
         match self.entries.get(key) {
             Some(v) => v.as_ref(),
@@ -75,19 +38,6 @@ impl<T> Slab<T> {
     ///
     /// If the given key is not associated with a value, then `None` is
     /// returned.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use slab::*;
-    /// let mut slab = Slab::new();
-    /// let key = slab.insert("hello");
-    ///
-    /// *slab.get_mut(key).unwrap() = "world";
-    ///
-    /// assert_eq!(slab[key], "world");
-    /// assert_eq!(slab.get_mut(123), None);
-    /// ```
     pub fn get_mut(&mut self, key: usize) -> Option<&mut T> {
         match self.entries.get_mut(key) {
             Some(v) => v.as_mut(),
@@ -100,19 +50,6 @@ impl<T> Slab<T> {
     /// The returned key can later be used to retrieve or remove the value using indexed
     /// lookup and `remove`. Additional capacity is allocated if needed. See
     /// [Capacity and reallocation](index.html#capacity-and-reallocation).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the number of elements in the vector overflows a `usize`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use slab::*;
-    /// let mut slab = Slab::new();
-    /// let key = slab.insert("hello");
-    /// assert_eq!(slab[key], "hello");
-    /// ```
     pub fn insert(&mut self, val: T) -> Option<usize> {
         let key = match self.next.pop_front() {
             Some(key) => key,
