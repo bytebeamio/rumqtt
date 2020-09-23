@@ -2,6 +2,7 @@ extern crate bytes;
 
 mod commitlog;
 mod router;
+mod slab;
 mod subscriptions;
 mod watermarks;
 

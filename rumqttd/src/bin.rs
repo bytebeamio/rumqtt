@@ -30,8 +30,7 @@ struct CommandLine {
     config: PathBuf,
 }
 
-#[tokio::main(core_threads = 4)]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     let commandline: CommandLine = argh::from_env();
     let config: Config = confy::load_path(commandline.config)?;
@@ -45,7 +44,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Start the broker
     let mut broker = Broker::new(config.broker);
-    broker.start().await?;
+    broker.start()?;
     Ok(())
 }
 
