@@ -29,19 +29,25 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
         for _i in 0..count {
             let payload = vec![0; payload_size];
             let qos = QoS::AtMostOnce;
-            client.publish("hello/benchmarks/world", qos, false, payload).await.unwrap();
+            client
+                .publish("hello/benchmarks/world", qos, false, payload)
+                .await
+                .unwrap();
         }
 
         let qos = QoS::AtLeastOnce;
         let payload = vec![0; payload_size];
-        client.publish("hello/benchmarks/world", qos, false, payload).await.unwrap();
+        client
+            .publish("hello/benchmarks/world", qos, false, payload)
+            .await
+            .unwrap();
         time::delay_for(Duration::from_secs(10)).await;
     });
 
     let start = Instant::now();
     loop {
         if let Event::Incoming(Incoming::PubAck(_)) = eventloop.poll().await? {
-            break
+            break;
         }
     }
 

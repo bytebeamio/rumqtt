@@ -119,7 +119,6 @@ impl Broker {
         Ok(tx)
     }
 
-   
     pub fn start(&mut self) -> Result<(), Error> {
         let r = self.router.take().unwrap();
         let name = "router-".to_owned();
@@ -141,7 +140,6 @@ impl Broker {
             }
         });
 
-        
         Ok(())
     }
 }
@@ -151,36 +149,37 @@ async fn router(mut router: Router) {
     router.start().await;
 }
 
+async fn accept_loop(
+    config: Arc<ServerSettings>,
+    router_tx: Sender<(usize, RouterInMessage)>,
+) -> Result<(), Error> {
+    let addr = format!("0.0.0.0:{}", config.port);
+    info!("Waiting for connections on {}", addr);
 
-async fn accept_loop(config: Arc<ServerSettings>, router_tx: Sender<(usize, RouterInMessage)>) -> Result<(), Error> {
-       let addr = format!("0.0.0.0:{}", config.port);
-       info!("Waiting for connections on {}", addr);
+    let mut listener = TcpListener::bind(addr).await?;
+    let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
+    let mut count = 0;
 
-       let mut listener = TcpListener::bind(addr).await?;
-       let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
-       let mut count = 0;
+    loop {
+        let (stream, addr) = listener.accept().await?;
+        count += 1;
+        info!("{}. Accepting from: {}", count, addr);
 
-       loop {
-           let (stream, addr) = listener.accept().await?;
-           count += 1;
-           info!("{}. Accepting from: {}", count, addr);
+        let config = config.clone();
+        let router_tx = router_tx.clone();
 
-           let config = config.clone();
-           let router_tx = router_tx.clone();
+        task::spawn(async {
+            let connector = Connector::new(config, router_tx);
+            // TODO Remove all max packet size hard codes
+            let network = Network::new(stream, 10 * 1024);
+            if let Err(e) = connector.new_connection(network).await {
+                error!("Dropping link task!! Result = {:?}", e);
+            }
+        });
 
-           task::spawn(async {
-               let connector = Connector::new(config, router_tx);
-               // TODO Remove all max packet size hard codes
-               let network = Network::new(stream, 10 * 1024);
-               if let Err(e) = connector.new_connection(network).await {
-                   error!("Dropping link task!! Result = {:?}", e);
-               }
-           });
-
-           time::delay_for(accept_loop_delay).await;
-       }
+        time::delay_for(accept_loop_delay).await;
+    }
 }
-
 
 struct Connector {
     config: Arc<ServerSettings>,

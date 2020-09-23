@@ -177,6 +177,7 @@ impl Router {
             id,
             data.len()
         );
+
         let mut last_offset = (0, 0);
         let mut count = 0;
         for publish in data {

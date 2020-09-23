@@ -29,7 +29,10 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
         for _i in 0..count {
             let payload = vec![0; payload_size];
             let qos = QoS::AtLeastOnce;
-            client.publish("hello/benchmarks/world", qos, false, payload).await.unwrap();
+            client
+                .publish("hello/benchmarks/world", qos, false, payload)
+                .await
+                .unwrap();
         }
 
         time::delay_for(Duration::from_secs(10)).await;

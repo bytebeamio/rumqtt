@@ -7,8 +7,7 @@ struct Config {
     broker: librumqttd::Config,
 }
 
-#[tokio::main(core_threads = 1)]
-async fn main() {
+fn main() {
     pretty_env_logger::init();
     let config: Config = confy::load_path("config/rumqttd.conf").unwrap();
     let mut broker = Broker::new(config.broker);
@@ -27,5 +26,5 @@ async fn main() {
         }
     });
 
-    broker.start().await.unwrap();
+    broker.start().unwrap();
 }
