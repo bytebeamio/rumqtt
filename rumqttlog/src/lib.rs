@@ -6,7 +6,7 @@ pub mod storage;
 pub mod tracker;
 pub mod volatile;
 
-pub use async_channel::{bounded, Receiver, RecvError, SendError, Sender};
+pub use flume::{bounded, Receiver, RecvError, SendError, Sender};
 pub use mqtt4bytes;
 pub use router::{
     Connection, ConnectionAck, DataReply, DataRequest, Disconnection, ReplicationData, Router,

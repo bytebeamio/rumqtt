@@ -4,7 +4,6 @@ use rumqttlog::{
     tracker::Tracker, Connection, ConnectionAck, DataReply, Receiver, RecvError, RouterInMessage,
     RouterOutMessage, SendError, Sender,
 };
-use tokio::select;
 
 const MAX_INFLIGHT_REQUESTS: usize = 100;
 
@@ -41,13 +40,13 @@ impl LinkTx {
         }
     }
 
-    pub async fn connect(&mut self) -> Result<LinkRx, LinkError> {
+    pub fn connect(&mut self) -> Result<LinkRx, LinkError> {
         let (connection, link_rx) = Connection::new_remote(&self.client_id, self.capacity);
         let message = (0, RouterInMessage::Connect(connection));
-        self.router_tx.send(message).await.unwrap();
+        self.router_tx.send(message).unwrap();
         // Right now link identifies failure with dropped rx in router, which is probably ok
         // We need this here to get id assigned by router
-        match link_rx.recv().await? {
+        match link_rx.recv()? {
             RouterOutMessage::ConnectionAck(ack) => match ack {
                 ConnectionAck::Success(id) => self.id = id,
                 ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
@@ -61,12 +60,7 @@ impl LinkTx {
     }
 
     /// Sends a MQTT Publish to the router
-    pub async fn publish<S, V>(
-        &mut self,
-        topic: S,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), LinkError>
+    pub fn publish<S, V>(&mut self, topic: S, retain: bool, payload: V) -> Result<(), LinkError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -74,16 +68,16 @@ impl LinkTx {
         let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.retain = retain;
         let message = RouterInMessage::Publish(publish);
-        self.router_tx.send((self.id, message)).await?;
+        self.router_tx.send((self.id, message))?;
         Ok(())
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub async fn subscribe<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
+    pub fn subscribe<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
         let subscribe = Subscribe::new(filter.into(), QoS::AtMostOnce);
         let packet = Packet::Subscribe(subscribe);
         let message = RouterInMessage::Data(vec![packet]);
-        self.router_tx.send((self.id, message)).await?;
+        self.router_tx.send((self.id, message))?;
         Ok(())
     }
 }
@@ -109,19 +103,24 @@ impl LinkRx {
         }
     }
 
-    pub async fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
-        select! {
-            message = self.link_rx.recv() => {
-                let message = message?;
-                return Ok(self.handle_router_response(message))
-            },
-            Some(message) = tracker_next(&mut self.tracker),
-            if self.tracker.has_next() && self.tracker.inflight() < MAX_INFLIGHT_REQUESTS => {
-                trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
-                self.router_tx.send((self.id, message)).await?;
-                return Ok(None)
-            }
+    pub fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
+        let message = self.link_rx.recv()?;
+
+        if self.tracker.has_next() && self.tracker.inflight() < MAX_INFLIGHT_REQUESTS {
+            let message = self.tracker.next().unwrap();
+            trace!(
+                "{:11} {:14} Id = {}, Message = {:?}",
+                "tacker",
+                "next",
+                self.id,
+                message
+            );
+
+            self.router_tx.send((self.id, message))?;
+            return Ok(None);
         }
+
+        Ok(self.handle_router_response(message))
     }
 
     fn handle_router_response(&mut self, message: RouterOutMessage) -> Option<DataReply> {
@@ -154,8 +153,4 @@ impl LinkRx {
             }
         }
     }
-}
-
-async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
-    tracker.next()
 }

@@ -2,10 +2,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::{io, mem};
 
-use async_channel::{bounded, Receiver, Sender, TrySendError};
+use flume::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
-use tokio::stream::StreamExt;
 
 use super::bytes::Bytes;
 use super::commitlog::CommitLog;
@@ -97,9 +96,9 @@ impl Router {
         (router, router_tx)
     }
 
-    pub async fn start(&mut self) {
+    pub fn start(&mut self) {
         // All these methods will handle state and errors
-        while let Some((id, data)) = self.router_rx.next().await {
+        while let Ok((id, data)) = self.router_rx.recv() {
             match data {
                 RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
                 RouterInMessage::Publish(data) => {
@@ -788,7 +787,9 @@ impl Router {
         if let Err(e) = connection.handle.try_send(reply) {
             match e {
                 TrySendError::Full(e) => error!("Channel full. Id = {}, Message = {:?}", id, e),
-                TrySendError::Closed(e) => info!("Channel closed. Id = {}, Message = {:?}", id, e),
+                TrySendError::Disconnected(e) => {
+                    info!("Channel closed. Id = {}, Message = {:?}", id, e)
+                }
             }
         }
     }

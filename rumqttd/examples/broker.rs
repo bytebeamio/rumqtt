@@ -1,6 +1,6 @@
 use librumqttd::Broker;
 use serde::{Deserialize, Serialize};
-use tokio::task;
+use std::thread;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Config {
@@ -13,7 +13,7 @@ fn main() {
     let mut broker = Broker::new(config.broker);
 
     let mut tx = broker.link("localclient", 10).unwrap();
-    task::spawn(async move {
+    thread::spawn(move || {
         let mut rx = tx.connect().await.unwrap();
         tx.subscribe("#").await.unwrap();
         loop {

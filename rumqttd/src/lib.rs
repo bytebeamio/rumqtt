@@ -120,12 +120,12 @@ impl Broker {
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
-        let r = self.router.take().unwrap();
+        let mut router = self.router.take().unwrap();
         let name = "router-".to_owned();
         let thread = thread::Builder::new().name(name);
 
         // spawn the router in a separate thread
-        thread.spawn(move || router(r))?;
+        thread.spawn(move || router.start())?;
         let mut rt = tokio::runtime::Builder::new()
             .basic_scheduler()
             .enable_all()
@@ -142,11 +142,6 @@ impl Broker {
 
         Ok(())
     }
-}
-
-#[tokio::main(core_threads = 1)]
-async fn router(mut router: Router) {
-    router.start().await;
 }
 
 async fn accept_loop(
@@ -216,7 +211,7 @@ impl Connector {
         }
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);
-        self.router_tx.send(message).await?;
+        self.router_tx.send(message)?;
         Ok(())
     }
 }
