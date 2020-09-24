@@ -105,22 +105,21 @@ impl LinkRx {
 
     pub fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
         let message = self.link_rx.recv()?;
+        let message = self.handle_router_response(message);
 
-        if self.tracker.has_next() && self.tracker.inflight() < MAX_INFLIGHT_REQUESTS {
-            let message = self.tracker.next().unwrap();
-            trace!(
-                "{:11} {:14} Id = {}, Message = {:?}",
-                "tacker",
-                "next",
-                self.id,
-                message
-            );
-
+        // A response from router should trigger new request. Some times
+        // requests. For example, topics reply should trigger next topics
+        // requsest and data request. Not sending a data request is a
+        // potential deadlock until next topics response. So just try_send
+        // is a problem.
+        //
+        // send until inflight requests are full
+        while let Some(message) = self.tracker.next() {
+            trace!("Id = {:14}, Message = {:?}", self.id, message);
             self.router_tx.send((self.id, message))?;
-            return Ok(None);
         }
 
-        Ok(self.handle_router_response(message))
+        Ok(message)
     }
 
     fn handle_router_response(&mut self, message: RouterOutMessage) -> Option<DataReply> {

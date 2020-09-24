@@ -146,7 +146,7 @@ impl Broker {
 
 async fn accept_loop(
     config: Arc<ServerSettings>,
-    router_tx: Sender<(usize, RouterInMessage)>,
+    router_tx: Sender<(Id, RouterInMessage)>,
 ) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
     info!("Waiting for connections on {}", addr);
@@ -165,6 +165,7 @@ async fn accept_loop(
 
         task::spawn(async {
             let connector = Connector::new(config, router_tx);
+
             // TODO Remove all max packet size hard codes
             let network = Network::new(stream, 10 * 1024);
             if let Err(e) = connector.new_connection(network).await {

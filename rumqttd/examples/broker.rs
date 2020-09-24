@@ -14,17 +14,25 @@ fn main() {
 
     let mut tx = broker.link("localclient", 10).unwrap();
     thread::spawn(move || {
-        let mut rx = tx.connect().await.unwrap();
-        tx.subscribe("#").await.unwrap();
-        loop {
-            if let Some(message) = rx.recv().await.unwrap() {
-                println!(
-                    "Incoming. Topic = {}, Payload = {:?}",
-                    message.topic, message.payload
-                );
-            }
+        broker.start().unwrap();
+    });
+
+    // connect to get a receiver
+    // TODO: Connect with a function which return tx and rx to prevent
+    // doing publishes before connecting
+    let mut rx = tx.connect().unwrap();
+    tx.subscribe("#").unwrap();
+
+    // subscribe and publish in a separate thread
+    thread::spawn(move || {
+        for _i in 0..10 {
+            tx.publish("hello/0/world", false, vec![0; 1024]).unwrap();
         }
     });
 
-    broker.start().unwrap();
+    loop {
+        if let Some(message) = rx.recv().unwrap() {
+            println!("T = {}, P = {:?}", message.topic, message.payload.len());
+        }
+    }
 }
