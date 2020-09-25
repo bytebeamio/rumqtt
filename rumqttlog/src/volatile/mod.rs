@@ -71,21 +71,9 @@ impl Log {
         (base_offset, offset)
     }
 
-    pub fn last_offset(&self) -> (u64, u64) {
-        let base_offset = self.active_segment.base_offset();
-        // Segment will always have at least 1 element as it's lazily
-        // created with append. Hence we can ignore -ve overflow
-        let relative_offset = base_offset + self.active_segment.len() as u64 - 1;
-
-        (base_offset, relative_offset)
-    }
-
     pub fn next_offset(&self) -> (u64, u64) {
         let base_offset = self.active_segment.base_offset();
-        // Segment will always have at least 1 element as it's lazily
-        // created with append. Hence we can ignore -ve overflow
         let relative_offset = base_offset + self.active_segment.len() as u64;
-
         (base_offset, relative_offset)
     }
 
@@ -101,28 +89,25 @@ impl Log {
         }
     }
 
-    /// Reads multiple packets from the storage and return base offset and relative
-    /// offset of the last segment.
-    /// Done status is used by the caller to jump to next segment
-    /// Returns base offset, offset of the last record along will records batch
-    /// **Note**: Base offset is used to be able to pull directly from correct segment instead of
-    /// using an explicit index to identify correct segment. Kafka clients just use absolute
-    /// offset in request. Upper layers should somehow translate absolute offet to base offset
-    /// **Note**: This method also returns full segment data when requested data is not of active
-    /// segment. Set your max_segment size keeping tail latencies of all the concurrent
-    /// connections mind (some runtimes support internal preemption using await points
+    /// Upper layers should somehow translate absolute offet to base offset
     /// where this might not be a problem)
-    /// **Note**: When data of deleted segment is asked, returns data of the current head
     /// Reads multiple packets from the storage and retuns base offset and
-    /// relative offset of the next log.
-    pub fn readv(
-        &mut self,
-        mut base_offset: u64,
-        mut offset: u64,
-        max_count: usize,
-    ) -> (Option<u64>, u64, u64, Vec<Bytes>) {
-        // TODO Fix usize to u64 conversions
+    /// offset of the next log.
+    /// 1st return = Done status is used by the caller to jump to next segment.
+    /// When data of deleted segment is asked, returns data of the current head
+    /// **Note**: Base offset is used to be able to pull directly from correct
+    /// segment instead of
+    /// **Note**: Uses an explicit index to identify correct segment. Kafka
+    /// clients just use absolute
+    /// **Note**: This method also returns full segment data when requested
+    /// data is not of active segment. Set your max_segment size keeping tail
+    /// latencies of all the concurrent connections mind
+    /// (some runtimes support internal preemption using await points)
+    pub fn readv(&mut self, segment: u64, offset: u64) -> (Option<u64>, u64, u64, Vec<Bytes>) {
+        let mut base_offset = segment;
+        let mut offset = offset;
 
+        // TODO Fix usize to u64 conversions
         // jump to head if the caller is trying to read deleted segment
         if base_offset < self.head_offset {
             warn!("Trying to read a deleted segment. Jumping");
@@ -133,7 +118,7 @@ impl Log {
         // read from active segment if base offset matches active segment's base offset
         if base_offset == self.active_segment.base_offset() {
             let relative_offset = (offset - base_offset) as usize;
-            let out = self.active_segment.readv(relative_offset, max_count);
+            let out = self.active_segment.readv(relative_offset);
             let next_record_offset = offset + out.len() as u64;
             return (
                 None,
@@ -146,8 +131,7 @@ impl Log {
         // read from backlog segments
         if let Some(segment) = self.segments.get(&base_offset) {
             let relative_offset = (offset - base_offset) as usize;
-            // TODO: Maxcount and segment jump
-            let out = segment.readv(relative_offset, max_count);
+            let out = segment.readv(relative_offset);
 
             return if out.len() > 0 {
                 let next_record_offset = offset + out.len() as u64;
@@ -159,7 +143,7 @@ impl Log {
                     out,
                 )
             } else {
-                let out = self.active_segment.readv(0, max_count);
+                let out = self.active_segment.readv(0);
                 let next_record_offset = offset + out.len() as u64;
                 (
                     None,
@@ -248,7 +232,7 @@ mod test {
         }
 
         // Read a segment from start. This returns full segment
-        let (jump, base_offset, next_offset, data) = log.readv(0, 0, 10);
+        let (jump, base_offset, next_offset, data) = log.readv(0, 0);
         assert_eq!(data.len(), 10);
         assert_eq!(base_offset, 0);
         assert_eq!(next_offset, 10);
@@ -261,7 +245,7 @@ mod test {
         assert_eq!(data[0], 50);
 
         // Read a segment from the middle. This returns all the remaining elements
-        let (jump, base_offset, next_offset, data) = log.readv(10, 15, 10);
+        let (jump, base_offset, next_offset, data) = log.readv(10, 15);
         assert_eq!(data.len(), 5);
         assert_eq!(base_offset, 10);
         assert_eq!(next_offset, 20);
@@ -270,11 +254,11 @@ mod test {
         assert_eq!(jump, Some(20));
 
         // Read a segment from scratch. gets full segment
-        let (_, _, _, data) = log.readv(10, 10, 100);
+        let (_, _, _, data) = log.readv(10, 10);
         assert_eq!(data.len(), 10);
 
         // Read a segment from middle. gets full segment from middle
-        let (_, _, _, data) = log.readv(10, 15, 100);
+        let (_, _, _, data) = log.readv(10, 15);
         assert_eq!(data.len(), 5);
     }
 
@@ -292,7 +276,7 @@ mod test {
         }
 
         // read active segment
-        let (jump, segment, offset, data) = log.readv(190, 190, 10);
+        let (jump, segment, offset, data) = log.readv(190, 190);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 190);
         assert_eq!(offset, 200);
@@ -314,7 +298,7 @@ mod test {
         }
 
         // read active segment
-        let (jump, segment, offset, data) = log.readv(80, 80, 10);
+        let (jump, segment, offset, data) = log.readv(80, 80);
         assert_eq!(data.len(), 5);
         assert_eq!(segment, 80);
         assert_eq!(offset, 85);
@@ -328,7 +312,7 @@ mod test {
         }
 
         // read active segment
-        let (jump, segment, offset, data) = log.readv(segment, offset, 10);
+        let (jump, segment, offset, data) = log.readv(segment, offset);
         assert_eq!(data.len(), 5);
         assert_eq!(segment, 80);
         assert_eq!(offset, 90);
@@ -350,7 +334,7 @@ mod test {
 
         // read active segment. there's no next segment. so active segment
         // is not done yet
-        let (jump, segment, offset, data) = log.readv(80, 80, 10);
+        let (jump, segment, offset, data) = log.readv(80, 80);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 80);
         assert_eq!(offset, 90);
@@ -364,7 +348,7 @@ mod test {
         }
 
         // read from the next offset of previous active segment
-        let (jump, segment, offset, data) = log.readv(segment, offset, 10);
+        let (jump, segment, offset, data) = log.readv(segment, offset);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 90);
         assert_eq!(offset, 100);
@@ -386,7 +370,7 @@ mod test {
 
         // Read 15K. Crosses boundaries of the segment and offset will be in
         // the middle of 2nd segment
-        let (jump, segment, offset, _data) = log.readv(0, 0, 10);
+        let (jump, segment, offset, _data) = log.readv(0, 0);
         assert_eq!(segment, 100);
         assert_eq!(offset, 110);
         assert!(jump.is_some());

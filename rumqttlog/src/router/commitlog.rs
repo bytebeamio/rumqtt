@@ -61,7 +61,6 @@ impl CommitLog {
         topic: &str,
         in_segment: u64,
         in_offset: u64,
-        max_count: usize,
     ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
         // native and replica commitlog where this topic doesn't exist
@@ -70,7 +69,7 @@ impl CommitLog {
             None => return Ok(None),
         };
 
-        let (jump, segment, offset, data) = log.readv(in_segment, in_offset, max_count);
+        let (jump, segment, offset, data) = log.readv(in_segment, in_offset);
 
         // For debugging. Will be removed later
         // println!(

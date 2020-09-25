@@ -709,7 +709,6 @@ impl Router {
         let native_id = self.id;
         let topic = &request.topic;
         let commitlog = &mut self.commitlog[native_id];
-        let max_count = request.max_count;
         let cursors = request.cursors;
 
         let (segment, offset) = cursors[native_id];
@@ -719,7 +718,7 @@ impl Router {
         );
         let mut reply = DataReply::new(request.topic.clone(), cursors, 0, Vec::new());
 
-        match commitlog.readv(topic, segment, offset, max_count) {
+        match commitlog.readv(topic, segment, offset) {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
                 match jump {
                     Some(next) => reply.cursors[native_id] = (next, next),
@@ -746,7 +745,6 @@ impl Router {
     /// log is caught up or encountered an error while reading data
     fn extract_all_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
-        let max_count = request.max_count;
 
         let mut cursors = [(0, 0); 3];
         let mut payload = Vec::new();
@@ -754,7 +752,7 @@ impl Router {
         // Iterate through native and replica commitlogs to collect data (of a topic)
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
             let (segment, offset) = request.cursors[i];
-            match commitlog.readv(topic, segment, offset, max_count) {
+            match commitlog.readv(topic, segment, offset) {
                 Ok(Some(v)) => {
                     let (jump, base_offset, record_offset, mut data) = v;
                     match jump {
