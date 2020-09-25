@@ -355,6 +355,14 @@ impl Router {
             }
         };
 
+        trace!(
+            "{:11} {:14} Id = {} Count = {}",
+            "subscr",
+            "response",
+            id,
+            topics.len()
+        );
+
         let reply = SubscriptionReply::new(topics);
         self.reply(id, RouterOutMessage::SubscriptionReply(reply));
     }
@@ -558,8 +566,6 @@ impl Router {
         mem::swap(&mut self.topics_waiters, &mut self.next_topics_waiters);
     }
 
-    /// This is a slight variant of publish notification. This also sends
-    /// TopicsReply
     fn fresh_subscription_notification(&mut self, id: ConnectionId) {
         let subscription = self.subscriptions.get_mut(id).unwrap();
 
@@ -574,6 +580,14 @@ impl Router {
                 return;
             }
         };
+
+        trace!(
+            "{:11} {:14} Id = {} Count = {}",
+            "subscr",
+            "notification",
+            id,
+            topics.len()
+        );
 
         let reply = SubscriptionReply::new(topics);
         self.connections
@@ -733,10 +747,6 @@ impl Router {
     fn extract_all_data(&mut self, request: &mut DataRequest) -> Option<DataReply> {
         let topic = &request.topic;
         let max_count = request.max_count;
-        debug!(
-            "Pull data. Topic = {}, cursors = {:?}",
-            topic, request.cursors
-        );
 
         let mut cursors = [(0, 0); 3];
         let mut payload = Vec::new();
@@ -799,7 +809,7 @@ impl Router {
 mod test {
     use super::broker::Broker;
     use crate::router::*;
-    use async_channel::Receiver;
+    use flume::Receiver;
     use std::time::Duration;
 
     #[tokio::test(core_threads = 1)]
@@ -1086,9 +1096,10 @@ mod broker {
     use super::{ConnectionId, Router};
     use crate::router::*;
     use crate::*;
-    use async_channel::{Receiver, Sender};
+    use flume::{Receiver, Sender};
     use mqtt4bytes::{QoS, Subscribe};
     use std::sync::Arc;
+    use std::thread;
 
     // Broker is used to test router
     pub(crate) struct Broker {
@@ -1100,9 +1111,9 @@ mod broker {
             let mut config = Config::default();
             config.id = 0;
             let (router, router_tx) = Router::new(Arc::new(config));
-            tokio::task::spawn(async move {
+            thread::spawn(move || {
                 let mut router = router;
-                router.start().await;
+                router.start();
             });
 
             Broker { router_tx }
@@ -1114,9 +1125,9 @@ mod broker {
         ) -> (ConnectionId, Receiver<RouterOutMessage>) {
             let (connection, link_rx) = Connection::new_remote(id, 5);
             let message = RouterInMessage::Connect(connection);
-            self.router_tx.send((0, message)).await.unwrap();
+            self.router_tx.send((0, message)).unwrap();
 
-            let connection_id = match link_rx.recv().await.unwrap() {
+            let connection_id = match link_rx.recv().unwrap() {
                 RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
                 o => panic!("Unexpected connection ack = {:?}", o),
             };

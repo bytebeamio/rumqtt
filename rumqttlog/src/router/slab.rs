@@ -72,26 +72,6 @@ impl<T> Slab<T> {
         self.entries[at] = Some(val);
     }
 
-    /// Remove and return the value associated with the given key.
-    ///
-    /// The key is then released and may be associated with future stored
-    /// values.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `key` is not associated with a value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use slab::*;
-    /// let mut slab = Slab::new();
-    ///
-    /// let hello = slab.insert("hello");
-    ///
-    /// assert_eq!(slab.remove(hello), "hello");
-    /// assert!(!slab.contains(hello));
-    /// ```
     pub fn remove(&mut self, key: usize) {
         let _ = mem::replace(&mut self.entries[key], None);
         self.next.push_back(key);
