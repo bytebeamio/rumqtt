@@ -541,7 +541,7 @@ impl Router {
                 }
             };
 
-            let reply = TopicsReply::new(offset + topics.len(), topics);
+            let reply = TopicsReply::new(offset, topics);
 
             trace!(
                 "{:11} {:14} Id = {}, Offset = {}, Count = {}",
@@ -698,7 +698,7 @@ impl Router {
 
         let subscription = self.subscriptions.get_mut(id).unwrap();
         match subscription.matched_topics(&topics) {
-            Some(topics) => Some(TopicsReply::new(offset + 1, topics)),
+            Some(topics) => Some(TopicsReply::new(offset, topics)),
             None => None,
         }
     }
@@ -723,7 +723,7 @@ impl Router {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
                 match jump {
                     Some(next) => reply.cursors[native_id] = (next, next),
-                    None => reply.cursors[native_id] = (base_offset, record_offset + 1),
+                    None => reply.cursors[native_id] = (base_offset, record_offset),
                 }
 
                 // Update reply's cursors only when read has returned some data
@@ -759,7 +759,7 @@ impl Router {
                     let (jump, base_offset, record_offset, mut data) = v;
                     match jump {
                         Some(next) => cursors[i] = (next, next),
-                        None => cursors[i] = (base_offset, record_offset + 1),
+                        None => cursors[i] = (base_offset, record_offset),
                     }
 
                     if data.is_empty() {
@@ -970,6 +970,7 @@ mod test {
         let offset = reply.offset;
         assert_eq!(topics.len(), 1);
         assert_eq!(topics[0].0, "hello/0/world");
+        dbg!(offset);
 
         // hello/1/world to hello/10/world
         broker.new_topics_request(connection_2_id, offset);

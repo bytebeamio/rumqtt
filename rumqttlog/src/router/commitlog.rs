@@ -59,8 +59,8 @@ impl CommitLog {
     pub fn readv(
         &mut self,
         topic: &str,
-        segment: u64,
-        offset: u64,
+        in_segment: u64,
+        in_offset: u64,
         max_count: usize,
     ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
@@ -70,7 +70,17 @@ impl CommitLog {
             None => return Ok(None),
         };
 
-        let (jump, segment, offset, data) = log.readv(segment, offset, max_count);
+        let (jump, segment, offset, data) = log.readv(in_segment, in_offset, max_count);
+
+        // For debugging. Will be removed later
+        // println!(
+        //     "In: segment {} offset {}, Out: segment {} offset {}, Count {}",
+        //     in_segment,
+        //     in_offset,
+        //     segment,
+        //     offset,
+        //     data.len()
+        // );
         Ok(Some((jump, segment, offset, data)))
     }
 }
@@ -99,17 +109,17 @@ impl TopicLog {
             return None;
         }
 
-        let mut last_offset = offset + count;
-        if last_offset >= len {
-            last_offset = len;
+        let mut next_offset = offset + count;
+        if next_offset >= len {
+            next_offset = len;
         }
 
-        let out = self.topics[offset..last_offset].as_ref();
+        let out = self.topics[offset..next_offset].as_ref();
         if out.is_empty() {
             return None;
         }
 
-        Some((last_offset - 1, out))
+        Some((next_offset, out))
     }
 
     /// Appends the topic if the topic isn't already seen

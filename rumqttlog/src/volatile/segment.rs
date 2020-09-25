@@ -34,7 +34,7 @@ impl Segment {
         self.file.len()
     }
 
-    /// Appends record to the file and return its offset
+    /// Appends record to the file and return next offset
     pub fn append(&mut self, record: Bytes) -> u64 {
         let len = record.len();
         self.file.push(record);
@@ -54,16 +54,16 @@ impl Segment {
     }
 
     /// Reads multiple data from a segment
-    pub fn readv(&self, offset: usize, max_count: usize) -> Vec<Bytes> {
-        let end = match self.file.len() {
-            // Requested offset crosses segment boundary
-            len if offset > len => return Vec::new(),
-            // End offset crosses boundary when trying fetch requested max count
-            len if offset + max_count > len => len,
-            // Return maximum number of elements
-            _ => offset + max_count,
-        };
+    pub fn readv(&self, offset: usize, _max_count: usize) -> Vec<Bytes> {
+        // let end = match self.file.len() {
+        //     // Requested offset crosses segment boundary
+        //     len if offset > len => return Vec::new(),
+        //     // End offset crosses boundary when trying fetch requested max count
+        //     len if offset + max_count > len => len,
+        //     // Return maximum number of elements
+        //     _ => offset + max_count,
+        // };
 
-        self.file[offset..end].to_vec()
+        self.file[offset..].to_vec()
     }
 }
