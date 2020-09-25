@@ -1,6 +1,7 @@
 use librumqttd::Broker;
 use serde::{Deserialize, Serialize};
 use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Config {
@@ -25,14 +26,22 @@ fn main() {
 
     // subscribe and publish in a separate thread
     thread::spawn(move || {
-        for _i in 0..10 {
-            tx.publish("hello/0/world", false, vec![0; 1024]).unwrap();
+        for _ in 0..10 {
+            for i in 0..200 {
+                let topic = format!("hello/{}/world", i);
+                tx.publish(topic, false, vec![0; 1024]).unwrap();
+            }
+
+            // thread::sleep(Duration::from_millis(1));
         }
     });
 
+    let mut count = 0;
     loop {
         if let Some(message) = rx.recv().unwrap() {
-            println!("T = {}, P = {:?}", message.topic, message.payload.len());
+            // println!("T = {}, P = {:?}", message.topic, message.payload.len());
+            count += message.payload.len();
+            println!("{}", count);
         }
     }
 }
