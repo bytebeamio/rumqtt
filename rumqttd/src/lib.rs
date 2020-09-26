@@ -121,7 +121,7 @@ impl Broker {
 
     pub fn start(&mut self) -> Result<(), Error> {
         let mut router = self.router.take().unwrap();
-        let name = "router-".to_owned();
+        let name = "rumqttd-router".to_owned();
         let thread = thread::Builder::new().name(name);
 
         // spawn the router in a separate thread

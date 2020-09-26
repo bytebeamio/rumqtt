@@ -154,6 +154,7 @@ impl Router {
         info!("Cleaning ID [{}] = {:?} from router", disconnect.id, id);
         self.connections.remove(id);
         self.subscriptions.remove(id);
+        self.watermarks.remove(id);
 
         // FIXME iterates through all the topics and all the (pending) requests remove the request
         for waiters in self.data_waiters.values_mut() {

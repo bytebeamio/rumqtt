@@ -5,8 +5,6 @@ use rumqttlog::{
     RouterOutMessage, SendError, Sender,
 };
 
-const MAX_INFLIGHT_REQUESTS: usize = 100;
-
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
     #[error("Unexpected router message")]
