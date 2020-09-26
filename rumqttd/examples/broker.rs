@@ -1,7 +1,6 @@
 use librumqttd::Broker;
 use serde::{Deserialize, Serialize};
 use std::thread;
-use std::time::Duration;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Config {
@@ -13,7 +12,7 @@ fn main() {
     let config: Config = confy::load_path("config/rumqttd.conf").unwrap();
     let mut broker = Broker::new(config.broker);
 
-    let mut tx = broker.link("localclient", 10).unwrap();
+    let mut tx = broker.link("localclient").unwrap();
     thread::spawn(move || {
         broker.start().unwrap();
     });
@@ -21,7 +20,7 @@ fn main() {
     // connect to get a receiver
     // TODO: Connect with a function which return tx and rx to prevent
     // doing publishes before connecting
-    let mut rx = tx.connect().unwrap();
+    let mut rx = tx.connect(10).unwrap();
     tx.subscribe("#").unwrap();
 
     // subscribe and publish in a separate thread
@@ -31,8 +30,6 @@ fn main() {
                 let topic = format!("hello/{}/world", i);
                 tx.publish(topic, false, vec![0; 1024]).unwrap();
             }
-
-            // thread::sleep(Duration::from_millis(1));
         }
     });
 

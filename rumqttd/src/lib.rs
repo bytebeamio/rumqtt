@@ -111,11 +111,11 @@ impl Broker {
         self.router_tx.clone()
     }
 
-    pub fn link(&self, client_id: &str, capacity: usize) -> Result<LinkTx, LinkError> {
+    pub fn link(&self, client_id: &str) -> Result<LinkTx, LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
 
-        let tx = LinkTx::new(client_id, capacity, self.router_tx.clone());
+        let tx = LinkTx::new(client_id, self.router_tx.clone());
         Ok(tx)
     }
 

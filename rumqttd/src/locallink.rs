@@ -21,27 +21,24 @@ pub struct LinkTx {
     id: usize,
     router_tx: Sender<(Id, RouterInMessage)>,
     client_id: String,
-    capacity: usize,
 }
 
 impl LinkTx {
-    pub(crate) fn new(
-        client_id: &str,
-        capacity: usize,
-        router_tx: Sender<(Id, RouterInMessage)>,
-    ) -> LinkTx {
+    pub(crate) fn new(client_id: &str, router_tx: Sender<(Id, RouterInMessage)>) -> LinkTx {
         LinkTx {
             id: 0,
             router_tx,
             client_id: client_id.to_owned(),
-            capacity,
         }
     }
 
-    pub fn connect(&mut self) -> Result<LinkRx, LinkError> {
-        let (connection, link_rx) = Connection::new_remote(&self.client_id, self.capacity);
+    pub fn connect(&mut self, max_inflight_requests: usize) -> Result<LinkRx, LinkError> {
+        // connection queue capacity should match that maximum inflight requests
+        let (connection, link_rx) = Connection::new_remote(&self.client_id, max_inflight_requests);
+
         let message = (0, RouterInMessage::Connect(connection));
         self.router_tx.send(message).unwrap();
+
         // Right now link identifies failure with dropped rx in router, which is probably ok
         // We need this here to get id assigned by router
         match link_rx.recv()? {
@@ -53,7 +50,13 @@ impl LinkTx {
         };
 
         // Send initialization requests from tracker [topics request and acks request]
-        let rx = LinkRx::new(self.id, self.router_tx.clone(), link_rx);
+        let rx = LinkRx::new(
+            self.id,
+            max_inflight_requests,
+            self.router_tx.clone(),
+            link_rx,
+        );
+
         Ok(rx)
     }
 
@@ -85,16 +88,19 @@ pub struct LinkRx {
     router_tx: Sender<(Id, RouterInMessage)>,
     link_rx: Receiver<RouterOutMessage>,
     tracker: Tracker,
+    max_inflight_requests: usize,
 }
 
 impl LinkRx {
     pub(crate) fn new(
         id: usize,
+        max_inflight_requests: usize,
         router_tx: Sender<(Id, RouterInMessage)>,
         link_rx: Receiver<RouterOutMessage>,
     ) -> LinkRx {
         LinkRx {
             id,
+            max_inflight_requests,
             router_tx,
             link_rx,
             tracker: Tracker::new(100),
@@ -111,10 +117,23 @@ impl LinkRx {
         // potential deadlock until next topics response. So just try_send
         // is a problem.
         //
-        // send until inflight requests are full
-        while let Some(message) = self.tracker.next() {
-            trace!("Id = {:14}, Message = {:?}", self.id, message);
-            self.router_tx.send((self.id, message))?;
+        // send until inflight requests reaches maximum configured (which is
+        // also the size of response channel to this connection) because router
+        // can keep receiving requests as the below loop aggressively sends
+        // all the possible requests. But requests shouldn't be infinite as
+        // router will eventually fill connection queue with responses and
+        // to finally result if channel full error. Inflight requests should
+        // stop at the capacity of response channel
+        while self.tracker.inflight() < self.max_inflight_requests {
+            // New topic request because of topic response should not fill
+            // inflight queue or else it it a block.
+            match self.tracker.next() {
+                Some(request) => {
+                    trace!("Id = {:14}, Request = {:?}", self.id, request);
+                    self.router_tx.send((self.id, request))?;
+                }
+                None => break,
+            }
         }
 
         Ok(message)
