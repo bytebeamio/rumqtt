@@ -115,46 +115,48 @@ impl Log {
             offset = self.head_offset;
         }
 
-        // read from active segment if base offset matches active segment's base offset
-        if base_offset == self.active_segment.base_offset() {
-            let relative_offset = (offset - base_offset) as usize;
-            let out = self.active_segment.readv(relative_offset);
-            let next_record_offset = offset + out.len() as u64;
-            return (
-                None,
-                self.active_segment.base_offset(),
-                next_record_offset,
-                out,
-            );
-        }
-
-        // read from backlog segments
-        if let Some(segment) = self.segments.get(&base_offset) {
-            let relative_offset = (offset - base_offset) as usize;
-            let out = segment.readv(relative_offset);
-
-            return if out.len() > 0 {
+        loop {
+            // read from active segment if base offset matches active segment's base offset
+            if base_offset == self.active_segment.base_offset() {
+                let relative_offset = (offset - base_offset) as usize;
+                let out = self.active_segment.readv(relative_offset);
                 let next_record_offset = offset + out.len() as u64;
-                let next_segment_offset = segment.base_offset() + segment.len() as u64;
-                (
-                    Some(next_segment_offset),
-                    segment.base_offset(),
-                    next_record_offset,
-                    out,
-                )
-            } else {
-                let out = self.active_segment.readv(0);
-                let next_record_offset = offset + out.len() as u64;
-                (
+                return (
                     None,
                     self.active_segment.base_offset(),
                     next_record_offset,
                     out,
-                )
-            };
-        }
+                );
+            }
 
-        (None, base_offset, offset, Vec::new())
+            // read from backlog segments
+            if let Some(segment) = self.segments.get(&base_offset) {
+                let relative_offset = (offset - base_offset) as usize;
+                let out = segment.readv(relative_offset);
+
+                if out.len() > 0 {
+                    let next_record_offset = offset + out.len() as u64;
+                    let next_segment_offset = segment.base_offset() + segment.len() as u64;
+                    return (
+                        Some(next_segment_offset),
+                        segment.base_offset(),
+                        next_record_offset,
+                        out,
+                    );
+                } else {
+                    // Jump to the next segment if the above readv return 0 element
+                    // because of just being at the edge before next segment got
+                    // added
+                    // NOTE: This jump is necessary because, readv should always
+                    // return data if there is data. Or else router registers this
+                    // for notification even though there is data (which might
+                    // cause a block)
+                    base_offset = segment.base_offset() + segment.len() as u64;
+                    offset = base_offset;
+                    continue;
+                };
+            }
+        }
     }
 }
 
@@ -170,7 +172,7 @@ mod test {
 
         // 200 1K iterations. 10 1K records per file. 20 files ignoring deletes.
         // segments: 0.segment, 10.segment .... 190.segment
-        // considering deletes: 100.segment .. 190.segment
+        // considering deletes: 100.segment, 110.segment .. 190.segment
         for i in 0..200 {
             let payload = vec![i; 1024];
             let payload = Bytes::from(payload);
@@ -320,11 +322,11 @@ mod test {
     }
 
     #[test]
-    fn last_active_segment_read_jumps_to_current_active_segment_read_correctly() {
+    fn last_active_segment_read_jumps_to_next_segment_read_correctly() {
         let mut log = Log::new(10 * 1024, 10);
 
         // 90 1K iterations. 9 files ignoring deletes.
-        // 0.segment (data with 0 - 9), 10.segment (10 - 19) .... 80.segment (80 - 89)
+        // 0.segment (data with 0 - 9), 10.segment .... 80.segment (80 - 89)
         // 10K per segment = 10 records per segment
         for i in 0..90 {
             let payload = vec![i; 1024];
@@ -340,8 +342,8 @@ mod test {
         assert_eq!(offset, 90);
         assert!(jump.is_none());
 
-        // append more which also changes active segment
-        for i in 90..100 {
+        // append more which also changes active segment to 100.segment
+        for i in 90..110 {
             let payload = vec![i; 1024];
             let payload = Bytes::from(payload);
             log.append(payload);
@@ -352,6 +354,13 @@ mod test {
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 90);
         assert_eq!(offset, 100);
+        assert_eq!(jump, Some(100));
+
+        // read active segment again
+        let (jump, segment, offset, data) = log.readv(segment, offset);
+        assert_eq!(data.len(), 10);
+        assert_eq!(segment, 100);
+        assert_eq!(offset, 110);
         assert!(jump.is_none());
     }
 
@@ -359,9 +368,9 @@ mod test {
     fn vectored_reads_reports_jumps_at_boundary() {
         let mut log = Log::new(10 * 1024, 10);
 
-        // 200 1K iterations. 10 1K records per file. 20 files ignoring deletes.
+        // 200 1K iterations. 10 1K records per file. 20 files ignoring deletes
         // segments: 0.segment, 10.segment .... 190.segment
-        // considering deletes: 100.segment .. 190.segment
+        // considering deletes: 100.segment, 110.segment .. 190.segment
         for i in 0..200 {
             let payload = vec![i; 1024];
             let payload = Bytes::from(payload);
@@ -373,6 +382,6 @@ mod test {
         let (jump, segment, offset, _data) = log.readv(0, 0);
         assert_eq!(segment, 100);
         assert_eq!(offset, 110);
-        assert!(jump.is_some());
+        assert_eq!(jump, Some(110));
     }
 }
