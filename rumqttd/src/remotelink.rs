@@ -70,7 +70,7 @@ impl RemoteLink {
         let client_id = connect.client_id.clone();
         let (connection, link_rx) = Connection::new_remote(&client_id, 10);
         let message = (0, RouterInMessage::Connect(connection));
-        router_tx.send(message).await.unwrap();
+        router_tx.send(message).unwrap();
 
         // Send connection acknowledgement back to the client
         let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
@@ -79,7 +79,7 @@ impl RemoteLink {
         // TODO When a new connection request is sent to the router, router should ack with error
         // TODO if it exceeds maximum allowed active connections
         // Right now link identifies failure with dropped rx in router, which is probably ok for now
-        let id = match link_rx.recv().await? {
+        let id = match link_rx.recv()? {
             RouterOutMessage::ConnectionAck(ack) => match ack {
                 ConnectionAck::Success(id) => id,
                 ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason)),
@@ -142,14 +142,14 @@ impl RemoteLink {
                 }
                 // Receive from router when previous when state isn't in collision
                 // due to previously recived data request
-                message = self.link_rx.recv(), if self.acks_required == 0 => {
+                message = self.link_rx.recv_async(), if self.acks_required == 0 => {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
                 Some(message) = tracker_next(&mut self.tracker),
                 if self.tracker.has_next() && self.tracker.inflight() < 10 => {
                     trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
-                    self.router_tx.send((self.id, message)).await?;
+                    self.router_tx.send((self.id, message))?;
                 }
             }
         }
@@ -289,7 +289,7 @@ impl RemoteLink {
                 data.len()
             );
             let message = RouterInMessage::Data(data);
-            self.router_tx.send((self.id, message)).await?;
+            self.router_tx.send((self.id, message))?;
         }
 
         Ok(())

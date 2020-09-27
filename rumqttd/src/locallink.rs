@@ -4,9 +4,6 @@ use rumqttlog::{
     tracker::Tracker, Connection, ConnectionAck, DataReply, Receiver, RecvError, RouterInMessage,
     RouterOutMessage, SendError, Sender,
 };
-use tokio::select;
-
-const MAX_INFLIGHT_REQUESTS: usize = 100;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -24,30 +21,27 @@ pub struct LinkTx {
     id: usize,
     router_tx: Sender<(Id, RouterInMessage)>,
     client_id: String,
-    capacity: usize,
 }
 
 impl LinkTx {
-    pub(crate) fn new(
-        client_id: &str,
-        capacity: usize,
-        router_tx: Sender<(Id, RouterInMessage)>,
-    ) -> LinkTx {
+    pub(crate) fn new(client_id: &str, router_tx: Sender<(Id, RouterInMessage)>) -> LinkTx {
         LinkTx {
             id: 0,
             router_tx,
             client_id: client_id.to_owned(),
-            capacity,
         }
     }
 
-    pub async fn connect(&mut self) -> Result<LinkRx, LinkError> {
-        let (connection, link_rx) = Connection::new_remote(&self.client_id, self.capacity);
+    pub fn connect(&mut self, max_inflight_requests: usize) -> Result<LinkRx, LinkError> {
+        // connection queue capacity should match that maximum inflight requests
+        let (connection, link_rx) = Connection::new_remote(&self.client_id, max_inflight_requests);
+
         let message = (0, RouterInMessage::Connect(connection));
-        self.router_tx.send(message).await.unwrap();
+        self.router_tx.send(message).unwrap();
+
         // Right now link identifies failure with dropped rx in router, which is probably ok
         // We need this here to get id assigned by router
-        match link_rx.recv().await? {
+        match link_rx.recv()? {
             RouterOutMessage::ConnectionAck(ack) => match ack {
                 ConnectionAck::Success(id) => self.id = id,
                 ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
@@ -56,17 +50,18 @@ impl LinkTx {
         };
 
         // Send initialization requests from tracker [topics request and acks request]
-        let rx = LinkRx::new(self.id, self.router_tx.clone(), link_rx);
+        let rx = LinkRx::new(
+            self.id,
+            max_inflight_requests,
+            self.router_tx.clone(),
+            link_rx,
+        );
+
         Ok(rx)
     }
 
     /// Sends a MQTT Publish to the router
-    pub async fn publish<S, V>(
-        &mut self,
-        topic: S,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), LinkError>
+    pub fn publish<S, V>(&mut self, topic: S, retain: bool, payload: V) -> Result<(), LinkError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -74,16 +69,16 @@ impl LinkTx {
         let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
         publish.retain = retain;
         let message = RouterInMessage::Publish(publish);
-        self.router_tx.send((self.id, message)).await?;
+        self.router_tx.send((self.id, message))?;
         Ok(())
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub async fn subscribe<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
+    pub fn subscribe<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
         let subscribe = Subscribe::new(filter.into(), QoS::AtMostOnce);
         let packet = Packet::Subscribe(subscribe);
         let message = RouterInMessage::Data(vec![packet]);
-        self.router_tx.send((self.id, message)).await?;
+        self.router_tx.send((self.id, message))?;
         Ok(())
     }
 }
@@ -93,35 +88,55 @@ pub struct LinkRx {
     router_tx: Sender<(Id, RouterInMessage)>,
     link_rx: Receiver<RouterOutMessage>,
     tracker: Tracker,
+    max_inflight_requests: usize,
 }
 
 impl LinkRx {
     pub(crate) fn new(
         id: usize,
+        max_inflight_requests: usize,
         router_tx: Sender<(Id, RouterInMessage)>,
         link_rx: Receiver<RouterOutMessage>,
     ) -> LinkRx {
         LinkRx {
             id,
+            max_inflight_requests,
             router_tx,
             link_rx,
             tracker: Tracker::new(100),
         }
     }
 
-    pub async fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
-        select! {
-            message = self.link_rx.recv() => {
-                let message = message?;
-                return Ok(self.handle_router_response(message))
-            },
-            Some(message) = tracker_next(&mut self.tracker),
-            if self.tracker.has_next() && self.tracker.inflight() < MAX_INFLIGHT_REQUESTS => {
-                trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
-                self.router_tx.send((self.id, message)).await?;
-                return Ok(None)
+    pub fn recv(&mut self) -> Result<Option<DataReply>, LinkError> {
+        let message = self.link_rx.recv()?;
+        let message = self.handle_router_response(message);
+
+        // A response from router should trigger new request. Some times
+        // requests. For example, topics reply should trigger next topics
+        // requsest and data request. Not sending a data request is a
+        // potential deadlock until next topics response. So just try_send
+        // is a problem.
+        //
+        // send until inflight requests reaches maximum configured (which is
+        // also the size of response channel to this connection) because router
+        // can keep receiving requests as the below loop aggressively sends
+        // all the possible requests. But requests shouldn't be infinite as
+        // router will eventually fill connection queue with responses and
+        // to finally result if channel full error. Inflight requests should
+        // stop at the capacity of response channel
+        while self.tracker.inflight() < self.max_inflight_requests {
+            // New topic request because of topic response should not fill
+            // inflight queue or else it it a block.
+            match self.tracker.next() {
+                Some(request) => {
+                    trace!("Id = {:14}, Request = {:?}", self.id, request);
+                    self.router_tx.send((self.id, request))?;
+                }
+                None => break,
             }
         }
+
+        Ok(message)
     }
 
     fn handle_router_response(&mut self, message: RouterOutMessage) -> Option<DataReply> {
@@ -154,8 +169,4 @@ impl LinkRx {
             }
         }
     }
-}
-
-async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
-    tracker.next()
 }

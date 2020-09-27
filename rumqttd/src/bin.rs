@@ -1,6 +1,7 @@
 use argh::FromArgs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::thread;
 
 use librumqttd::Broker;
 use pprof::ProfilerGuard;
@@ -30,8 +31,7 @@ struct CommandLine {
     config: PathBuf,
 }
 
-#[tokio::main(core_threads = 4)]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     let commandline: CommandLine = argh::from_env();
     let config: Config = confy::load_path(commandline.config)?;
@@ -43,9 +43,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })
     .expect("Error setting Ctrl-C handler");
 
-    // Start the broker
-    let mut broker = Broker::new(config.broker);
-    broker.start().await?;
+    let thread = thread::Builder::new().name("rumqttd-main".to_owned());
+
+    let thread = thread
+        .spawn(move || Broker::new(config.broker).start())
+        .unwrap();
+
+    println!("{:?}", thread.join());
     Ok(())
 }
 

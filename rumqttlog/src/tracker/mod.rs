@@ -103,8 +103,12 @@ impl Tracker {
     /// If all the tracks are pending, this returns `None` indicating that link should stop
     /// making any new requests to the router
     pub fn next(&mut self) -> Option<RouterInMessage> {
-        self.inflight += 1;
-        self.tracker.pop_front()
+        let request = self.tracker.pop_front();
+        if request.is_some() {
+            self.inflight += 1;
+        }
+
+        request
     }
 }
 

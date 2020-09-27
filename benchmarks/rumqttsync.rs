@@ -15,7 +15,6 @@ fn main() {
     common::profile("bench.pb", guard);
 }
 
-
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
     mqttoptions.set_keep_alive(20);
@@ -27,7 +26,9 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
         for _i in 0..count {
             let payload = vec![0; payload_size];
             let qos = QoS::AtLeastOnce;
-            client.publish("hello/benchmarks/world", qos, false, payload).unwrap();
+            client
+                .publish("hello/benchmarks/world", qos, false, payload)
+                .unwrap();
         }
 
         thread::sleep(Duration::from_secs(1));

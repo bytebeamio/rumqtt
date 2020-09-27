@@ -22,17 +22,6 @@ impl CommitLog {
         }
     }
 
-    /// Returns all the topics in the commitlog along with their current offsets
-    pub fn _topics_snapshot(&self) -> Vec<(String, (u64, u64))> {
-        let mut out = Vec::new();
-        for (topic, log) in self.logs.iter() {
-            let offset = log.last_offset();
-            out.push((topic.clone(), offset));
-        }
-
-        out
-    }
-
     /// Appends the record to correct commitlog and returns a boolean to indicate
     /// if this topic is new along with the offset of append
     pub fn append(&mut self, topic: &str, record: Bytes) -> io::Result<(bool, (u64, u64))> {
@@ -48,15 +37,6 @@ impl CommitLog {
             self.logs.insert(topic.to_owned(), log);
             Ok((true, offsets))
         }
-    }
-
-    fn _last_offset(&self, topic: &str) -> Option<(u64, u64)> {
-        let log = match self.logs.get(topic) {
-            Some(log) => log,
-            None => return None,
-        };
-
-        Some(log.last_offset())
     }
 
     fn next_offset(&self, topic: &str) -> Option<(u64, u64)> {
@@ -79,9 +59,8 @@ impl CommitLog {
     pub fn readv(
         &mut self,
         topic: &str,
-        segment: u64,
-        offset: u64,
-        max_count: usize,
+        in_segment: u64,
+        in_offset: u64,
     ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
         // native and replica commitlog where this topic doesn't exist
@@ -90,7 +69,17 @@ impl CommitLog {
             None => return Ok(None),
         };
 
-        let (jump, segment, offset, data) = log.readv(segment, offset, max_count);
+        let (jump, segment, offset, data) = log.readv(in_segment, in_offset);
+
+        // For debugging. Will be removed later
+        // println!(
+        //     "In: segment {} offset {}, Out: segment {} offset {}, Count {}",
+        //     in_segment,
+        //     in_offset,
+        //     segment,
+        //     offset,
+        //     data.len()
+        // );
         Ok(Some((jump, segment, offset, data)))
     }
 }
@@ -119,52 +108,21 @@ impl TopicLog {
             return None;
         }
 
-        let mut last_offset = offset + count;
-        if last_offset >= len {
-            last_offset = len;
+        let mut next_offset = offset + count;
+        if next_offset >= len {
+            next_offset = len;
         }
 
-        let out = self.topics[offset..last_offset].as_ref();
+        let out = self.topics[offset..next_offset].as_ref();
         if out.is_empty() {
             return None;
         }
 
-        Some((last_offset - 1, out))
+        Some((next_offset, out))
     }
 
     /// Appends the topic if the topic isn't already seen
     pub fn append(&mut self, topic: &str) {
         self.topics.push(topic.to_owned());
-    }
-}
-
-type Topic = String;
-
-/// Snapshots of topics grouped by cluster id
-#[derive(Debug, Clone)]
-pub struct Snapshots {
-    snapshots: HashMap<Topic, [(u64, u64); 3]>,
-}
-
-impl Snapshots {
-    pub fn _new() -> Snapshots {
-        Snapshots {
-            snapshots: HashMap::new(),
-        }
-    }
-
-    fn _fill(&mut self, commitlog_id: usize, snapshot: Vec<(String, (u64, u64))>) {
-        for (topic, offset) in snapshot.into_iter() {
-            match self.snapshots.get_mut(&topic) {
-                Some(offsets) => {
-                    offsets[commitlog_id] = offset;
-                }
-                None => {
-                    let mut offsets = [(0, 0); 3];
-                    offsets[commitlog_id] = offset;
-                    self.snapshots.insert(topic, offsets);
-                }
-            }
-        }
     }
 }

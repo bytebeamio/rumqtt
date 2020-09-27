@@ -111,55 +111,70 @@ impl Broker {
         self.router_tx.clone()
     }
 
-    pub fn link(&self, client_id: &str, capacity: usize) -> Result<LinkTx, LinkError> {
+    pub fn link(&self, client_id: &str) -> Result<LinkTx, LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
 
-        let tx = LinkTx::new(client_id, capacity, self.router_tx.clone());
+        let tx = LinkTx::new(client_id, self.router_tx.clone());
         Ok(tx)
     }
 
-    async fn accept_loop(&self, config: Arc<ServerSettings>) -> Result<(), Error> {
-        let addr = format!("0.0.0.0:{}", config.port);
-        info!("Waiting for connections on {}", addr);
+    pub fn start(&mut self) -> Result<(), Error> {
+        let mut router = self.router.take().unwrap();
+        let name = "rumqttd-router".to_owned();
+        let thread = thread::Builder::new().name(name);
 
-        let mut listener = TcpListener::bind(addr).await?;
-        let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
-
-        loop {
-            let (stream, addr) = listener.accept().await?;
-            info!("Accepting from: {}", addr);
-            let config = config.clone();
-            let router_tx = self.router_tx.clone();
-            task::spawn(async {
-                let connector = Connector::new(config, router_tx);
-                // TODO Remove all max packet size hard codes
-                let network = Network::new(stream, 10 * 1024);
-                if let Err(e) = connector.new_connection(network).await {
-                    error!("Dropping link task!! Result = {:?}", e);
-                }
-            });
-
-            time::delay_for(accept_loop_delay).await;
-        }
-    }
-
-    pub async fn start(&mut self) -> Result<(), Error> {
-        let r = self.router.take().unwrap();
-        thread::spawn(move || router(r));
+        // spawn the router in a separate thread
+        thread.spawn(move || router.start())?;
+        let mut rt = tokio::runtime::Builder::new()
+            .basic_scheduler()
+            .enable_all()
+            .build()?;
 
         let server = self.config.clone().servers.into_iter().next().unwrap();
-        if let Err(e) = self.accept_loop(Arc::new(server)).await {
-            error!("Accept loop error: {:?}", e);
-        }
+        let router_tx = self.router_tx.clone();
+
+        rt.block_on(async {
+            if let Err(e) = accept_loop(Arc::new(server), router_tx).await {
+                error!("Accept loop error: {:?}", e);
+            }
+        });
 
         Ok(())
     }
 }
 
-#[tokio::main(core_threads = 1)]
-async fn router(mut router: Router) {
-    router.start().await;
+async fn accept_loop(
+    config: Arc<ServerSettings>,
+    router_tx: Sender<(Id, RouterInMessage)>,
+) -> Result<(), Error> {
+    let addr = format!("0.0.0.0:{}", config.port);
+    info!("Waiting for connections on {}", addr);
+
+    let mut listener = TcpListener::bind(addr).await?;
+    let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
+    let mut count = 0;
+
+    loop {
+        let (stream, addr) = listener.accept().await?;
+        count += 1;
+        info!("{}. Accepting from: {}", count, addr);
+
+        let config = config.clone();
+        let router_tx = router_tx.clone();
+
+        task::spawn(async {
+            let connector = Connector::new(config, router_tx);
+
+            // TODO Remove all max packet size hard codes
+            let network = Network::new(stream, 10 * 1024);
+            if let Err(e) = connector.new_connection(network).await {
+                error!("Dropping link task!! Result = {:?}", e);
+            }
+        });
+
+        time::delay_for(accept_loop_delay).await;
+    }
 }
 
 struct Connector {
@@ -197,7 +212,7 @@ impl Connector {
         }
         let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);
-        self.router_tx.send(message).await?;
+        self.router_tx.send(message)?;
         Ok(())
     }
 }

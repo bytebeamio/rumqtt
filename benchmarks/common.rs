@@ -27,10 +27,10 @@ pub async fn new_connection(
 
     // send a connection request with a dummy id
     let message = (0, RouterInMessage::Connect(connection));
-    router_tx.send(message).await.unwrap();
+    router_tx.send(message).unwrap();
 
     // wait for ack from router
-    let id = match this_rx.recv().await.unwrap() {
+    let id = match this_rx.recv().unwrap() {
         RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
         RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => {
             panic!("Connection failed {:?}", e)

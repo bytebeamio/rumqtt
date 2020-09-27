@@ -2,6 +2,7 @@ extern crate bytes;
 
 mod commitlog;
 mod router;
+mod slab;
 mod subscriptions;
 mod watermarks;
 
@@ -9,7 +10,7 @@ pub use router::Router;
 use subscriptions::Subscription;
 
 use self::bytes::Bytes;
-use async_channel::{bounded, Receiver, Sender, TrySendError};
+use flume::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::{Packet, Publish};
 use std::fmt;
 
@@ -320,7 +321,7 @@ impl Connection {
                 TrySendError::Full(e) => {
                     error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e)
                 }
-                TrySendError::Closed(e) => {
+                TrySendError::Disconnected(e) => {
                     info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e)
                 }
             }
