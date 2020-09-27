@@ -20,7 +20,12 @@ fn main() {
     // connect to get a receiver
     // TODO: Connect with a function which return tx and rx to prevent
     // doing publishes before connecting
-    let mut rx = tx.connect(10).unwrap();
+    // NOTE: Connection buffer should be atleast total number of possible
+    // topics + 3 (request types). If inflight is full with more topics
+    // in tracker, it's possible that router never responnds current
+    // inflight requests. But other pending requests should still be able
+    // to progress
+    let mut rx = tx.connect(200).unwrap();
     tx.subscribe("#").unwrap();
 
     // subscribe and publish in a separate thread
