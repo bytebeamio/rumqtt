@@ -17,15 +17,15 @@ use std::vec::IntoIter;
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
-    #[error("Mqtt state")]
+    #[error("Mqtt state: {0}")]
     MqttState(#[from] StateError),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
-    #[error("Packet parsing error")]
+    #[error("Packet parsing error: {0}")]
     Mqtt4Bytes(mqtt4bytes::Error),
-    #[error("Network")]
+    #[error("Network: {0}")]
     Network(#[from] tls::Error),
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[error("Stream done")]
     StreamDone,
