@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate log;
 
+pub mod logs;
 pub mod router;
 pub mod storage;
 pub mod tracker;

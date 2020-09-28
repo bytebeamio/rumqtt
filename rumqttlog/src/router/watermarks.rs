@@ -33,10 +33,7 @@ impl Watermarks {
         if let Some(position) = self.cluster_offsets.get_mut(id) {
             *position = offset
         } else {
-            panic!(
-                "We only support a maximum of 3 nodes at the moment. Received id = {}",
-                id
-            );
+            panic!("We only support a maximum of 3 nodes. Received id = {}", id);
         }
 
         // debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);

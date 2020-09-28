@@ -1,5 +1,8 @@
+use crate::router::{ConnectionType, TopicsRequest};
+use crate::{DataRequest, RouterOutMessage};
+use flume::{Sender, TrySendError};
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 
 /// Used to register a new connection with the router
@@ -9,9 +12,10 @@ use std::mem;
 pub struct Subscription {
     /// Flag used to notify pending subscription request
     pending_subscription_request: bool,
-    /// Pending topics for connection. These are matched against
-    /// subscriptions but are yet to be pulled by connection
-    pub(crate) topics: Vec<(String, u8, [(u64, u64); 3])>,
+    /// Topics request
+    topics_request: Option<TopicsRequest>,
+    /// Requests to pull data from commitlog
+    data_requests: VecDeque<DataRequest>,
     /// Topics index to not add duplicates to topics
     topics_index: HashSet<String>,
     /// Concrete subscriptions on this topic
@@ -24,27 +28,25 @@ impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
             pending_subscription_request: false,
-            topics: Vec::new(),
+            topics_request: None,
+            data_requests: VecDeque::with_capacity(100),
             topics_index: HashSet::new(),
             concrete_subscriptions: HashMap::new(),
             wild_subscriptions: Vec::new(),
         }
     }
 
+    pub fn pop_data_request(&mut self) -> Option<DataRequest> {
+        self.data_requests.pop_front()
+    }
+
+    pub fn push_data_request(&mut self, request: DataRequest) {
+        self.data_requests.push_back(request)
+    }
+
     /// Returns current number of subscriptions
     pub fn count(&self) -> usize {
         self.concrete_subscriptions.len() + self.wild_subscriptions.len()
-    }
-
-    /// Topics which aren't sent to tracker yet
-    pub fn take_topics(&mut self) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
-        self.pending_subscription_request = false;
-        let topics = mem::replace(&mut self.topics, Vec::new());
-        if topics.is_empty() {
-            None
-        } else {
-            Some(topics)
-        }
     }
 
     pub fn pending_subscription_request(&self) -> bool {
@@ -55,37 +57,41 @@ impl Subscription {
         self.pending_subscription_request = true;
     }
 
-    /// Extracts new topics from topics log (from offset in TopicsRequest) and matches
-    /// them against subscriptions of this connection. Returns a TopicsReply if there
-    /// are matches
-    pub fn matched_topics(
-        &mut self,
-        topics: &[String],
-    ) -> Option<Vec<(String, u8, [(u64, u64); 3])>> {
+    pub fn register_topics_request(&mut self, next_offset: usize) {
+        let request = TopicsRequest::offset(next_offset);
+        self.topics_request = Some(request);
+    }
+
+    /// Match and add this topic to requests if it matches.
+    /// Register new topics
+    pub fn track_matched_topics(&mut self, topics: &[String]) -> usize {
+        let mut matched_count = 0;
         for topic in topics {
-            self.fill_matches(topic);
+            if self.track_if_matched(topic) {
+                matched_count += 1;
+            }
         }
 
-        let topics = mem::replace(&mut self.topics, Vec::new());
-        if topics.is_empty() {
-            None
-        } else {
-            Some(topics)
-        }
+        matched_count
     }
 
     /// A new subscription should match all the existing topics. Tracker
     /// should track matched topics from current offset of that topic
-    pub fn add_subscription(&mut self, filters: Vec<SubscribeTopic>, topics: Vec<String>) {
+    pub fn add_subscription_and_match(
+        &mut self,
+        filters: Vec<SubscribeTopic>,
+        topics: &[String],
+    ) -> Vec<(String, u8, [(u64, u64); 3])> {
+        let mut out = Vec::new();
         for filter in filters {
             if has_wildcards(&filter.topic_path) {
                 let subscription = filter.topic_path.clone();
-                self.wild_subscriptions
-                    .push((subscription, filter.qos as u8));
+                let qos = filter.qos as u8;
+                self.wild_subscriptions.push((subscription, qos));
             } else {
                 let subscription = filter.topic_path.clone();
-                self.concrete_subscriptions
-                    .insert(subscription, filter.qos as u8);
+                let qos = filter.qos as u8;
+                self.concrete_subscriptions.insert(subscription, qos);
             }
 
             // Check and track matching topics from input
@@ -97,19 +103,20 @@ impl Subscription {
 
                 if matches(&topic, &filter.topic_path) {
                     self.topics_index.insert(topic.clone());
-                    self.topics
-                        .push((topic.clone(), filter.qos as u8, [(0, 0); 3]));
+                    out.push((topic.clone(), filter.qos as u8, [(0, 0); 3]));
                     continue;
                 }
             }
         }
+
+        out
     }
 
-    /// Matches existing subscription with a new topic. These
+    /// Matches topic against existing subscriptions. These
     /// topics should be tracked by tracker from offset 0.
     /// Returns true if this topic matches a subscription for
     /// router to trigger new topic notification
-    fn fill_matches(&mut self, topic: &str) -> bool {
+    fn track_if_matched(&mut self, topic: &str) -> bool {
         // ignore if the topic is already being tracked
         if self.topics_index.contains(topic) {
             return false;
@@ -118,7 +125,8 @@ impl Subscription {
         // A concrete subscription match
         if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
-            self.topics.push((topic.to_owned(), *qos, [(0, 0); 3]));
+            let request = DataRequest::new(topic.to_owned());
+            self.data_requests.push_back(request);
             return true;
         }
 
@@ -126,7 +134,8 @@ impl Subscription {
         for (filter, qos) in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
-                self.topics.push((topic.to_owned(), *qos, [(0, 0); 3]));
+                let request = DataRequest::new(topic.to_owned());
+                self.data_requests.push_back(request);
                 return true;
             }
         }

@@ -1,6 +1,5 @@
 extern crate bytes;
 
-mod commitlog;
 mod router;
 mod slab;
 mod subscriptions;
@@ -19,6 +18,8 @@ use std::fmt;
 pub enum RouterInMessage {
     /// Client id and connection handle
     Connect(Connection),
+    /// Connection ready to receive more data
+    Ready,
     /// Data for native commitlog
     Publish(Publish),
     /// Data for native commitlog
@@ -102,9 +103,9 @@ impl ReplicationAck {
 #[derive(Clone)]
 pub struct DataRequest {
     /// Log to sweep
-    topic: String,
+    pub(crate) topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    cursors: [(u64, u64); 3],
+    pub(crate) cursors: [(u64, u64); 3],
     /// Maximum count of payload buffer per replica
     max_count: usize,
 }
