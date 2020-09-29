@@ -10,7 +10,7 @@ name: features
 
 jobs:
   test:
-    name: rumqtt build and test
+    name: Rumqtt build and test
     runs-on: [self-hosted, linux, X64, rumqtt]
     steps:
       - uses: actions/checkout@v2
