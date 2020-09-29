@@ -5,7 +5,7 @@ license = "Apache-2.0"
 version = "0.0.4"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
-keywords = ["mqtt", "broker", "server", "iot", "kafka", "nats", "distributed"]
+keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
 categories = ["network-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
