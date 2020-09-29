@@ -16,7 +16,7 @@ tokio = { version = "0.2", features = ["full"] }
 bytes = "0.5"
 webpki = "0.21"
 tokio-rustls = "0.14"
-mqtt4bytes = { path = "../mqtt4bytes", version = "0.1"}
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.1.8"}
 pollster = "0.2"
 async-channel = "1.4"
 log = "0.4"
