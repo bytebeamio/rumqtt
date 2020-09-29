@@ -22,7 +22,7 @@ pub enum ClientError {
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
 /// This is cloneable and can be used to asynchronously Publish, Subscribe.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
     cancel_tx: Sender<()>,
