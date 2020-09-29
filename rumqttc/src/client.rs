@@ -74,6 +74,17 @@ impl AsyncClient {
         Ok(())
     }
 
+    /// Sends a MQTT Subscribe for multiple topics to the eventloop
+    pub async fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
+    where
+        T: IntoIterator<Item = SubscribeTopic>,
+    {
+        let subscribe = Subscribe::new_many(topics);
+        let request = Request::Subscribe(subscribe);
+        self.request_tx.send(request).await?;
+        Ok(())
+    }
+
     /// Sends a MQTT Unsubscribe to the eventloop
     pub async fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
@@ -140,6 +151,14 @@ impl Client {
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         pollster::block_on(self.client.subscribe(topic, qos))?;
         Ok(())
+    }
+
+    /// Sends a MQTT Subscribe for multiple topics to the eventloop
+    pub fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
+    where
+        T: IntoIterator<Item = SubscribeTopic>,
+    {
+        pollster::block_on(self.client.subscribe_many(topics))
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
