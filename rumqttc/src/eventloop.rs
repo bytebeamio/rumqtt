@@ -193,7 +193,7 @@ impl EventLoop {
 
                 // flush all the acks and return first incoming packet
                 network.flush().await?;
-                return Ok(Event::Incoming(incoming))
+                Ok(Event::Incoming(incoming))
             },
             // Pull next request from user requests channel.
             // If conditions in the below branch are for flow control. We read next user
@@ -256,16 +256,16 @@ impl EventLoop {
                     }
 
                     network.flush().await?;
-                    return Ok(Event::Outgoing(outgoing))
+                    Ok(Event::Outgoing(outgoing))
                 }
-                None => return Err(ConnectionError::RequestsDone),
+                None => Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                 let request = self.state.handle_outgoing_packet(request)?;
                 let outgoing = network.write(request).await?;
-                return Ok(Event::Outgoing(outgoing));
+                Ok(Event::Outgoing(outgoing))
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
@@ -274,11 +274,11 @@ impl EventLoop {
                 timeout.reset(Instant::now() + self.options.keep_alive);
                 let request = self.state.handle_outgoing_packet(Request::PingReq)?;
                 let outgoing = network.write(request).await?;
-                return Ok(Event::Outgoing(outgoing));
+                Ok(Event::Outgoing(outgoing))
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
-                return Err(ConnectionError::Cancel);
+                Err(ConnectionError::Cancel)
             }
         }
     }
