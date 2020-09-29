@@ -35,12 +35,12 @@ jobs:
     # Cargo setup and build
     - name: cargo setup and build
       uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
+      with:
+        toolchain: stable
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --release --all-features
 
     # Setup gcloud CLI
     - name: gcp setup
