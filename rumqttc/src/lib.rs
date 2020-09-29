@@ -1,6 +1,7 @@
 //! A pure rust MQTT client which strives to be robust, efficient and easy to use.
-//! This library is backed by an async (tokio) eventloop which handles all the robustness and
-//! and efficiency parts of MQTT but naturally fits into both sync and async worlds as we'll see
+//! This library is backed by an async (tokio) eventloop which handles all the
+//! robustness and and efficiency parts of MQTT but naturally fits into both sync
+//! and async worlds as we'll see
 //!
 //! Let's jump into examples right away
 //!
@@ -13,7 +14,7 @@
 //!use std::thread;
 //!
 //! fn main() {
-//!     let mut mqttoptions = MqttOptions::new("rumqtt-sync-client", "test.mosquitto.org", 1883);
+//!     let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
 //!     mqttoptions.set_keep_alive(5);
 //!
 //!     let (mut client, mut connection) = Client::new(mqttoptions, 10);
@@ -29,33 +30,28 @@
 //!     }
 //! }
 //! ```
-//!
-//! What's happening behind the scenes
-//! - Eventloop orchestrates user requests and incoming packets concurrently and hadles the state
-//! - Ping the broker when necessary and detects client side half open connections as well
-//! - Throttling of outgoing packets
-//! - Queue size based flow control on outgoing packets
-//! - Automatic reconnections
-//! - Natural backpressure to the client during slow network
-//!
-//! In short, everything necessary to maintain a robust connection
-//!
-//! **NOTE**: Looping on `connection.iter()` is necessary to run the eventloop. It yields both
-//! incoming and outgoing activity notifications which allows customization as user sees fit.
-//! Blocking here will block connection progress
-//!
 //! A simple asynchronous publish and subscribe
 //! ------------------------------
 //! ```no_run
-//! use rumqttc::{MqttOptions, Request, EventLoop};
+//! use rumqttc::{MqttOptions, AsyncClient, QoS};
+//! use tokio::{task, time};
 //! use std::time::Duration;
 //! use std::error::Error;
 //!
 //! #[tokio::main(core_threads = 1)]
 //! async fn main() {
 //!     let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//!     let mut eventloop = EventLoop::new(mqttoptions, 10);
-//!     let requests_tx = eventloop.handle();
+//!     mqttoptions.set_keep_alive(5);
+//!
+//!     let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+//!     client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
+//!
+//!     task::spawn(async move {
+//!         for i in 0..10 {
+//!             client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).await.unwrap();
+//!             time::delay_for(Duration::from_millis(100)).await;
+//!         }
+//!     });
 //!
 //!     loop {
 //!         let notification = eventloop.poll().await.unwrap();
@@ -64,10 +60,27 @@
 //!     }
 //! }
 //! ```
-//! - Reconnects if polled again after an error
-//! - User handle to send requests is just a channel
 //!
-//! Since eventloop is externally polled (with `iter()/poll()` in a loop) out side the library, users can
+//! Quick overview of features
+//! - Eventloop orchestrates outgoing/incoming packets concurrently and hadles the state
+//! - Pings the broker when necessary and detects client side half open connections as well
+//! - Throttling of outgoing packets (todo)
+//! - Queue size based flow control on outgoing packets
+//! - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop`
+//! - Natural backpressure to client APIs during bad network
+//! - Immediate cancellation with `client.cancel()`
+//!
+//! In short, everything necessary to maintain a robust connection
+//!
+//! **NOTE**: Looping on `connection.iter()/eventloop.poll()` is necessary to
+//! run the eventloop and make progress. It yields incoming and outgoing activity
+//! notifications which allows customization as user sees fit.
+//!
+//! **IMPORTANT** Blocking inside `eventloop.poll()/eonnection.iter()` loop
+//! will block connection progress
+//!
+//! Since the eventloop is externally polled (with `iter()/poll()` in a loop)
+//! out side the library and `Eventloop` is accessible, users can
 //! - Distribute incoming messages based on topics
 //! - Stop it when required
 //! - Access internal state for use cases like graceful shutdown or to modify options before reconnection

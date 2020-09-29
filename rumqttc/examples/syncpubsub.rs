@@ -33,7 +33,7 @@ fn publish(mut client: Client) {
     for i in 0..10 {
         let payload = vec![i; i as usize];
         client
-            .publish("hello", QoS::AtLeastOnce, false, payload)
+            .publish("hello/world", QoS::AtLeastOnce, false, payload)
             .unwrap();
         thread::sleep(Duration::from_secs(1));
     }

@@ -1,5 +1,5 @@
-//! This module offers a high level synchronous abstraction to async eventloop.
-//! Uses channels internally to get `Requests` and send `Notifications`
+//! This module offers a high level synchronous and asynchronous abstraction to
+//! async eventloop.
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender};
@@ -20,6 +20,8 @@ pub enum ClientError {
     Mqtt4(mqtt4bytes::Error),
 }
 
+/// `AsyncClient` to communicate with MQTT `Eventloop`
+/// This is cloneable and can be used to asynchronously Publish, Subscribe.
 #[derive(Clone)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
@@ -27,6 +29,7 @@ pub struct AsyncClient {
 }
 
 impl AsyncClient {
+    /// Create a new `Client`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
@@ -67,6 +70,21 @@ impl AsyncClient {
     ) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
+        self.request_tx.send(request).await?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub async fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
+        let unsubscribe = Unsubscribe::new(topic.into());
+        let request = Request::Unsubscribe(unsubscribe);
+        self.request_tx.send(request).await?;
+        Ok(())
+    }
+
+    /// Sends a MQTT disconnect to the eventloop
+    pub async fn disconnect(&mut self) -> Result<(), ClientError> {
+        let request = Request::Disconnect;
         self.request_tx.send(request).await?;
         Ok(())
     }
@@ -124,6 +142,18 @@ impl Client {
         Ok(())
     }
 
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
+        pollster::block_on(self.client.unsubscribe(topic))?;
+        Ok(())
+    }
+
+    /// Sends a MQTT disconnect to the eventloop
+    pub fn disconnect(&mut self) -> Result<(), ClientError> {
+        pollster::block_on(self.client.disconnect())?;
+        Ok(())
+    }
+
     /// Stops the eventloop right away
     pub fn cancel(&mut self) -> Result<(), ClientError> {
         pollster::block_on(self.client.cancel())?;
@@ -131,8 +161,7 @@ impl Client {
     }
 }
 
-///  MQTT connection. Maintains all the necessary state and automatically retries connections
-/// in flaky networks.
+///  MQTT connection. Maintains all the necessary state
 pub struct Connection {
     pub eventloop: EventLoop,
     runtime: Option<Runtime>,
@@ -153,9 +182,10 @@ impl Connection {
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
-    /// necessary to make connection progress and maintain a robust connection
-    /// **NOTE** Don't block this
-    #[must_use = "Connection should be iterated over a loop to poll the eventloop"]
+    /// necessary to make connection progress and maintain a robust connection.
+    /// Just continuing to loop will reconnect
+    /// **NOTE** Don't block this while iterating
+    #[must_use = "Connection should be iterated over a loop to make progress"]
     pub fn iter(&mut self) -> Iter {
         let runtime = self.runtime.take().unwrap();
         Iter {
