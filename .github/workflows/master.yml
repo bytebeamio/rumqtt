@@ -2,6 +2,7 @@ on:
   push:
     branches:
       - master
+      - fixci
 
 name: master
 
