@@ -30,18 +30,19 @@ jobs:
     runs-on: [self-hosted, linux, X64, rumqtt]
 
     steps:
-    - name: githun actions checkout
-      uses: actions/checkout@v2
+    - uses: actions/checkout@v2
 
-    # Cargo setup and build
-    - name: cargo setup and build
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
+    # Install cargo
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+
+    # Build
+    - name: releae build rumqtt
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --release --all-features
 
     # Setup gcloud CLI
     - name: gcp setup
