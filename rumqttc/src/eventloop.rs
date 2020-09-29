@@ -423,6 +423,7 @@ mod test {
     use crate::state::StateError;
     use crate::{ConnectionError, MqttOptions, Request};
     use async_channel::Sender;
+    use matches::assert_matches;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
 
@@ -489,12 +490,7 @@ mod test {
         let o = eventloop.poll().await;
         let elapsed = start.elapsed();
 
-        match o {
-            Ok(_) => assert!(false),
-            Err(ConnectionError::Timeout(_)) => assert!(true),
-            Err(_) => assert!(false),
-        }
-
+        assert_matches!(o, Err(ConnectionError::Timeout(_)));
         assert_eq!(elapsed.as_secs(), 5);
     }
 
