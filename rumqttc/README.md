@@ -1,5 +1,8 @@
 # rumqttc
 
+[![crates.io page](https://img.shields.io/crates/v/rumqttc.svg)](https://crates.io/crates/rumqttc)
+[![docs.rs page](https://docs.rs/rumqttc/badge.svg)](https://docs.rs/rumqttc)
+
 A pure rust MQTT client which strives to be robust, efficient and easy to use.
 This library is backed by an async (tokio) eventloop which handles all the
 robustness and and efficiency parts of MQTT but naturally fits into both sync
