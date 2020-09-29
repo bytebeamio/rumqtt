@@ -112,11 +112,15 @@ impl EventLoop {
     ///
     /// Can be useful in cases when connection should be halted immediately
     /// between half-open connection detections or (re)connection timeouts
-    pub fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
+    pub(crate) fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
         self.cancel_tx.take()
     }
 
-    /// Next notification or outgoing request
+    /// Yields Next notification or outgoing request and periodically pings
+    /// the broker. Continuing to poll will reconnect to the broker if there is
+    /// a disconnection.
+    /// **NOTE** Don't block this while iterating
+    #[must_use = "Eventloop should be iterated over a loop to make progress"]
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
@@ -281,7 +285,7 @@ impl EventLoop {
 }
 
 impl EventLoop {
-    pub(crate) async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
+    async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
