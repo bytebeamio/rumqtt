@@ -12,21 +12,21 @@ env:
   GCE_INSTANCE_ZONE: ${{ secrets.GCE_INSTANCE_ZONE }}
 
 jobs:
-  test:
-    name: source build and test
-    runs-on: [self-hosted, linux, X64, rumqtt]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --all-features
+  # test:
+  #   name: Source test
+  #   runs-on: [self-hosted, linux, X64, rumqtt]
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: actions-rs/toolchain@v1
+  #       with:
+  #         toolchain: stable
+  #     - uses: actions-rs/cargo@v1
+  #       with:
+  #         command: test
+  #         args: --release --all-features
 
   deploy:
-    name: source build, docker build and deploy
+    name: Source build, docker build and deploy
     runs-on: [self-hosted, linux, X64, rumqtt]
 
     steps:
@@ -38,14 +38,14 @@ jobs:
         toolchain: stable
 
     # Build
-    - name: releae build rumqtt
+    - name: Release build rumqtt
       uses: actions-rs/cargo@v1
       with:
         command: build
         args: --release --all-features
 
     # Setup gcloud CLI
-    - name: gcp setup
+    - name: Gcloud commandline setup
       uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
       with:
         version: '290.0.1'
@@ -54,29 +54,29 @@ jobs:
 
     # Configure Docker to use the gcloud command-line tool as a credential
     # helper for authentication
-    - name: docker google cloud registry auth
+    - name: Docker google cloud registry auth
       run: |-
         gcloud --quiet auth configure-docker
 
     # Copy rumqttd and config files 
-    - name: prepare config and binary
+    - name: Prepare config and binary
       run: |-
-        cp -r target/release/rumqttd stage/
-        cp -r rumqttd/config stage/
+        cp -r target/release/rumqttd docker/stage/
+        cp -r rumqttd/config docker/stage/
 
     # Build the Docker image
-    - name: docker build
+    - name: Docker build
       run: |-
         working-directory: docker
         docker build --tag "gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA" .
 
     # Push the Docker image to Google Container Registry
-    - name: docker image publish
+    - name: Docker image publish
       run: |-
         docker push "asia.gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA"
 
     # Deploy the container
-    - name: deploy
+    - name: Deploy to google cloud
       run: |-
         gcloud compute instances update-container "$GCE_INSTANCE" \
           --zone "$GCE_INSTANCE_ZONE" \
