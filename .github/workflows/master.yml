@@ -12,18 +12,18 @@ env:
   GCE_INSTANCE_ZONE: ${{ secrets.GCE_INSTANCE_ZONE }}
 
 jobs:
-  # test:
-  #   name: Source test
-  #   runs-on: [self-hosted, linux, X64, rumqtt]
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: actions-rs/toolchain@v1
-  #       with:
-  #         toolchain: stable
-  #     - uses: actions-rs/cargo@v1
-  #       with:
-  #         command: test
-  #         args: --release --all-features
+  test:
+    name: Source test
+    runs-on: [self-hosted, linux, X64, rumqtt]
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --all-features
 
   deploy:
     name: Source build, docker build and deploy
