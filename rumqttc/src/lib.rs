@@ -28,8 +28,10 @@
 //!     println!("Notification = {:?}", notification);
 //! }
 //! ```
+//!
 //! A simple asynchronous publish and subscribe
 //! ------------------------------
+//!
 //! ```no_run
 //! use rumqttc::{MqttOptions, AsyncClient, QoS};
 //! use tokio::{task, time};
