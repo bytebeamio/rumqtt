@@ -520,13 +520,10 @@ mod test {
         for _ in 0..10 {
             let packet = broker.read_packet().await;
             let elapsed = start.elapsed();
-            match packet {
-                Packet::PingReq => {
-                    ping_received = true;
-                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                    break;
-                }
-                _ => (),
+            if let Packet::PingReq = packet {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                break;
             }
         }
 
@@ -560,13 +557,10 @@ mod test {
         for _ in 0..10 {
             let packet = broker.read_packet_and_respond().await;
             let elapsed = start.elapsed();
-            match packet {
-                Packet::PingReq => {
-                    ping_received = true;
-                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                    break;
-                }
-                _ => (),
+            if let Packet::PingReq = packet {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                break;
             }
         }
 
@@ -964,15 +958,11 @@ mod broker {
             });
             let packet = packet.await.unwrap().unwrap();
 
-            match packet.clone() {
-                Packet::Publish(publish) => {
-                    if publish.pkid > 0 {
-                        let packet = PubAck::new(publish.pkid);
-                        self.framed.write(Request::PubAck(packet)).await.unwrap();
-                    }
+            if let Packet::Publish(publish) = packet.clone() {
+                if publish.pkid > 0 {
+                    let packet = PubAck::new(publish.pkid);
+                    self.framed.write(Request::PubAck(packet)).await.unwrap();
                 }
-
-                _ => (),
             }
 
             packet
@@ -1003,11 +993,10 @@ mod broker {
                         let packet = Request::Publish(publish);
                         self.framed.write(packet).await.unwrap();
                     }
-                    packet = self.framed.readb(&mut self.incoming) => match packet.unwrap() {
-                        Packet::PingReq => {
+                    packet = self.framed.readb(&mut self.incoming) => {
+                        if let Packet::PingReq = packet.unwrap() {
                             self.framed.write(Request::PingResp).await.unwrap();
                         }
-                        _ => ()
                     }
                 }
             }
