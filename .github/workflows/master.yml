@@ -21,23 +21,30 @@ jobs:
           toolchain: stable
       - uses: actions-rs/cargo@v1
         with:
-          command: build
-          args: --release --all-features
-      - uses: actions-rs/cargo@v1
-        with:
           command: test
           args: --release --all-features
 
   deploy:
-    name: docker build and publish
+    name: source build, docker build and deploy
     runs-on: [self-hosted, linux, X64, rumqtt]
 
     steps:
-    - name: checkout
+    - name: githun actions checkout
       uses: actions/checkout@v2
 
+    # Cargo setup and build
+    - name: cargo setup and build
+      uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+
     # Setup gcloud CLI
-    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+    - name: gcp setup
+      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
       with:
         version: '290.0.1'
         service_account_key: ${{ secrets.GCE_SA_KEY }}
@@ -45,7 +52,8 @@ jobs:
 
     # Configure Docker to use the gcloud command-line tool as a credential
     # helper for authentication
-    - run: |-
+    - name: docker google cloud registry auth
+      run: |-
         gcloud --quiet auth configure-docker
 
     # Copy rumqttd and config files 
