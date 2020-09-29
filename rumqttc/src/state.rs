@@ -125,6 +125,7 @@ impl MqttState {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
             Request::PublishRaw(publish) => self.outgoing_raw_publish(publish)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
+            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
             Request::Disconnect => self.outgoing_disconnect()?,
             _ => unimplemented!(),
@@ -364,6 +365,18 @@ impl MqttState {
             subscription.topics, subscription.pkid
         );
         Ok(Request::Subscribe(subscription))
+    }
+
+    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<Request, StateError> {
+        let pkid = self.next_pkid();
+        unsub.pkid = pkid;
+
+        debug!(
+            "Unsubscribe. Topics = {:?}, Pkid = {:?}",
+            unsub.topics, unsub.pkid
+        );
+
+        Ok(Request::Unsubscribe(unsub))
     }
 
     fn outgoing_disconnect(&self) -> Result<Request, StateError> {

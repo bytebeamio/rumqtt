@@ -1,5 +1,5 @@
-//! This module offers a high level synchronous abstraction to async eventloop.
-//! Uses channels internally to get `Requests` and send `Notifications`
+//! This module offers a high level synchronous and asynchronous abstraction to
+//! async eventloop.
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender};
@@ -71,6 +71,21 @@ impl AsyncClient {
         Ok(())
     }
 
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub async fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
+        let unsubscribe = Unsubscribe::new(topic.into());
+        let request = Request::Unsubscribe(unsubscribe);
+        self.request_tx.send(request).await?;
+        Ok(())
+    }
+
+    /// Sends a MQTT disconnect to the eventloop
+    pub async fn disconnect(&mut self) -> Result<(), ClientError> {
+        let request = Request::Disconnect;
+        self.request_tx.send(request).await?;
+        Ok(())
+    }
+
     /// Stops the eventloop right away
     pub async fn cancel(&mut self) -> Result<(), ClientError> {
         self.cancel_tx.send(()).await?;
@@ -121,6 +136,18 @@ impl Client {
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         pollster::block_on(self.client.subscribe(topic, qos))?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
+        pollster::block_on(self.client.unsubscribe(topic))?;
+        Ok(())
+    }
+
+    /// Sends a MQTT disconnect to the eventloop
+    pub fn disconnect(&mut self) -> Result<(), ClientError> {
+        pollster::block_on(self.client.disconnect())?;
         Ok(())
     }
 
