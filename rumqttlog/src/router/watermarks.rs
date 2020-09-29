@@ -90,8 +90,7 @@ impl Watermarks {
 
     /// Returns committed acks by take
     pub fn acks(&mut self) -> Vec<(Pkid, Packet)> {
-        let acks = mem::replace(&mut self.acks, Vec::new());
-        acks
+        mem::take(&mut self.acks)
     }
 
     pub fn update_pkid_offset_map(&mut self, topic: &str, pkid: u16, offset: u64) {
