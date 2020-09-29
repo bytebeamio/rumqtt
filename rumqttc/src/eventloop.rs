@@ -764,7 +764,7 @@ mod test {
 
     #[tokio::test]
     async fn packet_id_collisions_are_timedout_on_second_ping() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1892);
         options
             .set_inflight(4)
             .set_collision_safety(true)
@@ -779,7 +779,7 @@ mod test {
         });
 
         task::spawn(async move {
-            let mut broker = Broker::new(1891, true).await;
+            let mut broker = Broker::new(1892, true).await;
             // read all incoming packets first
             for i in 1..=4 {
                 let packet = broker.read_publish().await;

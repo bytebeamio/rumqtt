@@ -5,9 +5,15 @@ on:
 
 name: master
 
+env:
+  PROJECT_ID: ${{ secrets.GCE_PROJECT }}
+  GCE_INSTANCE: ${{ secrets.GCE_INSTANCE }}
+  GCE_INSTANCE_ZONE: ${{ secrets.GCE_INSTANCE_ZONE }}
+
+jobs:
 jobs:
   test:
-    name: rumqtt build and test
+    name: source build and test
     runs-on: [self-hosted, linux, X64, rumqtt]
     steps:
       - uses: actions/checkout@v2
@@ -24,17 +30,45 @@ jobs:
           args: --release --all-features
 
   deploy:
-    name: docker build and deploy
-    needs: test
+    name: docker build and publish
     runs-on: [self-hosted, linux, X64, rumqtt]
-    defaults:
-      run:
-        working-directory: docker
+
     steps:
-      - run: ./build.sh
-      - run: docker run -d -p 1883:1883 --name rumqttd rumqttd
+    - name: checkout
+      uses: actions/checkout@v2
 
+    # Setup gcloud CLI
+    - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+      with:
+        version: '290.0.1'
+        service_account_key: ${{ secrets.GCE_SA_KEY }}
+        project_id: ${{ secrets.GCE_PROJECT }}
 
+    # Configure Docker to use the gcloud command-line tool as a credential
+    # helper for authentication
+    - run: |-
+        gcloud --quiet auth configure-docker
 
+    # Copy rumqttd and config files 
+    - name: prepare config and binary
+      run: |-
+        cp -r target/release/rumqttd stage/
+        cp -r rumqttd/config stage/
 
+    # Build the Docker image
+    - name: docker build
+      run: |-
+        working-directory: docker
+        docker build --tag "gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA" .
 
+    # Push the Docker image to Google Container Registry
+    - name: docker image publish
+      run: |-
+        docker push "asia.gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA"
+
+    # Deploy the container
+    - name: deploy
+      run: |-
+        gcloud compute instances update-container "$GCE_INSTANCE" \
+          --zone "$GCE_INSTANCE_ZONE" \
+          --container-image "asia.gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA"
