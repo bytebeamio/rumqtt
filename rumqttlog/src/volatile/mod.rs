@@ -134,7 +134,7 @@ impl Log {
                 let relative_offset = (offset - base_offset) as usize;
                 let out = segment.readv(relative_offset);
 
-                if out.len() > 0 {
+                if !out.is_empty() {
                     let next_record_offset = offset + out.len() as u64;
                     let next_segment_offset = segment.base_offset() + segment.len() as u64;
                     return (

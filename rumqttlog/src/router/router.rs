@@ -237,7 +237,7 @@ impl Router {
         id: ConnectionId,
         publish: Publish,
     ) -> Option<(u64, u64)> {
-        if publish.payload.len() == 0 {
+        if publish.payload.is_empty() {
             error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
             return None;
         }
@@ -301,7 +301,7 @@ impl Router {
             } = data;
             let mut is_new_topic = false;
             for payload in payload {
-                if payload.len() == 0 {
+                if payload.is_empty() {
                     error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
                     return;
                 }
