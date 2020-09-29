@@ -506,7 +506,7 @@ mod test {
         assert_eq!(mqtt.inflight, 1);
 
         // Packet id should be incremented and publish should be saved in queue
-        let publish_out = match mqtt.outgoing_publish(publish.clone()) {
+        let publish_out = match mqtt.outgoing_publish(publish) {
             Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };
@@ -525,7 +525,7 @@ mod test {
         assert_eq!(mqtt.inflight, 3);
 
         // Packet id should be incremented and publish should be saved in queue
-        let publish_out = match mqtt.outgoing_publish(publish.clone()) {
+        let publish_out = match mqtt.outgoing_publish(publish) {
             Ok(Request::PublishRaw(p)) => p,
             _ => panic!("Invalid packet. Should've been a publish packet"),
         };

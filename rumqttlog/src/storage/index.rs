@@ -242,7 +242,7 @@ mod test {
 
         // vectors (position, size of the record)
         let entries = vec![(0, 100), (100, 100), (200, 600), (800, 200), (1000, 100)];
-        write_entries(&mut index, entries.clone());
+        write_entries(&mut index, entries);
         index.close().unwrap();
 
         let (position, size, count) = index.readv(1, 1024).unwrap();
@@ -251,7 +251,7 @@ mod test {
         assert_eq!(count, 4);
 
         let entries = vec![(0, 100), (100, 100), (200, 600), (800, 200), (1000, 100)];
-        write_entries(&mut index, entries.clone());
+        write_entries(&mut index, entries);
         index.close().unwrap();
 
         // read less than size of a single record
