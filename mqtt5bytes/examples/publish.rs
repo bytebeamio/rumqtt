@@ -8,11 +8,12 @@ use tokio::time::Duration;
 
 #[tokio::main(core_threads = 2)]
 async fn main() {
-    let connect = Packet::Connect(Connect::new("hackathon-mqtt5-test"));
     let mut client = Client::new().await;
+
+    let connect = Packet::Connect(Connect::new("hackathonmqtt5test"));
     client.write(connect).await.unwrap();
-    // let packet = client.read().await.unwrap();
-    // println!("{:?}", packet);
+    let packet = client.read().await.unwrap();
+    println!("{:?}", packet);
 
     for i in 1..=100 {
         let mut publish = Publish::new("hello/world", QoS::AtLeastOnce, "hello foss");

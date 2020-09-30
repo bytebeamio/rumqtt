@@ -66,7 +66,7 @@ impl Connect {
 
     pub fn new<S: Into<String>>(id: S) -> Connect {
         Connect {
-            protocol: Protocol::MQTT(4),
+            protocol: Protocol::MQTT(5),
             keep_alive: 10,
             properties: None,
             client_id: id.into(),
@@ -96,6 +96,9 @@ impl Connect {
             let properties_len = properties.len();
             let properties_len_len = remaining_len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
         }
 
         len += 2 + self.client_id.len();
@@ -129,9 +132,13 @@ impl Connect {
 
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
-        if let Some(properties) = &self.properties {
-            properties.write(buffer)?;
-        }
+
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         write_mqtt_string(buffer, &self.client_id);
 
@@ -754,7 +761,7 @@ mod test {
     }
 
     #[test]
-    fn connect_parsing_works_correctlyl() {
+    fn connect_1_parsing_works_correctlyl() {
         let mut stream = bytes::BytesMut::new();
         let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
@@ -769,11 +776,130 @@ mod test {
     }
 
     #[test]
-    fn connect_encoding_works_correctly() {
+    fn connect_1_encoding_works_correctly() {
         let connect = sample();
         let mut buf = BytesMut::new();
         connect.write(&mut buf).unwrap();
         assert_eq!(&buf[..], sample_bytes());
+    }
+
+    fn sample2() -> Connect {
+        Connect::new("hackathonmqtt5test")
+    }
+
+    fn sample2_bytes() -> Vec<u8> {
+        vec![
+            0x10, // packet type
+            0x1f, 0x00, // remaining len
+            0x04, // 4
+            0x4d, 0x51, 0x54, 0x54, // MQTT
+            0x05, // level
+            0x02, // connect flags
+            0x00, 0x0a, // keep alive
+            0x00, 0x00, 0x12, 0x68, 0x61, 0x63, 0x6b, 0x61, 0x74, 0x68, 0x6f, 0x6e, 0x6d, 0x71,
+            0x74, 0x74, 0x35, 0x74, 0x65, 0x73, 0x74, // payload
+            0x10, 0x11, 0x12, // extra bytes in the stream
+        ]
+    }
+
+    #[test]
+    fn connect_2_parsing_works_correctlyl() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+        let packet = mqtt_read(&mut stream, 200).unwrap();
+        let packet = match packet {
+            Packet::Connect(connect) => connect,
+            packet => panic!("Invalid packet = {:?}", packet),
+        };
+
+        let connect = sample();
+        assert_eq!(packet, connect);
+    }
+
+    #[test]
+    fn connect_2_encoding_works_correctly() {
+        let connect = sample2();
+        let mut buf = BytesMut::new();
+        connect.write(&mut buf).unwrap();
+
+        let expected = sample2_bytes();
+        assert_eq!(&buf[..], &expected[0..(expected.len() - 3)]);
+    }
+
+    fn sample3() -> Connect {
+        let connect_properties = ConnectProperties {
+            session_expiry_interval: Some(1234),
+            receive_maximum: Some(432),
+            max_packet_size: Some(100),
+            topic_alias_max: Some(456),
+            request_response_info: Some(1),
+            request_problem_info: Some(1),
+            user_properties: vec![("test".to_owned(), "test".to_owned())],
+            authentication_method: Some("test".to_owned()),
+            authentication_data: Some(Bytes::from(vec![1, 2, 3, 4])),
+        };
+
+        let will = LastWill {
+            topic: "mydevice/status".to_string(),
+            message: Bytes::from(vec![b'd', b'e', b'a', b'd']),
+            qos: QoS::AtMostOnce,
+            retain: false,
+            properties: None,
+        };
+
+        let login = Login {
+            username: "matteo".to_string(),
+            password: "collina".to_string(),
+        };
+
+        Connect {
+            protocol: Protocol::MQTT(5),
+            keep_alive: 0,
+            properties: Some(connect_properties),
+            client_id: "my-device".to_string(),
+            clean_session: true,
+            last_will: Some(will),
+            login: Some(login),
+        }
+    }
+
+    fn sample3_bytes() -> Vec<u8> {
+        vec![
+            0x10, 0x6e, 0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x05, 0xc6, 0x00, 0x00, 0x2f, 0x11,
+            0x00, 0x00, 0x04, 0xd2, 0x21, 0x01, 0xb0, 0x27, 0x00, 0x00, 0x00, 0x64, 0x22, 0x01,
+            0xc8, 0x19, 0x01, 0x17, 0x01, 0x26, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x04,
+            0x74, 0x65, 0x73, 0x74, 0x15, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x16, 0x00, 0x04,
+            0x01, 0x02, 0x03, 0x04, 0x00, 0x09, 0x6d, 0x79, 0x2d, 0x64, 0x65, 0x76, 0x69, 0x63,
+            0x65, 0x00, 0x00, 0x0f, 0x6d, 0x79, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x2f, 0x73,
+            0x74, 0x61, 0x74, 0x75, 0x73, 0x00, 0x04, 0x64, 0x65, 0x61, 0x64, 0x00, 0x06, 0x6d,
+            0x61, 0x74, 0x74, 0x65, 0x6f, 0x00, 0x07, 0x63, 0x6f, 0x6c, 0x6c, 0x69, 0x6e, 0x61,
+        ]
+    }
+
+    #[test]
+    fn connect_3_parsing_works_correctlyl() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+        let packet = mqtt_read(&mut stream, 200).unwrap();
+        let packet = match packet {
+            Packet::Connect(connect) => connect,
+            packet => panic!("Invalid packet = {:?}", packet),
+        };
+
+        let connect = sample();
+        assert_eq!(packet, connect);
+    }
+
+    #[test]
+    fn connect_3_encoding_works_correctly() {
+        let connect = sample2();
+        let mut buf = BytesMut::new();
+        connect.write(&mut buf).unwrap();
+
+        let expected = sample2_bytes();
+        assert_eq!(&buf[..], &expected[0..(expected.len() - 3)]);
     }
 
     #[test]
