@@ -22,7 +22,7 @@ pub enum ClientError {
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
 /// This is cloneable and can be used to asynchronously Publish, Subscribe.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
     cancel_tx: Sender<()>,
@@ -45,7 +45,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish<S, V>(
-        &mut self,
+        &self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -63,11 +63,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub async fn subscribe<S: Into<String>>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-    ) -> Result<(), ClientError> {
+    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
         self.request_tx.send(request).await?;
@@ -75,7 +71,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub async fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.send(request).await?;
@@ -83,14 +79,14 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT disconnect to the eventloop
-    pub async fn disconnect(&mut self) -> Result<(), ClientError> {
+    pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
         self.request_tx.send(request).await?;
         Ok(())
     }
 
     /// Stops the eventloop right away
-    pub async fn cancel(&mut self) -> Result<(), ClientError> {
+    pub async fn cancel(&self) -> Result<(), ClientError> {
         self.cancel_tx.send(()).await?;
         Ok(())
     }
