@@ -1,6 +1,7 @@
 use super::*;
 use crate::*;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use bytes::{Buf, Bytes};
 use core::fmt;
@@ -19,15 +20,20 @@ impl Subscribe {
             qos,
         };
 
-        let mut topics = Vec::new();
-        topics.push(topic);
-        Subscribe { pkid: 0, topics }
+        Self::new_many(vec![topic])
     }
 
     pub fn empty_subscribe() -> Subscribe {
+        Self::new_many(None)
+    }
+
+    pub fn new_many<T>(topics: T) -> Subscribe
+    where
+        T: IntoIterator<Item = SubscribeTopic>,
+    {
         Subscribe {
             pkid: 0,
-            topics: Vec::new(),
+            topics: topics.into_iter().collect(),
         }
     }
 
@@ -95,12 +101,18 @@ pub struct SubscribeTopic {
     pub qos: QoS,
 }
 
+impl SubscribeTopic {
+    pub fn new(topic_path: String, qos: QoS) -> Self {
+        Self { topic_path, qos }
+    }
+}
+
 impl fmt::Debug for Subscribe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Filters = {:?}, Packet id = {:?}",
-            self.pkid, self.topics
+            self.topics, self.pkid
         )
     }
 }
