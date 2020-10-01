@@ -32,11 +32,18 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 /// Reads a series of bytes with a length from a byte stream
 fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
+    // Need to read 2 bytes to determine length of expected bytes
+    // Check to prevent crash if there aren't enough bytes
+    // TODO: Fix this in mqtt4bytes
+    if stream.len() < 2 {
+        return Err(Error::MalformedPacket);
+    }
+
     let len = stream.get_u16() as usize;
-    // Invalid packets which reached this point (simulated invalid packets actually triggered this)
-    // should not cause the split to cross boundaries
+    // Prevent attacks with wrong remaining length. Ensures that packet payload
+    // sent by the remote is not > what it promised with remaining length
     if len > stream.len() {
-        return Err(Error::BoundaryCrossed);
+        return Err(Error::BoundaryCrossed(len));
     }
 
     Ok(stream.split_to(len))
@@ -49,6 +56,20 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
         Ok(v) => Ok(v),
         Err(_e) => Err(Error::TopicNotUtf8),
     }
+}
+
+/// After collecting enough bytes to frame a packet (to pass to packet's frame())
+/// , It's possible that content itself in the stream is wrong. Like expected
+/// packet id or qos not being present. In cases where `read_mqtt_string` or
+/// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
+/// parse qos next, these pre checks will prevent `bytes` crashes
+fn required_minimum(stream: &mut Bytes, required: usize) -> Result<(), Error> {
+    let stream_len = stream.len();
+    if stream_len < required {
+        return Err(Error::MalformedPacket);
+    }
+
+    Ok(())
 }
 
 /// Serializes bytes to stream (including length)
