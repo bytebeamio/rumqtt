@@ -19,6 +19,8 @@ async fn main() {
         let mut publish = Publish::new("hello/world", QoS::AtLeastOnce, "hello foss");
         publish.set_pkid(i);
         client.write(Packet::Publish(publish)).await.unwrap();
+        let packet = client.read().await.unwrap();
+        println!("{:?}", packet);
         time::delay_for(Duration::from_secs(1)).await;
     }
 }

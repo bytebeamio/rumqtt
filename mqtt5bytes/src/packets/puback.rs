@@ -38,7 +38,26 @@ impl PubAck {
         let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
+
+        // No reason code or properties if remaining length == 2
+        if fixed_header.remaining_len == 2 {
+            return Ok(PubAck {
+                pkid,
+                reason: PubAckReason::Success,
+                properties: None,
+            });
+        }
+
+        // No properties len or properties if remaining len > 2 but < 4
         let ack_reason = bytes.get_u8();
+        if fixed_header.remaining_len < 4 {
+            return Ok(PubAck {
+                pkid,
+                reason: reason(ack_reason)?,
+                properties: None,
+            });
+        }
+
         let properties = PubAckProperties::extract(&mut bytes)?;
         let puback = PubAck {
             pkid,
@@ -52,11 +71,18 @@ impl PubAck {
     fn len(&self) -> usize {
         let mut len = 2 + 1; // pkid + reason
 
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
+            return 2;
+        }
+
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = remaining_len_len(properties_len);
             len += properties_len_len + properties_len;
         }
+
+        // Unlike other packets, property length can be ignored if there are
+        // no properties in acks
 
         len
     }
@@ -67,8 +93,12 @@ impl PubAck {
         buffer.put_u8(0x40);
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
-        buffer.put_u8(self.reason as u8);
 
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
+            return Ok(4);
+        }
+
+        buffer.put_u8(self.reason as u8);
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
@@ -226,5 +256,77 @@ mod test {
         let mut buf = BytesMut::new();
         puback.write(&mut buf).unwrap();
         assert_eq!(&buf[..], sample_bytes());
+    }
+
+    fn sample2() -> PubAck {
+        PubAck {
+            pkid: 42,
+            reason: PubAckReason::NoMatchingSubscribers,
+            properties: None,
+        }
+    }
+
+    fn sample2_bytes() -> Vec<u8> {
+        vec![0x40, 0x03, 0x00, 0x2a, 0x10]
+    }
+
+    #[test]
+    fn puback2_parsing_works_correctly() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample2_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+        let packet = mqtt_read(&mut stream, 200).unwrap();
+        let packet = match packet {
+            Packet::PubAck(puback) => puback,
+            packet => panic!("Invalid packet = {:?}", packet),
+        };
+
+        let puback = sample2();
+        assert_eq!(packet, puback);
+    }
+
+    #[test]
+    fn puback2_encoding_works_correctly() {
+        let puback = sample2();
+        let mut buf = BytesMut::new();
+
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample2_bytes());
+    }
+
+    fn sample3() -> PubAck {
+        PubAck {
+            pkid: 42,
+            reason: PubAckReason::Success,
+            properties: None,
+        }
+    }
+
+    fn sample3_bytes() -> Vec<u8> {
+        vec![0x40, 0x02, 0x00, 0x2a]
+    }
+
+    #[test]
+    fn puback3_parsing_works_correctly() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample3_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+        let packet = mqtt_read(&mut stream, 200).unwrap();
+        let packet = match packet {
+            Packet::PubAck(puback) => puback,
+            packet => panic!("Invalid packet = {:?}", packet),
+        };
+
+        let puback = sample3();
+        assert_eq!(packet, puback);
+    }
+
+    #[test]
+    fn puback3_encoding_works_correctly() {
+        let puback = sample3();
+        let mut buf = BytesMut::new();
+
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample3_bytes());
     }
 }

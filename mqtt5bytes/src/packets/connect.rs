@@ -212,6 +212,9 @@ impl LastWill {
             let properties_len = properties.len();
             let properties_len_len = remaining_len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
         };
 
         len += 2 + self.topic.len() + 2 + self.message.len();
@@ -226,9 +229,12 @@ impl LastWill {
             connect_flags |= 0x20;
         }
 
-        if let Some(properties) = &self.properties {
-            properties.write(buffer)?;
-        }
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         write_mqtt_string(buffer, &self.topic);
         write_mqtt_bytes(buffer, &self.message);
@@ -805,7 +811,7 @@ mod test {
     #[test]
     fn connect_2_parsing_works_correctlyl() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &sample_bytes();
+        let packetstream = &sample2_bytes();
         stream.extend_from_slice(&packetstream[..]);
         let packet = mqtt_read(&mut stream, 200).unwrap();
         let packet = match packet {
@@ -813,7 +819,7 @@ mod test {
             packet => panic!("Invalid packet = {:?}", packet),
         };
 
-        let connect = sample();
+        let connect = sample2();
         assert_eq!(packet, connect);
     }
 
@@ -880,7 +886,7 @@ mod test {
     #[test]
     fn connect_3_parsing_works_correctlyl() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &sample_bytes();
+        let packetstream = &sample3_bytes();
         stream.extend_from_slice(&packetstream[..]);
         let packet = mqtt_read(&mut stream, 200).unwrap();
         let packet = match packet {
@@ -888,18 +894,18 @@ mod test {
             packet => panic!("Invalid packet = {:?}", packet),
         };
 
-        let connect = sample();
+        let connect = sample3();
         assert_eq!(packet, connect);
     }
 
     #[test]
     fn connect_3_encoding_works_correctly() {
-        let connect = sample2();
+        let connect = sample3();
         let mut buf = BytesMut::new();
         connect.write(&mut buf).unwrap();
 
-        let expected = sample2_bytes();
-        assert_eq!(&buf[..], &expected[0..(expected.len() - 3)]);
+        let expected = sample3_bytes();
+        assert_eq!(&buf[..], &expected[0..(expected.len())]);
     }
 
     #[test]

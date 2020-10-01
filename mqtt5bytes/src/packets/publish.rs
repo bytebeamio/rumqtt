@@ -103,6 +103,9 @@ impl Publish {
             let properties_len = properties.len();
             let properties_len_len = remaining_len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
         }
 
         len += self.payload.len();
@@ -129,9 +132,12 @@ impl Publish {
             buffer.put_u16(pkid);
         }
 
-        if let Some(properties) = &self.properties {
-            properties.write(buffer)?;
-        }
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         buffer.extend_from_slice(&self.payload);
         // TODO: Returned length is worong in other packets. Fix it
