@@ -31,7 +31,23 @@ impl PubRel {
         let variable_header_index = fixed_header.fixed_len;
         bytes.advance(variable_header_index);
         let pkid = bytes.get_u16();
+        if fixed_header.remaining_len == 2 {
+            return Ok(PubRel {
+                pkid,
+                reason: PubRelReason::Success,
+                properties: None,
+            });
+        }
+
         let ack_reason = bytes.get_u8();
+        if fixed_header.remaining_len < 4 {
+            return Ok(PubRel {
+                pkid,
+                reason: reason(ack_reason)?,
+                properties: None,
+            });
+        }
+
         let properties = PubRelProperties::extract(&mut bytes)?;
         let puback = PubRel {
             pkid,
@@ -44,6 +60,9 @@ impl PubRel {
 
     fn len(&self) -> usize {
         let mut len = 2 + 1; // pkid + reason
+        if self.reason == PubRelReason::Success && self.properties.is_none() {
+            return 2;
+        }
 
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
@@ -60,6 +79,10 @@ impl PubRel {
         buffer.put_u8(0x62);
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
+        if self.reason == PubRelReason::Success && self.properties.is_none() {
+            return Ok(4);
+        }
+
         buffer.put_u8(self.reason as u8);
 
         if let Some(properties) = &self.properties {
