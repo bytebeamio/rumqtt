@@ -19,7 +19,7 @@ use std::time::Duration;
 use std::thread;
 
 fn main() {
-    let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
+    let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org:1883");
     mqttoptions.set_keep_alive(5);
 
     let (mut client, mut connection) = Client::new(mqttoptions, 10);
@@ -45,7 +45,7 @@ use std::error::Error;
 
 #[tokio::main(core_threads = 1)]
 async fn main() {
-    let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
+    let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org:1883");
     mqttoptions.set_keep_alive(5);
 
     let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);

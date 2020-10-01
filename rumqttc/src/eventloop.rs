@@ -1,13 +1,15 @@
 use crate::framed::Network;
 use crate::{tls, Incoming, MqttState, Request, StateError};
-use crate::{MqttOptions, Outgoing};
+use crate::{MqttOptions, Outgoing, Protocol};
 
 use async_channel::{bounded, Receiver, Sender};
+use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
 use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
 use tokio::time::{self, Delay, Elapsed, Instant};
+use ws_stream_tungstenite::WsStream;
 
 use std::collections::VecDeque;
 use std::io;
@@ -333,14 +335,32 @@ impl EventLoop {
     }
 
     async fn network_connect(&mut self) -> Result<(), ConnectionError> {
-        let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
-            let socket = tls::tls_connect(&self.options).await?;
-            Network::new(socket, self.options.max_incoming_packet_size)
-        } else {
-            let addr = self.options.broker_addr.as_str();
-            let port = self.options.port;
-            let socket = TcpStream::connect((addr, port)).await?;
-            Network::new(socket, self.options.max_incoming_packet_size)
+        let network = match self.options.protocol {
+            Protocol::Http | Protocol::Https => {
+                if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
+                    let socket = tls::tls_connect(&self.options).await?;
+                    Network::new(socket, self.options.max_incoming_packet_size)
+                } else {
+                    let addr = self.options.broker_addr.as_str();
+                    let port = self.options.port;
+                    let socket = TcpStream::connect((addr, port)).await?;
+                    Network::new(socket, self.options.max_incoming_packet_size)
+                }
+            }
+            Protocol::Ws => {
+                let (socket, _) = connect_async(self.options.broker_addr.as_str())
+                    .await
+                    .map_err(|_| ConnectionError::Cancel)?;
+
+                Network::new(WsStream::new(socket), self.options.max_incoming_packet_size)
+            }
+            Protocol::Wss => {
+                let (socket, _) = connect_async(self.options.broker_addr.as_str())
+                    .await
+                    .map_err(|_| ConnectionError::Cancel)?;
+
+                Network::new(WsStream::new(socket), self.options.max_incoming_packet_size)
+            }
         };
 
         self.network = Some(network);
@@ -483,7 +503,7 @@ mod test {
         });
 
         time::delay_for(Duration::from_secs(1)).await;
-        let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
+        let options = MqttOptions::new("dummy", "127.0.0.1:1880");
         let mut eventloop = EventLoop::new(options, 5);
 
         let start = Instant::now();
@@ -496,7 +516,7 @@ mod test {
 
     #[tokio::test]
     async fn idle_connection_triggers_pings_on_time() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1885");
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
@@ -528,7 +548,7 @@ mod test {
 
     #[tokio::test]
     async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1886");
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
@@ -565,7 +585,7 @@ mod test {
 
     #[tokio::test]
     async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:2000");
         options.set_keep_alive(5);
         let keep_alive = options.keep_alive();
 
@@ -589,7 +609,7 @@ mod test {
 
     #[tokio::test]
     async fn detects_halfopen_connections_in_the_second_ping_request() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:2001");
         options.set_keep_alive(5);
 
         // A broker which consumes packets but doesn't reply
@@ -615,7 +635,7 @@ mod test {
 
     #[tokio::test]
     async fn requests_are_blocked_after_max_inflight_queue_size() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1887);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1887");
         options.set_inflight(5);
         let inflight = options.inflight();
 
@@ -644,7 +664,7 @@ mod test {
 
     #[tokio::test]
     async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1888");
         options.set_inflight(3);
 
         let mut eventloop = EventLoop::new(options, 5);
@@ -693,7 +713,7 @@ mod test {
 
     #[tokio::test]
     async fn packet_id_collisions_are_detected_and_flow_control_is_applied_correctly() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1891");
         options.set_inflight(4).set_collision_safety(true);
 
         let mut eventloop = EventLoop::new(options, 5);
@@ -758,7 +778,7 @@ mod test {
 
     #[tokio::test]
     async fn packet_id_collisions_are_timedout_on_second_ping() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1892);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1892");
         options
             .set_inflight(4)
             .set_collision_safety(true)
@@ -802,7 +822,7 @@ mod test {
 
     #[tokio::test]
     async fn reconnection_resumes_from_the_previous_state() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1889);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1889");
         options.set_keep_alive(5);
 
         // start sending qos0 publishes. Makes sure that there is out activity but no in activity
@@ -843,7 +863,7 @@ mod test {
 
     #[tokio::test]
     async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1890);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1:1890");
         options.set_keep_alive(5);
 
         // start sending qos0 publishes. this makes sure that there is

@@ -13,7 +13,7 @@
 //! use std::time::Duration;
 //! use std::thread;
 //!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
+//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org:1883");
 //! mqttoptions.set_keep_alive(5);
 //!
 //! let (mut client, mut connection) = Client::new(mqttoptions, 10);
@@ -40,7 +40,7 @@
 //!
 //! # #[tokio::main(core_threads = 1)]
 //! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
+//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org:1883");
 //! mqttoptions.set_keep_alive(5);
 //!
 //! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -90,7 +90,7 @@ extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
-use std::time::Duration;
+use std::{convert::{TryFrom, TryInto}, time::Duration};
 
 mod client;
 mod eventloop;
@@ -193,6 +193,28 @@ pub enum SecurityOptions {
     UsernamePassword(String, String),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Protocol {
+    Http,
+    Https,
+    Ws,
+    Wss,
+}
+
+impl TryFrom<&str> for Protocol {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "http" => Ok(Protocol::Http),
+            "https" => Ok(Protocol::Https),
+            "ws" => Ok(Protocol::Ws),
+            "wss" => Ok(Protocol::Wss),
+            _ => Err(()),
+        }
+    }
+}
+
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
@@ -203,6 +225,8 @@ pub struct MqttOptions {
     broker_addr: String,
     /// broker port
     port: u16,
+    // What transport protocol to use
+    protocol: Protocol,
     /// keep alive time to send pingreq to broker when the connection is idle
     keep_alive: Duration,
     /// clean (or) persistent session
@@ -246,15 +270,24 @@ pub struct MqttOptions {
 
 impl MqttOptions {
     /// New mqtt options
-    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
+    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T) -> MqttOptions {
         let id = id.into();
         if id.starts_with(' ') || id.is_empty() {
             panic!("Invalid client id")
         }
 
+        let host = host.into();
+
+        let url = match url::Url::parse(&host) {
+            Ok(u) => u,
+            Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(&format!("http://{}", &host)).unwrap(),
+            Err(e) => panic!(e)
+        };
+
         MqttOptions {
-            broker_addr: host.into(),
-            port,
+            broker_addr: url.host_str().unwrap().to_owned(),
+            port: url.port_or_known_default().unwrap_or_else(|| 1883),
+            protocol: url.scheme().try_into().unwrap_or_else(|_| Protocol::Http),
             keep_alive: Duration::from_secs(60),
             clean_session: true,
             client_id: id,
@@ -531,20 +564,26 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1").set_clean_session(true);
+    }
+
+    #[test]
+    fn no_scheme() {
+        let _mqtt_opts = MqttOptions::new("client_a", "wss://127.0.0.1");
+        assert_eq!(_mqtt_opts.protocol, crate::Protocol::Wss);
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1").set_clean_session(true);
     }
 
     #[test]
     #[should_panic]
     fn ca_and_client_config() {
         let client_config = ClientConfig::new();
-        let mut mqtt_opts = MqttOptions::new("client", "127.0.0.1", 1883);
+        let mut mqtt_opts = MqttOptions::new("client", "127.0.0.1");
         mqtt_opts
             .set_tls_client_config(Arc::new(client_config))
             .set_ca(vec![]);
