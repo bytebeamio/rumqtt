@@ -1,14 +1,14 @@
 /// A temporal list of unique new topics
 #[derive(Debug)]
-pub struct TopicLog {
+pub struct TopicsLog {
     /// List of new topics
     topics: Vec<String>,
 }
 
-impl TopicLog {
+impl TopicsLog {
     /// Create a new topic log
-    pub fn new() -> TopicLog {
-        TopicLog { topics: Vec::new() }
+    pub fn new() -> TopicsLog {
+        TopicsLog { topics: Vec::new() }
     }
 
     /// read n topics from a give offset along with offset of the last read topic

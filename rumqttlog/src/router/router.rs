@@ -14,7 +14,7 @@ use crate::router::{
 };
 use crate::router::{ConnectionAck, ConnectionType, Subscription};
 
-use crate::logs::Logs;
+use crate::logs::{DataLog, TopicsLog};
 use crate::router::slab::Slab;
 use crate::router::watermarks::Watermarks;
 use crate::{Config, ReplicationData};
@@ -34,8 +34,10 @@ pub struct Router {
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
     id: ConnectionId,
-    /// Data logs and topic logs
-    logs: Logs,
+    /// Data logs grouped by replica
+    datalog: DataLog,
+    /// Topic log
+    topicslog: TopicsLog,
     /// Pre-allocated list of connections
     connections: Slab<Connection>,
     /// Subscriptions and matching topics maintained per connection
@@ -58,12 +60,14 @@ impl Router {
         let subscriptions = Slab::with_capacity(config.max_connections);
         // let watermarks = Slab::with_capacity(config.max_connections);
         let id = config.id;
-        let logs: Logs = Logs::new(id, config.clone());
+        let datalog: DataLog = DataLog::new(id, config.clone());
+        let topicslog = TopicsLog::new();
 
         let router = Router {
             _config: config,
             id,
-            logs,
+            datalog,
+            topicslog,
             connections,
             subscriptions,
             data_waiters: HashMap::new(),
@@ -176,7 +180,7 @@ impl Router {
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
-        let topics = match self.logs.topics(0, 0) {
+        let topics = match self.topicslog.readv(0, 0) {
             Some((_, topics)) => topics,
             None => return,
         };
@@ -192,7 +196,7 @@ impl Router {
         let mut topics = subscriptions.add_subscription_and_match(subscribe.topics, topics);
 
         // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
-        self.logs.seek_offsets_to_end(self.id, &mut topics);
+        self.datalog.seek_offsets_to_end(self.id, &mut topics);
 
         // Add matching requests to connection subscriptions
         for (topic, _, cursors) in topics {
@@ -226,7 +230,7 @@ impl Router {
         } = publish;
 
         let (is_new_topic, (base_offset, offset)) =
-            match self.logs.append_to_commitlog(id, &topic, payload) {
+            match self.datalog.append_to_commitlog(id, &topic, payload) {
                 Some(v) => v,
                 None => return None,
             };
@@ -246,7 +250,7 @@ impl Router {
         // commitlog (i.e native or replica commitlog). So there is a chance that topic log
         // has duplicate topics. Tracker filters these duplicates though
         if is_new_topic {
-            self.logs.append_to_topicslog(&topic);
+            self.topicslog.append(&topic);
             self.fresh_topics_notification(id);
         }
 
@@ -281,7 +285,8 @@ impl Router {
                     return;
                 }
 
-                if let Some((new_topic, _)) = self.logs.append_to_commitlog(id, &topic, payload) {
+                if let Some((new_topic, _)) = self.datalog.append_to_commitlog(id, &topic, payload)
+                {
                     is_new_topic = new_topic;
                 }
             }
@@ -293,7 +298,7 @@ impl Router {
             // watermarks.update_pkid_offset_map(&topic, pkid, 0);
 
             if is_new_topic {
-                self.logs.append_to_topicslog(&topic);
+                self.topicslog.append(&topic);
                 self.fresh_topics_notification(id);
             }
 
@@ -319,7 +324,7 @@ impl Router {
                 request.cursors
             );
 
-            match self.logs.handle_data_request(id, &request) {
+            match self.datalog.handle_data_request(id, &request) {
                 Some(reply) => {
                     trace!(
                         "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
@@ -389,7 +394,7 @@ impl Router {
             }
 
             // Read more topics from last offset.
-            let fresh_topics = self.logs.topics(request.offset, request.count);
+            let fresh_topics = self.topicslog.readv(request.offset, request.count);
             let (next_offset, topics) = fresh_topics.unwrap();
 
             // Match new topics with existing subscriptions of this link and reply.
@@ -423,12 +428,12 @@ impl Router {
                 // don't extract new replicated data for replication links
                 0..=9 if replication_data => continue,
                 // extract new native data to be sent to replication link
-                0..=9 => match self.logs.extract_connection_data(&mut request) {
+                0..=9 => match self.datalog.extract_connection_data(&mut request) {
                     Some(reply) => reply,
                     None => continue,
                 },
                 // extract all data to be sent to connection link
-                _ => match self.logs.extract_all_data(&mut request) {
+                _ => match self.datalog.extract_all_data(&mut request) {
                     Some(reply) => reply,
                     None => continue,
                 },

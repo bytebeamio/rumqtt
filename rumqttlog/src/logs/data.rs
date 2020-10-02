@@ -2,11 +2,10 @@ use std::collections::HashMap;
 use std::io;
 
 use crate::volatile::Log;
-use crate::{Config, DataReply, DataRequest};
+use crate::{Config, DataRequest};
 use bytes::Bytes;
 use std::sync::Arc;
 
-// TODO change config to Arc
 pub(crate) struct DataLog {
     id: usize,
     config: Arc<Config>,

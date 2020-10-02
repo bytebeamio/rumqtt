@@ -1,49 +1,32 @@
 mod data;
 mod topics;
 
-use crate::router::TopicsRequest;
 use crate::{Config, DataReply, DataRequest};
 use bytes::Bytes;
-use data::DataLog;
-use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use topics::TopicLog;
+
+pub use topics::TopicsLog;
 
 type Id = usize;
 type Topic = String;
 
-pub struct Logs {
+pub struct DataLog {
     id: Id,
     /// Commitlog by topic per replica. Commit log stores all the of given topic.
     /// Details are very similar to what kafka does. Who knows, we might
     /// even make the broker kafka compatible and directly feed it to databases
-    commitlog: [DataLog; 3],
-    /// Captures new topic just like commitlog
-    topiclog: TopicLog,
+    commitlog: [data::DataLog; 3],
 }
 
-impl Logs {
-    pub fn new(id: Id, config: Arc<Config>) -> Logs {
-        let topiclog = TopicLog::new();
+impl DataLog {
+    pub fn new(id: Id, config: Arc<Config>) -> DataLog {
         let commitlog = [
-            DataLog::new(config.clone(), 0),
-            DataLog::new(config.clone(), 1),
-            DataLog::new(config.clone(), 2),
+            data::DataLog::new(config.clone(), 0),
+            data::DataLog::new(config.clone(), 1),
+            data::DataLog::new(config.clone(), 2),
         ];
 
-        Logs {
-            id,
-            commitlog,
-            topiclog,
-        }
-    }
-
-    pub fn topics(&self, offset: usize, count: usize) -> Option<(usize, &[String])> {
-        self.topiclog.readv(offset, count)
-    }
-
-    pub fn append_to_topicslog(&mut self, topic: &str) {
-        self.topiclog.append(topic)
+        DataLog { id, commitlog }
     }
 
     /// Update matched topic offsets to current offset of this topic's commitlog
