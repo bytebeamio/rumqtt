@@ -259,6 +259,7 @@ fn outgoing(packet: &Request) -> Outgoing {
             Outgoing::PubAcks(out)
         }
         Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
+        Request::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
         Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
