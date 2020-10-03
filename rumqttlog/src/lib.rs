@@ -10,8 +10,8 @@ pub mod waiters;
 pub use flume::{bounded, Receiver, RecvError, SendError, Sender};
 pub use mqtt4bytes;
 pub use router::{
-    Connection, ConnectionAck, DataReply, DataRequest, Disconnection, ReplicationData, Router,
-    RouterInMessage, RouterOutMessage,
+    Connection, ConnectionAck, Data, DataRequest, Disconnection, Event, Notification,
+    ReplicationData, Router,
 };
 pub use storage::segment::Segment;
 pub use storage::Log;

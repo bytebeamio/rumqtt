@@ -1,7 +1,7 @@
 mod data;
 mod topics;
 
-use crate::{Config, DataReply, DataRequest};
+use crate::{Config, Data, DataRequest};
 use bytes::Bytes;
 use std::sync::Arc;
 
@@ -60,7 +60,7 @@ impl DataLog {
         }
     }
 
-    pub fn handle_data_request(&mut self, id: Id, request: &DataRequest) -> Option<DataReply> {
+    pub fn handle_data_request(&mut self, id: Id, request: &DataRequest) -> Option<Data> {
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
         // Also, extract only connection data if this request is from a replicator
@@ -73,14 +73,14 @@ impl DataLog {
 
     /// Extracts data from native log. Returns None in case the
     /// log is caught up or encountered an error while reading data
-    pub(crate) fn extract_connection_data(&mut self, request: &DataRequest) -> Option<DataReply> {
+    pub(crate) fn extract_connection_data(&mut self, request: &DataRequest) -> Option<Data> {
         let native_id = self.id;
         let topic = &request.topic;
         let commitlog = &mut self.commitlog[native_id];
         let cursors = request.cursors;
 
         let (segment, offset) = cursors[native_id];
-        let mut reply = DataReply::new(request.topic.clone(), cursors, 0, Vec::new());
+        let mut reply = Data::new(request.topic.clone(), cursors, 0, Vec::new());
 
         match commitlog.readv(topic, segment, offset) {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
@@ -107,7 +107,7 @@ impl DataLog {
 
     /// Extracts data from native and replicated logs. Returns None in case the
     /// log is caught up or encountered an error while reading data
-    pub(crate) fn extract_all_data(&mut self, request: &DataRequest) -> Option<DataReply> {
+    pub(crate) fn extract_all_data(&mut self, request: &DataRequest) -> Option<Data> {
         let topic = &request.topic;
 
         let mut cursors = [(0, 0); 3];
@@ -142,7 +142,7 @@ impl DataLog {
         // the request with updated offsets
         match payload.is_empty() {
             true => None,
-            false => Some(DataReply::new(request.topic.clone(), cursors, 0, payload)),
+            false => Some(Data::new(request.topic.clone(), cursors, 0, payload)),
         }
     }
 }

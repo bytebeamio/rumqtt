@@ -5,8 +5,8 @@ use flume::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
-use super::{Connection, RouterInMessage, RouterOutMessage};
-use crate::router::{AcksReply, ConnectionAck, ConnectionType, ReplicationAck, Subscription};
+use super::{Connection, Event, Notification};
+use crate::router::{Acks, ConnectionAck, ConnectionType, ReplicationAck, Subscription};
 
 use crate::logs::{DataLog, TopicsLog};
 use crate::router::slab::Slab;
@@ -46,11 +46,11 @@ pub struct Router {
     /// Channel receiver to receive data from all the active connections and
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
-    router_rx: Receiver<(ConnectionId, RouterInMessage)>,
+    router_rx: Receiver<(ConnectionId, Event)>,
 }
 
 impl Router {
-    pub fn new(config: Arc<Config>) -> (Self, Sender<(ConnectionId, RouterInMessage)>) {
+    pub fn new(config: Arc<Config>) -> (Self, Sender<(ConnectionId, Event)>) {
         let (router_tx, router_rx) = bounded(1000);
         let id = config.id;
 
@@ -87,12 +87,12 @@ impl Router {
         // All these methods will handle state and errors
         while let Ok((id, data)) = self.router_rx.recv() {
             match data {
-                RouterInMessage::Connect(connection) => self.handle_new_connection(connection),
-                RouterInMessage::Data(data) => self.handle_connection_data(id, data),
-                RouterInMessage::ReplicationData(data) => self.handle_replication_data(id, data),
-                RouterInMessage::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
-                RouterInMessage::Disconnect(request) => self.handle_disconnection(id, request),
-                v => panic!(v),
+                Event::Connect(connection) => self.handle_new_connection(connection),
+                Event::Data(data) => self.handle_connection_data(id, data),
+                Event::ReplicationData(data) => self.handle_replication_data(id, data),
+                Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
+                Event::Disconnect(request) => self.handle_disconnection(id, request),
+                Event::Ready => self.connection_ready(id),
             }
         }
 
@@ -119,7 +119,7 @@ impl Router {
             },
         };
 
-        let message = RouterOutMessage::ConnectionAck(ConnectionAck::Success(id));
+        let message = Notification::ConnectionAck(ConnectionAck::Success(id));
         notify(&mut self.connections, id, message);
     }
 
@@ -426,11 +426,7 @@ impl Router {
                 reply.payload.len()
             );
 
-            notify(
-                &mut self.connections,
-                link_id,
-                RouterOutMessage::DataReply(reply),
-            );
+            notify(&mut self.connections, link_id, Notification::Data(reply));
 
             // NOTE:
             // ----------------------
@@ -445,16 +441,16 @@ impl Router {
         if watermarks.pending_acks_reply() {
             let acks = watermarks.acks();
 
-            let reply = AcksReply::new(acks);
+            let reply = Acks::new(acks);
             watermarks.set_pending_acks_reply(false);
             trace!("{:11} {:14} Id = {}", "acks", "notification", id);
-            let reply = RouterOutMessage::AcksReply(reply);
+            let reply = Notification::Acks(reply);
             notify(&mut self.connections, id, reply);
         }
     }
 }
 
-fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: RouterOutMessage) {
+fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) {
     let connection = match connections.get_mut(id) {
         Some(c) => c,
         None => {

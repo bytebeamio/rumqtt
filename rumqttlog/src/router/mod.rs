@@ -10,43 +10,46 @@ use subscriptions::Subscription;
 
 use self::bytes::Bytes;
 use flume::{bounded, Receiver, Sender};
-use mqtt4bytes::{Packet, Publish};
+use mqtt4bytes::Packet;
 use std::fmt;
 
-/// Messages going into router
+/// Messages from connection to router
 #[derive(Debug)]
-pub enum RouterInMessage {
+pub enum Event {
     /// Client id and connection handle
     Connect(Connection),
     /// Connection ready to receive more data
     Ready,
-    /// Data for native commitlog
-    Publish(Publish),
     /// Data for native commitlog
     Data(Vec<Packet>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
     /// Replication acks
     ReplicationAcks(Vec<ReplicationAck>),
-    /// Data request
-    DataRequest(DataRequest),
-    /// Topics request
-    TopicsRequest(TopicsRequest),
-    /// Acks request
-    AcksRequest(AcksRequest),
     /// Disconnection request
     Disconnect(Disconnection),
 }
 
-/// Messages coming from router
+/// Requests for pull operations
 #[derive(Debug)]
-pub enum RouterOutMessage {
+pub enum Request {
+    /// Data request
+    Data(DataRequest),
+    /// Topics request
+    Topics(TopicsRequest),
+    /// Acks request
+    Acks(AcksRequest),
+}
+
+/// Notification from router to connection
+#[derive(Debug)]
+pub enum Notification {
     /// Connection reply
     ConnectionAck(ConnectionAck),
     /// Data reply
-    DataReply(DataReply),
+    Data(Data),
     /// Watermarks reply
-    AcksReply(AcksReply),
+    Acks(Acks),
 }
 
 /// Data sent router to be written to commitlog
@@ -151,7 +154,7 @@ impl fmt::Debug for DataRequest {
     }
 }
 
-pub struct DataReply {
+pub struct Data {
     /// Log to sweep
     pub topic: String,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
@@ -162,14 +165,9 @@ pub struct DataReply {
     pub payload: Vec<Bytes>,
 }
 
-impl DataReply {
-    pub fn new(
-        topic: String,
-        cursors: [(u64, u64); 3],
-        size: usize,
-        payload: Vec<Bytes>,
-    ) -> DataReply {
-        DataReply {
+impl Data {
+    pub fn new(topic: String, cursors: [(u64, u64); 3], size: usize, payload: Vec<Bytes>) -> Data {
+        Data {
             topic,
             cursors,
             size,
@@ -178,7 +176,7 @@ impl DataReply {
     }
 }
 
-impl fmt::Debug for DataReply {
+impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -226,14 +224,14 @@ impl AcksRequest {
 }
 
 #[derive(Debug)]
-pub struct AcksReply {
+pub struct Acks {
     /// packet ids that can be acked
     pub acks: Vec<(u16, Packet)>,
 }
 
-impl AcksReply {
-    pub fn new(acks: Vec<(u16, Packet)>) -> AcksReply {
-        AcksReply { acks }
+impl Acks {
+    pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
+        Acks { acks }
     }
 }
 
@@ -254,11 +252,11 @@ pub struct Connection {
     pub(crate) conn: ConnectionType,
     /// Handle which is given to router to allow router to comminicate with
     /// this connection
-    pub handle: Sender<RouterOutMessage>,
+    pub handle: Sender<Notification>,
 }
 
 impl Connection {
-    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<Notification>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
@@ -269,7 +267,7 @@ impl Connection {
         (connection, this_rx)
     }
 
-    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
+    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<Notification>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {

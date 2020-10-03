@@ -8,8 +8,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// communicate with this connection
 #[derive(Debug)]
 pub struct Subscription {
-    /// Flag used to notify pending subscription request
-    pending_subscription_request: bool,
     /// Topics request
     topics_request: Option<TopicsRequest>,
     /// Requests to pull data from commitlog
@@ -25,7 +23,6 @@ pub struct Subscription {
 impl Subscription {
     pub fn new() -> Subscription {
         Subscription {
-            pending_subscription_request: false,
             topics_request: None,
             data_requests: VecDeque::with_capacity(100),
             topics_index: HashSet::new(),
@@ -45,14 +42,6 @@ impl Subscription {
     /// Returns current number of subscriptions
     pub fn count(&self) -> usize {
         self.concrete_subscriptions.len() + self.wild_subscriptions.len()
-    }
-
-    pub fn pending_subscription_request(&self) -> bool {
-        self.pending_subscription_request
-    }
-
-    pub fn register_pending_subscription_request(&mut self) {
-        self.pending_subscription_request = true;
     }
 
     pub fn register_topics_request(&mut self, next_offset: usize) {
