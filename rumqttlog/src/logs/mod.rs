@@ -8,7 +8,6 @@ use std::sync::Arc;
 pub use topics::TopicsLog;
 
 type Id = usize;
-type Topic = String;
 
 pub struct DataLog {
     id: Id,
@@ -46,7 +45,7 @@ impl DataLog {
     ) -> Option<(bool, (u64, u64))> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
-        let mut commitlog = if replication_data {
+        let commitlog = if replication_data {
             self.commitlog.get_mut(id).unwrap()
         } else {
             self.commitlog.get_mut(self.id).unwrap()

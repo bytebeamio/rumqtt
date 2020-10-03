@@ -9,7 +9,7 @@ pub use router::Router;
 use subscriptions::Subscription;
 
 use self::bytes::Bytes;
-use flume::{bounded, Receiver, Sender, TrySendError};
+use flume::{bounded, Receiver, Sender};
 use mqtt4bytes::{Packet, Publish};
 use std::fmt;
 
@@ -30,8 +30,6 @@ pub enum RouterInMessage {
     ReplicationAcks(Vec<ReplicationAck>),
     /// Data request
     DataRequest(DataRequest),
-    /// Subscription request
-    SubscriptionRequest(SubscriptionRequest),
     /// Topics request
     TopicsRequest(TopicsRequest),
     /// Acks request
@@ -47,10 +45,6 @@ pub enum RouterOutMessage {
     ConnectionAck(ConnectionAck),
     /// Data reply
     DataReply(DataReply),
-    /// Subscription reply
-    SubscriptionReply(SubscriptionReply),
-    /// Topics reply
-    TopicsReply(TopicsReply),
     /// Watermarks reply
     AcksReply(AcksReply),
 }
@@ -222,35 +216,6 @@ impl TopicsRequest {
     }
 }
 
-#[derive(Debug)]
-pub struct TopicsReply {
-    /// Last topic offset
-    pub offset: usize,
-    /// list of new topics along with the offsets
-    /// that tracker should poll from
-    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
-}
-
-impl TopicsReply {
-    fn new(offset: usize, topics: Vec<(String, u8, [(u64, u64); 3])>) -> TopicsReply {
-        TopicsReply { offset, topics }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SubscriptionRequest;
-
-#[derive(Debug, Clone)]
-pub struct SubscriptionReply {
-    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
-}
-
-impl SubscriptionReply {
-    fn new(topics: Vec<(String, u8, [(u64, u64); 3])>) -> SubscriptionReply {
-        SubscriptionReply { topics }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct AcksRequest;
 
@@ -313,20 +278,6 @@ impl Connection {
         };
 
         (connection, this_rx)
-    }
-
-    /// Send message to link
-    fn reply(&mut self, reply: RouterOutMessage) {
-        if let Err(e) = self.handle.try_send(reply) {
-            match e {
-                TrySendError::Full(e) => {
-                    error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e)
-                }
-                TrySendError::Disconnected(e) => {
-                    info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e)
-                }
-            }
-        }
     }
 }
 

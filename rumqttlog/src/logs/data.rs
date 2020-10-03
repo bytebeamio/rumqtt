@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 
 use crate::volatile::Log;
-use crate::{Config, DataRequest};
+use crate::Config;
 use bytes::Bytes;
 use std::sync::Arc;
 

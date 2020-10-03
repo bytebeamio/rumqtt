@@ -1,9 +1,7 @@
-use crate::router::{ConnectionType, TopicsRequest};
-use crate::{DataRequest, RouterOutMessage};
-use flume::{Sender, TrySendError};
+use crate::router::TopicsRequest;
+use crate::DataRequest;
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::mem;
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
@@ -123,7 +121,7 @@ impl Subscription {
         }
 
         // A concrete subscription match
-        if let Some(qos) = self.concrete_subscriptions.get(topic) {
+        if let Some(_qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
             let request = DataRequest::new(topic.to_owned());
             self.data_requests.push_back(request);
@@ -131,7 +129,7 @@ impl Subscription {
         }
 
         // Wildcard subscription match. We return after first match
-        for (filter, qos) in self.wild_subscriptions.iter() {
+        for (filter, _qos) in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
                 let request = DataRequest::new(topic.to_owned());
