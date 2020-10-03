@@ -6,7 +6,7 @@ mod subscriptions;
 mod watermarks;
 
 pub use router::Router;
-use subscriptions::Subscription;
+use subscriptions::Tracker;
 
 use self::bytes::Bytes;
 use flume::{bounded, Receiver, Sender};

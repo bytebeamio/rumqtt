@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use super::{Connection, Event, Notification};
 use crate::router::{
-    Acks, ConnectionAck, ConnectionType, ReplicationAck, Subscription, TopicsRequest,
+    Acks, ConnectionAck, ConnectionType, ReplicationAck, Request, TopicsRequest, Tracker,
 };
 
 use crate::logs::{DataLog, TopicsLog};
@@ -15,6 +15,7 @@ use crate::router::slab::Slab;
 use crate::router::watermarks::Watermarks;
 use crate::waiters::{DataWaiters, TopicsWaiters};
 use crate::{Config, DataRequest, Disconnection, ReplicationData};
+use std::collections::VecDeque;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -37,9 +38,11 @@ pub struct Router {
     /// Pre-allocated list of connections
     connections: Slab<Connection>,
     /// Subscriptions and matching topics maintained per connection
-    subscriptions: Slab<Subscription>,
+    trackers: Slab<Tracker>,
     /// Watermarks of a connection
     watermarks: Slab<Watermarks>,
+    /// Connections with more pending requests.
+    ready: VecDeque<ConnectionId>,
     /// Waiter on a topic. These are used to wake connections/replicators
     /// which are caught up all the data on a topic. Map[topic]List[Connections Ids]
     data_waiters: DataWaiters,
@@ -55,11 +58,12 @@ impl Router {
     pub fn new(config: Arc<Config>) -> (Self, Sender<(ConnectionId, Event)>) {
         let (router_tx, router_rx) = bounded(1000);
         let id = config.id;
+        let max_connections = config.max_connections;
 
         // Connection level information
-        let connections = Slab::with_capacity(config.max_connections);
-        let subscriptions = Slab::with_capacity(config.max_connections);
-        let watermarks = Slab::with_capacity(config.max_connections);
+        let connections = Slab::with_capacity(max_connections);
+        let subscriptions = Slab::with_capacity(max_connections);
+        let watermarks = Slab::with_capacity(max_connections);
 
         // Global data
         let datalog: DataLog = DataLog::new(id, config.clone());
@@ -68,6 +72,7 @@ impl Router {
         // Waiters to notify new data or topics
         let data_waiters = DataWaiters::new();
         let topics_waiters = TopicsWaiters::new();
+        let ready = VecDeque::with_capacity(max_connections);
 
         let router = Router {
             _config: config,
@@ -75,8 +80,9 @@ impl Router {
             datalog,
             topicslog,
             connections,
-            subscriptions,
+            trackers: subscriptions,
             watermarks,
+            ready,
             data_waiters,
             topics_waiters,
             router_rx,
@@ -109,7 +115,7 @@ impl Router {
             }
             ConnectionType::Device(did) => match self.connections.insert(connection) {
                 Some(id) => {
-                    self.subscriptions.insert(Subscription::new()).unwrap();
+                    self.trackers.insert(Tracker::new()).unwrap();
                     self.watermarks.insert(Watermarks::new()).unwrap();
                     info!("Connection. In ID = {:?}, Router ID = {:?}", did, id);
                     id
@@ -129,10 +135,65 @@ impl Router {
         info!("Cleaning ID [{}] = {:?} from router", disconnect.id, id);
 
         self.connections.remove(id);
-        self.subscriptions.remove(id);
+        self.trackers.remove(id);
         self.watermarks.remove(id);
         self.data_waiters.remove(id);
         self.topics_waiters.remove(id);
+    }
+
+    fn connection_ready(&mut self, id: ConnectionId) {
+        let tracker = self.trackers.get_mut(id).unwrap();
+        dbg!(&tracker);
+
+        // Iterate through a max of 100 requests everytime a connection if polled
+        for _ in 0..100 {
+            if let Some(request) = tracker.pop_request() {
+                match request {
+                    Request::Data(request) => {
+                        trace!(
+                            "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
+                            "data",
+                            "request",
+                            id,
+                            request.topic,
+                            request.cursors
+                        );
+
+                        let data = match self.datalog.handle_data_request(id, &request) {
+                            Some(data) => {
+                                trace!(
+                                    "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
+                                    "data",
+                                    "response",
+                                    id,
+                                    data.topic,
+                                    data.cursors,
+                                    data.payload.len()
+                                );
+
+                                data
+                            }
+                            None => {
+                                trace!(
+                                    "{:11} {:14} Id = {}, Topic = {}",
+                                    "data",
+                                    "register",
+                                    id,
+                                    request.topic
+                                );
+
+                                self.data_waiters.register(id, request);
+                                continue;
+                            }
+                        };
+
+                        notify(&mut self.connections, id, Notification::Data(data));
+                    }
+                    Request::Topics(_) => {}
+                    Request::Acks(_) => {}
+                }
+            }
+        }
     }
 
     /// Handles new incoming data on a topic
@@ -145,15 +206,12 @@ impl Router {
             data.len()
         );
 
-        let mut last_offset = (0, 0);
         let mut count = 0;
         for publish in data {
             match publish {
                 Packet::Publish(publish) => {
-                    if let Some(offset) = self.handle_connection_publish(id, publish) {
-                        last_offset = offset;
-                        count += 1;
-                    }
+                    self.handle_connection_publish(id, publish);
+                    count += 1;
                 }
                 Packet::Subscribe(subscribe) => {
                     self.handle_connection_subscribe(id, subscribe);
@@ -165,19 +223,18 @@ impl Router {
         }
 
         trace!(
-            "{:11} {:14} Id = {} Count = {}, Offset = {:?}",
+            "{:11} {:14} Id = {} Count = {}",
             "data",
             "committed",
             id,
             count,
-            last_offset
         );
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
         let topics = self.topicslog.readv(0, 0);
 
-        let subscriptions = self.subscriptions.get_mut(id).unwrap();
+        let subscriptions = self.trackers.get_mut(id).unwrap();
         let mut return_codes = Vec::new();
         for filter in subscribe.topics.iter() {
             return_codes.push(SubscribeReturnCodes::Success(filter.qos));
@@ -186,38 +243,24 @@ impl Router {
         // A new subscription should match with all the existing topics and take a snapshot of current
         // offset of all the matched topics. Subscribers will receive data from the next offset
         match topics {
-            Some((next_offset, topics)) => {
+            Some((_, topics)) => {
                 // Add subscription and get topics matching all the existing topics
                 // in the (topics) commitlog ant seek them to next offset. Seeking is
                 // necessary because new subscription should yield only subsequent data
-                // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
-                let (first, mut topics) = subscriptions.add_subscripiton(subscribe.topics, topics);
-                self.datalog.seek_offsets_to_end(self.id, &mut topics);
-
-                // Register topics request if this is the first subscription. This ensures
-                // that router informs subscriptions of new topics from `next offset`. This
-                // is not necessary if subscription already initiated topics request before.
-                // Registering topics request only after first subscription ensures that router
-                // does not need to inform subscription about new topics
-                if first {
-                    let request = TopicsRequest::offset(next_offset);
-                    self.topics_waiters.register(id, request);
-                }
+                subscriptions.add_subscription_and_match(subscribe.topics, topics);
 
                 // Add matching topics for data requests and register notifications for new topics
-                for (topic, _, cursors) in topics {
-                    let request = DataRequest::offsets(topic, cursors);
-                    subscriptions.push_data_request(request);
+                while let Some(mut topic) = subscriptions.next_matched() {
+                    // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
+                    self.datalog.seek_offsets_to_end(self.id, &mut topic);
+                    let request = DataRequest::offsets(topic.0, topic.2);
+                    subscriptions.register_data_request(request);
                 }
             }
             None => {
                 // Router did not receive data from any topics yet. Add subscription and
                 // register topics request from offset 0
-                let (first, _) = subscriptions.add_subscripiton(subscribe.topics, &[]);
-                if first {
-                    let request = TopicsRequest::offset(0);
-                    self.topics_waiters.register(id, request);
-                }
+                subscriptions.add_subscription_and_match(subscribe.topics, &[]);
             }
         };
 
@@ -245,11 +288,10 @@ impl Router {
             ..
         } = publish;
 
-        let (is_new_topic, (base_offset, offset)) =
-            match self.datalog.append_to_commitlog(id, &topic, payload) {
-                Some(v) => v,
-                None => return None,
-            };
+        let (is_new_topic, (base_offset, offset)) = match self.datalog.append(id, &topic, payload) {
+            Some(v) => v,
+            None => return None,
+        };
 
         if qos as u8 > 0 {
             let watermarks = self.watermarks.get_mut(id).unwrap();
@@ -301,8 +343,7 @@ impl Router {
                     return;
                 }
 
-                if let Some((new_topic, _)) = self.datalog.append_to_commitlog(id, &topic, payload)
-                {
+                if let Some((new_topic, _)) = self.datalog.append(id, &topic, payload) {
                     is_new_topic = new_topic;
                 }
             }
@@ -338,51 +379,6 @@ impl Router {
         }
     }
 
-    fn connection_ready(&mut self, id: ConnectionId) {
-        let subscription = self.subscriptions.get_mut(id).unwrap();
-        // FIXME: This might be a problem when there are a lot of topics
-        while let Some(request) = subscription.pop_data_request() {
-            trace!(
-                "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
-                "data",
-                "request",
-                id,
-                request.topic,
-                request.cursors
-            );
-
-            let data = match self.datalog.handle_data_request(id, &request) {
-                Some(data) => {
-                    trace!(
-                        "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
-                        "data",
-                        "response",
-                        id,
-                        data.topic,
-                        data.cursors,
-                        data.payload.len()
-                    );
-
-                    data
-                }
-                None => {
-                    trace!(
-                        "{:11} {:14} Id = {}, Topic = {}",
-                        "data",
-                        "register",
-                        id,
-                        request.topic
-                    );
-
-                    self.data_waiters.register(id, request);
-                    continue;
-                }
-            };
-
-            notify(&mut self.connections, id, Notification::Data(data));
-        }
-    }
-
     /// Send notifications to links which registered them. Id is only used to
     /// identify if new topics are from a replicator.
     /// New topic from one connection involves notifying other connections which
@@ -392,7 +388,7 @@ impl Router {
         let replication_data = id < 10;
         while let Some((link_id, request)) = self.topics_waiters.pop_front() {
             // Ignore connections with zero subscriptions.
-            let subscription = self.subscriptions.get_mut(link_id).unwrap();
+            let subscription = self.trackers.get_mut(link_id).unwrap();
             if subscription.count() == 0 {
                 // panic!("Topics request registration for 0 subscription connection");
                 continue;

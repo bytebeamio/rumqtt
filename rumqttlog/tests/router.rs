@@ -8,22 +8,38 @@ use std::time::Duration;
 fn new_connection_data_notifies_interested_connections() {
     pretty_env_logger::init();
     let connections = Connections::new();
-    let (connection_1_id, _connection_1_rx) = connections.connection("1", 5);
-    let (connection_2_id, connection_2_rx) = connections.connection("2", 5);
+    let (connection_1_id, _connection_1_rx) = connections.connection("1", 2);
+    let (connection_2_id, connection_2_rx) = connections.connection("2", 2);
 
-    connections.subscribe(connection_2_id, "hello/world", 1);
+    connections.subscribe(connection_2_id, "hello/+/world", 1);
 
-    // write data from a native connection and read from connection
-    connections.data(connection_1_id, "hello/world", vec![1, 2, 3], 1);
-    connections.data(connection_1_id, "hello/world", vec![4, 5, 6], 2);
-    connections.data(connection_1_id, "hello/world", vec![7, 8, 9], 3);
+    // Write data. 9 messages, 4 topics. Connection"s capacity is only 2 topics.
+    connections.data(connection_1_id, "hello/1/world", vec![1, 2, 3], 1);
+    connections.data(connection_1_id, "hello/1/world", vec![4, 5, 6], 2);
+    connections.data(connection_1_id, "hello/1/world", vec![10, 11, 12], 3);
+    connections.data(connection_1_id, "hello/2/world", vec![13, 14, 15], 4);
+    connections.data(connection_1_id, "hello/2/world", vec![16, 17, 18], 5);
+    connections.data(connection_1_id, "hello/2/world", vec![19, 20, 21], 6);
+    connections.data(connection_1_id, "hello/3/world", vec![22, 23, 24], 7);
+    connections.data(connection_1_id, "hello/3/world", vec![25, 26, 27], 8);
+    connections.data(connection_1_id, "hello/3/world", vec![28, 29, 30], 9);
+    connections.data(connection_1_id, "hello/4/world", vec![31, 32, 33], 10);
+    connections.data(connection_1_id, "hello/4/world", vec![34, 35, 36], 11);
+    connections.data(connection_1_id, "hello/4/world", vec![37, 38, 39], 12);
 
     connections.ready(connection_2_id);
+
     let reply = wait_for_data(&connection_2_rx).unwrap();
     assert_eq!(reply.payload.len(), 3);
     assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
     assert_eq!(reply.payload[1].as_ref(), &[4, 5, 6]);
-    assert_eq!(reply.payload[2].as_ref(), &[7, 8, 9]);
+    assert_eq!(reply.payload[2].as_ref(), &[10, 11, 12]);
+
+    let reply = wait_for_data(&connection_2_rx).unwrap();
+    assert_eq!(reply.payload.len(), 3);
+    assert_eq!(reply.payload[0].as_ref(), &[13, 14, 15]);
+    assert_eq!(reply.payload[1].as_ref(), &[16, 17, 18]);
+    assert_eq!(reply.payload[2].as_ref(), &[19, 20, 21]);
 }
 
 fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {

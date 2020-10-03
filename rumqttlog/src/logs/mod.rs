@@ -29,20 +29,15 @@ impl DataLog {
     }
 
     /// Update matched topic offsets to current offset of this topic's commitlog
-    pub fn seek_offsets_to_end(&self, id: Id, topics: &mut Vec<(String, u8, [(u64, u64); 3])>) {
+    pub fn seek_offsets_to_end(&self, id: Id, topic: &mut (String, u8, [(u64, u64); 3])) {
         let commitlog = &self.commitlog[id];
-        commitlog.seek_offsets_to_end(topics);
+        commitlog.seek_offsets_to_end(topic);
     }
 
     /// Connections pull logs from both replication and connections where as replicator
     /// only pull logs from connections.
     /// Data from replicator and data from connection are separated for this reason
-    pub fn append_to_commitlog(
-        &mut self,
-        id: Id,
-        topic: &str,
-        bytes: Bytes,
-    ) -> Option<(bool, (u64, u64))> {
+    pub fn append(&mut self, id: Id, topic: &str, bytes: Bytes) -> Option<(bool, (u64, u64))> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
         let replication_data = id < 10;
         let commitlog = if replication_data {

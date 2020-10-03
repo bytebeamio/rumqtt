@@ -47,11 +47,9 @@ impl DataLog {
         Some(log.next_offset())
     }
 
-    pub fn seek_offsets_to_end(&self, topics: &mut Vec<(String, u8, [(u64, u64); 3])>) {
-        for (topic, _, offset) in topics.iter_mut() {
-            if let Some(last_offset) = self.next_offset(topic) {
-                offset[self.id] = last_offset;
-            }
+    pub fn seek_offsets_to_end(&self, topic: &mut (String, u8, [(u64, u64); 3])) {
+        if let Some(last_offset) = self.next_offset(&topic.0) {
+            topic.2[self.id] = last_offset;
         }
     }
 
