@@ -126,6 +126,8 @@ pub enum Outgoing {
     PubAcks(Vec<u16>),
     /// PubRec packet
     PubRec(u16),
+    /// PubRel packet
+    PubRel(u16),
     /// PubComp packet
     PubComp(u16),
     /// Ping request packet
