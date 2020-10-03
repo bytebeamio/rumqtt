@@ -64,11 +64,19 @@ impl Subscription {
 
     /// A new subscription should match all the existing topics. Tracker
     /// should track matched topics from current offset of that topic
-    pub fn add_subscription_and_match(
+    /// Adding and matching is combined so that only new subscriptions are
+    /// matched against provided topics and then added to subscriptions
+    pub fn add_subscripiton(
         &mut self,
         filters: Vec<SubscribeTopic>,
         topics: &[String],
-    ) -> Vec<(String, u8, [(u64, u64); 3])> {
+    ) -> (bool, Vec<(String, u8, [(u64, u64); 3])>) {
+        // register topics request during first subscription
+        let mut first_subscription = false;
+        if self.concrete_subscriptions.len() + self.wild_subscriptions.len() == 0 {
+            first_subscription = true;
+        }
+
         let mut out = Vec::new();
         for filter in filters {
             if has_wildcards(&filter.topic_path) {
@@ -96,7 +104,7 @@ impl Subscription {
             }
         }
 
-        out
+        (first_subscription, out)
     }
 
     /// Matches topic against existing subscriptions. These

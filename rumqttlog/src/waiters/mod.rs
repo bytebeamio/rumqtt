@@ -25,13 +25,6 @@ impl DataWaiters {
 
     /// Register data waiter
     pub fn register(&mut self, id: ConnectionId, request: DataRequest) {
-        trace!(
-            "{:11} {:14} Id = {}, Topic = {}",
-            "data",
-            "register",
-            id,
-            request.topic
-        );
         let topic = request.topic.clone();
         let request = (id, request);
 
@@ -71,7 +64,7 @@ impl TopicsWaiters {
         self.waiters.pop_front()
     }
 
-    pub fn register_topics_waiter(&mut self, id: ConnectionId, request: TopicsRequest) {
+    pub fn register(&mut self, id: ConnectionId, request: TopicsRequest) {
         trace!("{:11} {:14} Id = {}", "topics", "register", id);
         let request = (id.to_owned(), request);
         self.waiters.push_back(request);

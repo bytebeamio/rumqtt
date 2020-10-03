@@ -6,7 +6,9 @@ use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
 use super::{Connection, Event, Notification};
-use crate::router::{Acks, ConnectionAck, ConnectionType, ReplicationAck, Subscription};
+use crate::router::{
+    Acks, ConnectionAck, ConnectionType, ReplicationAck, Subscription, TopicsRequest,
+};
 
 use crate::logs::{DataLog, TopicsLog};
 use crate::router::slab::Slab;
@@ -173,10 +175,7 @@ impl Router {
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
-        let topics = match self.topicslog.readv(0, 0) {
-            Some((_, topics)) => topics,
-            None => return,
-        };
+        let topics = self.topicslog.readv(0, 0);
 
         let subscriptions = self.subscriptions.get_mut(id).unwrap();
         let mut return_codes = Vec::new();
@@ -185,22 +184,46 @@ impl Router {
         }
 
         // A new subscription should match with all the existing topics and take a snapshot of current
-        // offset of all the matched topics. Subscribers will receive data from that offset
-        let mut topics = subscriptions.add_subscription_and_match(subscribe.topics, topics);
+        // offset of all the matched topics. Subscribers will receive data from the next offset
+        match topics {
+            Some((next_offset, topics)) => {
+                // Add subscription and get topics matching all the existing topics
+                // in the (topics) commitlog ant seek them to next offset. Seeking is
+                // necessary because new subscription should yield only subsequent data
+                // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
+                let (first, mut topics) = subscriptions.add_subscripiton(subscribe.topics, topics);
+                self.datalog.seek_offsets_to_end(self.id, &mut topics);
 
-        // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
-        self.datalog.seek_offsets_to_end(self.id, &mut topics);
+                // Register topics request if this is the first subscription. This ensures
+                // that router informs subscriptions of new topics from `next offset`. This
+                // is not necessary if subscription already initiated topics request before.
+                // Registering topics request only after first subscription ensures that router
+                // does not need to inform subscription about new topics
+                if first {
+                    let request = TopicsRequest::offset(next_offset);
+                    self.topics_waiters.register(id, request);
+                }
 
-        // Add matching requests to connection subscriptions
-        for (topic, _, cursors) in topics {
-            let request = DataRequest::offsets(topic, cursors);
-            subscriptions.push_data_request(request);
-        }
+                // Add matching topics for data requests and register notifications for new topics
+                for (topic, _, cursors) in topics {
+                    let request = DataRequest::offsets(topic, cursors);
+                    subscriptions.push_data_request(request);
+                }
+            }
+            None => {
+                // Router did not receive data from any topics yet. Add subscription and
+                // register topics request from offset 0
+                let (first, _) = subscriptions.add_subscripiton(subscribe.topics, &[]);
+                if first {
+                    let request = TopicsRequest::offset(0);
+                    self.topics_waiters.register(id, request);
+                }
+            }
+        };
 
+        // Update acks and triggers acks notification for suback
         let watermarks = self.watermarks.get_mut(id).unwrap();
         watermarks.push_subscribe_ack(subscribe.pkid, return_codes);
-
-        // Notification for suback
         self.fresh_acks_notification(id);
     }
 
@@ -209,7 +232,7 @@ impl Router {
         id: ConnectionId,
         publish: Publish,
     ) -> Option<(u64, u64)> {
-        if publish.payload.len() == 0 {
+        if publish.payload.is_empty() {
             error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
             return None;
         }
@@ -328,22 +351,35 @@ impl Router {
                 request.cursors
             );
 
-            match self.datalog.handle_data_request(id, &request) {
-                Some(reply) => {
+            let data = match self.datalog.handle_data_request(id, &request) {
+                Some(data) => {
                     trace!(
                         "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
                         "data",
                         "response",
                         id,
-                        reply.topic,
-                        reply.cursors,
-                        reply.payload.len()
+                        data.topic,
+                        data.cursors,
+                        data.payload.len()
                     );
+
+                    data
                 }
                 None => {
+                    trace!(
+                        "{:11} {:14} Id = {}, Topic = {}",
+                        "data",
+                        "register",
+                        id,
+                        request.topic
+                    );
+
                     self.data_waiters.register(id, request);
+                    continue;
                 }
-            }
+            };
+
+            notify(&mut self.connections, id, Notification::Data(data));
         }
     }
 
