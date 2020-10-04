@@ -656,7 +656,7 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
         }
         None => {
             trace!("{:11} {:14} Id = {}", "acks", "register", id);
-            acks.register_pending_acks_request(true);
+            acks.register_pending_acks_request();
             return None;
         }
     };
