@@ -532,12 +532,16 @@ impl Router {
         // to other connections, acks are meant for the same connection.
         // We use watermark's own flag to determine if it's waiting for
         // a notification
-        if watermarks.pending_acks_reply() {
+        if watermarks.take_pending_acks_request().is_some() {
+            // Take acks which are ready to be sent to the
+            // connection
             let acks = watermarks.acks();
+            debug_assert!(acks.len() > 0);
 
-            let reply = Acks::new(acks);
-            watermarks.set_pending_acks_reply(false);
             trace!("{:11} {:14} Id = {}", "acks", "notification", id);
+
+            // Notify connection with acks
+            let reply = Acks::new(acks);
             let reply = Notification::Acks(reply);
             notify(&mut self.connections, id, reply);
 
@@ -652,7 +656,7 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
         }
         None => {
             trace!("{:11} {:14} Id = {}", "acks", "register", id);
-            acks.set_pending_acks_reply(true);
+            acks.register_pending_acks_request(true);
             return None;
         }
     };

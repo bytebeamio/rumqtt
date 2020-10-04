@@ -10,7 +10,7 @@ type Topic = String;
 /// Watermarks for a given topic
 #[derive(Debug)]
 pub struct Watermarks {
-    pending_acks_reply: bool,
+    pending_acks_request: Option<()>,
     /// Packet id to offset map per topic. When replication requirements
     /// are met, packet ids will be moved to acks
     pkid_offset_map: HashMap<Topic, (VecDeque<Pkid>, VecDeque<Offset>)>,
@@ -23,7 +23,7 @@ pub struct Watermarks {
 impl Watermarks {
     pub fn new() -> Watermarks {
         Watermarks {
-            pending_acks_reply: false,
+            pending_acks_request: None,
             pkid_offset_map: HashMap::new(),
             acks: Vec::new(),
             cluster_offsets: vec![0, 0, 0],
@@ -49,12 +49,12 @@ impl Watermarks {
         // debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);
     }
 
-    pub fn set_pending_acks_reply(&mut self, status: bool) {
-        self.pending_acks_reply = status
+    pub fn register_pending_acks_request(&mut self) {
+        self.pending_acks_request = Some(())
     }
 
-    pub fn pending_acks_reply(&self) -> bool {
-        self.pending_acks_reply
+    pub fn take_pending_acks_request(&mut self) -> Option<()> {
+        self.pending_acks_request.take()
     }
 
     /// Commit acks with enough replication
