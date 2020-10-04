@@ -363,7 +363,7 @@ impl Router {
 
         // Data from topics with replication factor = 0 should be acked immediately if there are
         // waiters registered. We shouldn't rely on replication acks for data acks in this case
-        // self.fresh_acks_notification(id);
+        self.fresh_acks_notification(id);
         Some((base_offset, offset))
     }
 

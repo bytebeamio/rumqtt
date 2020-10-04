@@ -245,6 +245,10 @@ impl Acks {
     pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
         Acks { acks }
     }
+
+    pub fn len(&self) -> usize {
+        self.acks.len()
+    }
 }
 
 #[derive(Debug, Clone)]

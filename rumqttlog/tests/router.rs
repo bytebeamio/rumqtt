@@ -12,6 +12,8 @@ fn new_connection_data_notifies_interested_connections() {
     let (connection_2_id, connection_2_rx) = connections.connection("2", 2);
 
     connections.subscribe(connection_2_id, "hello/+/world", 1);
+    let acks = wait_for_acks(&connection_2_rx).unwrap();
+    assert_eq!(acks.len(), 1);
 
     // Write data. 9 messages, 4 topics. Connection"s capacity is only 2 topics.
     connections.data(connection_1_id, "hello/1/world", vec![1, 2, 3], 1);
@@ -29,17 +31,17 @@ fn new_connection_data_notifies_interested_connections() {
 
     connections.ready(connection_2_id);
 
-    let reply = wait_for_data(&connection_2_rx).unwrap();
-    assert_eq!(reply.payload.len(), 3);
-    assert_eq!(reply.payload[0].as_ref(), &[1, 2, 3]);
-    assert_eq!(reply.payload[1].as_ref(), &[4, 5, 6]);
-    assert_eq!(reply.payload[2].as_ref(), &[10, 11, 12]);
+    let data = wait_for_data(&connection_2_rx).unwrap();
+    assert_eq!(data.payload.len(), 3);
+    assert_eq!(data.payload[0].as_ref(), &[1, 2, 3]);
+    assert_eq!(data.payload[1].as_ref(), &[4, 5, 6]);
+    assert_eq!(data.payload[2].as_ref(), &[10, 11, 12]);
 
-    let reply = wait_for_data(&connection_2_rx).unwrap();
-    assert_eq!(reply.payload.len(), 3);
-    assert_eq!(reply.payload[0].as_ref(), &[13, 14, 15]);
-    assert_eq!(reply.payload[1].as_ref(), &[16, 17, 18]);
-    assert_eq!(reply.payload[2].as_ref(), &[19, 20, 21]);
+    let data = wait_for_data(&connection_2_rx).unwrap();
+    assert_eq!(data.payload.len(), 3);
+    assert_eq!(data.payload[0].as_ref(), &[13, 14, 15]);
+    assert_eq!(data.payload[1].as_ref(), &[16, 17, 18]);
+    assert_eq!(data.payload[2].as_ref(), &[19, 20, 21]);
 }
 
 fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {
@@ -57,8 +59,14 @@ fn wait_for_acks(rx: &Receiver<Notification>) -> Option<Acks> {
 
     match rx.try_recv() {
         Ok(Notification::Acks(reply)) => Some(reply),
-        Ok(v) => panic!("{:?}", v),
-        Err(e) => panic!("{:?}", e),
+        Ok(v) => {
+            println!("Error = {:?}", v);
+            None
+        }
+        Err(e) => {
+            println!("Error = {:?}", e);
+            None
+        }
     }
 }
 
@@ -75,7 +83,7 @@ impl Connections {
         let (router, router_tx) = Router::new(Arc::new(config));
         thread::spawn(move || {
             let mut router = router;
-            router.start();
+            let _ = router.start();
         });
 
         Connections { router_tx }
