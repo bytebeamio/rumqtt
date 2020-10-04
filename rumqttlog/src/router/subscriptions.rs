@@ -35,7 +35,7 @@ impl Tracker {
     }
 
     /// Returns current number of subscriptions
-    pub fn count(&self) -> usize {
+    pub fn subscription_count(&self) -> usize {
         self.concrete_subscriptions.len() + self.wild_subscriptions.len()
     }
 
@@ -43,21 +43,33 @@ impl Tracker {
         self.requests.pop_front()
     }
 
-    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) {
+    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) -> usize {
         let request = DataRequest::offsets(topic, cursors);
         let request = Request::Data(request);
-        self.requests.push_back(request)
+        self.requests.push_back(request);
+
+        // Number of pending requests. Use by router to add connection
+        // to ready queue
+        self.requests.len()
     }
 
-    pub fn register_topics_request(&mut self, next_offset: usize) {
+    pub fn register_topics_request(&mut self, next_offset: usize) -> usize {
         let request = TopicsRequest::offset(next_offset);
         let request = Request::Topics(request);
         self.requests.push_back(request);
+
+        // Number of pending requests. Use by router to add connection
+        // to ready queue
+        self.requests.len()
     }
 
-    pub fn register_acks_request(&mut self) {
+    pub fn register_acks_request(&mut self) -> usize {
         let request = Request::Acks(AcksRequest);
         self.requests.push_back(request);
+
+        // Number of pending requests. Use by router to add connection
+        // to ready queue
+        self.requests.len()
     }
 
     /// Match and add this topic to requests if it matches.
@@ -87,7 +99,7 @@ impl Tracker {
     /// matched against provided topics and then added to subscriptions
     pub fn add_subscription_and_match(&mut self, filters: Vec<SubscribeTopic>, topics: &[String]) {
         // Register topics request during first subscription
-        if self.count() == 0 {
+        if self.subscription_count() == 0 {
             let request = Request::Topics(TopicsRequest::offset(topics.len()));
             self.requests.push_back(request);
         }

@@ -431,7 +431,7 @@ impl Router {
         while let Some((link_id, request)) = self.topics_waiters.pop_front() {
             // Ignore connections with zero subscriptions.
             let tracker = self.trackers.get_mut(link_id).unwrap();
-            if tracker.count() == 0 {
+            if tracker.subscription_count() == 0 {
                 // panic!("Topics request registration for 0 subscription connection");
                 continue;
             }
@@ -510,6 +510,11 @@ impl Router {
 
     fn fresh_acks_notification(&mut self, id: ConnectionId) {
         let watermarks = self.watermarks.get_mut(id).unwrap();
+
+        // Unlike data and topics where notifications are routed
+        // to other connections, acks are meant for the same connection.
+        // We use watermark's own flag to determine if it's waiting for
+        // a notification
         if watermarks.pending_acks_reply() {
             let acks = watermarks.acks();
 
@@ -518,6 +523,10 @@ impl Router {
             trace!("{:11} {:14} Id = {}", "acks", "notification", id);
             let reply = Notification::Acks(reply);
             notify(&mut self.connections, id, reply);
+
+            // Add next acks request to the tracker
+            let tracker = self.trackers.get_mut(id).unwrap();
+            tracker.register_acks_request();
         }
     }
 }
