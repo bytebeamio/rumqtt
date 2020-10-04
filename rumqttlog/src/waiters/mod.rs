@@ -64,7 +64,7 @@ impl TopicsWaiters {
         self.waiters.pop_front()
     }
 
-    pub fn register(&mut self, id: ConnectionId, request: TopicsRequest) {
+    pub fn push_back(&mut self, id: ConnectionId, request: TopicsRequest) {
         trace!("{:11} {:14} Id = {}", "topics", "register", id);
         let request = (id.to_owned(), request);
         self.waiters.push_back(request);

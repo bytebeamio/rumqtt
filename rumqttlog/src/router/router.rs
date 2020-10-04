@@ -228,7 +228,11 @@ impl Router {
                     }
                 },
                 None => {
-                    // Prevents connection from being added to ready queue again
+                    // At this point, pending requests in tracker is 0. Early return
+                    // here prevents connection from being added to ready queue again.
+                    // New requests are added to tracker through notifications of
+                    // previous requests. When first request is added back to tracker
+                    // again, it's scheduled back on ready queue again.
                     return;
                 }
             }
@@ -440,7 +444,7 @@ impl Router {
             // should not track replicator 2's topics.
             // id 0-10 are reserved for replicators which are linked to other routers in the mesh
             if replication_data && link_id < 10 {
-                tracker.register_topics_request(request.offset);
+                self.topics_waiters.push_back(link_id, request);
                 continue;
             }
 
@@ -453,7 +457,12 @@ impl Router {
             // subscriptions held by this connection. Push TopicsRequest back to
             // next topics waiter queue in that case.
             let count = tracker.track_matched_topics(topics);
-            tracker.register_topics_request(next_offset);
+            let pending = tracker.register_topics_request(next_offset);
+
+            // Tracker is ready again. Add it back to ready queue
+            if pending == 1 {
+                self.readyqueue.push_back(link_id);
+            }
 
             trace!(
                 "{:11} {:14} Id = {}, Offset = {}, Count = {}",
@@ -474,25 +483,33 @@ impl Router {
         };
 
         let replication_data = id < 10;
-        while let Some((link_id, mut request)) = waiters.pop_front() {
-            let reply = match link_id {
-                // don't extract new replicated data for replication links
-                0..=9 if replication_data => continue,
-                // extract new native data to be sent to replication link
-                0..=9 => match self.datalog.extract_connection_data(&mut request) {
-                    Some(reply) => reply,
-                    None => continue,
-                },
-                // extract all data to be sent to connection link
-                _ => match self.datalog.extract_all_data(&mut request) {
-                    Some(reply) => reply,
-                    None => continue,
-                },
+        while let Some((link_id, request)) = waiters.pop_front() {
+            let is_replicator = link_id < 10;
+
+            // Ignore new data notification if the current notification awaiting
+            // link is a replicator link and data is also from a replicator
+            let reply = if is_replicator && replication_data {
+                None
+            } else {
+                self.datalog.handle_data_request(link_id, &request)
             };
 
-            // Add next data request to the tracker
+            // Re-register this connection for notification
+            let reply = match reply {
+                Some(v) => v,
+                None => {
+                    waiters.push_back((link_id, request));
+                    continue;
+                }
+            };
+
             let tracker = self.trackers.get_mut(link_id).unwrap();
-            tracker.register_data_request(reply.topic.clone(), reply.cursors);
+            let pending = tracker.register_data_request(reply.topic.clone(), reply.cursors);
+
+            // Tracker is ready again. Add it back to ready queue
+            if pending == 1 {
+                self.readyqueue.push_back(link_id);
+            }
 
             trace!(
                 "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
@@ -526,7 +543,12 @@ impl Router {
 
             // Add next acks request to the tracker
             let tracker = self.trackers.get_mut(id).unwrap();
-            tracker.register_acks_request();
+            let pending = tracker.register_acks_request();
+
+            // Tracker is ready again. Add it back to ready queue
+            if pending == 1 {
+                self.readyqueue.push_back(id);
+            }
         }
     }
 }
@@ -606,7 +628,7 @@ fn handle_topics_request<'a>(
         }
         None => {
             trace!("{:11} {:14} Id = {}", "topics", "register", id);
-            waiters.register(id, request);
+            waiters.push_back(id, request);
             return None;
         }
     };
