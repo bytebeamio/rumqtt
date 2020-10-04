@@ -1,5 +1,6 @@
 extern crate bytes;
 
+mod readyqueue;
 mod router;
 mod slab;
 mod subscriptions;

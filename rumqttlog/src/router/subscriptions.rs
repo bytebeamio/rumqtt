@@ -22,8 +22,11 @@ pub struct Tracker {
 
 impl Tracker {
     pub fn new() -> Tracker {
+        let mut requests = VecDeque::with_capacity(100);
+        requests.push_back(Request::Acks(AcksRequest));
+
         Tracker {
-            requests: VecDeque::with_capacity(100),
+            requests,
             topics_index: HashSet::new(),
             concrete_subscriptions: HashMap::new(),
             wild_subscriptions: Vec::new(),

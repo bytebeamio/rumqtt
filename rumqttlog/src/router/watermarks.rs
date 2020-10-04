@@ -1,3 +1,4 @@
+use crate::router::Acks;
 use mqtt4bytes::*;
 use std::collections::{HashMap, VecDeque};
 use std::mem;
@@ -27,6 +28,15 @@ impl Watermarks {
             acks: Vec::new(),
             cluster_offsets: vec![0, 0, 0],
         }
+    }
+
+    pub fn handle_acks_request(&mut self) -> Option<Acks> {
+        let acks = self.acks();
+        if acks.is_empty() {
+            return None;
+        }
+
+        Some(Acks::new(acks))
     }
 
     pub fn update_cluster_offsets(&mut self, id: usize, offset: u64) {

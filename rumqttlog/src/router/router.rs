@@ -5,17 +5,14 @@ use flume::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
-use super::{Connection, Event, Notification};
-use crate::router::{
-    Acks, ConnectionAck, ConnectionType, ReplicationAck, Request, TopicsRequest, Tracker,
-};
+use super::*;
 
 use crate::logs::{DataLog, TopicsLog};
+use crate::router::readyqueue::ReadyQueue;
 use crate::router::slab::Slab;
 use crate::router::watermarks::Watermarks;
 use crate::waiters::{DataWaiters, TopicsWaiters};
 use crate::{Config, DataRequest, Disconnection, ReplicationData};
-use std::collections::VecDeque;
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -41,8 +38,8 @@ pub struct Router {
     trackers: Slab<Tracker>,
     /// Watermarks of a connection
     watermarks: Slab<Watermarks>,
-    /// Connections with more pending requests.
-    ready: VecDeque<ConnectionId>,
+    /// Connections with more pending requests and ready to make progress
+    readyqueue: ReadyQueue,
     /// Waiter on a topic. These are used to wake connections/replicators
     /// which are caught up all the data on a topic. Map[topic]List[Connections Ids]
     data_waiters: DataWaiters,
@@ -62,7 +59,7 @@ impl Router {
 
         // Connection level information
         let connections = Slab::with_capacity(max_connections);
-        let subscriptions = Slab::with_capacity(max_connections);
+        let trackers = Slab::with_capacity(max_connections);
         let watermarks = Slab::with_capacity(max_connections);
 
         // Global data
@@ -72,7 +69,7 @@ impl Router {
         // Waiters to notify new data or topics
         let data_waiters = DataWaiters::new();
         let topics_waiters = TopicsWaiters::new();
-        let ready = VecDeque::with_capacity(max_connections);
+        let readyqueue = ReadyQueue::new();
 
         let router = Router {
             _config: config,
@@ -80,9 +77,9 @@ impl Router {
             datalog,
             topicslog,
             connections,
-            trackers: subscriptions,
+            trackers,
             watermarks,
-            ready,
+            readyqueue,
             data_waiters,
             topics_waiters,
             router_rx,
@@ -92,6 +89,13 @@ impl Router {
     }
 
     pub fn start(&mut self) {
+        // Poll 10 connections which are ready
+        for _ in 0..10 {
+            if let Some(id) = self.readyqueue.pop_front() {
+                self.connection_ready(id);
+            }
+        }
+
         // All these methods will handle state and errors
         while let Ok((id, data)) = self.router_rx.recv() {
             match data {
@@ -117,6 +121,7 @@ impl Router {
                 Some(id) => {
                     self.trackers.insert(Tracker::new()).unwrap();
                     self.watermarks.insert(Watermarks::new()).unwrap();
+                    self.readyqueue.push_back(id);
                     info!("Connection. In ID = {:?}, Router ID = {:?}", did, id);
                     id
                 }
@@ -139,58 +144,46 @@ impl Router {
         self.watermarks.remove(id);
         self.data_waiters.remove(id);
         self.topics_waiters.remove(id);
+        self.readyqueue.remove(id);
     }
 
     fn connection_ready(&mut self, id: ConnectionId) {
         let tracker = self.trackers.get_mut(id).unwrap();
-        dbg!(&tracker);
 
         // Iterate through a max of 100 requests everytime a connection if polled
         for _ in 0..100 {
-            if let Some(request) = tracker.pop_request() {
-                match request {
+            match tracker.pop_request() {
+                Some(request) => match request {
                     Request::Data(request) => {
-                        trace!(
-                            "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
-                            "data",
-                            "request",
-                            id,
-                            request.topic,
-                            request.cursors
-                        );
-
-                        let data = match self.datalog.handle_data_request(id, &request) {
-                            Some(data) => {
-                                trace!(
-                                    "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
-                                    "data",
-                                    "response",
-                                    id,
-                                    data.topic,
-                                    data.cursors,
-                                    data.payload.len()
-                                );
-
-                                data
-                            }
-                            None => {
-                                trace!(
-                                    "{:11} {:14} Id = {}, Topic = {}",
-                                    "data",
-                                    "register",
-                                    id,
-                                    request.topic
-                                );
-
-                                self.data_waiters.register(id, request);
-                                continue;
-                            }
-                        };
-
-                        notify(&mut self.connections, id, Notification::Data(data));
+                        // Get data from commitlog and register for notification if
+                        // all the data is caught up.
+                        let datalog = &mut self.datalog;
+                        let waiters = &mut self.data_waiters;
+                        if let Some(data) = handle_data_request(id, request, datalog, waiters) {
+                            // If data is yielded by commitlog, register a new data
+                            // request in the tracker with next offset and sent data
+                            // notification to connection
+                            let request = DataRequest::offsets(data.topic.clone(), data.cursors);
+                            tracker.register_data_request(request);
+                            notify(&mut self.connections, id, Notification::Data(data));
+                        }
                     }
                     Request::Topics(_) => {}
-                    Request::Acks(_) => {}
+                    Request::Acks(_) => {
+                        // Get acks from commitlog and register for notification if
+                        // all the data is caught up.
+                        let acks = self.watermarks.get_mut(id).unwrap();
+                        if let Some(acks) = handle_acks_request(id, acks) {
+                            // If acks are yielded, register a new acks request
+                            // and notification to connection
+                            tracker.register_acks_request();
+                            notify(&mut self.connections, id, Notification::Acks(acks));
+                        }
+                    }
+                },
+                None => {
+                    // Prevents connection from being added to ready queue again
+                    return;
                 }
             }
         }
@@ -480,6 +473,76 @@ impl Router {
             notify(&mut self.connections, id, reply);
         }
     }
+}
+
+fn handle_data_request(
+    id: ConnectionId,
+    request: DataRequest,
+    datalog: &mut DataLog,
+    data_waiters: &mut DataWaiters,
+) -> Option<Data> {
+    trace!(
+        "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
+        "data",
+        "request",
+        id,
+        request.topic,
+        request.cursors
+    );
+
+    let data = match datalog.handle_data_request(id, &request) {
+        Some(data) => {
+            trace!(
+                "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
+                "data",
+                "response",
+                id,
+                data.topic,
+                data.cursors,
+                data.payload.len()
+            );
+
+            data
+        }
+        None => {
+            trace!(
+                "{:11} {:14} Id = {}, Topic = {}",
+                "data",
+                "register",
+                id,
+                request.topic
+            );
+
+            data_waiters.register(id, request);
+            return None;
+        }
+    };
+
+    Some(data)
+}
+
+fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> {
+    trace!("{:11} {:14} Id = {}", "acks", "request", id);
+    let acks = match acks.handle_acks_request() {
+        Some(acks) => {
+            trace!(
+                "{:11} {:14} Id = {} Count = {}",
+                "acks",
+                "response",
+                id,
+                acks.acks.len()
+            );
+
+            acks
+        }
+        None => {
+            trace!("{:11} {:14} Id = {}", "acks", "register", id);
+            acks.set_pending_acks_reply(true);
+            return None;
+        }
+    };
+
+    Some(acks)
 }
 
 fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) {
