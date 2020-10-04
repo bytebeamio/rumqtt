@@ -1,7 +1,6 @@
-use std::io;
 use std::sync::Arc;
 
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
@@ -17,7 +16,7 @@ use crate::{Config, DataRequest, Disconnection, ReplicationData};
 #[derive(Error, Debug)]
 #[error("...")]
 pub enum RouterError {
-    Io(#[from] io::Error),
+    Recv(#[from] RecvError),
 }
 
 type ConnectionId = usize;
@@ -167,7 +166,9 @@ impl Router {
     fn connection_ready(&mut self, id: ConnectionId) {
         let tracker = self.trackers.get_mut(id).unwrap();
 
-        // Iterate through a max of 100 requests everytime a connection if polled
+        // Iterate through a max of 100 requests everytime a connection if polled.
+        // This prevents a connection from unfairly taking up router's time preventing
+        // other connections from making progress.
         for _ in 0..100 {
             match tracker.pop_request() {
                 Some(request) => match request {
@@ -178,13 +179,19 @@ impl Router {
                         // Get data from commitlog and register for notification if
                         // all the data is caught up.
                         if let Some(data) = handle_data_request(id, request, datalog, waiters) {
-                            let request = DataRequest::offsets(data.topic.clone(), data.cursors);
-
                             // If data is yielded by commitlog, register a new data request
                             // in the tracker with next offset and send data notification to
                             // the connection
-                            tracker.register_data_request(request);
-                            notify(&mut self.connections, id, Notification::Data(data));
+                            tracker.register_data_request(data.topic.clone(), data.cursors);
+                            let notification = Notification::Data(data);
+                            let notified = notify(&mut self.connections, id, notification);
+
+                            // Save notification to failed messages and dont schedule this
+                            // connection again
+                            if !notified {
+                                info!("Notification error. Unschedule. Id = {}", id);
+                                return;
+                            }
                         }
                     }
                     Request::Topics(request) => {
@@ -208,7 +215,15 @@ impl Router {
                         // and send acks notification to the connection
                         if let Some(acks) = handle_acks_request(id, acks) {
                             tracker.register_acks_request();
-                            notify(&mut self.connections, id, Notification::Acks(acks));
+                            let notification = Notification::Acks(acks);
+                            let notified = notify(&mut self.connections, id, notification);
+
+                            // Save notification to failed messages and dont schedule this
+                            // connection again
+                            if !notified {
+                                info!("Notification error. Unschedule. Id = {}", id);
+                                return;
+                            }
                         }
                     }
                 },
@@ -218,6 +233,10 @@ impl Router {
                 }
             }
         }
+
+        // If there are more requests in the tracker, add the connection back
+        // to ready queue.
+        self.readyqueue.push_back(id);
     }
 
     /// Handles new incoming data on a topic
@@ -258,7 +277,7 @@ impl Router {
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
         let topics = self.topicslog.readv(0, 0);
 
-        let subscriptions = self.trackers.get_mut(id).unwrap();
+        let tracker = self.trackers.get_mut(id).unwrap();
         let mut return_codes = Vec::new();
         for filter in subscribe.topics.iter() {
             return_codes.push(SubscribeReturnCodes::Success(filter.qos));
@@ -271,20 +290,19 @@ impl Router {
                 // Add subscription and get topics matching all the existing topics
                 // in the (topics) commitlog ant seek them to next offset. Seeking is
                 // necessary because new subscription should yield only subsequent data
-                subscriptions.add_subscription_and_match(subscribe.topics, topics);
+                tracker.add_subscription_and_match(subscribe.topics, topics);
 
                 // Add matching topics for data requests and register notifications for new topics
-                while let Some(mut topic) = subscriptions.next_matched() {
-                    // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
+                // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
+                while let Some(mut topic) = tracker.next_matched() {
                     self.datalog.seek_offsets_to_end(self.id, &mut topic);
-                    let request = DataRequest::offsets(topic.0, topic.2);
-                    subscriptions.register_data_request(request);
+                    tracker.register_data_request(topic.0, topic.2);
                 }
             }
             None => {
                 // Router did not receive data from any topics yet. Add subscription and
                 // register topics request from offset 0
-                subscriptions.add_subscription_and_match(subscribe.topics, &[]);
+                tracker.add_subscription_and_match(subscribe.topics, &[]);
             }
         };
 
@@ -412,8 +430,8 @@ impl Router {
         let replication_data = id < 10;
         while let Some((link_id, request)) = self.topics_waiters.pop_front() {
             // Ignore connections with zero subscriptions.
-            let subscription = self.trackers.get_mut(link_id).unwrap();
-            if subscription.count() == 0 {
+            let tracker = self.trackers.get_mut(link_id).unwrap();
+            if tracker.count() == 0 {
                 // panic!("Topics request registration for 0 subscription connection");
                 continue;
             }
@@ -422,7 +440,7 @@ impl Router {
             // should not track replicator 2's topics.
             // id 0-10 are reserved for replicators which are linked to other routers in the mesh
             if replication_data && link_id < 10 {
-                subscription.register_topics_request(request.offset);
+                tracker.register_topics_request(request.offset);
                 continue;
             }
 
@@ -434,8 +452,8 @@ impl Router {
             // Even though there are new topics, it's possible that they didn't match
             // subscriptions held by this connection. Push TopicsRequest back to
             // next topics waiter queue in that case.
-            let count = subscription.track_matched_topics(topics);
-            subscription.register_topics_request(next_offset);
+            let count = tracker.track_matched_topics(topics);
+            tracker.register_topics_request(next_offset);
 
             trace!(
                 "{:11} {:14} Id = {}, Offset = {}, Count = {}",
@@ -471,6 +489,10 @@ impl Router {
                     None => continue,
                 },
             };
+
+            // Add next data request to the tracker
+            let tracker = self.trackers.get_mut(link_id).unwrap();
+            tracker.register_data_request(reply.topic.clone(), reply.cursors);
 
             trace!(
                 "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",

@@ -43,7 +43,8 @@ impl Tracker {
         self.requests.pop_front()
     }
 
-    pub fn register_data_request(&mut self, request: DataRequest) {
+    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) {
+        let request = DataRequest::offsets(topic, cursors);
         let request = Request::Data(request);
         self.requests.push_back(request)
     }
