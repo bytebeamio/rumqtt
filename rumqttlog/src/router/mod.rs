@@ -10,7 +10,7 @@ pub use router::Router;
 use subscriptions::Tracker;
 
 use self::bytes::Bytes;
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::Packet;
 use std::fmt;
 
@@ -215,6 +215,17 @@ impl TopicsRequest {
     }
 }
 
+pub struct Topics<'a> {
+    offset: usize,
+    topics: &'a [String],
+}
+
+impl<'a> Topics<'a> {
+    pub fn new(offset: usize, topics: &'a [String]) -> Topics {
+        Topics { offset, topics }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AcksRequest;
 
@@ -245,15 +256,16 @@ pub enum ConnectionType {
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
 /// communicate with this connection
-#[derive(Clone)]
 pub struct Connection {
     /// Kind of connection. A replicator connection or a device connection
     /// Replicator connection are only created from inside this library.
     /// All the external connections are of 'device' type
-    pub(crate) conn: ConnectionType,
+    pub conn: ConnectionType,
+    /// Last failed message to connection
+    last_failed: Option<Notification>,
     /// Handle which is given to router to allow router to comminicate with
     /// this connection
-    pub handle: Sender<Notification>,
+    handle: Sender<Notification>,
 }
 
 impl Connection {
@@ -262,6 +274,7 @@ impl Connection {
 
         let connection = Connection {
             conn: ConnectionType::Device(id.to_owned()),
+            last_failed: None,
             handle: this_tx,
         };
 
@@ -273,10 +286,30 @@ impl Connection {
 
         let connection = Connection {
             conn: ConnectionType::Replicator(id),
+            last_failed: None,
             handle: this_tx,
         };
 
         (connection, this_rx)
+    }
+
+    pub fn notify_last_failed(&mut self) {
+        if let Some(last_failed) = self.last_failed.take() {
+            self.handle.try_send(last_failed).unwrap();
+        }
+    }
+
+    pub fn notify(&mut self, notification: Notification) -> bool {
+        if let Err(e) = self.handle.try_send(notification) {
+            match e {
+                TrySendError::Full(e) => self.last_failed = Some(e),
+                TrySendError::Disconnected(e) => self.last_failed = Some(e),
+            }
+
+            return false;
+        }
+
+        true
     }
 }
 

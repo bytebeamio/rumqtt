@@ -1,7 +1,7 @@
 use std::io;
 use std::sync::Arc;
 
-use flume::{bounded, Receiver, Sender, TrySendError};
+use flume::{bounded, Receiver, Sender};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
@@ -155,27 +155,41 @@ impl Router {
             match tracker.pop_request() {
                 Some(request) => match request {
                     Request::Data(request) => {
-                        // Get data from commitlog and register for notification if
-                        // all the data is caught up.
                         let datalog = &mut self.datalog;
                         let waiters = &mut self.data_waiters;
+
+                        // Get data from commitlog and register for notification if
+                        // all the data is caught up.
                         if let Some(data) = handle_data_request(id, request, datalog, waiters) {
-                            // If data is yielded by commitlog, register a new data
-                            // request in the tracker with next offset and sent data
-                            // notification to connection
                             let request = DataRequest::offsets(data.topic.clone(), data.cursors);
+
+                            // If data is yielded by commitlog, register a new data request
+                            // in the tracker with next offset and send data notification to
+                            // the connection
                             tracker.register_data_request(request);
                             notify(&mut self.connections, id, Notification::Data(data));
                         }
                     }
-                    Request::Topics(_) => {}
+                    Request::Topics(request) => {
+                        let topicslog = &mut self.topicslog;
+                        let waiters = &mut self.topics_waiters;
+
+                        // Get topics from topics log and register for notification if
+                        // all the topics are caught up
+                        if let Some(data) = handle_topics_request(id, request, topicslog, waiters) {
+                            // Register for new topics request if previous request is handled
+                            tracker.track_matched_topics(data.topics);
+                            tracker.register_topics_request(data.offset);
+                        }
+                    }
                     Request::Acks(_) => {
                         // Get acks from commitlog and register for notification if
                         // all the data is caught up.
                         let acks = self.watermarks.get_mut(id).unwrap();
+
+                        // If acks are yielded, register a new acks request
+                        // and send acks notification to the connection
                         if let Some(acks) = handle_acks_request(id, acks) {
-                            // If acks are yielded, register a new acks request
-                            // and notification to connection
                             tracker.register_acks_request();
                             notify(&mut self.connections, id, Notification::Acks(acks));
                         }
@@ -452,12 +466,6 @@ impl Router {
             );
 
             notify(&mut self.connections, link_id, Notification::Data(reply));
-
-            // NOTE:
-            // ----------------------
-            // When the reply is empty don't register notification on behalf of the link.
-            // This will cause the channel to be full. Register the notification only when
-            // link has made the request and reply doesn't contain any data
         }
     }
 
@@ -479,7 +487,7 @@ fn handle_data_request(
     id: ConnectionId,
     request: DataRequest,
     datalog: &mut DataLog,
-    data_waiters: &mut DataWaiters,
+    waiters: &mut DataWaiters,
 ) -> Option<Data> {
     trace!(
         "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
@@ -513,12 +521,49 @@ fn handle_data_request(
                 request.topic
             );
 
-            data_waiters.register(id, request);
+            waiters.register(id, request);
             return None;
         }
     };
 
     Some(data)
+}
+
+fn handle_topics_request<'a>(
+    id: ConnectionId,
+    request: TopicsRequest,
+    topicslog: &'a mut TopicsLog,
+    waiters: &mut TopicsWaiters,
+) -> Option<Topics<'a>> {
+    trace!(
+        "{:11} {:14} Id = {}, Offset = {}",
+        "topics",
+        "request",
+        id,
+        request.offset
+    );
+
+    let topics = match topicslog.readv(request.offset, request.count) {
+        Some(topics) => {
+            trace!(
+                "{:11} {:14} Id = {}, Offset = {}, Count = {}",
+                "topics",
+                "response",
+                id,
+                topics.0,
+                topics.1.len()
+            );
+
+            Topics::new(topics.0, topics.1)
+        }
+        None => {
+            trace!("{:11} {:14} Id = {}", "topics", "register", id);
+            waiters.register(id, request);
+            return None;
+        }
+    };
+
+    Some(topics)
 }
 
 fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> {
@@ -545,21 +590,14 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
     Some(acks)
 }
 
-fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) {
+fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) -> bool {
     let connection = match connections.get_mut(id) {
         Some(c) => c,
         None => {
             error!("Invalid id while replying = {:?}", id);
-            return;
+            return true;
         }
     };
 
-    if let Err(e) = connection.handle.try_send(reply) {
-        match e {
-            TrySendError::Full(e) => error!("Channel full. Id = {}, Message = {:?}", id, e),
-            TrySendError::Disconnected(e) => {
-                info!("Channel closed. Id = {}, Message = {:?}", id, e)
-            }
-        }
-    }
+    connection.notify(reply)
 }
