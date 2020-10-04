@@ -16,7 +16,7 @@ use crate::{Config, DataRequest, Disconnection, ReplicationData};
 
 #[derive(Error, Debug)]
 #[error("...")]
-pub enum Error {
+pub enum RouterError {
     Io(#[from] io::Error),
 }
 
@@ -88,27 +88,44 @@ impl Router {
         (router, router_tx)
     }
 
-    pub fn start(&mut self) {
-        // Poll 10 connections which are ready
-        for _ in 0..10 {
-            if let Some(id) = self.readyqueue.pop_front() {
-                self.connection_ready(id);
+    pub fn start(&mut self) -> Result<(), RouterError> {
+        loop {
+            // Block on incoming events if there are no connections
+            // in ready queue.
+            if self.readyqueue.is_empty() {
+                let (id, data) = self.router_rx.recv()?;
+                self.route(id, data);
+            }
+
+            // Poll 10 connections which are ready in ready queue
+            for _ in 0..10 {
+                match self.readyqueue.pop_front() {
+                    Some(id) => self.connection_ready(id),
+                    None => break,
+                }
+            }
+
+            // Try reading 1000 events from connections in a non-blocking
+            // fashion to accumulate data and handle subscriptions
+            for _ in 0..1000 {
+                // All these methods will handle state and errors
+                match self.router_rx.try_recv() {
+                    Ok((id, data)) => self.route(id, data),
+                    Err(..) => break,
+                }
             }
         }
+    }
 
-        // All these methods will handle state and errors
-        while let Ok((id, data)) = self.router_rx.recv() {
-            match data {
-                Event::Connect(connection) => self.handle_new_connection(connection),
-                Event::Data(data) => self.handle_connection_data(id, data),
-                Event::ReplicationData(data) => self.handle_replication_data(id, data),
-                Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
-                Event::Disconnect(request) => self.handle_disconnection(id, request),
-                Event::Ready => self.connection_ready(id),
-            }
+    fn route(&mut self, id: usize, data: Event) {
+        match data {
+            Event::Connect(connection) => self.handle_new_connection(connection),
+            Event::Data(data) => self.handle_connection_data(id, data),
+            Event::ReplicationData(data) => self.handle_replication_data(id, data),
+            Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
+            Event::Disconnect(request) => self.handle_disconnection(id, request),
+            Event::Ready => self.connection_ready(id),
         }
-
-        error!("Router stopped!!");
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {
