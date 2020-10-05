@@ -475,6 +475,26 @@ mod test {
     }
 
     #[tokio::test]
+    async fn unsuccessful_connection_should_not_panic_on_ping() {
+        task::spawn(async move {
+            let _broker = Broker::new(1880, false).await;
+            time::delay_for(Duration::from_secs(5)).await;
+        });
+
+        time::delay_for(Duration::from_secs(1)).await;
+        let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
+        let mut eventloop = EventLoop::new(options, 5);
+
+        for _ in 0..2 {
+            let some_event = time::delay_for(Duration::from_secs(1));
+            select! {
+                _ = some_event => {}
+                _poll = eventloop.poll() => {}
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn connection_should_timeout_on_time() {
         task::spawn(async move {
             let _broker = Broker::new(1880, false).await;
