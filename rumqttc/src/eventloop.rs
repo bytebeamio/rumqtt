@@ -123,12 +123,18 @@ impl EventLoop {
     #[must_use = "Eventloop should be iterated over a loop to make progress"]
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
-            if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
+            match self.connect_or_cancel().await {
+                Ok(connack) => {
+                    if self.keepalive_timeout.is_none() {
+                        self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
+                    }
+                    return Ok(Event::Incoming(connack));
+                }
+                Err(e) => {
+                    self.network = None;
+                    return Err(e);
+                }
             }
-            let connack = self.connect_or_cancel().await?;
-
-            return Ok(Event::Incoming(connack));
         }
 
         match self.select().await {
