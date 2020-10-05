@@ -29,7 +29,7 @@ pub struct AsyncClient {
 }
 
 impl AsyncClient {
-    /// Create a new `Client`
+    /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
@@ -41,6 +41,15 @@ impl AsyncClient {
         };
 
         (client, eventloop)
+    }
+
+    /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
+    /// creating a test instance.
+    pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
+        AsyncClient {
+            request_tx,
+            cancel_tx,
+        }
     }
 
     /// Sends a MQTT Publish to the eventloop
