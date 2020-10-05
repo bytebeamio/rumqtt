@@ -20,6 +20,8 @@ pub struct Tracker {
     matched: VecDeque<(String, u8, [(u64, u64); 3])>,
 }
 
+impl Tracker {}
+
 impl Tracker {
     pub fn new() -> Tracker {
         let mut requests = VecDeque::with_capacity(100);
@@ -34,6 +36,10 @@ impl Tracker {
         }
     }
 
+    pub fn requests_done(&self) -> bool {
+        self.requests.is_empty()
+    }
+
     /// Returns current number of subscriptions
     pub fn subscription_count(&self) -> usize {
         self.concrete_subscriptions.len() + self.wild_subscriptions.len()
@@ -43,33 +49,33 @@ impl Tracker {
         self.requests.pop_front()
     }
 
-    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) -> usize {
+    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) -> bool {
         let request = DataRequest::offsets(topic, cursors);
         let request = Request::Data(request);
+        let revive = self.requests.is_empty();
         self.requests.push_back(request);
 
-        // Number of pending requests. Use by router to add connection
-        // to ready queue
-        self.requests.len()
+        // Use by router to add connection to ready queue
+        revive
     }
 
-    pub fn register_topics_request(&mut self, next_offset: usize) -> usize {
+    pub fn register_topics_request(&mut self, next_offset: usize) -> bool {
         let request = TopicsRequest::offset(next_offset);
         let request = Request::Topics(request);
+        let revive = self.requests.is_empty();
         self.requests.push_back(request);
 
-        // Number of pending requests. Use by router to add connection
-        // to ready queue
-        self.requests.len()
+        // Use by router to add connection to ready queue
+        revive
     }
 
-    pub fn register_acks_request(&mut self) -> usize {
+    pub fn register_acks_request(&mut self) -> bool {
         let request = Request::Acks(AcksRequest);
+        let revive = self.requests.is_empty();
         self.requests.push_back(request);
 
-        // Number of pending requests. Use by router to add connection
-        // to ready queue
-        self.requests.len()
+        // Use by router to add connection to ready queue
+        revive
     }
 
     /// Match and add this topic to requests if it matches.
@@ -78,9 +84,7 @@ impl Tracker {
         let mut matched_count = 0;
         for topic in topics {
             if self.match_with_subscriptions(topic) {
-                let request = DataRequest::new(topic.to_owned());
-                let request = Request::Data(request);
-                self.requests.push_back(request);
+                self.register_data_request(topic.to_owned(), [(0, 0); 3]);
                 matched_count += 1;
             }
         }
@@ -97,11 +101,15 @@ impl Tracker {
     /// should track matched topics from current offset of that topic
     /// Adding and matching is combined so that only new subscriptions are
     /// matched against provided topics and then added to subscriptions
-    pub fn add_subscription_and_match(&mut self, filters: Vec<SubscribeTopic>, topics: &[String]) {
+    pub fn add_subscription_and_match(
+        &mut self,
+        filters: Vec<SubscribeTopic>,
+        topics: &[String],
+    ) -> bool {
         // Register topics request during first subscription
+        let mut first = false;
         if self.subscription_count() == 0 {
-            let request = Request::Topics(TopicsRequest::offset(topics.len()));
-            self.requests.push_back(request);
+            first = true;
         }
 
         for filter in filters {
@@ -130,6 +138,8 @@ impl Tracker {
                 }
             }
         }
+
+        first
     }
 
     /// Matches topic against existing subscriptions. These

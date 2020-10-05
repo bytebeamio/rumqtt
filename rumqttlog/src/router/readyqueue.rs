@@ -1,6 +1,7 @@
 use crate::ConnectionId;
 use std::collections::VecDeque;
 
+#[derive(Debug)]
 pub struct ReadyQueue {
     queue: VecDeque<ConnectionId>,
 }

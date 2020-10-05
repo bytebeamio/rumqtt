@@ -5,6 +5,37 @@ use std::thread;
 use std::time::Duration;
 
 #[test]
+fn acks_are_retuned_as_expected_to_the_connection() {
+    let connections = Connections::new();
+    let (connection_1_id, connection_1_rx) = connections.connection("1", 3);
+
+    // Send data one by one
+    for i in 0..1000 {
+        connections.data(connection_1_id, "hello/1/world", vec![1, 2, 3], i);
+    }
+
+    let mut count = 0;
+    loop {
+        count += wait_for_acks(&connection_1_rx).unwrap().len();
+
+        if count == 1000 {
+            break;
+        }
+    }
+
+    // Send data in bulk
+    connections.datav(connection_1_id, "hello/1/world", vec![1, 2, 3], 1000);
+    let mut count = 0;
+    loop {
+        count += wait_for_acks(&connection_1_rx).unwrap().len();
+
+        if count == 1000 {
+            break;
+        }
+    }
+}
+
+#[test]
 fn new_connection_data_notifies_interested_connections() {
     pretty_env_logger::init();
     let connections = Connections::new();
@@ -15,33 +46,24 @@ fn new_connection_data_notifies_interested_connections() {
     let acks = wait_for_acks(&connection_2_rx).unwrap();
     assert_eq!(acks.len(), 1);
 
-    // Write data. 9 messages, 4 topics. Connection"s capacity is only 2 topics.
+    // Write data. 4 messages, 2 topics. Connection's capacity is 2 items.
     connections.data(connection_1_id, "hello/1/world", vec![1, 2, 3], 1);
     connections.data(connection_1_id, "hello/1/world", vec![4, 5, 6], 2);
-    connections.data(connection_1_id, "hello/1/world", vec![10, 11, 12], 3);
     connections.data(connection_1_id, "hello/2/world", vec![13, 14, 15], 4);
     connections.data(connection_1_id, "hello/2/world", vec![16, 17, 18], 5);
-    connections.data(connection_1_id, "hello/2/world", vec![19, 20, 21], 6);
-    connections.data(connection_1_id, "hello/3/world", vec![22, 23, 24], 7);
-    connections.data(connection_1_id, "hello/3/world", vec![25, 26, 27], 8);
-    connections.data(connection_1_id, "hello/3/world", vec![28, 29, 30], 9);
-    connections.data(connection_1_id, "hello/4/world", vec![31, 32, 33], 10);
-    connections.data(connection_1_id, "hello/4/world", vec![34, 35, 36], 11);
-    connections.data(connection_1_id, "hello/4/world", vec![37, 38, 39], 12);
 
-    connections.ready(connection_2_id);
+    // Pending requests were done before. Readiness has
+    // to be manually triggered
 
     let data = wait_for_data(&connection_2_rx).unwrap();
-    assert_eq!(data.payload.len(), 3);
+    assert_eq!(data.payload.len(), 1);
     assert_eq!(data.payload[0].as_ref(), &[1, 2, 3]);
-    assert_eq!(data.payload[1].as_ref(), &[4, 5, 6]);
-    assert_eq!(data.payload[2].as_ref(), &[10, 11, 12]);
 
     let data = wait_for_data(&connection_2_rx).unwrap();
     assert_eq!(data.payload.len(), 3);
-    assert_eq!(data.payload[0].as_ref(), &[13, 14, 15]);
-    assert_eq!(data.payload[1].as_ref(), &[16, 17, 18]);
-    assert_eq!(data.payload[2].as_ref(), &[19, 20, 21]);
+    assert_eq!(data.payload[0].as_ref(), &[4, 5, 6]);
+    assert_eq!(data.payload[1].as_ref(), &[13, 14, 15]);
+    assert_eq!(data.payload[2].as_ref(), &[16, 17, 18]);
 }
 
 fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {
@@ -49,8 +71,14 @@ fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {
 
     match rx.try_recv() {
         Ok(Notification::Data(reply)) => Some(reply),
-        Ok(v) => panic!("{:?}", v),
-        Err(e) => panic!("{:?}", e),
+        Ok(v) => {
+            println!("Error = {:?}", v);
+            None
+        }
+        Err(e) => {
+            println!("Error = {:?}", e);
+            None
+        }
     }
 }
 
@@ -112,6 +140,19 @@ impl Connections {
         publish.pkid = pkid;
 
         let message = Event::Data(vec![Packet::Publish(publish)]);
+        let message = (id, message);
+        self.router_tx.try_send(message).unwrap();
+    }
+
+    pub fn datav(&self, id: usize, topic: &str, payload: Vec<u8>, count: u16) {
+        let mut packets = Vec::new();
+        for i in 0..count {
+            let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload.clone());
+            publish.pkid = i;
+            packets.push(Packet::Publish(publish));
+        }
+
+        let message = Event::Data(packets);
         let message = (id, message);
         self.router_tx.try_send(message).unwrap();
     }

@@ -138,7 +138,11 @@ impl Router {
                     self.trackers.insert(Tracker::new()).unwrap();
                     self.watermarks.insert(Watermarks::new()).unwrap();
                     self.readyqueue.push_back(id);
-                    info!("Connection. In ID = {:?}, Router ID = {:?}", did, id);
+                    info!(
+                        "{:11} {:14} Id = {}, Remote id = {}",
+                        "connection", "new", id, did,
+                    );
+
                     id
                 }
                 None => {
@@ -153,7 +157,10 @@ impl Router {
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
-        info!("Cleaning ID [{}] = {:?} from router", disconnect.id, id);
+        info!(
+            "{:11} {:14} Id = {}, Remote id = {}",
+            "connection", "clean", id, disconnect.id,
+        );
 
         self.connections.remove(id);
         self.trackers.remove(id);
@@ -164,6 +171,7 @@ impl Router {
     }
 
     fn connection_ready(&mut self, id: ConnectionId) {
+        trace!("{:11} {:14} Id = {}", "requests", "start", id,);
         let tracker = self.trackers.get_mut(id).unwrap();
 
         // Iterate through a max of 100 requests everytime a connection if polled.
@@ -190,7 +198,7 @@ impl Router {
                             // connection again
                             if !notified {
                                 info!("Notification error. Unschedule. Id = {}", id);
-                                return;
+                                break;
                             }
                         }
                     }
@@ -222,7 +230,7 @@ impl Router {
                             // connection again
                             if !notified {
                                 info!("Notification error. Unschedule. Id = {}", id);
-                                return;
+                                break;
                             }
                         }
                     }
@@ -233,14 +241,20 @@ impl Router {
                     // New requests are added to tracker through notifications of
                     // previous requests. When first request is added back to tracker
                     // again, it's scheduled back on ready queue again.
-                    return;
+                    break;
                 }
             }
         }
 
         // If there are more requests in the tracker, add the connection back
         // to ready queue.
-        self.readyqueue.push_back(id);
+        if !tracker.requests_done() {
+            trace!("{:11} {:14} Id = {}", "requests", "pause", id,);
+            self.readyqueue.push_back(id);
+            return;
+        }
+
+        trace!("{:11} {:14} Id = {}", "requests", "done", id,);
     }
 
     /// Handles new incoming data on a topic
@@ -253,12 +267,10 @@ impl Router {
             data.len()
         );
 
-        let mut count = 0;
         for publish in data {
             match publish {
                 Packet::Publish(publish) => {
                     self.handle_connection_publish(id, publish);
-                    count += 1;
                 }
                 Packet::Subscribe(subscribe) => {
                     self.handle_connection_subscribe(id, subscribe);
@@ -269,13 +281,7 @@ impl Router {
             }
         }
 
-        trace!(
-            "{:11} {:14} Id = {} Count = {}",
-            "data",
-            "committed",
-            id,
-            count,
-        );
+        trace!("{:11} {:14} Id = {}", "data", "committed", id,);
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
@@ -292,21 +298,40 @@ impl Router {
         match topics {
             Some((_, topics)) => {
                 // Add subscription and get topics matching all the existing topics
-                // in the (topics) commitlog ant seek them to next offset. Seeking is
-                // necessary because new subscription should yield only subsequent data
-                tracker.add_subscription_and_match(subscribe.topics, topics);
+                // in the (topics) commitlog ant seek them to next offset. Add subscriptions
+                // and store matched topics interna. If this is the first subscription,
+                // register topics request
+                if tracker.add_subscription_and_match(subscribe.topics, topics) {
+                    // If a new request is added to empty request queue of the tracker,
+                    // add this connection back to ready queue
+                    if tracker.register_topics_request(topics.len()) {
+                        self.readyqueue.push_back(id);
+                    }
+                }
 
-                // Add matching topics for data requests and register notifications for new topics
+                // Take matched topics above and seek their offsets. Seeking is
+                // necessary because new subscription should yield only subsequent data
                 // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
                 while let Some(mut topic) = tracker.next_matched() {
                     self.datalog.seek_offsets_to_end(self.id, &mut topic);
-                    tracker.register_data_request(topic.0, topic.2);
+
+                    // If a new request is added to empty request queue of the tracker,
+                    // add this connection back to ready queue
+                    if tracker.register_data_request(topic.0, topic.2) {
+                        self.readyqueue.push_back(id);
+                    }
                 }
             }
             None => {
                 // Router did not receive data from any topics yet. Add subscription and
                 // register topics request from offset 0
-                tracker.add_subscription_and_match(subscribe.topics, &[]);
+                if tracker.add_subscription_and_match(subscribe.topics, &[]) {
+                    // If a new request is added to empty request queue of the tracker,
+                    // add this connection back to ready queue
+                    if tracker.register_topics_request(0) {
+                        self.readyqueue.push_back(id);
+                    }
+                }
             }
         };
 
@@ -452,17 +477,18 @@ impl Router {
             let fresh_topics = self.topicslog.readv(request.offset, request.count);
             let (next_offset, topics) = fresh_topics.unwrap();
 
-            // Match new topics with existing subscriptions of this link and reply.
+            // Match new topics with existing subscriptions of this link.
             // Even though there are new topics, it's possible that they didn't match
-            // subscriptions held by this connection. Push TopicsRequest back to
-            // next topics waiter queue in that case.
-            let count = tracker.track_matched_topics(topics);
-            let pending = tracker.register_topics_request(next_offset);
-
-            // Tracker is ready again. Add it back to ready queue
-            if pending == 1 {
+            // subscriptions held by this connection.
+            // Register next topics request in the router
+            if tracker.register_topics_request(next_offset) {
                 self.readyqueue.push_back(link_id);
             }
+
+            // This also adds data requests to tracker queue. If this connection
+            // is paused, topics request registration above has resumed the connection
+            // already
+            let count = tracker.track_matched_topics(topics);
 
             trace!(
                 "{:11} {:14} Id = {}, Offset = {}, Count = {}",
@@ -504,10 +530,8 @@ impl Router {
             };
 
             let tracker = self.trackers.get_mut(link_id).unwrap();
-            let pending = tracker.register_data_request(reply.topic.clone(), reply.cursors);
-
-            // Tracker is ready again. Add it back to ready queue
-            if pending == 1 {
+            if tracker.register_data_request(reply.topic.clone(), reply.cursors) {
+                // Tracker is ready again. Add it back to ready queue
                 self.readyqueue.push_back(link_id);
             }
 
@@ -547,10 +571,8 @@ impl Router {
 
             // Add next acks request to the tracker
             let tracker = self.trackers.get_mut(id).unwrap();
-            let pending = tracker.register_acks_request();
-
-            // Tracker is ready again. Add it back to ready queue
-            if pending == 1 {
+            if tracker.register_acks_request() {
+                // Tracker is ready again. Add it back to ready queue
                 self.readyqueue.push_back(id);
             }
         }
