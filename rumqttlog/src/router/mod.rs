@@ -3,11 +3,11 @@ extern crate bytes;
 mod readyqueue;
 mod router;
 mod slab;
-mod subscriptions;
+mod tracker;
 mod watermarks;
 
 pub use router::Router;
-use subscriptions::Tracker;
+use tracker::Tracker;
 
 use self::bytes::Bytes;
 use flume::{bounded, Receiver, Sender, TrySendError};
