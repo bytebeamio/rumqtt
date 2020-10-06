@@ -131,6 +131,9 @@ impl Router {
         let id = match connection.conn.clone() {
             ConnectionType::Replicator(id) => {
                 self.connections.insert_at(connection, id);
+                self.trackers.insert_at(Tracker::new(), id);
+                self.watermarks.insert_at(Watermarks::new(), id);
+                self.readyqueue.push_back(id);
                 id
             }
             ConnectionType::Device(did) => match self.connections.insert(connection) {
@@ -269,12 +272,8 @@ impl Router {
 
         for publish in data {
             match publish {
-                Packet::Publish(publish) => {
-                    self.handle_connection_publish(id, publish);
-                }
-                Packet::Subscribe(subscribe) => {
-                    self.handle_connection_subscribe(id, subscribe);
-                }
+                Packet::Publish(publish) => self.handle_connection_publish(id, publish),
+                Packet::Subscribe(subscribe) => self.handle_connection_subscribe(id, subscribe),
                 incoming => {
                     warn!("Packet = {:?} not supported by router yet", incoming);
                 }
@@ -341,14 +340,10 @@ impl Router {
         self.fresh_acks_notification(id);
     }
 
-    fn handle_connection_publish(
-        &mut self,
-        id: ConnectionId,
-        publish: Publish,
-    ) -> Option<(u64, u64)> {
+    fn handle_connection_publish(&mut self, id: ConnectionId, publish: Publish) {
         if publish.payload.is_empty() {
             error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
-            return None;
+            return;
         }
 
         let Publish {
@@ -359,9 +354,9 @@ impl Router {
             ..
         } = publish;
 
-        let (is_new_topic, (base_offset, offset)) = match self.datalog.append(id, &topic, payload) {
+        let (is_new_topic, (_segment, offset)) = match self.datalog.append(id, &topic, payload) {
             Some(v) => v,
-            None => return None,
+            None => return,
         };
 
         if qos as u8 > 0 {
@@ -389,7 +384,6 @@ impl Router {
         // Data from topics with replication factor = 0 should be acked immediately if there are
         // waiters registered. We shouldn't rely on replication acks for data acks in this case
         self.fresh_acks_notification(id);
-        Some((base_offset, offset))
     }
 
     fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
@@ -457,7 +451,9 @@ impl Router {
     /// all the topic waiters
     fn fresh_topics_notification(&mut self, id: ConnectionId) {
         let replication_data = id < 10;
-        while let Some((link_id, request)) = self.topics_waiters.pop_front() {
+        let waiters = &mut self.topics_waiters;
+
+        while let Some((link_id, request)) = waiters.pop_front() {
             // Ignore connections with zero subscriptions.
             let tracker = self.trackers.get_mut(link_id).unwrap();
             if tracker.subscription_count() == 0 {
@@ -466,10 +462,13 @@ impl Router {
             }
 
             // Don't send replicated topic notifications to replication link. Replicator 1
-            // should not track replicator 2's topics.
-            // id 0-10 are reserved for replicators which are linked to other routers in the mesh
+            // should not track replicator 2's topics (This will lead to circular replication)
+            // False notification. This connection should be notified in the next call of
+            // this method. Push this request to next queue in waiter and swap at the end.
+            // TODO: Split waiters into remote and replicator connections.
+            // TODO: Ignore replicators for notifications from replicators
             if replication_data && link_id < 10 {
-                self.topics_waiters.push_back(link_id, request);
+                waiters.push_back(link_id, request);
                 continue;
             }
 
@@ -499,14 +498,13 @@ impl Router {
                 count
             );
         }
+
+        waiters.prepare_next();
     }
 
     /// Send data to links which registered them
     fn fresh_data_notification(&mut self, id: ConnectionId, topic: &str) {
-        let waiters = match self.data_waiters.get_mut(topic) {
-            Some(w) => w,
-            None => return,
-        };
+        let waiters = self.data_waiters.get_mut(topic).unwrap();
 
         let replication_data = id < 10;
         while let Some((link_id, request)) = waiters.pop_front() {
@@ -514,18 +512,17 @@ impl Router {
 
             // Ignore new data notification if the current notification awaiting
             // link is a replicator link and data is also from a replicator
-            let reply = if is_replicator && replication_data {
-                None
-            } else {
-                self.datalog.handle_data_request(link_id, &request)
-            };
+            // False positive. This connection should be notified in the next call of
+            // this method. Push this request to next queue in waiter and swap at the end.
+            if is_replicator && replication_data {
+                waiters.push_back(link_id, request);
+                continue;
+            }
 
-            // Re-register this connection for notification
-            let reply = match reply {
+            let reply = match self.datalog.handle_data_request(link_id, &request) {
                 Some(v) => v,
                 None => {
-                    waiters.push_back((link_id, request));
-                    continue;
+                    panic!("Expecting data here");
                 }
             };
 
@@ -547,6 +544,8 @@ impl Router {
 
             notify(&mut self.connections, link_id, Notification::Data(reply));
         }
+
+        waiters.prepare_next();
     }
 
     fn fresh_acks_notification(&mut self, id: ConnectionId) {
@@ -696,4 +695,95 @@ fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notificat
     };
 
     connection.notify(reply)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::QoS;
+    use mqtt4bytes::Subscribe;
+
+    #[test]
+    fn topics_notifications_does_not_create_infinite_loops() {
+        let (mut router, _tx) = Router::new(Arc::new(Config::default()));
+
+        // Instantiate replica connections with subscriptions and topic request notifications
+        for i in 0..10 {
+            add_new_replica_connection(&mut router, i);
+            add_new_subscription(&mut router, i, "hello/world");
+            router.topics_waiters.register(i, TopicsRequest::new());
+        }
+
+        // Instantiate replica connections with subscriptions and topic request notifications
+        for i in 10..20 {
+            let client_id = &format!("{}", i);
+            add_new_remote_connection(&mut router, client_id);
+            add_new_subscription(&mut router, i, "hello/world");
+            router.topics_waiters.register(i, TopicsRequest::new());
+        }
+
+        router.topicslog.append("hello/world");
+
+        // A new topic notification from a replicator. This is a false positive
+        // for all the replicators
+        router.fresh_topics_notification(1);
+
+        // Next iteration of `fresh_topics_notification` will have all missed notifications
+        for i in 0..10 {
+            let request = router.topics_waiters.pop_front().unwrap();
+            assert_eq!(i, request.0);
+        }
+    }
+
+    #[test]
+    fn data_notifications_does_not_create_infinite_loops() {
+        let (mut router, _tx) = Router::new(Arc::new(Config::default()));
+
+        // Instantiate replica connections with subscriptions and
+        // data request notifications
+        for i in 0..10 {
+            add_new_replica_connection(&mut router, i);
+            add_new_subscription(&mut router, i, "hello/world");
+
+            let request = DataRequest::new("hello/world".to_owned());
+            router.data_waiters.register(i, request);
+        }
+
+        // Instantiate replica connections with subscriptions and topic request notifications
+        for i in 10..20 {
+            let client_id = &format!("{}", i);
+            add_new_remote_connection(&mut router, client_id);
+            add_new_subscription(&mut router, i, "hello/world");
+            router.topics_waiters.register(i, TopicsRequest::new());
+        }
+
+        router
+            .datalog
+            .append(1, "hello/world", Bytes::from(vec![1, 2, 3]));
+
+        // A new topic notification from a replicator. This is a false positive
+        // for all the replicators
+        router.fresh_data_notification(1, "hello/world");
+
+        // Next iteration of `fresh_topics_notification` will have all missed notifications
+        let waiters = router.data_waiters.get_mut("hello/world").unwrap();
+        for i in 0..10 {
+            let request = waiters.pop_front().unwrap();
+            assert_eq!(i, request.0);
+        }
+    }
+
+    fn add_new_replica_connection(router: &mut Router, id: usize) {
+        let (connection, _rx) = Connection::new_replica(id, 10);
+        router.handle_new_connection(connection);
+    }
+
+    fn add_new_remote_connection(router: &mut Router, client_id: &str) {
+        let (connection, _rx) = Connection::new_remote(client_id, 10);
+        router.handle_new_connection(connection);
+    }
+
+    fn add_new_subscription(router: &mut Router, id: usize, topic: &str) {
+        router.handle_connection_subscribe(id, Subscribe::new(topic, QoS::AtLeastOnce));
+    }
 }

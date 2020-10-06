@@ -9,7 +9,7 @@ type ConnectionId = usize;
 /// which are caught up previously and waiting on new data.
 pub struct DataWaiters {
     // Map[topic]List[Connections Ids]
-    waiters: HashMap<Topic, VecDeque<(ConnectionId, DataRequest)>>,
+    waiters: HashMap<Topic, Waiters<DataRequest>>,
 }
 
 impl DataWaiters {
@@ -19,61 +19,75 @@ impl DataWaiters {
         }
     }
 
-    pub fn get_mut(&mut self, topic: &str) -> Option<&mut VecDeque<(ConnectionId, DataRequest)>> {
+    pub fn get_mut(&mut self, topic: &str) -> Option<&mut Waiters<DataRequest>> {
         self.waiters.get_mut(topic)
     }
 
     /// Register data waiter
     pub fn register(&mut self, id: ConnectionId, request: DataRequest) {
         let topic = request.topic.clone();
-        let request = (id, request);
-
-        match self.waiters.get_mut(&topic) {
-            Some(waiters) => waiters.push_back(request),
-            None => {
-                let mut waiters = VecDeque::new();
-                waiters.push_back(request);
-                self.waiters.insert(topic, waiters);
-            }
-        }
+        let waiters = self.waiters.entry(topic).or_insert(Waiters::new());
+        waiters.register(id, request);
     }
 
     /// Remove a connection from waiters
     pub fn remove(&mut self, id: ConnectionId) {
         for waiters in self.waiters.values_mut() {
-            if let Some(index) = waiters.iter().position(|x| x.0 == id) {
-                waiters.swap_remove_back(index);
-            }
+            waiters.remove(id)
         }
     }
 }
 
-pub struct TopicsWaiters {
+pub type TopicsWaiters = Waiters<TopicsRequest>;
+
+/// TopicsWaiters are connections which are waiting to be notified
+/// of new topics. Notifications can sometimes be false positives for topics
+/// a connection (e.g replicator connection and new topic due to replicator
+/// data). This connection should be polled again for next notification.
+/// Having 2 waiters to prevents infinite waiter loops while trying to
+/// add connection back to waiter queue
+#[derive(Debug)]
+pub struct Waiters<T> {
     /// Waiters on new topics
-    waiters: VecDeque<(ConnectionId, TopicsRequest)>,
+    current: VecDeque<(ConnectionId, T)>,
+    /// Waiters for next iteration
+    next: VecDeque<(ConnectionId, T)>,
 }
 
-impl TopicsWaiters {
-    pub fn new() -> TopicsWaiters {
-        TopicsWaiters {
-            waiters: VecDeque::new(),
+impl<T> Waiters<T> {
+    pub fn new() -> Waiters<T> {
+        Waiters {
+            current: VecDeque::with_capacity(1000),
+            next: VecDeque::with_capacity(1000),
         }
     }
 
-    pub fn pop_front(&mut self) -> Option<(ConnectionId, TopicsRequest)> {
-        self.waiters.pop_front()
+    /// Pushes a request to current wait queue
+    pub fn register(&mut self, id: ConnectionId, request: T) {
+        let request = (id, request);
+        self.current.push_back(request);
     }
 
-    pub fn push_back(&mut self, id: ConnectionId, request: TopicsRequest) {
-        trace!("{:11} {:14} Id = {}", "topics", "register", id);
-        let request = (id.to_owned(), request);
-        self.waiters.push_back(request);
+    /// Pops a request from current wait queue
+    pub fn pop_front(&mut self) -> Option<(ConnectionId, T)> {
+        self.current.pop_front()
+    }
+
+    /// Pushes a request to next wait queue
+    pub fn push_back(&mut self, id: ConnectionId, request: T) {
+        let request = (id, request);
+        self.next.push_back(request);
+    }
+
+    /// Swaps next wait queue with current wait queue
+    pub fn prepare_next(&mut self) {
+        std::mem::swap(&mut self.current, &mut self.next);
     }
 
     /// Remove a connection from waiters
     pub fn remove(&mut self, id: ConnectionId) {
-        if let Some(index) = self.waiters.iter().position(|x| x.0 == id) {
-            self.waiters.swap_remove_back(index);
+        if let Some(index) = self.current.iter().position(|x| x.0 == id) {
+            self.current.swap_remove_back(index);
         }
     }
 }
