@@ -1,7 +1,7 @@
 use crate::{Incoming, Request};
 
 use mqtt4bytes::*;
-use std::{mem, time::Instant};
+use std::{collections::HashSet, mem, time::Instant};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
@@ -58,7 +58,7 @@ pub struct MqttState {
     /// Packet ids of released QoS 2 publishes
     pub(crate) outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
-    pub incoming_pub: Vec<Option<u16>>,
+    pub incoming_pub: HashSet<u16>,
     /// Last collision due to broker not acking in order
     pub collision: Option<PublishRaw>,
 }
@@ -79,7 +79,7 @@ impl MqttState {
             // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
-            incoming_pub: vec![None; std::u16::MAX as usize + 1],
+            incoming_pub: HashSet::new(),
             collision: None,
         }
     }
@@ -104,9 +104,7 @@ impl MqttState {
         }
 
         // remove packed ids of incoming qos2 publishes
-        for id in self.incoming_pub.iter_mut() {
-            id.take();
-        }
+        self.incoming_pub.clear();
 
         self.await_pingresp = false;
         self.collision_ping_count = 0;
@@ -271,22 +269,19 @@ impl MqttState {
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
                 let response = Request::PubRec(PubRec::new(pkid));
-                self.incoming_pub[pkid as usize] = Some(pkid);
+                self.incoming_pub.insert(pkid);
                 Ok(Some(response))
             }
         }
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Request>, StateError> {
-        match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
-            Some(_) => {
-                let response = Request::PubComp(PubComp::new(pubrel.pkid));
-                Ok(Some(response))
-            }
-            None => {
-                error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-                Err(StateError::Unsolicited(pubrel.pkid))
-            }
+        if self.incoming_pub.remove(&pubrel.pkid) {
+            let response = Request::PubComp(PubComp::new(pubrel.pkid));
+            Ok(Some(response))
+        } else {
+            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
+            Err(StateError::Unsolicited(pubrel.pkid))
         }
     }
 
@@ -546,10 +541,8 @@ mod test {
         mqtt.handle_incoming_publish(&publish2).unwrap();
         mqtt.handle_incoming_publish(&publish3).unwrap();
 
-        let pkid = mqtt.incoming_pub[3].unwrap();
-
         // only qos2 publish should be add to queue
-        assert_eq!(pkid, 3);
+        assert_eq!(mqtt.incoming_pub.contains(&3), true);
     }
 
     #[test]
