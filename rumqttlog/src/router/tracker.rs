@@ -36,10 +36,6 @@ impl Tracker {
         }
     }
 
-    pub fn requests_done(&self) -> bool {
-        self.requests.is_empty()
-    }
-
     /// Returns current number of subscriptions
     pub fn subscription_count(&self) -> usize {
         self.concrete_subscriptions.len() + self.wild_subscriptions.len()

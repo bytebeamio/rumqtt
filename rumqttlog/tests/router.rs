@@ -5,9 +5,9 @@ use std::thread;
 use std::time::Duration;
 
 #[test]
-fn acks_are_retuned_as_expected_to_the_connection() {
+fn acks_are_returned_as_expected_to_the_connection() {
     let connections = Connections::new();
-    let (connection_1_id, connection_1_rx) = connections.connection("1", 3);
+    let (connection_1_id, connection_1_rx) = connections.connection("1", 10);
 
     // Send data one by one
     for i in 0..1000 {
@@ -17,7 +17,6 @@ fn acks_are_retuned_as_expected_to_the_connection() {
     let mut count = 0;
     loop {
         count += wait_for_acks(&connection_1_rx).unwrap().len();
-
         if count == 1000 {
             break;
         }
@@ -28,7 +27,6 @@ fn acks_are_retuned_as_expected_to_the_connection() {
     let mut count = 0;
     loop {
         count += wait_for_acks(&connection_1_rx).unwrap().len();
-
         if count == 1000 {
             break;
         }
@@ -37,7 +35,6 @@ fn acks_are_retuned_as_expected_to_the_connection() {
 
 #[test]
 fn new_connection_data_notifies_interested_connections() {
-    pretty_env_logger::init();
     let connections = Connections::new();
     let (connection_1_id, _connection_1_rx) = connections.connection("1", 2);
     let (connection_2_id, connection_2_rx) = connections.connection("2", 2);
@@ -56,14 +53,47 @@ fn new_connection_data_notifies_interested_connections() {
     // to be manually triggered
 
     let data = wait_for_data(&connection_2_rx).unwrap();
-    assert_eq!(data.payload.len(), 1);
+    assert_eq!(data.payload.len(), 2);
     assert_eq!(data.payload[0].as_ref(), &[1, 2, 3]);
+    assert_eq!(data.payload[1].as_ref(), &[4, 5, 6]);
 
     let data = wait_for_data(&connection_2_rx).unwrap();
-    assert_eq!(data.payload.len(), 3);
-    assert_eq!(data.payload[0].as_ref(), &[4, 5, 6]);
-    assert_eq!(data.payload[1].as_ref(), &[13, 14, 15]);
-    assert_eq!(data.payload[2].as_ref(), &[16, 17, 18]);
+    assert_eq!(data.payload.len(), 2);
+    assert_eq!(data.payload[0].as_ref(), &[13, 14, 15]);
+    assert_eq!(data.payload[1].as_ref(), &[16, 17, 18]);
+}
+
+#[test]
+fn failed_notifications_are_retried_after_connection_ready() {
+    let connections = Connections::new();
+    let (connection_id, connection_rx) = connections.connection("1", 3);
+
+    // 1. First data write triggers 1 ack notification first (1st notification)
+    // 2. 500 data writes
+    // 3. Acks request + notification with 500 acks + acks request registration (2nd notification)
+    // 4. First data write triggers 1 ack notification first (3rd notification)
+    // 5. 500 data writes
+    // 6. Acks request + notification with 498 acks (4th notification fails)
+    // 7. Connection unscheduled from ready queue
+    // 8. 998 data writes
+    for i in 0..2000 {
+        connections.data(connection_id, "hello/1/world", vec![1, 2, 3], i);
+    }
+
+    let count = wait_for_acks(&connection_rx).unwrap().len();
+    assert_eq!(count, 1);
+    let count = wait_for_acks(&connection_rx).unwrap().len();
+    assert_eq!(count, 500);
+    let count = wait_for_acks(&connection_rx).unwrap().len();
+    assert_eq!(count, 1);
+
+    assert!(wait_for_acks(&connection_rx).is_none());
+
+    connections.ready(connection_id);
+    let count = wait_for_acks(&connection_rx).unwrap().len();
+    assert_eq!(count, 500);
+    let count = wait_for_acks(&connection_rx).unwrap().len();
+    assert_eq!(count, 998);
 }
 
 fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {
@@ -141,7 +171,7 @@ impl Connections {
 
         let message = Event::Data(vec![Packet::Publish(publish)]);
         let message = (id, message);
-        self.router_tx.try_send(message).unwrap();
+        self.router_tx.send(message).unwrap();
     }
 
     pub fn datav(&self, id: usize, topic: &str, payload: Vec<u8>, count: u16) {

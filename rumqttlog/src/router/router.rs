@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use flume::{bounded, Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
@@ -17,6 +17,7 @@ use crate::{Config, DataRequest, Disconnection, ReplicationData};
 #[error("...")]
 pub enum RouterError {
     Recv(#[from] RecvError),
+    Disconnected,
 }
 
 type ConnectionId = usize;
@@ -96,21 +97,24 @@ impl Router {
                 self.route(id, data);
             }
 
-            // Poll 10 connections which are ready in ready queue
-            for _ in 0..10 {
-                match self.readyqueue.pop_front() {
-                    Some(id) => self.connection_ready(id),
-                    None => break,
-                }
-            }
-
-            // Try reading 1000 events from connections in a non-blocking
-            // fashion to accumulate data and handle subscriptions
-            for _ in 0..1000 {
+            // Try reading more from connections in a non-blocking
+            // fashion to accumulate data and handle subscriptions.
+            // Accumulating more data lets requests retrieve bigger
+            // bulks which in turn increases efficiency
+            for _ in 0..500 {
                 // All these methods will handle state and errors
                 match self.router_rx.try_recv() {
                     Ok((id, data)) => self.route(id, data),
-                    Err(..) => break,
+                    Err(TryRecvError::Disconnected) => return Err(RouterError::Disconnected),
+                    Err(TryRecvError::Empty) => break,
+                }
+            }
+
+            // Poll 100 connections which are ready in ready queue
+            for _ in 0..100 {
+                match self.readyqueue.pop_front() {
+                    Some(id) => self.connection_ready(id, 100),
+                    None => break,
                 }
             }
         }
@@ -123,7 +127,13 @@ impl Router {
             Event::ReplicationData(data) => self.handle_replication_data(id, data),
             Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
             Event::Disconnect(request) => self.handle_disconnection(id, request),
-            Event::Ready => self.connection_ready(id),
+            Event::Ready => {
+                if !retry(&mut self.connections, id) {
+                    panic!("Notification channel should be empty during ready event");
+                }
+
+                self.connection_ready(id, 100)
+            }
         }
     }
 
@@ -173,14 +183,14 @@ impl Router {
         self.readyqueue.remove(id);
     }
 
-    fn connection_ready(&mut self, id: ConnectionId) {
+    fn connection_ready(&mut self, id: ConnectionId, max_iterations: usize) {
         trace!("{:11} {:14} Id = {}", "requests", "start", id,);
         let tracker = self.trackers.get_mut(id).unwrap();
 
-        // Iterate through a max of 100 requests everytime a connection if polled.
-        // This prevents a connection from unfairly taking up router's time preventing
-        // other connections from making progress.
-        for _ in 0..100 {
+        // Iterate through a max of 'max_iterations' requests everytime a connection.
+        // if polled. This prevents a connection from unfairly taking up router's time
+        // preventing other connections from making progress.
+        for _ in 0..max_iterations {
             match tracker.pop_request() {
                 Some(request) => match request {
                     Request::Data(request) => {
@@ -198,10 +208,10 @@ impl Router {
                             let notified = notify(&mut self.connections, id, notification);
 
                             // Save notification to failed messages and dont schedule this
-                            // connection again
+                            // connection again even though there are pending requests
                             if !notified {
                                 info!("Notification error. Unschedule. Id = {}", id);
-                                break;
+                                return;
                             }
                         }
                     }
@@ -218,8 +228,8 @@ impl Router {
                         }
                     }
                     Request::Acks(_) => {
-                        // Get acks from commitlog and register for notification if
-                        // all the data is caught up.
+                        // Get acks from commitlog and register for notification if all
+                        // the data is caught up.
                         let acks = self.watermarks.get_mut(id).unwrap();
 
                         // If acks are yielded, register a new acks request
@@ -230,10 +240,10 @@ impl Router {
                             let notified = notify(&mut self.connections, id, notification);
 
                             // Save notification to failed messages and dont schedule this
-                            // connection again
+                            // connection again even though there are pending requests
                             if !notified {
                                 info!("Notification error. Unschedule. Id = {}", id);
-                                break;
+                                return;
                             }
                         }
                     }
@@ -244,20 +254,16 @@ impl Router {
                     // New requests are added to tracker through notifications of
                     // previous requests. When first request is added back to tracker
                     // again, it's scheduled back on ready queue again.
-                    break;
+                    trace!("{:11} {:14} Id = {}", "requests", "done", id);
+                    return;
                 }
             }
         }
 
         // If there are more requests in the tracker, add the connection back
         // to ready queue.
-        if !tracker.requests_done() {
-            trace!("{:11} {:14} Id = {}", "requests", "pause", id,);
-            self.readyqueue.push_back(id);
-            return;
-        }
-
-        trace!("{:11} {:14} Id = {}", "requests", "done", id,);
+        trace!("{:11} {:14} Id = {}", "requests", "pause", id,);
+        self.readyqueue.push_back(id);
     }
 
     /// Handles new incoming data on a topic
@@ -504,7 +510,12 @@ impl Router {
 
     /// Send data to links which registered them
     fn fresh_data_notification(&mut self, id: ConnectionId, topic: &str) {
-        let waiters = self.data_waiters.get_mut(topic).unwrap();
+        // There might not be any waiters on this topic
+        // FIXME: Every notification trigger is a hashmap lookup
+        let waiters = match self.data_waiters.get_mut(topic) {
+            Some(waiters) => waiters,
+            None => return,
+        };
 
         let replication_data = id < 10;
         while let Some((link_id, request)) = waiters.pop_front() {
@@ -685,11 +696,23 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
     Some(acks)
 }
 
+fn retry(connections: &mut Slab<Connection>, id: ConnectionId) -> bool {
+    let connection = match connections.get_mut(id) {
+        Some(c) => c,
+        None => {
+            error!("Invalid id while retrying = {:?}", id);
+            return true;
+        }
+    };
+
+    connection.notify_last_failed()
+}
+
 fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) -> bool {
     let connection = match connections.get_mut(id) {
         Some(c) => c,
         None => {
-            error!("Invalid id while replying = {:?}", id);
+            error!("Invalid id while notifying = {:?}", id);
             return true;
         }
     };
@@ -700,8 +723,7 @@ fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notificat
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::QoS;
-    use mqtt4bytes::Subscribe;
+    use mqtt4bytes::{Publish, QoS, Subscribe};
 
     #[test]
     fn topics_notifications_does_not_create_infinite_loops() {
@@ -757,9 +779,8 @@ mod test {
             router.topics_waiters.register(i, TopicsRequest::new());
         }
 
-        router
-            .datalog
-            .append(1, "hello/world", Bytes::from(vec![1, 2, 3]));
+        let payload = Bytes::from(vec![1, 2, 3]);
+        router.datalog.append(1, "hello/world", payload);
 
         // A new topic notification from a replicator. This is a false positive
         // for all the replicators
@@ -773,14 +794,47 @@ mod test {
         }
     }
 
+    /// Connection should not be part of next iteration of ready queue
+    /// when previous notification fails
+    #[test]
+    fn failed_notification_connection_should_not_be_scheduled() {
+        let mut config = Config::default();
+        config.id = 0;
+
+        let (mut router, _tx) = Router::new(Arc::new(config));
+        let _rx = add_new_remote_connection(&mut router, "10");
+
+        // Add 20 data requests
+        for i in 0..20 {
+            let topic = format!("hello/{}/world", i);
+            let request = DataRequest::new(topic);
+            router.data_waiters.register(10, request);
+        }
+
+        // Along with connection ack. 10th notification will fail
+        for _ in 0..10 {
+            // Write a publish to commitlog
+            let publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]);
+            router.handle_connection_data(10, vec![Packet::Publish(publish)]);
+
+            // Trigger 1 request. This will notify with above data
+            // and puts connection back in ready queue.
+            let id = router.readyqueue.pop_front().unwrap();
+            router.connection_ready(id, 1);
+        }
+
+        assert!(router.readyqueue.is_empty());
+    }
+
     fn add_new_replica_connection(router: &mut Router, id: usize) {
         let (connection, _rx) = Connection::new_replica(id, 10);
         router.handle_new_connection(connection);
     }
 
-    fn add_new_remote_connection(router: &mut Router, client_id: &str) {
-        let (connection, _rx) = Connection::new_remote(client_id, 10);
+    fn add_new_remote_connection(router: &mut Router, client_id: &str) -> Receiver<Notification> {
+        let (connection, rx) = Connection::new_remote(client_id, 10);
         router.handle_new_connection(connection);
+        rx
     }
 
     fn add_new_subscription(router: &mut Router, id: usize, topic: &str) {

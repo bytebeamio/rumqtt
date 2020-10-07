@@ -297,12 +297,15 @@ impl Connection {
         (connection, this_rx)
     }
 
-    pub fn notify_last_failed(&mut self) {
+    pub fn notify_last_failed(&mut self) -> bool {
         if let Some(last_failed) = self.last_failed.take() {
-            self.handle.try_send(last_failed).unwrap();
+            return self.notify(last_failed);
         }
+
+        true
     }
 
+    /// Sends notification and returns success status
     pub fn notify(&mut self, notification: Notification) -> bool {
         if let Err(e) = self.handle.try_send(notification) {
             match e {
