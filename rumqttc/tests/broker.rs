@@ -15,7 +15,7 @@ pub struct Broker {
 
 impl Broker {
     /// Create a new broker which accepts 1 mqtt connection
-    pub async fn new(port: u16, send_connack: bool) -> Broker {
+    pub async fn new(port: u16, connack: u8) -> Broker {
         let addr = format!("127.0.0.1:{}", port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
         let (stream, _) = listener.accept().await.unwrap();
@@ -24,10 +24,13 @@ impl Broker {
 
         let packet = framed.readb(&mut incoming).await.unwrap();
         if let Packet::Connect(_) = packet {
-            if send_connack {
-                let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-                framed.connack(connack).await.unwrap();
-            }
+            let connack = match connack {
+                0 => ConnAck::new(ConnectReturnCode::Accepted, false),
+                1 => ConnAck::new(ConnectReturnCode::BadUsernamePassword, false),
+                _ => return Broker { framed, incoming },
+            };
+
+            framed.connack(connack).await.unwrap();
         } else {
             panic!("Expecting connect packet");
         }

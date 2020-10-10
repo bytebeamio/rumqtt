@@ -58,7 +58,7 @@ async fn tick(
 #[tokio::test]
 async fn connection_should_timeout_on_time() {
     task::spawn(async move {
-        let _broker = Broker::new(1880, false).await;
+        let _broker = Broker::new(1880, 3).await;
         time::delay_for(Duration::from_secs(10)).await;
     });
 
@@ -87,7 +87,7 @@ async fn idle_connection_triggers_pings_on_time() {
         run(&mut eventloop, false).await.unwrap();
     });
 
-    let mut broker = Broker::new(1885, true).await;
+    let mut broker = Broker::new(1885, 0).await;
 
     // check incoming rate at th broker
     let start = Instant::now();
@@ -125,7 +125,7 @@ async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
         run(&mut eventloop, false).await.unwrap();
     });
 
-    let mut broker = Broker::new(1886, true).await;
+    let mut broker = Broker::new(1886, 0).await;
 
     let start = Instant::now();
     let mut ping_received = false;
@@ -154,7 +154,7 @@ async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
         run(&mut eventloop, false).await.unwrap();
     });
 
-    let mut broker = Broker::new(2000, true).await;
+    let mut broker = Broker::new(2000, 0).await;
     let start = Instant::now();
     broker
         .start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1))
@@ -174,7 +174,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
 
     // A broker which consumes packets but doesn't reply
     task::spawn(async move {
-        let mut broker = Broker::new(2001, true).await;
+        let mut broker = Broker::new(2001, 0).await;
         broker.blackhole().await;
     });
 
@@ -212,7 +212,7 @@ async fn requests_are_blocked_after_max_inflight_queue_size() {
         run(&mut eventloop, false).await.unwrap();
     });
 
-    let mut broker = Broker::new(1887, true).await;
+    let mut broker = Broker::new(1887, 0).await;
     for i in 1..=10 {
         let packet = broker.read_publish().await;
 
@@ -240,7 +240,7 @@ async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
         run(&mut eventloop, true).await.unwrap();
     });
 
-    let mut broker = Broker::new(1888, true).await;
+    let mut broker = Broker::new(1888, 0).await;
 
     // packet 1
     let packet = broker.read_publish().await;
@@ -285,7 +285,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied_correctly
     });
 
     task::spawn(async move {
-        let mut broker = Broker::new(1891, true).await;
+        let mut broker = Broker::new(1891, 0).await;
         // read all incoming packets first
         for i in 1..=4 {
             let packet = broker.read_publish().await;
@@ -353,7 +353,7 @@ async fn packet_id_collisions_are_timedout_on_second_ping() {
     });
 
     task::spawn(async move {
-        let mut broker = Broker::new(1892, true).await;
+        let mut broker = Broker::new(1892, 0).await;
         // read all incoming packets first
         for i in 1..=4 {
             let packet = broker.read_publish().await;
@@ -399,7 +399,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     });
 
     // broker connection 1
-    let mut broker = Broker::new(1889, true).await;
+    let mut broker = Broker::new(1889, 0).await;
     for i in 1..=2 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
@@ -413,7 +413,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     // a block around broker with {} is closing the connection as expected
 
     // broker connection 2
-    let mut broker = Broker::new(1889, true).await;
+    let mut broker = Broker::new(1889, 0).await;
     for i in 3..=4 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
@@ -441,14 +441,14 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
     });
 
     // broker connection 1. receive but don't ack
-    let mut broker = Broker::new(1890, true).await;
+    let mut broker = Broker::new(1890, 0).await;
     for i in 1..=2 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
     }
 
     // broker connection 2 receives from scratch
-    let mut broker = Broker::new(1890, true).await;
+    let mut broker = Broker::new(1890, 0).await;
     for i in 1..=6 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
