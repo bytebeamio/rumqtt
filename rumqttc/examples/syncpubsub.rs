@@ -12,9 +12,10 @@ fn main() {
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {
-        if i == 7 {
+        if i == 10 {
             break;
         }
+
         println!("Notification = {:?}", notification);
     }
 
@@ -29,12 +30,14 @@ fn main() {
 }
 
 fn publish(mut client: Client) {
-    client.subscribe("hello/world", QoS::AtMostOnce).unwrap();
-    for i in 0..10 {
-        let payload = vec![i; i as usize];
-        client
-            .publish("hello/world", QoS::AtLeastOnce, false, payload)
-            .unwrap();
-        thread::sleep(Duration::from_secs(1));
+    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
+    for i in 0..300 {
+        let payload = vec![1; i as usize];
+        let topic = format!("hello/{}/world", i);
+        let qos = QoS::AtLeastOnce;
+
+        client.publish(topic, qos, true, payload).unwrap();
     }
+
+    thread::sleep(Duration::from_secs(1));
 }
