@@ -10,7 +10,7 @@ pub use router::Router;
 use tracker::Tracker;
 
 use self::bytes::Bytes;
-use flume::{bounded, Receiver, Sender, TrySendError};
+use jackiechan::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::Packet;
 use std::fmt;
 
@@ -310,7 +310,7 @@ impl Connection {
         if let Err(e) = self.handle.try_send(notification) {
             match e {
                 TrySendError::Full(e) => self.last_failed = Some(e),
-                TrySendError::Disconnected(e) => self.last_failed = Some(e),
+                TrySendError::Closed(e) => self.last_failed = Some(e),
             }
 
             return false;

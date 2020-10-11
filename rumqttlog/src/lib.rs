@@ -16,7 +16,7 @@ pub use router::{
 pub use storage::segment::Segment;
 pub use storage::Log;
 
-pub use flume::{bounded, Receiver, RecvError, SendError, Sender};
+pub use jackiechan::{bounded, Receiver, RecvError, SendError, Sender};
 pub use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};

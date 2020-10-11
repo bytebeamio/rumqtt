@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
+use jackiechan::{bounded, Receiver, RecvError, Sender, TryRecvError};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
@@ -105,7 +105,7 @@ impl Router {
                 // All these methods will handle state and errors
                 match self.router_rx.try_recv() {
                     Ok((id, data)) => self.route(id, data),
-                    Err(TryRecvError::Disconnected) => return Err(RouterError::Disconnected),
+                    Err(TryRecvError::Closed) => return Err(RouterError::Disconnected),
                     Err(TryRecvError::Empty) => break,
                 }
             }

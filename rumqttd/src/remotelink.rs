@@ -133,7 +133,7 @@ impl RemoteLink {
                 }
                 // Receive from router when previous when state isn't in collision
                 // due to previously recived data request
-                message = self.link_rx.recv_async(), if self.acks_required == 0 => {
+                message = self.link_rx.async_recv(), if self.acks_required == 0 => {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }

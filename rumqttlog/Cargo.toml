@@ -18,7 +18,7 @@ thiserror = "1"
 log = "0.4"
 intmap = "0.7"
 fnv = "1"
-flume = "0.9"
+jackiechan = "0.0.2"
 
 [dev-dependencies]
 argh = "0.1"
