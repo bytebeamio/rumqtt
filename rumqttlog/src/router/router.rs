@@ -4,12 +4,13 @@ use jackiechan::{bounded, Receiver, RecvError, Sender, TryRecvError};
 use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
 use thiserror::Error;
 
+use super::connection::ConnectionType;
+use super::readyqueue::ReadyQueue;
+use super::slab::Slab;
+use super::watermarks::Watermarks;
 use super::*;
 
 use crate::logs::{DataLog, TopicsLog};
-use crate::router::readyqueue::ReadyQueue;
-use crate::router::slab::Slab;
-use crate::router::watermarks::Watermarks;
 use crate::waiters::{DataWaiters, TopicsWaiters};
 use crate::{Config, DataRequest, Disconnection, ReplicationData};
 
@@ -127,13 +128,7 @@ impl Router {
             Event::ReplicationData(data) => self.handle_replication_data(id, data),
             Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
             Event::Disconnect(request) => self.handle_disconnection(id, request),
-            Event::Ready => {
-                if !retry(&mut self.connections, id) {
-                    panic!("Notification channel should be empty during ready event");
-                }
-
-                self.connection_ready(id, 100)
-            }
+            Event::Ready => self.connection_ready(id, 100),
         }
     }
 
@@ -186,6 +181,9 @@ impl Router {
     fn connection_ready(&mut self, id: ConnectionId, max_iterations: usize) {
         trace!("{:11} {:14} Id = {}", "requests", "start", id,);
         let tracker = self.trackers.get_mut(id).unwrap();
+        if tracker.busy_unschedule() {
+            tracker.set_busy_unschedule(false);
+        }
 
         // Iterate through a max of 'max_iterations' requests everytime a connection.
         // if polled. This prevents a connection from unfairly taking up router's time
@@ -205,12 +203,12 @@ impl Router {
                             // the connection
                             tracker.register_data_request(data.topic.clone(), data.cursors);
                             let notification = Notification::Data(data);
-                            let notified = notify(&mut self.connections, id, notification);
+                            let pause = notify(&mut self.connections, id, notification);
 
-                            // Save notification to failed messages and dont schedule this
-                            // connection again even though there are pending requests
-                            if !notified {
-                                info!("Notification error. Unschedule. Id = {}", id);
+                            // This connection might not be able to process next request. Don't schedule
+                            if pause {
+                                info!("Connection busy/closed. Unschedule. Id = {}", id);
+                                tracker.set_busy_unschedule(true);
                                 return;
                             }
                         }
@@ -237,12 +235,12 @@ impl Router {
                         if let Some(acks) = handle_acks_request(id, acks) {
                             tracker.register_acks_request();
                             let notification = Notification::Acks(acks);
-                            let notified = notify(&mut self.connections, id, notification);
+                            let pause = notify(&mut self.connections, id, notification);
 
-                            // Save notification to failed messages and dont schedule this
-                            // connection again even though there are pending requests
-                            if !notified {
-                                info!("Notification error. Unschedule. Id = {}", id);
+                            // This connection might not be able to process next request. Don't schedule
+                            if pause {
+                                info!("Connection busy/closed. Unschedule. Id = {}", id);
+                                tracker.set_busy_unschedule(true);
                                 return;
                             }
                         }
@@ -255,6 +253,7 @@ impl Router {
                     // previous requests. When first request is added back to tracker
                     // again, it's scheduled back on ready queue again.
                     trace!("{:11} {:14} Id = {}", "requests", "done", id);
+                    tracker.set_empty_unschedule(true);
                     return;
                 }
             }
@@ -307,10 +306,14 @@ impl Router {
                 // and store matched topics interna. If this is the first subscription,
                 // register topics request
                 if tracker.add_subscription_and_match(subscribe.topics, topics) {
-                    // If a new request is added to empty request queue of the tracker,
-                    // add this connection back to ready queue
-                    if tracker.register_topics_request(topics.len()) {
+                    tracker.register_topics_request(topics.len());
+
+                    // If connection is removed from ready queue because of 0 requests,
+                    // but connection itself is ready for more notifications, add
+                    // connection back to ready queue
+                    if tracker.empty_unschedule() {
                         self.readyqueue.push_back(id);
+                        tracker.set_empty_unschedule(false);
                     }
                 }
 
@@ -319,11 +322,14 @@ impl Router {
                 // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
                 while let Some(mut topic) = tracker.next_matched() {
                     self.datalog.seek_offsets_to_end(self.id, &mut topic);
+                    tracker.register_data_request(topic.0, topic.2);
 
-                    // If a new request is added to empty request queue of the tracker,
-                    // add this connection back to ready queue
-                    if tracker.register_data_request(topic.0, topic.2) {
+                    // If connection is removed from ready queue because of 0 requests,
+                    // but connection itself is ready for more notifications, add
+                    // connection back to ready queue
+                    if tracker.empty_unschedule() {
                         self.readyqueue.push_back(id);
+                        tracker.set_empty_unschedule(false);
                     }
                 }
             }
@@ -331,10 +337,14 @@ impl Router {
                 // Router did not receive data from any topics yet. Add subscription and
                 // register topics request from offset 0
                 if tracker.add_subscription_and_match(subscribe.topics, &[]) {
-                    // If a new request is added to empty request queue of the tracker,
-                    // add this connection back to ready queue
-                    if tracker.register_topics_request(0) {
+                    tracker.register_topics_request(0);
+
+                    // If connection is removed from ready queue because of 0 requests,
+                    // but connection itself is ready for more notifications, add
+                    // connection back to ready queue
+                    if tracker.empty_unschedule() {
                         self.readyqueue.push_back(id);
+                        tracker.set_empty_unschedule(false);
                     }
                 }
             }
@@ -478,31 +488,19 @@ impl Router {
                 continue;
             }
 
-            // Read more topics from last offset.
-            let fresh_topics = self.topicslog.readv(request.offset, request.count);
-            let (next_offset, topics) = fresh_topics.unwrap();
-
             // Match new topics with existing subscriptions of this link.
             // Even though there are new topics, it's possible that they didn't match
             // subscriptions held by this connection.
             // Register next topics request in the router
-            if tracker.register_topics_request(next_offset) {
+            tracker.register_topics_request(request.offset);
+
+            // If connection is removed from ready queue because of 0 requests,
+            // but connection itself is ready for more notifications, add
+            // connection back to ready queue
+            if tracker.empty_unschedule() {
                 self.readyqueue.push_back(link_id);
+                tracker.set_empty_unschedule(false);
             }
-
-            // This also adds data requests to tracker queue. If this connection
-            // is paused, topics request registration above has resumed the connection
-            // already
-            let count = tracker.track_matched_topics(topics);
-
-            trace!(
-                "{:11} {:14} Id = {}, Offset = {}, Count = {}",
-                "topics",
-                "notification",
-                link_id,
-                next_offset,
-                count
-            );
         }
 
         waiters.prepare_next();
@@ -530,30 +528,16 @@ impl Router {
                 continue;
             }
 
-            let reply = match self.datalog.handle_data_request(link_id, &request) {
-                Some(v) => v,
-                None => {
-                    panic!("Expecting data here");
-                }
-            };
-
             let tracker = self.trackers.get_mut(link_id).unwrap();
-            if tracker.register_data_request(reply.topic.clone(), reply.cursors) {
-                // Tracker is ready again. Add it back to ready queue
+            tracker.register_data_request(request.topic, request.cursors);
+
+            // If connection is removed from ready queue because of 0 requests,
+            // but connection itself is ready for more notifications, add
+            // connection back to ready queue
+            if tracker.empty_unschedule() {
                 self.readyqueue.push_back(link_id);
+                tracker.set_empty_unschedule(false);
             }
-
-            trace!(
-                "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
-                "data",
-                "notification",
-                link_id,
-                reply.topic,
-                reply.cursors,
-                reply.payload.len()
-            );
-
-            notify(&mut self.connections, link_id, Notification::Data(reply));
         }
 
         waiters.prepare_next();
@@ -567,23 +551,18 @@ impl Router {
         // We use watermark's own flag to determine if it's waiting for
         // a notification
         if watermarks.take_pending_acks_request().is_some() {
-            // Take acks which are ready to be sent to the
-            // connection
-            let acks = watermarks.acks();
-            debug_assert!(acks.len() > 0);
-
             trace!("{:11} {:14} Id = {}", "acks", "notification", id);
-
-            // Notify connection with acks
-            let reply = Acks::new(acks);
-            let reply = Notification::Acks(reply);
-            notify(&mut self.connections, id, reply);
 
             // Add next acks request to the tracker
             let tracker = self.trackers.get_mut(id).unwrap();
-            if tracker.register_acks_request() {
-                // Tracker is ready again. Add it back to ready queue
+            tracker.register_acks_request();
+
+            // If connection is removed from ready queue because of 0 requests,
+            // but connection itself is ready for more notifications, add
+            // connection back to ready queue
+            if tracker.empty_unschedule() {
                 self.readyqueue.push_back(id);
+                tracker.set_empty_unschedule(false);
             }
         }
     }
@@ -696,18 +675,7 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
     Some(acks)
 }
 
-fn retry(connections: &mut Slab<Connection>, id: ConnectionId) -> bool {
-    let connection = match connections.get_mut(id) {
-        Some(c) => c,
-        None => {
-            error!("Invalid id while retrying = {:?}", id);
-            return true;
-        }
-    };
-
-    connection.notify_last_failed()
-}
-
+/// Notifies and returns unschedule status if the connection is busy
 fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) -> bool {
     let connection = match connections.get_mut(id) {
         Some(c) => c,

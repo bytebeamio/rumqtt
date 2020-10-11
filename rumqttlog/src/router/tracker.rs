@@ -8,6 +8,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// communicate with this connection
 #[derive(Debug)]
 pub struct Tracker {
+    /// Connection unschedule (from ready queue) status
+    /// because of request exhaustion
+    empty_unschedule: bool,
+    /// Connection unschedule (from ready queue) status
+    /// due to connection being busy (channel full)
+    busy_unschedule: bool,
     /// Requests to pull data from commitlog
     requests: VecDeque<Request>,
     /// Topics index to not add duplicates to topics
@@ -28,12 +34,30 @@ impl Tracker {
         requests.push_back(Request::Acks(AcksRequest));
 
         Tracker {
+            empty_unschedule: false,
+            busy_unschedule: false,
             requests,
             topics_index: HashSet::new(),
             concrete_subscriptions: HashMap::new(),
             wild_subscriptions: Vec::new(),
             matched: VecDeque::with_capacity(100),
         }
+    }
+
+    pub fn busy_unschedule(&self) -> bool {
+        self.busy_unschedule
+    }
+
+    pub fn empty_unschedule(&self) -> bool {
+        self.empty_unschedule
+    }
+
+    pub fn set_busy_unschedule(&mut self, b: bool) {
+        self.busy_unschedule = b;
+    }
+
+    pub fn set_empty_unschedule(&mut self, b: bool) {
+        self.empty_unschedule = b;
     }
 
     /// Returns current number of subscriptions
@@ -45,33 +69,21 @@ impl Tracker {
         self.requests.pop_front()
     }
 
-    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) -> bool {
+    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) {
         let request = DataRequest::offsets(topic, cursors);
         let request = Request::Data(request);
-        let revive = self.requests.is_empty();
         self.requests.push_back(request);
-
-        // Use by router to add connection to ready queue
-        revive
     }
 
-    pub fn register_topics_request(&mut self, next_offset: usize) -> bool {
+    pub fn register_topics_request(&mut self, next_offset: usize) {
         let request = TopicsRequest::offset(next_offset);
         let request = Request::Topics(request);
-        let revive = self.requests.is_empty();
         self.requests.push_back(request);
-
-        // Use by router to add connection to ready queue
-        revive
     }
 
-    pub fn register_acks_request(&mut self) -> bool {
+    pub fn register_acks_request(&mut self) {
         let request = Request::Acks(AcksRequest);
-        let revive = self.requests.is_empty();
         self.requests.push_back(request);
-
-        // Use by router to add connection to ready queue
-        revive
     }
 
     /// Match and add this topic to requests if it matches.

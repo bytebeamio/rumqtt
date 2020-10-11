@@ -1,16 +1,17 @@
 extern crate bytes;
 
+mod connection;
 mod readyqueue;
 mod router;
 mod slab;
 mod tracker;
 mod watermarks;
 
+use connection::Connection;
 pub use router::Router;
 use tracker::Tracker;
 
 use self::bytes::Bytes;
-use jackiechan::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::Packet;
 use std::fmt;
 
@@ -51,6 +52,8 @@ pub enum Notification {
     Data(Data),
     /// Watermarks reply
     Acks(Acks),
+    /// Connection paused by router
+    Pause,
 }
 
 /// Data sent router to be written to commitlog
@@ -251,87 +254,12 @@ impl Acks {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ConnectionType {
-    Device(String),
-    Replicator(usize),
-}
-
-/// Used to register a new connection with the router
-/// Connection messages encompasses a handle for router to
-/// communicate with this connection
-pub struct Connection {
-    /// Kind of connection. A replicator connection or a device connection
-    /// Replicator connection are only created from inside this library.
-    /// All the external connections are of 'device' type
-    pub conn: ConnectionType,
-    /// Last failed message to connection
-    last_failed: Option<Notification>,
-    /// Handle which is given to router to allow router to comminicate with
-    /// this connection
-    handle: Sender<Notification>,
-}
-
-impl Connection {
-    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<Notification>) {
-        let (this_tx, this_rx) = bounded(capacity);
-
-        let connection = Connection {
-            conn: ConnectionType::Device(id.to_owned()),
-            last_failed: None,
-            handle: this_tx,
-        };
-
-        (connection, this_rx)
-    }
-
-    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<Notification>) {
-        let (this_tx, this_rx) = bounded(capacity);
-
-        let connection = Connection {
-            conn: ConnectionType::Replicator(id),
-            last_failed: None,
-            handle: this_tx,
-        };
-
-        (connection, this_rx)
-    }
-
-    pub fn notify_last_failed(&mut self) -> bool {
-        if let Some(last_failed) = self.last_failed.take() {
-            return self.notify(last_failed);
-        }
-
-        true
-    }
-
-    /// Sends notification and returns success status
-    pub fn notify(&mut self, notification: Notification) -> bool {
-        if let Err(e) = self.handle.try_send(notification) {
-            match e {
-                TrySendError::Full(e) => self.last_failed = Some(e),
-                TrySendError::Closed(e) => self.last_failed = Some(e),
-            }
-
-            return false;
-        }
-
-        true
-    }
-}
-
 #[derive(Debug)]
 pub enum ConnectionAck {
     /// Id assigned by the router for this connectiobackn
     Success(usize),
     /// Failure and reason for failure string
     Failure(String),
-}
-
-impl fmt::Debug for Connection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.conn)
-    }
 }
 
 #[derive(Debug)]

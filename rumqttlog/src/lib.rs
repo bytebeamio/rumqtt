@@ -10,8 +10,7 @@ pub mod waiters;
 use std::path::PathBuf;
 
 pub use router::{
-    Connection, ConnectionAck, Data, DataRequest, Disconnection, Event, Notification,
-    ReplicationData, Router,
+    ConnectionAck, Data, DataRequest, Disconnection, Event, Notification, ReplicationData, Router,
 };
 pub use storage::segment::Segment;
 pub use storage::Log;
