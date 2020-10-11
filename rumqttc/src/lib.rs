@@ -284,7 +284,7 @@ impl MqttOptions {
         self
     }
 
-    pub fn last_will(&mut self) -> Option<LastWill> {
+    pub fn last_will(&self) -> Option<LastWill> {
         self.last_will.clone()
     }
 

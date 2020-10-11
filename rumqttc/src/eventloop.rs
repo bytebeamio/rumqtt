@@ -116,6 +116,13 @@ impl EventLoop {
         self.cancel_tx.take()
     }
 
+    fn clean(&mut self) {
+        self.network = None;
+        self.keepalive_timeout = None;
+        let pending = self.state.clean();
+        self.pending = pending.into_iter();
+    }
+
     /// Yields Next notification or outgoing request and periodically pings
     /// the broker. Continuing to poll will reconnect to the broker if there is
     /// a disconnection.
@@ -123,7 +130,8 @@ impl EventLoop {
     #[must_use = "Eventloop should be iterated over a loop to make progress"]
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
-            let connack = self.connect_or_cancel().await?;
+            let (network, connack) = connect_or_cancel(&self.options, &self.cancel_rx).await?;
+            self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
                 self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
@@ -134,14 +142,14 @@ impl EventLoop {
 
         match self.select().await {
             Ok(v) => Ok(v),
-            Err(ConnectionError::MqttState(StateError::Collision(pkid)))
-                if self.options.collision_safety() =>
-            {
-                // don't disconnect the network in case collision safety is enabled
-                Err(ConnectionError::MqttState(StateError::Collision(pkid)))
-            }
             Err(e) => {
-                self.network = None;
+                // don't disconnect the network in case collision safety is enabled
+                if let ConnectionError::MqttState(StateError::Collision(pkid)) = e {
+                    if self.options.collision_safety() {
+                        return Err(ConnectionError::MqttState(StateError::Collision(pkid)));
+                    }
+                }
+                self.clean();
                 Err(e)
             }
         }
@@ -284,129 +292,108 @@ impl EventLoop {
     }
 }
 
-impl EventLoop {
-    async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
-        let cancel_rx = self.cancel_rx.clone();
-        // select here prevents cancel request from being blocked until connection request is
-        // resolved. Returns with an error if connections fail continuously
-        let o = select! {
-            o = self.connect() => o,
-            _ = cancel_rx.recv() => {
-                Err(ConnectionError::Cancel)
-            }
-        };
-
-        if o.is_err() {
-            self.network = None;
-            self.keepalive_timeout = None;
+async fn connect_or_cancel(
+    options: &MqttOptions,
+    cancel_rx: &Receiver<()>,
+) -> Result<(Network, Incoming), ConnectionError> {
+    // select here prevents cancel request from being blocked until connection request is
+    // resolved. Returns with an error if connections fail continuously
+    select! {
+        o = connect(options) => o,
+        _ = cancel_rx.recv() => {
+            Err(ConnectionError::Cancel)
         }
-
-        o
     }
+}
 
-    /// This stream internally processes requests from the request stream provided to the eventloop
-    /// while also consuming byte stream from the network and yielding mqtt packets as the output of
-    /// the stream.
-    /// This function (for convenience) includes internal delays for users to perform internal sleeps
-    /// between re-connections so that cancel semantics can be used during this sleep
-    async fn connect(&mut self) -> Result<Incoming, ConnectionError> {
-        self.state.await_pingresp = false;
-
-        // connect to the broker
-        match self.network_connect().await {
-            Ok(network) => network,
-            Err(e) => {
-                time::delay_for(self.reconnection_delay).await;
-                return Err(e);
-            }
-        };
-
-        // make MQTT connection request (which internally awaits for ack)
-        let packet = match self.mqtt_connect().await {
-            Ok(p) => p,
-            Err(e) => {
-                time::delay_for(self.reconnection_delay).await;
-                return Err(e);
-            }
-        };
-
-        // let packet = Packet::ConnAck(ConnAck::new(ConnectReturnCode::Accepted, false));
-        // Last session might contain packets which aren't acked. MQTT says these packets should be
-        // republished in the next session
-        // move pending messages from state to eventloop
-        let pending = self.state.clean();
-        self.pending = pending.into_iter();
-        Ok(packet)
-    }
-
-    async fn network_connect(&mut self) -> Result<(), ConnectionError> {
-        let network = if self.options.ca.is_some() || self.options.tls_client_config.is_some() {
-            let socket = tls::tls_connect(&self.options).await?;
-            Network::new(socket, self.options.max_incoming_packet_size)
-        } else {
-            let addr = self.options.broker_addr.as_str();
-            let port = self.options.port;
-            let socket = TcpStream::connect((addr, port)).await?;
-            Network::new(socket, self.options.max_incoming_packet_size)
-        };
-
-        self.network = Some(network);
-        Ok(())
-    }
-
-    async fn mqtt_connect(&mut self) -> Result<Incoming, ConnectionError> {
-        let network = self.network.as_mut().unwrap();
-        let id = self.options.client_id();
-        let keep_alive = self.options.keep_alive().as_secs() as u16;
-        let clean_session = self.options.clean_session();
-        let last_will = self.options.last_will();
-
-        let mut connect = Connect::new(id);
-        connect.keep_alive = keep_alive;
-        connect.clean_session = clean_session;
-        connect.last_will = last_will;
-
-        if let Some((username, password)) = self.options.credentials() {
-            let login = Login::new(username, password);
-            connect.login = Some(login);
+/// This stream internally processes requests from the request stream provided to the eventloop
+/// while also consuming byte stream from the network and yielding mqtt packets as the output of
+/// the stream.
+/// This function (for convenience) includes internal delays for users to perform internal sleeps
+/// between re-connections so that cancel semantics can be used during this sleep
+async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+    // connect to the broker
+    let mut network = match network_connect(options).await {
+        Ok(network) => network,
+        Err(e) => {
+            return Err(e);
         }
+    };
 
-        // mqtt connection with timeout
-        time::timeout(
-            Duration::from_secs(self.options.connection_timeout()),
-            async {
-                network.connect(connect).await?;
-                Ok::<_, ConnectionError>(())
-            },
-        )
-        .await??;
+    // make MQTT connection request (which internally awaits for ack)
+    let packet = match mqtt_connect(options, &mut network).await {
+        Ok(p) => p,
+        Err(e) => return Err(e),
+    };
 
-        // wait for 'timeout' time to validate connack
-        let incoming = &mut self.incoming;
-        let packet = time::timeout(
-            Duration::from_secs(self.options.connection_timeout()),
-            async {
-                let packet = match network.readb(incoming).await? {
-                    Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Accepted => {
-                        Packet::ConnAck(connack)
-                    }
-                    Incoming::ConnAck(connack) => {
-                        let error = format!("Broker rejected. Reason = {:?}", connack.code);
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-                    }
-                    packet => {
-                        let error = format!("Expecting connack. Received = {:?}", packet);
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-                    }
-                };
+    // Last session might contain packets which aren't acked. MQTT says these packets should be
+    // republished in the next session
+    // move pending messages from state to eventloop
+    // let pending = self.state.clean();
+    // self.pending = pending.into_iter();
+    Ok((network, packet))
+}
 
-                Ok::<_, io::Error>(packet)
-            },
-        )
-        .await??;
+async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
+    let network = if options.ca.is_some() || options.tls_client_config.is_some() {
+        let socket = tls::tls_connect(options).await?;
+        Network::new(socket, options.max_incoming_packet_size)
+    } else {
+        let addr = options.broker_addr.as_str();
+        let port = options.port;
+        let socket = TcpStream::connect((addr, port)).await?;
+        Network::new(socket, options.max_incoming_packet_size)
+    };
 
-        Ok(packet)
+    Ok(network)
+}
+
+async fn mqtt_connect(
+    options: &MqttOptions,
+    network: &mut Network,
+) -> Result<Incoming, ConnectionError> {
+    let keep_alive = options.keep_alive().as_secs() as u16;
+    let clean_session = options.clean_session();
+    let last_will = options.last_will();
+
+    let mut connect = Connect::new(options.client_id());
+    connect.keep_alive = keep_alive;
+    connect.clean_session = clean_session;
+    connect.last_will = last_will;
+
+    if let Some((username, password)) = options.credentials() {
+        let login = Login::new(username, password);
+        connect.login = Some(login);
     }
+
+    // mqtt connection with timeout
+    time::timeout(Duration::from_secs(options.connection_timeout()), async {
+        network.connect(connect).await?;
+        Ok::<_, ConnectionError>(())
+    })
+    .await??;
+
+    // wait for 'timeout' time to validate connack
+    let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
+        let packet = match network.read().await? {
+            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Accepted => {
+                Packet::ConnAck(connack)
+            }
+            Incoming::ConnAck(connack) => {
+                let error = format!("Broker rejected. Reason = {:?}", connack.code);
+                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+            }
+            packet => {
+                let error = format!("Expecting connack. Received = {:?}", packet);
+                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+            }
+        };
+
+        Ok::<_, io::Error>(packet)
+    })
+    .await??;
+
+    Ok(packet)
 }
 
 /// Returns the next pending packet asynchronously to be used in select!

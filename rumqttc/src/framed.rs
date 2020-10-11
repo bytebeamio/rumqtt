@@ -58,6 +58,26 @@ impl Network {
         self.max_readb_count = count;
     }
 
+    pub async fn read(&mut self) -> Result<Incoming, io::Error> {
+        loop {
+            match mqtt_read(&mut self.read, self.max_incoming_size) {
+                Ok(packet) => return Ok(packet),
+                Err(Error::InsufficientBytes(required)) => self.pending = required,
+                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+            };
+
+            let mut total_read = 0;
+            loop {
+                let read = self.read_fill().await?;
+                total_read += read;
+                if total_read >= self.pending {
+                    self.pending = 0;
+                    break;
+                }
+            }
+        }
+    }
+
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
     pub async fn readb(
