@@ -74,48 +74,59 @@ async fn connection_should_timeout_on_time() {
     assert_eq!(elapsed.as_secs(), 5);
 }
 
+//
+// All keep alive tests here
+//
+
 #[tokio::test]
 async fn idle_connection_triggers_pings_on_time() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-    options.set_keep_alive(5);
-    let keep_alive = options.keep_alive();
+    let keep_alive = 5;
 
-    // start sending requests
-    let mut eventloop = EventLoop::new(options, 5);
-    // start the eventloop
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    options.set_keep_alive(keep_alive);
+
+    // Create client eventloop and poll
     task::spawn(async move {
+        let mut eventloop = EventLoop::new(options, 5);
         run(&mut eventloop, false).await.unwrap();
     });
 
     let mut broker = Broker::new(1885, 0).await;
+    let mut count = 0;
+    let mut start = Instant::now();
 
-    // check incoming rate at th broker
-    let start = Instant::now();
-    let mut ping_received = false;
-
-    for _ in 0..10 {
+    for _ in 0..3 {
         let packet = broker.read_packet().await;
-        let elapsed = start.elapsed();
-        if let Packet::PingReq = packet {
-            ping_received = true;
-            assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-            break;
+        match packet {
+            Packet::PingReq => {
+                count += 1;
+                let elapsed = start.elapsed();
+                assert_eq!(elapsed.as_secs(), keep_alive as u64);
+                broker.pingresp().await;
+                start = Instant::now();
+            }
+            _ => {
+                panic!("Expecting ping, Received: {:?}", packet);
+            }
         }
     }
 
-    assert!(ping_received);
+    assert_eq!(count, 3);
 }
 
 #[tokio::test]
-async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
+async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
+    let keep_alive = 5;
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
-    options.set_keep_alive(5);
-    let keep_alive = options.keep_alive();
+
+    options.set_keep_alive(keep_alive);
 
     // start sending qos0 publishes. this makes sure that there is
-    // outgoing activity but no incomin activity
+    // outgoing activity but no incoming activity
     let mut eventloop = EventLoop::new(options, 5);
     let requests_tx = eventloop.handle();
+
+    // Start sending publishes
     task::spawn(async move {
         start_requests(10, QoS::AtMostOnce, 1, requests_tx).await;
     });
@@ -126,45 +137,65 @@ async fn some_outgoing_and_no_incoming_packets_should_trigger_pings_on_time() {
     });
 
     let mut broker = Broker::new(1886, 0).await;
+    let mut count = 0;
+    let mut start = Instant::now();
 
-    let start = Instant::now();
-    let mut ping_received = false;
+    loop {
+        let event = broker.tick().await;
 
-    for _ in 0..10 {
-        let packet = broker.read_packet_and_respond().await;
-        let elapsed = start.elapsed();
-        if let Packet::PingReq = packet {
-            ping_received = true;
-            assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-            break;
+        if let Event::Incoming(Incoming::PingReq) = event {
+            // wait for 3 pings
+            count += 1;
+            if count == 3 {
+                break;
+            }
+
+            assert_eq!(start.elapsed().as_secs(), keep_alive as u64);
+            broker.pingresp().await;
+            start = Instant::now();
         }
     }
 
-    assert!(ping_received);
+    assert_eq!(count, 3);
 }
 
 #[tokio::test]
-async fn some_incoming_and_no_outgoing_packets_should_trigger_pings_on_time() {
+async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
+    let keep_alive = 5;
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
-    options.set_keep_alive(5);
-    let keep_alive = options.keep_alive();
 
-    let mut eventloop = EventLoop::new(options, 5);
+    options.set_keep_alive(keep_alive);
+
     task::spawn(async move {
+        let mut eventloop = EventLoop::new(options, 5);
         run(&mut eventloop, false).await.unwrap();
     });
 
     let mut broker = Broker::new(2000, 0).await;
-    let start = Instant::now();
-    broker
-        .start_publishes(5, QoS::AtMostOnce, Duration::from_secs(1))
-        .await;
-    let packet = broker.read_packet().await;
-    match packet {
-        Packet::PingReq => (),
-        packet => panic!("Expecting pingreq. Found = {:?}", packet),
-    };
-    assert_eq!(start.elapsed().as_secs(), keep_alive.as_secs());
+    let mut count = 0;
+
+    // Start sending qos 0 publishes to the client. This triggers
+    // some incoming and no outgoing packets in the client
+    broker.spawn_publishes(10, QoS::AtMostOnce, 1).await;
+
+    let mut start = Instant::now();
+    loop {
+        let event = broker.tick().await;
+
+        if let Event::Incoming(Incoming::PingReq) = event {
+            // wait for 3 pings
+            count += 1;
+            if count == 3 {
+                break;
+            }
+
+            assert_eq!(start.elapsed().as_secs(), keep_alive as u64);
+            broker.pingresp().await;
+            start = Instant::now();
+        }
+    }
+
+    assert_eq!(count, 3);
 }
 
 #[tokio::test]
@@ -192,6 +223,10 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
 
     assert_eq!(start.elapsed().as_secs(), 10);
 }
+
+//
+// All flow control tests here
+//
 
 #[tokio::test]
 async fn requests_are_blocked_after_max_inflight_queue_size() {
@@ -242,37 +277,27 @@ async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
 
     let mut broker = Broker::new(1888, 0).await;
 
-    // packet 1
-    let packet = broker.read_publish().await;
-    assert!(packet.is_some());
-    // packet 2
-    let packet = broker.read_publish().await;
-    assert!(packet.is_some());
-    // packet 3
-    let packet = broker.read_publish().await;
-    assert!(packet.is_some());
+    // packet 1, 2, and 3
+    assert!(broker.read_publish().await.is_some());
+    assert!(broker.read_publish().await.is_some());
+    assert!(broker.read_publish().await.is_some());
 
     // no packet 4. client inflight full as there aren't acks yet
-    let packet = broker.read_publish().await;
-    assert!(packet.is_none());
+    assert!(broker.read_publish().await.is_none());
 
     // ack packet 1 and client would produce packet 4
     broker.ack(1).await;
-    let packet = broker.read_publish().await;
-    assert!(packet.is_some());
-    let packet = broker.read_publish().await;
-    assert!(packet.is_none());
+    assert!(broker.read_publish().await.is_some());
+    assert!(broker.read_publish().await.is_none());
 
     // ack packet 2 and client would produce packet 5
     broker.ack(2).await;
-    let packet = broker.read_publish().await;
-    assert!(packet.is_some());
-    let packet = broker.read_publish().await;
-    assert!(packet.is_none());
+    assert!(broker.read_publish().await.is_some());
+    assert!(broker.read_publish().await.is_none());
 }
 
 #[tokio::test]
-async fn packet_id_collisions_are_detected_and_flow_control_is_applied_correctly() {
+async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
     options.set_inflight(4).set_collision_safety(true);
 
@@ -311,8 +336,8 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied_correctly
     });
 
     time::delay_for(Duration::from_secs(1)).await;
-    // sends 4 requests and receives ack 3, 4
-    // 5th request will trigger collision
+
+    // sends 4 requests and receives ack 3, 4. 5th request will trigger collision
     match run(&mut eventloop, false).await {
         Err(ConnectionError::MqttState(StateError::Collision(1))) => (),
         o => panic!("Expecting collision error. Found = {:?}", o),
@@ -320,17 +345,13 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied_correctly
 
     // Next poll will receive ack = 1 in 5 seconds and fixes collision
     let start = Instant::now();
-    assert_eq!(
-        eventloop.poll().await.unwrap(),
-        Event::Incoming(Packet::PubAck(PubAck::new(1)))
-    );
+    let event = eventloop.poll().await.unwrap();
+    assert_eq!(event, Event::Incoming(Packet::PubAck(PubAck::new(1))));
     assert_eq!(start.elapsed().as_secs(), 5);
 
     // Next poll unblocks failed publish due to collision
-    assert_eq!(
-        eventloop.poll().await.unwrap(),
-        Event::Outgoing(Outgoing::Publish(1))
-    );
+    let event = eventloop.poll().await.unwrap();
+    assert_eq!(event, Event::Outgoing(Outgoing::Publish(1)));
 
     // handle remaining outgoing and incoming packets
     tick(&mut eventloop, false, 10).await.unwrap();
@@ -380,9 +401,37 @@ async fn packet_id_collisions_are_timedout_on_second_ping() {
     }
 }
 
+//
+// All reconnection tests here
+//
+#[tokio::test]
+async fn next_poll_after_connect_failure_reconnects() {
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3000);
+
+    task::spawn(async move {
+        let _broker = Broker::new(3000, 1).await;
+        // let _broker = Broker::new(3000, 0).await;
+        time::delay_for(Duration::from_secs(15)).await;
+    });
+
+    time::delay_for(Duration::from_secs(1)).await;
+    let mut eventloop = EventLoop::new(options, 5);
+
+    let event = eventloop.poll().await;
+    let error = "Broker rejected. Reason = BadUsernamePassword";
+    match event {
+        Err(ConnectionError::Io(e)) => assert_eq!(e.to_string(), error),
+        v => panic!("Expected bad username password error. Found = {:?}", v),
+    }
+
+    let event = eventloop.poll().await.unwrap();
+    let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+    assert_eq!(event, Event::Incoming(Packet::ConnAck(connack)));
+}
+
 #[tokio::test]
 async fn reconnection_resumes_from_the_previous_state() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1889);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3001);
     options.set_keep_alive(5);
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
@@ -399,7 +448,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     });
 
     // broker connection 1
-    let mut broker = Broker::new(1889, 0).await;
+    let mut broker = Broker::new(3001, 0).await;
     for i in 1..=2 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
@@ -413,7 +462,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     // a block around broker with {} is closing the connection as expected
 
     // broker connection 2
-    let mut broker = Broker::new(1889, 0).await;
+    let mut broker = Broker::new(3001, 0).await;
     for i in 3..=4 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
@@ -423,7 +472,7 @@ async fn reconnection_resumes_from_the_previous_state() {
 
 #[tokio::test]
 async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1890);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
     options.set_keep_alive(5);
 
     // start sending qos0 publishes. this makes sure that there is
@@ -441,14 +490,14 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
     });
 
     // broker connection 1. receive but don't ack
-    let mut broker = Broker::new(1890, 0).await;
+    let mut broker = Broker::new(3002, 0).await;
     for i in 1..=2 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
     }
 
     // broker connection 2 receives from scratch
-    let mut broker = Broker::new(1890, 0).await;
+    let mut broker = Broker::new(3002, 0).await;
     for i in 1..=6 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);

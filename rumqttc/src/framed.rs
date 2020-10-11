@@ -136,13 +136,6 @@ impl Network {
         let size = match request {
             Request::Publish(packet) => packet.write(&mut self.write)?,
             Request::PublishRaw(packet) => packet.write(&mut self.write)?,
-            Request::Publishes(packets) => {
-                let mut size = 0;
-                for packet in packets {
-                    size += packet.write(&mut self.write)?;
-                }
-                size
-            }
             Request::PubRel(packet) => packet.write(&mut self.write)?,
             Request::PingReq => {
                 let packet = PingReq;
@@ -161,13 +154,6 @@ impl Network {
                 packet.write(&mut self.write)?
             }
             Request::PubAck(packet) => packet.write(&mut self.write)?,
-            Request::PubAcks(packets) => {
-                let mut size = 0;
-                for packet in packets {
-                    size += packet.write(&mut self.write)?;
-                }
-                size
-            }
             Request::PubRec(packet) => packet.write(&mut self.write)?,
             Request::PubComp(packet) => packet.write(&mut self.write)?,
         };
@@ -243,27 +229,14 @@ fn outgoing(packet: &Request) -> Outgoing {
     match packet {
         Request::Publish(publish) => Outgoing::Publish(publish.pkid),
         Request::PublishRaw(publish) => Outgoing::Publish(publish.pkid),
-        Request::Publishes(publishes) => {
-            let mut out = Vec::with_capacity(publishes.len());
-            for publish in publishes {
-                out.push(publish.pkid)
-            }
-            Outgoing::Publishes(out)
-        }
         Request::PubAck(puback) => Outgoing::PubAck(puback.pkid),
-        Request::PubAcks(pubacks) => {
-            let mut out = Vec::with_capacity(pubacks.len());
-            for puback in pubacks {
-                out.push(puback.pkid)
-            }
-            Outgoing::PubAcks(out)
-        }
         Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
         Request::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
         Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
         Request::PingReq => Outgoing::PingReq,
+        Request::PingResp => Outgoing::PingResp,
         Request::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
