@@ -59,8 +59,6 @@ pub struct EventLoop {
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
     pub(crate) cancel_tx: Option<Sender<()>>,
-    /// Delay between reconnection (after a failure)
-    pub(crate) reconnection_delay: Duration,
 }
 
 /// Events which can be yielded by the event loop
@@ -94,18 +92,12 @@ impl EventLoop {
             keepalive_timeout: None,
             cancel_rx,
             cancel_tx: Some(cancel_tx),
-            reconnection_delay: Duration::from_secs(0),
         }
     }
 
     /// Returns a handle to communicate with this eventloop
     pub fn handle(&self) -> Sender<Request> {
         self.requests_tx.clone()
-    }
-
-    /// Set delay between (automatic) reconnections
-    pub fn set_reconnection_delay(&mut self, delay: Duration) {
-        self.reconnection_delay = delay;
     }
 
     /// Handle for cancelling the eventloop.

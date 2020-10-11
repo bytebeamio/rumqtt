@@ -5,7 +5,6 @@ use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use async_channel::{SendError, Sender};
 use mqtt4bytes::*;
 use std::mem;
-use std::time::Duration;
 use tokio::runtime;
 use tokio::runtime::Runtime;
 
@@ -192,17 +191,11 @@ pub struct Connection {
 }
 
 impl Connection {
-    fn new(mut eventloop: EventLoop, runtime: Runtime) -> Connection {
-        eventloop.set_reconnection_delay(Duration::from_secs(1));
+    fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
         Connection {
             eventloop,
             runtime: Some(runtime),
         }
-    }
-
-    /// Set delay between (automatic) re-connections (on error).
-    pub fn set_reconnection_delay(&mut self, delay: Duration) {
-        self.eventloop.set_reconnection_delay(delay)
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
