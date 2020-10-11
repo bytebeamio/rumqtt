@@ -410,7 +410,7 @@ async fn next_poll_after_connect_failure_reconnects() {
 
     task::spawn(async move {
         let _broker = Broker::new(3000, 1).await;
-        // let _broker = Broker::new(3000, 0).await;
+        let _broker = Broker::new(3000, 0).await;
         time::delay_for(Duration::from_secs(15)).await;
     });
 

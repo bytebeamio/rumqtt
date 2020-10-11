@@ -289,12 +289,19 @@ impl EventLoop {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
-        select! {
+        let o = select! {
             o = self.connect() => o,
             _ = cancel_rx.recv() => {
                 Err(ConnectionError::Cancel)
             }
+        };
+
+        if o.is_err() {
+            self.network = None;
+            self.keepalive_timeout = None;
         }
+
+        o
     }
 
     /// This stream internally processes requests from the request stream provided to the eventloop
