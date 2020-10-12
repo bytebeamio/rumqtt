@@ -89,6 +89,9 @@ impl Router {
         (router, router_tx)
     }
 
+    /// Waits on incoming events when ready queue is empty.
+    /// After pulling 1 event, tries to pull 500 more events
+    /// before polling ready queue 100 times (connections)
     pub fn start(&mut self) -> Result<(), RouterError> {
         loop {
             // Block on incoming events if there are no connections
@@ -289,6 +292,7 @@ impl Router {
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
+        trace!("{:11} {:14} Id = {}", "subscribe", "", id);
         let topics = self.topicslog.readv(0, 0);
 
         let tracker = self.trackers.get_mut(id).unwrap();
@@ -488,6 +492,8 @@ impl Router {
                 continue;
             }
 
+            trace!("{:11} {:14} Id = {}", "topics", "notification", link_id);
+
             // Match new topics with existing subscriptions of this link.
             // Even though there are new topics, it's possible that they didn't match
             // subscriptions held by this connection.
@@ -575,7 +581,7 @@ fn handle_data_request(
     waiters: &mut DataWaiters,
 ) -> Option<Data> {
     trace!(
-        "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}",
+        "{:11} {:14} Id = {} Topic = {} Offsets = {:?}",
         "data",
         "request",
         id,
@@ -586,7 +592,7 @@ fn handle_data_request(
     let data = match datalog.handle_data_request(id, &request) {
         Some(data) => {
             trace!(
-                "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
+                "{:11} {:14} Id = {} Topic = {} Offsets = {:?} Count = {}",
                 "data",
                 "response",
                 id,
@@ -599,7 +605,7 @@ fn handle_data_request(
         }
         None => {
             trace!(
-                "{:11} {:14} Id = {}, Topic = {}",
+                "{:11} {:14} Id = {} Topic = {}",
                 "data",
                 "register",
                 id,
@@ -621,7 +627,7 @@ fn handle_topics_request<'a>(
     waiters: &mut TopicsWaiters,
 ) -> Option<Topics<'a>> {
     trace!(
-        "{:11} {:14} Id = {}, Offset = {}",
+        "{:11} {:14} Id = {} Offset = {}",
         "topics",
         "request",
         id,
@@ -631,7 +637,7 @@ fn handle_topics_request<'a>(
     let topics = match topicslog.readv(request.offset, request.count) {
         Some(topics) => {
             trace!(
-                "{:11} {:14} Id = {}, Offset = {}, Count = {}",
+                "{:11} {:14} Id = {} Offset = {} Count = {}",
                 "topics",
                 "response",
                 id,
@@ -643,7 +649,7 @@ fn handle_topics_request<'a>(
         }
         None => {
             trace!("{:11} {:14} Id = {}", "topics", "register", id);
-            waiters.push_back(id, request);
+            waiters.register(id, request);
             return None;
         }
     };

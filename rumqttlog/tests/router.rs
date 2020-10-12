@@ -36,24 +36,48 @@ fn acks_are_returned_as_expected_to_the_connection() {
 #[test]
 fn new_connection_data_notifies_interested_connections() {
     let connections = Connections::new();
+
+    // Create connections. They will be ready in ready queue immediately and
+    // acks requests will start and gets registered in waiter as there are no
+    // acks to give
     let (connection_1_id, _connection_1_rx) = connections.connection("1", 5);
     let (connection_2_id, connection_2_rx) = connections.connection("2", 5);
 
+    // Even though there are connections in ready queue, router will try to pull
+    // 500 more events. This subscribe adds topics request to connection 2's tracker
     connections.subscribe(connection_2_id, "hello/+/world", 1);
+
+    // Above subscribe will wake up previously registered acks request in
+    // the waiter and adds it back to connection's tracker.
+    // Now that events there are no more events ready, ready queue will be
+    // scheduled and topics request will result in registration as there are
+    // no new topics.
+    // Next, acks request will result in response notification
+    // and new acks request is added to tracker and this request
+    // is registered next as there are no new acks
     let acks = wait_for_acks(&connection_2_rx).unwrap();
     assert_eq!(acks.len(), 1);
 
-    // Write data. 4 messages, 2 topics. Connection's capacity is 5 items.
+    // Router will now wait for 1 new event to unblock and tries to read 500 more
+    // So all the 4 messages (of 2 topics) are written to commitlog.
+    // During first data,
+    // Acks request from waiter will be added to conection 10's tracker a
+    // Topics requests from waiter will be added to connection 11's tracker
     connections.data(connection_1_id, "hello/1/world", vec![1, 2, 3], 1);
     connections.data(connection_1_id, "hello/1/world", vec![4, 5, 6], 2);
     connections.data(connection_1_id, "hello/2/world", vec![13, 14, 15], 4);
     connections.data(connection_1_id, "hello/2/world", vec![16, 17, 18], 5);
 
+    // Router now schedules topics request, which results in topics response.
+    // Topics response adds data requests "hello/1/world" and "hello/2/world"
+    // to connection 2's tracker
+    // Next data request will respond with "hello/1/world"'s data
     let data = wait_for_data(&connection_2_rx).unwrap();
     assert_eq!(data.payload.len(), 2);
     assert_eq!(data.payload[0].as_ref(), &[1, 2, 3]);
     assert_eq!(data.payload[1].as_ref(), &[4, 5, 6]);
 
+    // Next data request will respond with "hello/2/world"'s data
     let data = wait_for_data(&connection_2_rx).unwrap();
     assert_eq!(data.payload.len(), 2);
     assert_eq!(data.payload[0].as_ref(), &[13, 14, 15]);
@@ -62,7 +86,6 @@ fn new_connection_data_notifies_interested_connections() {
 
 #[test]
 fn failed_notifications_are_retried_after_connection_ready() {
-    pretty_env_logger::init();
     let connections = Connections::new();
     let (connection_id, connection_rx) = connections.connection("1", 3);
 
