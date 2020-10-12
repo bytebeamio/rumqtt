@@ -89,28 +89,25 @@ fn failed_notifications_are_retried_after_connection_ready() {
     let connections = Connections::new();
     let (connection_id, connection_rx) = connections.connection("1", 3);
 
-    // 1. First data write triggers 1 ack notification to re-register acks request
-    // 2. 500 data writes
-    // 3. Acks request + response with 501 acks + acks request registration
-    // 4. First data write triggers 1 ack notification to re-register acks request
-    // 5. 500 data writes
-    // 6. Acks request + notification with 501 acks
-    // 7. Space of 1 left in notification channel. Connection unscheduled from ready queue
-    // 8. 998 data writes
     for i in 0..2000 {
         connections.data(connection_id, "hello/1/world", vec![1, 2, 3], i);
     }
 
-    let count = wait_for_acks(&connection_rx).unwrap().len();
-    assert_eq!(count, 501);
-    let count = wait_for_acks(&connection_rx).unwrap().len();
-    assert_eq!(count, 501);
-    assert!(wait_for_acks(&connection_rx).is_none());
+    let mut count = 0;
+    loop {
+        count += match wait_for_notifications(&connection_rx) {
+            Some(Notification::Acks(acks)) => acks.len(),
+            Some(Notification::Pause) => {
+                connections.ready(connection_id);
+                continue;
+            }
+            v => panic!("Expecting acks or pause. Received {:?}", v),
+        };
 
-    connections.ready(connection_id);
-    let count = wait_for_acks(&connection_rx).unwrap().len();
-    assert_eq!(count, 998);
-    assert!(wait_for_acks(&connection_rx).is_none());
+        if count == 2000 {
+            break;
+        }
+    }
 }
 
 fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {
@@ -138,6 +135,18 @@ fn wait_for_acks(rx: &Receiver<Notification>) -> Option<Acks> {
             println!("Notification = {:?}", v);
             None
         }
+        Err(e) => {
+            println!("Error = {:?}", e);
+            None
+        }
+    }
+}
+
+fn wait_for_notifications(rx: &Receiver<Notification>) -> Option<Notification> {
+    thread::sleep(Duration::from_secs(1));
+
+    match rx.try_recv() {
+        Ok(notification) => Some(notification),
         Err(e) => {
             println!("Error = {:?}", e);
             None
