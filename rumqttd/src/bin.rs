@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::Write;
 use std::process::exit;
 
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 

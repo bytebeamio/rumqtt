@@ -7,6 +7,7 @@ use tokio::time;
 
 mod common;
 
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
