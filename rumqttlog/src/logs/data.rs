@@ -1,21 +1,20 @@
 use std::collections::HashMap;
 use std::io;
 
-use super::bytes::Bytes;
 use crate::volatile::Log;
 use crate::Config;
+use bytes::Bytes;
 use std::sync::Arc;
 
-// TODO change config to Arc
-pub(crate) struct CommitLog {
+pub(crate) struct DataLog {
     id: usize,
     config: Arc<Config>,
     logs: HashMap<String, Log>,
 }
 
-impl CommitLog {
-    pub fn new(config: Arc<Config>, id: usize) -> CommitLog {
-        CommitLog {
+impl DataLog {
+    pub fn new(config: Arc<Config>, id: usize) -> DataLog {
+        DataLog {
             id,
             config,
             logs: HashMap::new(),
@@ -48,11 +47,9 @@ impl CommitLog {
         Some(log.next_offset())
     }
 
-    pub fn seek_offsets_to_end(&self, topics: &mut Vec<(String, u8, [(u64, u64); 3])>) {
-        for (topic, _, offset) in topics.iter_mut() {
-            if let Some(last_offset) = self.next_offset(topic) {
-                offset[self.id] = last_offset;
-            }
+    pub fn seek_offsets_to_end(&self, topic: &mut (String, u8, [(u64, u64); 3])) {
+        if let Some(last_offset) = self.next_offset(&topic.0) {
+            topic.2[self.id] = last_offset;
         }
     }
 
@@ -81,48 +78,5 @@ impl CommitLog {
         //     data.len()
         // );
         Ok(Some((jump, segment, offset, data)))
-    }
-}
-
-/// A temporal list of unique new topics
-#[derive(Debug)]
-pub struct TopicLog {
-    /// List of new topics
-    topics: Vec<String>,
-}
-
-impl TopicLog {
-    /// Create a new topic log
-    pub fn new() -> TopicLog {
-        TopicLog { topics: Vec::new() }
-    }
-
-    pub fn topics(&self) -> Vec<String> {
-        self.topics.clone()
-    }
-
-    /// read n topics from a give offset along with offset of the last read topic
-    pub fn readv(&self, offset: usize, count: usize) -> Option<(usize, &[String])> {
-        let len = self.topics.len();
-        if offset >= len || count == 0 {
-            return None;
-        }
-
-        let mut next_offset = offset + count;
-        if next_offset >= len {
-            next_offset = len;
-        }
-
-        let out = self.topics[offset..next_offset].as_ref();
-        if out.is_empty() {
-            return None;
-        }
-
-        Some((next_offset, out))
-    }
-
-    /// Appends the topic if the topic isn't already seen
-    pub fn append(&mut self, topic: &str) {
-        self.topics.push(topic.to_owned());
     }
 }

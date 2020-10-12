@@ -1,7 +1,7 @@
 use pprof::ProfilerGuard;
 use prost::Message;
 use rumqttlog::router::ConnectionAck;
-use rumqttlog::{Connection, Receiver, RouterInMessage, RouterOutMessage, Sender};
+use rumqttlog::{Connection, Event, Notification, Receiver, Sender};
 use std::fs::File;
 use std::io::Write;
 
@@ -21,18 +21,18 @@ pub fn profile(name: &str, guard: ProfilerGuard) {
 pub async fn new_connection(
     id: &str,
     cap: usize,
-    router_tx: &Sender<(usize, RouterInMessage)>,
-) -> (usize, Receiver<RouterOutMessage>) {
+    router_tx: &Sender<(usize, Event)>,
+) -> (usize, Receiver<Notification>) {
     let (connection, this_rx) = Connection::new_remote(id, cap);
 
     // send a connection request with a dummy id
-    let message = (0, RouterInMessage::Connect(connection));
+    let message = (0, Event::Connect(connection));
     router_tx.send(message).unwrap();
 
     // wait for ack from router
     let id = match this_rx.recv().unwrap() {
-        RouterOutMessage::ConnectionAck(ConnectionAck::Success(id)) => id,
-        RouterOutMessage::ConnectionAck(ConnectionAck::Failure(e)) => {
+        Notification::ConnectionAck(ConnectionAck::Success(id)) => id,
+        Notification::ConnectionAck(ConnectionAck::Failure(e)) => {
             panic!("Connection failed {:?}", e)
         }
         message => panic!("Not connection ack = {:?}", message),

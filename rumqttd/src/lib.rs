@@ -37,7 +37,7 @@ pub enum Error {
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
     #[error("Channel send error")]
-    Send(#[from] SendError<(Id, RouterInMessage)>),
+    Send(#[from] SendError<(Id, Event)>),
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet),
@@ -92,7 +92,7 @@ impl Default for ServerSettings {
 
 pub struct Broker {
     config: Config,
-    router_tx: Sender<(Id, RouterInMessage)>,
+    router_tx: Sender<(Id, Event)>,
     router: Option<Router>,
 }
 
@@ -107,7 +107,7 @@ impl Broker {
         }
     }
 
-    pub fn router_handle(&self) -> Sender<(Id, RouterInMessage)> {
+    pub fn router_handle(&self) -> Sender<(Id, Event)> {
         self.router_tx.clone()
     }
 
@@ -146,7 +146,7 @@ impl Broker {
 
 async fn accept_loop(
     config: Arc<ServerSettings>,
-    router_tx: Sender<(Id, RouterInMessage)>,
+    router_tx: Sender<(Id, Event)>,
 ) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.port);
     info!("Waiting for connections on {}", addr);
@@ -179,11 +179,11 @@ async fn accept_loop(
 
 struct Connector {
     config: Arc<ServerSettings>,
-    router_tx: Sender<(Id, RouterInMessage)>,
+    router_tx: Sender<(Id, Event)>,
 }
 
 impl Connector {
-    fn new(config: Arc<ServerSettings>, router_tx: Sender<(Id, RouterInMessage)>) -> Connector {
+    fn new(config: Arc<ServerSettings>, router_tx: Sender<(Id, Event)>) -> Connector {
         Connector { config, router_tx }
     }
 
@@ -210,7 +210,7 @@ impl Connector {
                 id, client_id, e
             ),
         }
-        let disconnect = RouterInMessage::Disconnect(Disconnection::new(client_id));
+        let disconnect = Event::Disconnect(Disconnection::new(client_id));
         let message = (id, disconnect);
         self.router_tx.send(message)?;
         Ok(())

@@ -1,24 +1,29 @@
 #[macro_use]
 extern crate log;
 
+pub mod logs;
 pub mod router;
 pub mod storage;
-pub mod tracker;
 pub mod volatile;
+pub mod waiters;
 
-pub use flume::{bounded, Receiver, RecvError, SendError, Sender};
-pub use mqtt4bytes;
+use std::path::PathBuf;
+
+pub use router::connection::Connection;
 pub use router::{
-    Connection, ConnectionAck, DataReply, DataRequest, Disconnection, ReplicationData, Router,
-    RouterInMessage, RouterOutMessage,
+    ConnectionAck, Data, DataRequest, Disconnection, Event, Notification, ReplicationData, Router,
 };
 pub use storage::segment::Segment;
 pub use storage::Log;
 
-use std::path::PathBuf;
-
+pub use jackiechan::{bounded, Receiver, RecvError, SendError, Sender};
+pub use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
+
+pub type ConnectionId = usize;
+pub type Topic = String;
+pub type TopicId = usize;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshConfig {

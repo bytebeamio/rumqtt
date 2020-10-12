@@ -3,8 +3,8 @@ use crate::state::{self, State};
 use crate::{Id, ServerSettings};
 use mqtt4bytes::{ConnAck, Connect, ConnectReturnCode, Packet, Publish, QoS};
 use rumqttlog::{
-    tracker::Tracker, Connection, ConnectionAck, Receiver, RecvError, RouterInMessage,
-    RouterOutMessage, SendError, Sender,
+    Connection, ConnectionAck, Receiver, RecvError, Event,
+    Notification, SendError, Sender,
 };
 use std::io;
 use std::sync::Arc;
@@ -16,12 +16,11 @@ pub struct RemoteLink {
     connect: Connect,
     id: Id,
     network: Network,
-    tracker: Tracker,
     state: State,
-    router_tx: Sender<(Id, RouterInMessage)>,
-    link_rx: Receiver<RouterOutMessage>,
+    router_tx: Sender<(Id, Event)>,
+    link_rx: Receiver<Notification>,
     acks_required: usize,
-    stored_message: Option<RouterOutMessage>,
+    stored_message: Option<Notification>,
     total: usize,
 }
 
@@ -36,13 +35,13 @@ pub enum Error {
     #[error("State error")]
     State(#[from] state::Error),
     #[error("Unexpected router message")]
-    RouterMessage(RouterOutMessage),
+    RouterMessage(Notification),
     #[error("Connack error {0}")]
     ConnAck(String),
     #[error("Keep alive time exceeded")]
     KeepAlive,
     #[error("Channel send error")]
-    Send(#[from] SendError<(Id, RouterInMessage)>),
+    Send(#[from] SendError<(Id, Event)>),
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
     #[error("Payload count greater than max inflight")]
@@ -52,7 +51,7 @@ pub enum Error {
 impl RemoteLink {
     pub async fn new(
         config: Arc<ServerSettings>,
-        router_tx: Sender<(Id, RouterInMessage)>,
+        router_tx: Sender<(Id, Event)>,
         mut network: Network,
     ) -> Result<(String, Id, RemoteLink), Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
@@ -69,7 +68,7 @@ impl RemoteLink {
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
         let (connection, link_rx) = Connection::new_remote(&client_id, 10);
-        let message = (0, RouterInMessage::Connect(connection));
+        let message = (0, Event::Connect(connection));
         router_tx.send(message).unwrap();
 
         // Send connection acknowledgement back to the client
@@ -80,7 +79,7 @@ impl RemoteLink {
         // TODO if it exceeds maximum allowed active connections
         // Right now link identifies failure with dropped rx in router, which is probably ok for now
         let id = match link_rx.recv()? {
-            RouterOutMessage::ConnectionAck(ack) => match ack {
+            Notification::ConnectionAck(ack) => match ack {
                 ConnectionAck::Success(id) => id,
                 ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason)),
             },
@@ -96,7 +95,6 @@ impl RemoteLink {
                 connect,
                 id,
                 network,
-                tracker: Tracker::new(max_inflight_count as usize),
                 state: State::new(max_inflight_count),
                 router_tx,
                 link_rx,
@@ -126,13 +124,6 @@ impl RemoteLink {
                 }
             }
 
-            trace!(
-                "topics {} {} {}",
-                self.id,
-                self.tracker.has_next(),
-                self.tracker.inflight()
-            );
-
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),
                 packets = self.network.readb() => {
@@ -142,43 +133,17 @@ impl RemoteLink {
                 }
                 // Receive from router when previous when state isn't in collision
                 // due to previously recived data request
-                message = self.link_rx.recv_async(), if self.acks_required == 0 => {
+                message = self.link_rx.async_recv(), if self.acks_required == 0 => {
                     let message = message?;
                     self.handle_router_response(message).await?;
-                }
-                Some(message) = tracker_next(&mut self.tracker),
-                if self.tracker.has_next() && self.tracker.inflight() < 10 => {
-                    trace!("{:11} {:14} Id = {}, Message = {:?}", "tacker", "next", self.id, message);
-                    self.router_tx.send((self.id, message))?;
                 }
             }
         }
     }
 
-    async fn handle_router_response(&mut self, message: RouterOutMessage) -> Result<(), Error> {
+    async fn handle_router_response(&mut self, message: Notification) -> Result<(), Error> {
         match message {
-            RouterOutMessage::TopicsReply(reply) => {
-                trace!(
-                    "{:11} {:14} Id = {}, Count = {}",
-                    "topics",
-                    "reply",
-                    self.id,
-                    reply.topics.len()
-                );
-                self.tracker.track_new_topics(&reply);
-            }
-            RouterOutMessage::SubscriptionReply(reply) => {
-                trace!(
-                    "{:11} {:14} Id = {}, Count = {}",
-                    "subscription",
-                    "reply",
-                    self.id,
-                    reply.topics.len()
-                );
-                self.tracker.track_existing_topics(&reply);
-                // trace!("topics Id = {} {:?}", self.id, self.tracker);
-            }
-            RouterOutMessage::AcksReply(reply) => {
+            Notification::Acks(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Count = {}",
                     "acks",
@@ -186,13 +151,13 @@ impl RemoteLink {
                     self.id,
                     reply.acks.len()
                 );
-                self.tracker.update_watermarks_tracker(&reply);
+
                 for (_pkid, ack) in reply.acks.into_iter() {
                     self.network.fill(ack)?;
                 }
             }
-            RouterOutMessage::ConnectionAck(_) => {}
-            RouterOutMessage::DataReply(reply) => {
+            Notification::ConnectionAck(_) => {}
+            Notification::Data(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
                     "data",
@@ -215,11 +180,10 @@ impl RemoteLink {
                 let no_collision_count = self.state.no_collision_count(reply.payload.len());
                 if no_collision_count > 0 {
                     self.acks_required = no_collision_count;
-                    self.stored_message = Some(RouterOutMessage::DataReply(reply));
+                    self.stored_message = Some(Notification::Data(reply));
                     return Ok(());
                 }
 
-                self.tracker.update_data_tracker(&reply);
                 self.total += payload_count;
                 // dbg!(self.total);
                 for p in reply.payload {
@@ -228,6 +192,10 @@ impl RemoteLink {
                     let publish = Packet::Publish(publish);
                     self.network.fill(publish)?;
                 }
+            }
+            Notification::Pause => {
+                let message = (self.id, Event::Ready);
+                self.router_tx.send(message)?;
             }
         }
 
@@ -288,7 +256,7 @@ impl RemoteLink {
                 self.id,
                 data.len()
             );
-            let message = RouterInMessage::Data(data);
+            let message = Event::Data(data);
             self.router_tx.send((self.id, message))?;
         }
 
@@ -296,6 +264,3 @@ impl RemoteLink {
     }
 }
 
-async fn tracker_next(tracker: &mut Tracker) -> Option<RouterInMessage> {
-    tracker.next()
-}

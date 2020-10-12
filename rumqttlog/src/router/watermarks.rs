@@ -1,3 +1,4 @@
+use crate::router::Acks;
 use mqtt4bytes::*;
 use std::collections::{HashMap, VecDeque};
 use std::mem;
@@ -9,7 +10,7 @@ type Topic = String;
 /// Watermarks for a given topic
 #[derive(Debug)]
 pub struct Watermarks {
-    pending_acks_reply: bool,
+    pending_acks_request: Option<()>,
     /// Packet id to offset map per topic. When replication requirements
     /// are met, packet ids will be moved to acks
     pkid_offset_map: HashMap<Topic, (VecDeque<Pkid>, VecDeque<Offset>)>,
@@ -22,32 +23,38 @@ pub struct Watermarks {
 impl Watermarks {
     pub fn new() -> Watermarks {
         Watermarks {
-            pending_acks_reply: false,
+            pending_acks_request: None,
             pkid_offset_map: HashMap::new(),
             acks: Vec::new(),
             cluster_offsets: vec![0, 0, 0],
         }
     }
 
+    pub fn handle_acks_request(&mut self) -> Option<Acks> {
+        let acks = self.acks();
+        if acks.is_empty() {
+            return None;
+        }
+
+        Some(Acks::new(acks))
+    }
+
     pub fn update_cluster_offsets(&mut self, id: usize, offset: u64) {
         if let Some(position) = self.cluster_offsets.get_mut(id) {
             *position = offset
         } else {
-            panic!(
-                "We only support a maximum of 3 nodes at the moment. Received id = {}",
-                id
-            );
+            panic!("We only support a maximum of 3 nodes. Received id = {}", id);
         }
 
         // debug!("Updating cluster offsets. Topic = {}, Offsets: {:?}", self.topic, self.cluster_offsets);
     }
 
-    pub fn set_pending_acks_reply(&mut self, status: bool) {
-        self.pending_acks_reply = status
+    pub fn register_pending_acks_request(&mut self) {
+        self.pending_acks_request = Some(())
     }
 
-    pub fn pending_acks_reply(&self) -> bool {
-        self.pending_acks_reply
+    pub fn take_pending_acks_request(&mut self) -> Option<()> {
+        self.pending_acks_request.take()
     }
 
     /// Commit acks with enough replication

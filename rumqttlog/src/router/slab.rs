@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::mem;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Slab<T> {
     // Chunk of memory
     entries: Vec<Option<T>>,
