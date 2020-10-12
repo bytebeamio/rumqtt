@@ -193,6 +193,10 @@ impl RemoteLink {
                     self.network.fill(publish)?;
                 }
             }
+            Notification::Pause => {
+                let message = (self.id, Event::Ready);
+                self.router_tx.send(message)?;
+            }
         }
 
         // FIXME Early returns above will prevent router send and network write

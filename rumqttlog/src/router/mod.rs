@@ -1,6 +1,6 @@
 extern crate bytes;
 
-mod connection;
+pub(crate) mod connection;
 mod readyqueue;
 mod router;
 mod slab;

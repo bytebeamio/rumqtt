@@ -71,12 +71,12 @@ impl Connection {
         self.remaining_space -= 1;
 
         // Update remaining space if there is room for only one notification.
-        if self.remaining_space <= self.capacity - 1 {
+        if self.remaining_space <= 1 {
             self.remaining_space = self.capacity - self.handle.len();
 
             // If remaining space is still 1 after refresh, send pause notification
             // to the connection and return unschedule true
-            if self.remaining_space <= self.capacity - 1 {
+            if self.remaining_space <= 1 {
                 let notification = Notification::Pause;
                 if let Err(e) = self.handle.try_send(notification) {
                     match e {

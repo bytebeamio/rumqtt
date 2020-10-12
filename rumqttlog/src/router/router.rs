@@ -772,7 +772,7 @@ mod test {
         let (mut router, _tx) = Router::new(Arc::new(config));
         let _rx = add_new_remote_connection(&mut router, "10");
 
-        // Add 20 data requests
+        // Register 20 data requests in notifications
         for i in 0..20 {
             let topic = format!("hello/{}/world", i);
             let request = DataRequest::new(topic);
@@ -780,15 +780,23 @@ mod test {
         }
 
         // Along with connection ack. 10th notification will fail
-        for _ in 0..10 {
+        for i in 1..=10 {
             // Write a publish to commitlog
             let publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1, 2, 3]);
             router.handle_connection_data(10, vec![Packet::Publish(publish)]);
 
-            // Trigger 1 request. This will notify with above data
-            // and puts connection back in ready queue.
-            let id = router.readyqueue.pop_front().unwrap();
-            router.connection_ready(id, 1);
+            // connack + 8 pub acks. 9 acks before this iteration
+            // implies 9 notifications + 1 pause notification = 10 notifications
+            // channel full before this iteration
+            if i == 9 {
+                assert!(router.readyqueue.pop_front().is_none());
+                break;
+            } else {
+                // Trigger 1 request. This will notify puback for above
+                // data and puts connection back in ready queue.
+                let id = router.readyqueue.pop_front().unwrap();
+                router.connection_ready(id, 1);
+            }
         }
 
         assert!(router.readyqueue.is_empty());

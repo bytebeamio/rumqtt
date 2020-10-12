@@ -52,7 +52,6 @@ impl LinkTx {
         // Send initialization requests from tracker [topics request and acks request]
         let rx = LinkRx::new(
             self.id,
-            max_inflight_requests,
             self.router_tx.clone(),
             link_rx,
         );
@@ -87,19 +86,16 @@ pub struct LinkRx {
     id: usize,
     router_tx: Sender<(Id, Event)>,
     link_rx: Receiver<Notification>,
-    max_inflight_requests: usize,
 }
 
 impl LinkRx {
     pub(crate) fn new(
         id: usize,
-        max_inflight_requests: usize,
         router_tx: Sender<(Id, Event)>,
         link_rx: Receiver<Notification>,
     ) -> LinkRx {
         LinkRx {
             id,
-            max_inflight_requests,
             router_tx,
             link_rx,
         }
@@ -107,12 +103,13 @@ impl LinkRx {
 
     pub fn recv(&mut self) -> Result<Option<Data>, LinkError> {
         let message = self.link_rx.recv()?;
-        let message = self.handle_router_response(message);
+        let message = self.handle_router_response(message)?;
         Ok(message)
     }
 
-    fn handle_router_response(&mut self, message: Notification) -> Option<Data> {
+    fn handle_router_response(&mut self, message: Notification) -> Result<Option<Data>, LinkError> {
         match message {
+            Notification::ConnectionAck(_) => Ok(None),
             Notification::Data(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Count = {}",
@@ -121,11 +118,17 @@ impl LinkRx {
                     self.id,
                     reply.payload.len()
                 );
-                Some(reply)
+
+                Ok(Some(reply))
             }
-            message => {
-                warn!("Message = {:?} not supported", message);
-                None
+            Notification::Pause => {
+                let message = (self.id, Event::Ready);
+                self.router_tx.send(message)?;
+                Ok(None)
+            }
+            Notification::Acks(_) => {
+                warn!("Acks not supported in local link");
+                Ok(None)
             }
         }
     }

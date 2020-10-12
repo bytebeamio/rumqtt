@@ -9,6 +9,7 @@ pub mod waiters;
 
 use std::path::PathBuf;
 
+pub use router::connection::Connection;
 pub use router::{
     ConnectionAck, Data, DataRequest, Disconnection, Event, Notification, ReplicationData, Router,
 };
