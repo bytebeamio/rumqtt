@@ -89,7 +89,7 @@ impl Network {
                 Err(Error::InsufficientBytes(required)) => {
                     self.pending = required;
                     // Not `max_readb_count` but we have atleast one packet.
-                    if incoming.len() > 0 {
+                    if !incoming.is_empty() {
                         break;
                     }
                 }
@@ -220,7 +220,7 @@ impl Network {
     }
 
     pub async fn flush(&mut self) -> Result<(), io::Error> {
-        if self.write.len() == 0 {
+        if self.write.is_empty() {
             return Ok(());
         }
 
@@ -259,6 +259,7 @@ fn outgoing(packet: &Request) -> Outgoing {
             Outgoing::PubAcks(out)
         }
         Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
+        Request::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
         Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),

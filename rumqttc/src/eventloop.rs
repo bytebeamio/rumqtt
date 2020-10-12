@@ -17,15 +17,15 @@ use std::vec::IntoIter;
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
-    #[error("Mqtt state")]
+    #[error("Mqtt state: {0}")]
     MqttState(#[from] StateError),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
-    #[error("Packet parsing error")]
+    #[error("Packet parsing error: {0}")]
     Mqtt4Bytes(mqtt4bytes::Error),
-    #[error("Network")]
+    #[error("Network: {0}")]
     Network(#[from] tls::Error),
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[error("Stream done")]
     StreamDone,
@@ -112,11 +112,15 @@ impl EventLoop {
     ///
     /// Can be useful in cases when connection should be halted immediately
     /// between half-open connection detections or (re)connection timeouts
-    pub fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
+    pub(crate) fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
         self.cancel_tx.take()
     }
 
-    /// Next notification or outgoing request
+    /// Yields Next notification or outgoing request and periodically pings
+    /// the broker. Continuing to poll will reconnect to the broker if there is
+    /// a disconnection.
+    /// **NOTE** Don't block this while iterating
+    #[must_use = "Eventloop should be iterated over a loop to make progress"]
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let connack = self.connect_or_cancel().await?;
@@ -189,7 +193,7 @@ impl EventLoop {
 
                 // flush all the acks and return first incoming packet
                 network.flush().await?;
-                return Ok(Event::Incoming(incoming))
+                Ok(Event::Incoming(incoming))
             },
             // Pull next request from user requests channel.
             // If conditions in the below branch are for flow control. We read next user
@@ -252,16 +256,16 @@ impl EventLoop {
                     }
 
                     network.flush().await?;
-                    return Ok(Event::Outgoing(outgoing))
+                    Ok(Event::Outgoing(outgoing))
                 }
-                None => return Err(ConnectionError::RequestsDone),
+                None => Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                 let request = self.state.handle_outgoing_packet(request)?;
                 let outgoing = network.write(request).await?;
-                return Ok(Event::Outgoing(outgoing));
+                Ok(Event::Outgoing(outgoing))
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
@@ -270,18 +274,18 @@ impl EventLoop {
                 timeout.reset(Instant::now() + self.options.keep_alive);
                 let request = self.state.handle_outgoing_packet(Request::PingReq)?;
                 let outgoing = network.write(request).await?;
-                return Ok(Event::Outgoing(outgoing));
+                Ok(Event::Outgoing(outgoing))
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {
-                return Err(ConnectionError::Cancel);
+                Err(ConnectionError::Cancel)
             }
         }
     }
 }
 
 impl EventLoop {
-    pub(crate) async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
+    async fn connect_or_cancel(&mut self) -> Result<Incoming, ConnectionError> {
         let cancel_rx = self.cancel_rx.clone();
         // select here prevents cancel request from being blocked until connection request is
         // resolved. Returns with an error if connections fail continuously
@@ -419,6 +423,7 @@ mod test {
     use crate::state::StateError;
     use crate::{ConnectionError, MqttOptions, Request};
     use async_channel::Sender;
+    use matches::assert_matches;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
 
@@ -485,12 +490,7 @@ mod test {
         let o = eventloop.poll().await;
         let elapsed = start.elapsed();
 
-        match o {
-            Ok(_) => assert!(false),
-            Err(ConnectionError::Timeout(_)) => assert!(true),
-            Err(_) => assert!(false),
-        }
-
+        assert_matches!(o, Err(ConnectionError::Timeout(_)));
         assert_eq!(elapsed.as_secs(), 5);
     }
 
@@ -516,13 +516,10 @@ mod test {
         for _ in 0..10 {
             let packet = broker.read_packet().await;
             let elapsed = start.elapsed();
-            match packet {
-                Packet::PingReq => {
-                    ping_received = true;
-                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                    break;
-                }
-                _ => (),
+            if let Packet::PingReq = packet {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                break;
             }
         }
 
@@ -556,13 +553,10 @@ mod test {
         for _ in 0..10 {
             let packet = broker.read_packet_and_respond().await;
             let elapsed = start.elapsed();
-            match packet {
-                Packet::PingReq => {
-                    ping_received = true;
-                    assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
-                    break;
-                }
-                _ => (),
+            if let Packet::PingReq = packet {
+                ping_received = true;
+                assert_eq!(elapsed.as_secs(), keep_alive.as_secs());
+                break;
             }
         }
 
@@ -764,7 +758,7 @@ mod test {
 
     #[tokio::test]
     async fn packet_id_collisions_are_timedout_on_second_ping() {
-        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
+        let mut options = MqttOptions::new("dummy", "127.0.0.1", 1892);
         options
             .set_inflight(4)
             .set_collision_safety(true)
@@ -779,7 +773,7 @@ mod test {
         });
 
         task::spawn(async move {
-            let mut broker = Broker::new(1891, true).await;
+            let mut broker = Broker::new(1892, true).await;
             // read all incoming packets first
             for i in 1..=4 {
                 let packet = broker.read_publish().await;
@@ -960,15 +954,11 @@ mod broker {
             });
             let packet = packet.await.unwrap().unwrap();
 
-            match packet.clone() {
-                Packet::Publish(publish) => {
-                    if publish.pkid > 0 {
-                        let packet = PubAck::new(publish.pkid);
-                        self.framed.write(Request::PubAck(packet)).await.unwrap();
-                    }
+            if let Packet::Publish(publish) = packet.clone() {
+                if publish.pkid > 0 {
+                    let packet = PubAck::new(publish.pkid);
+                    self.framed.write(Request::PubAck(packet)).await.unwrap();
                 }
-
-                _ => (),
             }
 
             packet
@@ -999,11 +989,10 @@ mod broker {
                         let packet = Request::Publish(publish);
                         self.framed.write(packet).await.unwrap();
                     }
-                    packet = self.framed.readb(&mut self.incoming) => match packet.unwrap() {
-                        Packet::PingReq => {
+                    packet = self.framed.readb(&mut self.incoming) => {
+                        if let Packet::PingReq = packet.unwrap() {
                             self.framed.write(Request::PingResp).await.unwrap();
                         }
-                        _ => ()
                     }
                 }
             }

@@ -15,7 +15,7 @@ impl<T> Slab<T> {
     /// Constructs a new initialized slab
     pub fn with_capacity(mut capacity: usize) -> Slab<T> {
         // slots for replicators
-        capacity = 10 + capacity;
+        capacity += 10;
         let mut entries = Vec::with_capacity(capacity);
         entries.resize_with(capacity, || None::<T>);
 

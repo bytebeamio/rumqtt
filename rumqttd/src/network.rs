@@ -87,7 +87,7 @@ impl Network {
                 }
                 Err(Error::InsufficientBytes(required)) => {
                     self.pending = required;
-                    if out.len() > 0 {
+                    if !out.is_empty() {
                         break;
                     }
                 }
@@ -190,7 +190,7 @@ impl Network {
     }
 
     pub async fn flush(&mut self) -> Result<(), io::Error> {
-        if self.write.len() == 0 {
+        if self.write.is_empty() {
             return Ok(());
         }
 
