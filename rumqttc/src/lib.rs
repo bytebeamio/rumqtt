@@ -114,16 +114,12 @@ pub type Incoming = Packet;
 pub enum Outgoing {
     /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
-    /// Publishes
-    Publishes(Vec<u16>),
     /// Subscribe packet with packet identifier
     Subscribe(u16),
     /// Unsubscribe packet with packet identifier
     Unsubscribe(u16),
     /// PubAck packet
     PubAck(u16),
-    /// PubAck packet
-    PubAcks(Vec<u16>),
     /// PubRec packet
     PubRec(u16),
     /// PubRel packet
@@ -132,6 +128,8 @@ pub enum Outgoing {
     PubComp(u16),
     /// Ping request packet
     PingReq,
+    /// Ping response packet
+    PingResp,
     /// Disconnect packet
     Disconnect,
 }
@@ -157,8 +155,6 @@ pub enum Request {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect,
-    Publishes(Vec<Publish>),
-    PubAcks(Vec<PubAck>),
 }
 
 /// Key type for TLS authentication
@@ -288,7 +284,7 @@ impl MqttOptions {
         self
     }
 
-    pub fn last_will(&mut self) -> Option<LastWill> {
+    pub fn last_will(&self) -> Option<LastWill> {
         self.last_will.clone()
     }
 

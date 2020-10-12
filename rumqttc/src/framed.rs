@@ -58,6 +58,26 @@ impl Network {
         self.max_readb_count = count;
     }
 
+    pub async fn read(&mut self) -> Result<Incoming, io::Error> {
+        loop {
+            match mqtt_read(&mut self.read, self.max_incoming_size) {
+                Ok(packet) => return Ok(packet),
+                Err(Error::InsufficientBytes(required)) => self.pending = required,
+                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+            };
+
+            let mut total_read = 0;
+            loop {
+                let read = self.read_fill().await?;
+                total_read += read;
+                if total_read >= self.pending {
+                    self.pending = 0;
+                    break;
+                }
+            }
+        }
+    }
+
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
     pub async fn readb(
@@ -136,13 +156,6 @@ impl Network {
         let size = match request {
             Request::Publish(packet) => packet.write(&mut self.write)?,
             Request::PublishRaw(packet) => packet.write(&mut self.write)?,
-            Request::Publishes(packets) => {
-                let mut size = 0;
-                for packet in packets {
-                    size += packet.write(&mut self.write)?;
-                }
-                size
-            }
             Request::PubRel(packet) => packet.write(&mut self.write)?,
             Request::PingReq => {
                 let packet = PingReq;
@@ -161,13 +174,6 @@ impl Network {
                 packet.write(&mut self.write)?
             }
             Request::PubAck(packet) => packet.write(&mut self.write)?,
-            Request::PubAcks(packets) => {
-                let mut size = 0;
-                for packet in packets {
-                    size += packet.write(&mut self.write)?;
-                }
-                size
-            }
             Request::PubRec(packet) => packet.write(&mut self.write)?,
             Request::PubComp(packet) => packet.write(&mut self.write)?,
         };
@@ -243,27 +249,14 @@ fn outgoing(packet: &Request) -> Outgoing {
     match packet {
         Request::Publish(publish) => Outgoing::Publish(publish.pkid),
         Request::PublishRaw(publish) => Outgoing::Publish(publish.pkid),
-        Request::Publishes(publishes) => {
-            let mut out = Vec::with_capacity(publishes.len());
-            for publish in publishes {
-                out.push(publish.pkid)
-            }
-            Outgoing::Publishes(out)
-        }
         Request::PubAck(puback) => Outgoing::PubAck(puback.pkid),
-        Request::PubAcks(pubacks) => {
-            let mut out = Vec::with_capacity(pubacks.len());
-            for puback in pubacks {
-                out.push(puback.pkid)
-            }
-            Outgoing::PubAcks(out)
-        }
         Request::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
         Request::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
         Request::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Request::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Request::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
         Request::PingReq => Outgoing::PingReq,
+        Request::PingResp => Outgoing::PingResp,
         Request::Disconnect => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
