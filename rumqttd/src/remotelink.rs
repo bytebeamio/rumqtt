@@ -3,9 +3,9 @@ use crate::state::{self, State};
 use crate::{Id, ServerSettings};
 use mqtt4bytes::{ConnAck, Connect, ConnectReturnCode, Packet, Publish, QoS};
 use rumqttlog::{
-    Connection, ConnectionAck, Receiver, RecvError, Event,
-    Notification, SendError, Sender,
+    Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
+use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
 use tokio::time::{Duration, Elapsed, Instant};
@@ -124,11 +124,12 @@ impl RemoteLink {
                 }
             }
 
+            let mut packets = VecDeque::with_capacity(10);
             select! {
                 _ = keep_alive2 => return Err(Error::KeepAlive),
-                packets = self.network.readb() => {
+                o = self.network.readb(&mut packets) => {
                     timeout.reset(Instant::now() + keep_alive);
-                    let packets = packets?;
+                    o?;
                     self.handle_network_data(packets).await?;
                 }
                 // Receive from router when previous when state isn't in collision
@@ -204,7 +205,8 @@ impl RemoteLink {
         Ok(())
     }
 
-    async fn handle_network_data(&mut self, incoming: Vec<Packet>) -> Result<(), Error> {
+    // TODO: Multiple iterations. Once in network
+    async fn handle_network_data(&mut self, incoming: VecDeque<Packet>) -> Result<(), Error> {
         let mut data = Vec::new();
 
         for packet in incoming {
@@ -263,4 +265,3 @@ impl RemoteLink {
         Ok(())
     }
 }
-

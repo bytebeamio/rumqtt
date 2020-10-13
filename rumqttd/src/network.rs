@@ -2,7 +2,8 @@ use bytes::BytesMut;
 use mqtt4bytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use std::io;
+use std::collections::VecDeque;
+use std::io::{self, ErrorKind};
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -10,8 +11,6 @@ use std::io;
 pub struct Network {
     /// Socket for IO
     socket: Box<dyn N>,
-    /// Pending bytes required to create next frame
-    pending: usize,
     /// Buffered reads
     read: BytesMut,
     /// Buffered writes
@@ -27,7 +26,6 @@ impl Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
-            pending: 0,
             read: BytesMut::with_capacity(10 * 1024),
             write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
@@ -35,125 +33,108 @@ impl Network {
         }
     }
 
-    // TODO make this equivalent to `mqtt_read` to frame `Incoming` directly
-    pub async fn read(&mut self) -> Result<Packet, io::Error> {
+    /// Reads more than 'count' bytes into self.read buffer
+    async fn read_bytes(&mut self, required: usize) -> io::Result<usize> {
+        let mut total_read = 0;
         loop {
-            match mqtt_read(&mut self.read, self.max_incoming_size) {
-                Ok(packet) => return Ok(packet),
-                Err(Error::InsufficientBytes(required)) => self.pending = required,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+            let read = self.socket.read_buf(&mut self.read).await?;
+            if 0 == read {
+                return if self.read.is_empty() {
+                    Err(io::Error::new(
+                        ErrorKind::ConnectionAborted,
+                        "connection closed by peer",
+                    ))
+                } else {
+                    Err(io::Error::new(
+                        ErrorKind::ConnectionReset,
+                        "connection reset by peer",
+                    ))
+                };
             }
 
-            // read more packets until a frame can be created. This functions blocks until a frame
-            // can be created. Use this in a select! branch
-            let mut total_read = 0;
-            loop {
-                let read = self.read_fill().await?;
-                total_read += read;
-                if total_read >= self.pending {
-                    self.pending = 0;
-                    break;
-                }
+            total_read += read;
+            if total_read >= required {
+                return Ok(total_read);
+            }
+        }
+    }
+
+    pub async fn read(&mut self) -> Result<Packet, io::Error> {
+        loop {
+            let required = match mqtt_read(&mut self.read, self.max_incoming_size) {
+                Ok(packet) => return Ok(packet),
+                Err(Error::InsufficientBytes(required)) => required,
+                Err(e) => return Err(io::Error::new(ErrorKind::InvalidData, e.to_string())),
+            };
+
+            // read more packets until a frame can be created. This function
+            // blocks until a frame can be created. Use this in a select! branch
+            self.read_bytes(required).await?;
+        }
+    }
+
+    pub async fn read_connect(&mut self) -> io::Result<Connect> {
+        let packet = self.read().await?;
+
+        match packet {
+            Packet::Connect(connect) => Ok(connect),
+            packet => {
+                let error = format!("Expecting connack. Received = {:?}", packet);
+                Err(io::Error::new(io::ErrorKind::InvalidData, error))
             }
         }
     }
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(&mut self) -> Result<Vec<Packet>, io::Error> {
-        let mut out = Vec::with_capacity(self.max_readb_count);
+    pub async fn readb(&mut self, out: &mut VecDeque<Packet>) -> Result<(), io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
-                // Connection is explicitly handled by other methods. This read is used after establishing
-                // the link. Ignore connection related packets
+                // Error on connect packet after the connection is established
                 Ok(Packet::Connect(_)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Not expecting connect",
-                    ))
+                    return Err(io::Error::new(ErrorKind::InvalidData, "Duplicate connect"));
                 }
+                // Connack is an invalid packet for a broker
                 Ok(Packet::ConnAck(_)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Not expecting connack",
-                    ))
+                    return Err(io::Error::new(ErrorKind::InvalidData, "Client connack"));
                 }
+                // Store packet and return after enough packets are accumulated
                 Ok(packet) => {
-                    out.push(packet);
+                    out.push_back(packet);
                     if out.len() >= self.max_readb_count {
-                        break;
+                        return Ok(());
                     }
-                    continue;
                 }
+                // Wait for more bytes until a frame can be created or return with existing
                 Err(Error::InsufficientBytes(required)) => {
-                    self.pending = required;
+                    // If some packets are already framed, return those instead
+                    // of blocking until max readb count
                     if !out.is_empty() {
-                        break;
+                        return Ok(());
                     }
+
+                    self.read_bytes(required).await?;
                 }
-                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-            };
-
-            let mut total_read = 0;
-            loop {
-                let read = self.read_fill().await?;
-                total_read += read;
-                if total_read >= self.pending {
-                    self.pending = 0;
-                    break;
-                }
-            }
-        }
-
-        Ok(out)
-    }
-
-    /// Fills the read buffer with more bytes
-    async fn read_fill(&mut self) -> Result<usize, io::Error> {
-        let read = self.socket.read_buf(&mut self.read).await?;
-        if 0 == read {
-            return if self.read.is_empty() {
-                Err(io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    "connection closed by peer",
-                ))
-            } else {
-                Err(io::Error::new(
-                    io::ErrorKind::ConnectionReset,
-                    "connection reset by peer",
-                ))
+                Err(e) => return Err(io::Error::new(ErrorKind::InvalidData, e.to_string())),
             };
         }
-
-        Ok(read)
     }
 
     #[inline]
     fn write_fill(&mut self, request: Packet) -> Result<usize, Error> {
-        // TODO Implement max_outgoing_packet_size using write size
         let size = match request {
             Packet::Publish(packet) => packet.write(&mut self.write)?,
             Packet::PubRel(packet) => packet.write(&mut self.write)?,
-            Packet::PingReq => {
-                let packet = PingReq;
-                packet.write(&mut self.write)?
-            }
-            Packet::PingResp => {
-                let packet = PingResp;
-                packet.write(&mut self.write)?
-            }
+            Packet::PingResp => PingResp.write(&mut self.write)?,
             Packet::Subscribe(packet) => packet.write(&mut self.write)?,
             Packet::SubAck(packet) => packet.write(&mut self.write)?,
             Packet::Unsubscribe(packet) => packet.write(&mut self.write)?,
             Packet::UnsubAck(packet) => packet.write(&mut self.write)?,
-            Packet::Disconnect => {
-                let packet = Disconnect;
-                packet.write(&mut self.write)?
-            }
+            Packet::Disconnect => Disconnect.write(&mut self.write)?,
             Packet::PubAck(packet) => packet.write(&mut self.write)?,
             Packet::PubRec(packet) => packet.write(&mut self.write)?,
             Packet::PubComp(packet) => packet.write(&mut self.write)?,
-            _packet => unimplemented!(),
+            packet => unimplemented!("{:?}", packet),
         };
 
         Ok(size)
@@ -167,18 +148,6 @@ impl Network {
 
         self.flush().await?;
         Ok(len)
-    }
-
-    pub async fn read_connect(&mut self) -> Result<Connect, io::Error> {
-        let packet = self.read().await?;
-
-        match packet {
-            Packet::Connect(connect) => Ok(connect),
-            packet => {
-                let error = format!("Expecting connack. Received = {:?}", packet);
-                Err(io::Error::new(io::ErrorKind::InvalidData, error))
-            }
-        }
     }
 
     pub fn fill(&mut self, request: Packet) -> Result<(), io::Error> {
