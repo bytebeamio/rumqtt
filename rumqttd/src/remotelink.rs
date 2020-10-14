@@ -8,7 +8,7 @@ use rumqttlog::{
 use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
-use tokio::time::{Duration, Elapsed, Instant};
+use tokio::time::{Duration, Elapsed};
 use tokio::{select, time};
 
 pub struct RemoteLink {
@@ -106,9 +106,7 @@ impl RemoteLink {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
-        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
-        let mut timeout = time::delay_for(keep_alive);
+        self.network.set_keepalive(self.connect.keep_alive);
 
         // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
         //         Router shouldn't drop messages
@@ -117,7 +115,6 @@ impl RemoteLink {
         // network and system calls for n publisher and 1 subscriber workloads
         // as data from multiple topics can be batched (for a given connection)
         loop {
-            let keep_alive2 = &mut timeout;
             if self.acks_required == 0 {
                 if let Some(message) = self.stored_message.take() {
                     self.handle_router_response(message).await?;
@@ -126,15 +123,13 @@ impl RemoteLink {
 
             let mut packets = VecDeque::with_capacity(10);
             select! {
-                _ = keep_alive2 => return Err(Error::KeepAlive),
                 o = self.network.readb(&mut packets) => {
-                    timeout.reset(Instant::now() + keep_alive);
                     o?;
                     self.handle_network_data(packets).await?;
                 }
                 // Receive from router when previous when state isn't in collision
-                // due to previously recived data request
-                message = self.link_rx.async_recv(), if self.acks_required == 0 => {
+                // due to previously received data request
+                message = self.link_rx.async_recv() => {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
@@ -205,10 +200,14 @@ impl RemoteLink {
         Ok(())
     }
 
-    // TODO: Multiple iterations. Once in network
     async fn handle_network_data(&mut self, incoming: VecDeque<Packet>) -> Result<(), Error> {
         let mut data = Vec::new();
 
+        // FIXME: (Not yet. Only in December)
+        // At the moment, we are doing 2 loops on incoming packets. In network while
+        // collecting and here while processing. If we can handle state, which is
+        // shared between network read and write, This iteration can be handled directly
+        // inside network
         for packet in incoming {
             // debug!("Id = {}[{}], Packet packet = {:?}", self.connect.client_id, self.id, packet);
             match packet {
@@ -225,17 +224,11 @@ impl RemoteLink {
                     data.push(incoming);
                 }
                 Packet::Subscribe(subscribe) => {
-                    trace!(
-                        "{:11} {:14} Id = {}, Topics = {:?}",
-                        "subscribe",
-                        "commit",
-                        self.id,
-                        subscribe.topics
-                    );
                     let incoming = Packet::Subscribe(subscribe);
                     data.push(incoming);
                 }
                 Packet::PingReq => {
+                    debug!("{:11} {:14} Id = {}", "data", "ping", self.id);
                     self.network.fill(Packet::PingResp)?;
                 }
                 Packet::Disconnect => {
@@ -254,7 +247,7 @@ impl RemoteLink {
             trace!(
                 "{:11} {:14} Id = {}, Count = {}",
                 "data",
-                "commit",
+                "remote",
                 self.id,
                 data.len()
             );

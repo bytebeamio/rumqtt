@@ -5,8 +5,8 @@ use std::mem;
 pub struct State {
     outgoing_pub: Vec<Option<u16>>,
     max_inflight: u16,
-    pub(crate) inflight: u16,
-    pub(crate) last_pkid: u16,
+    inflight: u16,
+    last_pkid: u16,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -4,6 +4,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
+use tokio::time::{self, Duration};
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -19,6 +20,7 @@ pub struct Network {
     max_incoming_size: usize,
     /// Maximum readv count
     max_readb_count: usize,
+    keepalive: Duration,
 }
 
 impl Network {
@@ -30,7 +32,13 @@ impl Network {
             write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
             max_readb_count: 10,
+            keepalive: Duration::from_secs(0),
         }
+    }
+
+    pub fn set_keepalive(&mut self, keepalive: u16) {
+        let keepalive = Duration::from_secs(keepalive as u64);
+        self.keepalive = keepalive + keepalive.mul_f32(0.5);
     }
 
     /// Reads more than 'count' bytes into self.read buffer
@@ -85,9 +93,24 @@ impl Network {
         }
     }
 
+    pub async fn readb(&mut self, out: &mut VecDeque<Packet>) -> io::Result<()> {
+        if self.keepalive.as_secs() > 0 {
+            time::timeout(self.keepalive, async {
+                self.inner_readb(out).await?;
+                Ok::<(), io::Error>(())
+            })
+            .await??;
+
+            Ok::<(), io::Error>(())
+        } else {
+            self.inner_readb(out).await?;
+            Ok::<(), io::Error>(())
+        }
+    }
+
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(&mut self, out: &mut VecDeque<Packet>) -> Result<(), io::Error> {
+    pub async fn inner_readb(&mut self, out: &mut VecDeque<Packet>) -> Result<(), io::Error> {
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Error on connect packet after the connection is established

@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let guard = pprof::ProfilerGuard::new(100).unwrap();
     ctrlc::set_handler(move || {
-        profile("rumqttd.pb", &guard);
+        // profile("rumqttd.pb", &guard);
         exit(0);
     })
     .expect("Error setting Ctrl-C handler");
