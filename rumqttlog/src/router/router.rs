@@ -748,7 +748,7 @@ mod test {
             add_new_replica_connection(&mut router, i);
             add_new_subscription(&mut router, i, "hello/world");
 
-            let request = DataRequest::new("hello/world".to_owned());
+            let request = DataRequest::new("hello/world".to_owned(), 1);
             router.data_waiters.register(i, request);
         }
 
@@ -788,7 +788,7 @@ mod test {
         // Register 20 data requests in notifications
         for i in 0..20 {
             let topic = format!("hello/{}/world", i);
-            let request = DataRequest::new(topic);
+            let request = DataRequest::new(topic, 1);
             router.data_waiters.register(10, request);
         }
 
