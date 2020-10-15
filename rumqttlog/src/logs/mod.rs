@@ -75,7 +75,7 @@ impl DataLog {
         let cursors = request.cursors;
 
         let (segment, offset) = cursors[native_id];
-        let mut reply = Data::new(request.topic.clone(), cursors, 0, Vec::new());
+        let mut reply = Data::new(request.topic.clone(), request.qos, cursors, 0, Vec::new());
 
         match commitlog.readv(topic, segment, offset) {
             Ok(Some((jump, base_offset, record_offset, payload))) => {
@@ -137,7 +137,13 @@ impl DataLog {
         // the request with updated offsets
         match payload.is_empty() {
             true => None,
-            false => Some(Data::new(request.topic.clone(), cursors, 0, payload)),
+            false => Some(Data::new(
+                request.topic.clone(),
+                request.qos,
+                cursors,
+                0,
+                payload,
+            )),
         }
     }
 }

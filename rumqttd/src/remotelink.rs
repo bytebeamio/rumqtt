@@ -1,7 +1,7 @@
 use crate::network::Network;
 use crate::state::{self, State};
 use crate::{Id, ServerSettings};
-use mqtt4bytes::{ConnAck, Connect, ConnectReturnCode, Packet, Publish, QoS};
+use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode, Packet, Publish};
 use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
@@ -28,8 +28,6 @@ pub struct RemoteLink {
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
-    // #[error("Packet not supported yet")]
-    // UnsupportedPacket(Packet),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("State error")]
@@ -183,7 +181,7 @@ impl RemoteLink {
                 self.total += payload_count;
                 // dbg!(self.total);
                 for p in reply.payload {
-                    let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
+                    let publish = Publish::from_bytes(&reply.topic, qos(reply.qos).unwrap(), p);
                     let publish = self.state.handle_router_data(publish)?;
                     let publish = Packet::Publish(publish);
                     self.network.fill(publish)?;

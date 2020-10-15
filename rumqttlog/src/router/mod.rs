@@ -105,6 +105,8 @@ impl ReplicationAck {
 pub struct DataRequest {
     /// Log to sweep
     pub(crate) topic: String,
+    /// QoS of the request
+    pub(crate) qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub(crate) cursors: [(u64, u64); 3],
     /// Maximum count of payload buffer per replica
@@ -113,37 +115,22 @@ pub struct DataRequest {
 
 impl DataRequest {
     /// New data request with offsets starting from 0
-    pub fn new(topic: String) -> DataRequest {
+    pub fn new(topic: String, qos: u8) -> DataRequest {
         DataRequest {
             topic,
             cursors: [(0, 0); 3],
             max_count: 100,
-        }
-    }
-
-    pub fn with(topic: String, max_count: usize) -> DataRequest {
-        DataRequest {
-            topic,
-            cursors: [(0, 0); 3],
-            max_count,
+            qos,
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
+    pub fn offsets(topic: String, qos: u8, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
             cursors,
             max_count: 100,
-        }
-    }
-
-    /// New data request with provided offsets
-    pub fn offsets_with(topic: String, cursors: [(u64, u64); 3], max_count: usize) -> DataRequest {
-        DataRequest {
-            topic,
-            cursors,
-            max_count,
+            qos,
         }
     }
 }
@@ -161,6 +148,8 @@ impl fmt::Debug for DataRequest {
 pub struct Data {
     /// Log to sweep
     pub topic: String,
+    /// Qos of the topic
+    pub qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursors: [(u64, u64); 3],
     /// Payload size
@@ -170,12 +159,19 @@ pub struct Data {
 }
 
 impl Data {
-    pub fn new(topic: String, cursors: [(u64, u64); 3], size: usize, payload: Vec<Bytes>) -> Data {
+    pub fn new(
+        topic: String,
+        qos: u8,
+        cursors: [(u64, u64); 3],
+        size: usize,
+        payload: Vec<Bytes>,
+    ) -> Data {
         Data {
             topic,
             cursors,
             size,
             payload,
+            qos,
         }
     }
 }

@@ -32,7 +32,7 @@ impl AsyncClient {
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.take_cancel_handle().unwrap();
+        let cancel_tx = eventloop.cancel_handle();
 
         let client = AsyncClient {
             request_tx,

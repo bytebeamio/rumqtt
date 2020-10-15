@@ -58,7 +58,7 @@ pub struct EventLoop {
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
-    pub(crate) cancel_tx: Option<Sender<()>>,
+    pub(crate) cancel_tx: Sender<()>,
 }
 
 /// Events which can be yielded by the event loop
@@ -91,7 +91,7 @@ impl EventLoop {
             network: None,
             keepalive_timeout: None,
             cancel_rx,
-            cancel_tx: Some(cancel_tx),
+            cancel_tx,
         }
     }
 
@@ -104,8 +104,8 @@ impl EventLoop {
     ///
     /// Can be useful in cases when connection should be halted immediately
     /// between half-open connection detections or (re)connection timeouts
-    pub(crate) fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
-        self.cancel_tx.take()
+    pub(crate) fn cancel_handle(&mut self) -> Sender<()> {
+        self.cancel_tx.clone()
     }
 
     fn clean(&mut self) {

@@ -204,7 +204,10 @@ impl Router {
                             // If data is yielded by commitlog, register a new data request
                             // in the tracker with next offset and send data notification to
                             // the connection
-                            tracker.register_data_request(data.topic.clone(), data.cursors);
+                            let (topic, qos, cursors) =
+                                (data.topic.clone(), data.qos, data.cursors);
+                            let request = DataRequest::offsets(topic, qos, cursors);
+                            tracker.register_data_request(request);
                             let notification = Notification::Data(data);
                             let pause = notify(&mut self.connections, id, notification);
 
@@ -326,7 +329,9 @@ impl Router {
                 // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
                 while let Some(mut topic) = tracker.next_matched() {
                     self.datalog.seek_offsets_to_end(self.id, &mut topic);
-                    tracker.register_data_request(topic.0, topic.2);
+                    let (topic, qos, cursors) = (topic.0, topic.1, topic.2);
+                    let request = DataRequest::offsets(topic, qos, cursors);
+                    tracker.register_data_request(request);
 
                     // If connection is removed from ready queue because of 0 requests,
                     // but connection itself is ready for more notifications, add
@@ -535,7 +540,9 @@ impl Router {
             }
 
             let tracker = self.trackers.get_mut(link_id).unwrap();
-            tracker.register_data_request(request.topic, request.cursors);
+            let (topic, qos, cursors) = (request.topic, request.qos, request.cursors);
+            let request = DataRequest::offsets(topic, qos, cursors);
+            tracker.register_data_request(request);
 
             // If connection is removed from ready queue because of 0 requests,
             // but connection itself is ready for more notifications, add

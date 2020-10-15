@@ -69,8 +69,7 @@ impl Tracker {
         self.requests.pop_front()
     }
 
-    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) {
-        let request = DataRequest::offsets(topic, cursors);
+    pub fn register_data_request(&mut self, request: DataRequest) {
         let request = Request::Data(request);
         self.requests.push_back(request);
     }
@@ -91,8 +90,8 @@ impl Tracker {
     pub fn track_matched_topics(&mut self, topics: &[String]) -> usize {
         let mut matched_count = 0;
         for topic in topics {
-            if self.match_with_subscriptions(topic) {
-                self.register_data_request(topic.to_owned(), [(0, 0); 3]);
+            if let Some(request) = self.match_with_subscriptions(topic) {
+                self.register_data_request(request);
                 matched_count += 1;
             }
         }
@@ -154,26 +153,28 @@ impl Tracker {
     /// topics should be tracked by tracker from offset 0.
     /// Returns true if this topic matches a subscription for
     /// router to trigger new topic notification
-    fn match_with_subscriptions(&mut self, topic: &str) -> bool {
+    fn match_with_subscriptions(&mut self, topic: &str) -> Option<DataRequest> {
         // ignore if the topic is already being tracked
         if self.topics_index.contains(topic) {
-            return false;
+            return None;
         }
 
         // A concrete subscription match
-        if let Some(_qos) = self.concrete_subscriptions.get(topic) {
+        if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
-            return true;
+            let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3]);
+            return Some(request);
         }
 
         // Wildcard subscription match. We return after first match
-        for (filter, _qos) in self.wild_subscriptions.iter() {
+        for (filter, qos) in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
-                return true;
+                let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3]);
+                return Some(request);
             }
         }
 
-        false
+        None
     }
 }
