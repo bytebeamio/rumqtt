@@ -156,17 +156,21 @@ impl EventLoop {
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
 
+        log::trace!("select");
+
         // Return buffered outgoing notification first so that, if incoming
         // packets 1, 2, 3 are acked in bulk before reading new incoming packet,
         // we return buffered outgoing notifications of sent packets first before
         // new incoming notification. This ensures that notification order is in
         // sync with the order in which select is doing things
         if let Some(outgoing) = self.outgoing.pop_front() {
+            log::trace!("Buffered outgoing {:?}", outgoing);
             return Ok(Event::Outgoing(outgoing));
         }
 
         // Return buffered incoming packets before hitting network again
         if let Some(incoming) = self.incoming.pop_front() {
+            log::trace!("Buffered incoming {:?}", incoming);
             return Ok(Event::Incoming(incoming));
         }
 
@@ -175,6 +179,7 @@ impl EventLoop {
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
             o = network.readb(&mut self.incoming) => {
+                log::trace!("Read from network {:?}", o);
                 let incoming = o?;
 
                 // handle 1st incoming packet
