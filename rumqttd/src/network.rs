@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use mqtt4bytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use std::collections::VecDeque;
+use crate::state::State;
 use std::io::{self, ErrorKind};
 use tokio::time::{self, Duration};
 
@@ -14,8 +14,6 @@ pub struct Network {
     socket: Box<dyn N>,
     /// Buffered reads
     read: BytesMut,
-    /// Buffered writes
-    write: BytesMut,
     /// Maximum packet size
     max_incoming_size: usize,
     /// Maximum readv count
@@ -29,7 +27,6 @@ impl Network {
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
-            write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
             max_readb_count: 10,
             keepalive: Duration::from_secs(0),
@@ -41,7 +38,7 @@ impl Network {
         self.keepalive = keepalive + keepalive.mul_f32(0.5);
     }
 
-    /// Reads more than 'count' bytes into self.read buffer
+    /// Reads more than 'required' bytes to frame a packet into self.read buffer
     async fn read_bytes(&mut self, required: usize) -> io::Result<usize> {
         let mut total_read = 0;
         loop {
@@ -93,24 +90,25 @@ impl Network {
         }
     }
 
-    pub async fn readb(&mut self, out: &mut VecDeque<Packet>) -> io::Result<()> {
+    pub async fn readb(&mut self, state: &mut State) -> io::Result<()> {
         if self.keepalive.as_secs() > 0 {
             time::timeout(self.keepalive, async {
-                self.inner_readb(out).await?;
+                self.collect(state).await?;
                 Ok::<(), io::Error>(())
             })
             .await??;
 
             Ok::<(), io::Error>(())
         } else {
-            self.inner_readb(out).await?;
+            self.collect(state).await?;
             Ok::<(), io::Error>(())
         }
     }
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn inner_readb(&mut self, out: &mut VecDeque<Packet>) -> Result<(), io::Error> {
+    pub async fn collect(&mut self, state: &mut State) -> Result<(), io::Error> {
+        let mut count = 0;
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Error on connect packet after the connection is established
@@ -123,8 +121,10 @@ impl Network {
                 }
                 // Store packet and return after enough packets are accumulated
                 Ok(packet) => {
-                    out.push_back(packet);
-                    if out.len() >= self.max_readb_count {
+                    count += 1;
+
+                    state.handle_network_data(packet);
+                    if count >= self.max_readb_count {
                         return Ok(());
                     }
                 }
@@ -132,7 +132,7 @@ impl Network {
                 Err(Error::InsufficientBytes(required)) => {
                     // If some packets are already framed, return those instead
                     // of blocking until max readb count
-                    if !out.is_empty() {
+                    if count > 0 {
                         return Ok(());
                     }
 
@@ -143,51 +143,24 @@ impl Network {
         }
     }
 
-    #[inline]
-    fn write_fill(&mut self, request: Packet) -> Result<usize, Error> {
-        let size = match request {
-            Packet::Publish(packet) => packet.write(&mut self.write)?,
-            Packet::PubRel(packet) => packet.write(&mut self.write)?,
-            Packet::PingResp => PingResp.write(&mut self.write)?,
-            Packet::Subscribe(packet) => packet.write(&mut self.write)?,
-            Packet::SubAck(packet) => packet.write(&mut self.write)?,
-            Packet::Unsubscribe(packet) => packet.write(&mut self.write)?,
-            Packet::UnsubAck(packet) => packet.write(&mut self.write)?,
-            Packet::Disconnect => Disconnect.write(&mut self.write)?,
-            Packet::PubAck(packet) => packet.write(&mut self.write)?,
-            Packet::PubRec(packet) => packet.write(&mut self.write)?,
-            Packet::PubComp(packet) => packet.write(&mut self.write)?,
-            packet => unimplemented!("{:?}", packet),
-        };
-
-        Ok(size)
-    }
-
     pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {
-        let len = match connack.write(&mut self.write) {
+        let mut write = BytesMut::new();
+        let len = match connack.write(&mut write) {
             Ok(size) => size,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };
 
-        self.flush().await?;
+        self.socket.write_all(&write[..]).await?;
         Ok(len)
     }
 
-    pub fn fill(&mut self, request: Packet) -> Result<(), io::Error> {
-        if let Err(e) = self.write_fill(request) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
-        };
-
-        Ok(())
-    }
-
-    pub async fn flush(&mut self) -> Result<(), io::Error> {
-        if self.write.is_empty() {
+    pub async fn flush(&mut self, write: &mut BytesMut) -> Result<(), io::Error> {
+        if write.is_empty() {
             return Ok(());
         }
 
-        self.socket.write_all(&self.write[..]).await?;
-        self.write.clear();
+        self.socket.write_all(&write[..]).await?;
+        write.clear();
         Ok(())
     }
 }
