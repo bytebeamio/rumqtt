@@ -1,6 +1,6 @@
 use crate::network::Network;
 use crate::state::{self, State};
-use crate::{Id, ServerSettings};
+use crate::{network, Id, ServerSettings};
 use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode, Publish};
 use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
@@ -26,6 +26,8 @@ pub struct RemoteLink {
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
+    #[error("Network error {0}")]
+    Network(#[from] network::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("State error")]

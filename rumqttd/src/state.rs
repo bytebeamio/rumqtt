@@ -11,6 +11,10 @@ pub enum Error {
     Serialization(mqtt4bytes::Error),
     #[error("Collision with an unacked packet")]
     Collision,
+    #[error("Duplicate connect")]
+    DuplicateConnect,
+    #[error("Client connack")]
+    ClientConnAck,
 }
 
 /// State of the mqtt connection.
@@ -120,8 +124,10 @@ impl State {
         Ok(())
     }
 
-    pub(crate) async fn handle_network_data(&mut self, packet: Packet) -> Result<(), Error> {
+    pub(crate) fn handle_network_data(&mut self, packet: Packet) -> Result<(), Error> {
         match packet {
+            Packet::Connect(_) => return Err(Error::DuplicateConnect),
+            Packet::ConnAck(_) => return Err(Error::ClientConnAck),
             Packet::PubAck(ack) => {
                 self.handle_incoming_puback(&ack)?;
             }
