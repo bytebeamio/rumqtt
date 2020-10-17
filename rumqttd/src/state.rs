@@ -26,23 +26,23 @@ pub enum Error {
 #[derive(Debug, Clone)]
 pub struct State {
     /// Packet id of the last outgoing packet
-    pub(crate) last_pkid: u16,
+    last_pkid: u16,
     /// Number of outgoing inflight publishes
-    pub(crate) inflight: u16,
+    inflight: u16,
     /// Maximum number of allowed inflight
-    pub(crate) max_inflight: u16,
+    max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub(crate) outgoing_pub: Vec<Option<Publish>>,
+    outgoing_pub: Vec<Option<Publish>>,
     /// Packet ids of released QoS 2 publishes
-    pub(crate) outgoing_rel: Vec<Option<u16>>,
+    outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
-    pub incoming_pub: Vec<Option<u16>>,
+    incoming_pub: Vec<Option<u16>>,
     /// Last collision due to broker not acking in order
-    pub collision: Option<Publish>,
+    collision: Option<Publish>,
     /// Collected incoming packets
     incoming: Vec<Packet>,
     /// Write buffer
-    pub(crate) write: BytesMut,
+    write: BytesMut,
 }
 
 impl State {
@@ -72,6 +72,10 @@ impl State {
         mem::replace(&mut self.incoming, Vec::with_capacity(10))
     }
 
+    pub fn write_mut(&mut self) -> &mut BytesMut {
+        &mut self.write
+    }
+
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     pub(crate) fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), Error> {
@@ -97,10 +101,16 @@ impl State {
         let payload_len = publish.payload.len();
         debug!("Publish. Pkid = {:?}, Size = {:?}", pkid, payload_len);
 
-        // if there is an existing publish at this pkid, this implies that client
-        // hasn't acked this packet yet. This error is possible only when client
-        // isn't acking sequentially
-        if self.outgoing_pub.get(publish.pkid as usize).is_some() {
+        // If there is an existing publish at this pkid, this implies that client
+        // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
+        // after a count of 'inflight' messages. This error is possible only when
+        // client isn't acking sequentially
+        if self
+            .outgoing_pub
+            .get(publish.pkid as usize)
+            .unwrap()
+            .is_some()
+        {
             warn!("Collision on packet id = {:?}", publish.pkid);
             self.collision = Some(publish);
             return Ok(());
@@ -109,6 +119,8 @@ impl State {
         publish
             .write(&mut self.write)
             .map_err(Error::Serialization)?;
+
+        self.outgoing_pub[pkid] = Some(publish);
         self.inflight += 1;
         Ok(())
     }
@@ -118,13 +130,14 @@ impl State {
             Packet::PubAck(ack) => ack.write(&mut self.write),
             Packet::PubRec(ack) => ack.write(&mut self.write),
             Packet::PubComp(ack) => ack.write(&mut self.write),
+            Packet::SubAck(ack) => ack.write(&mut self.write),
             _ => unimplemented!(),
         }
         .map_err(Error::Serialization)?;
         Ok(())
     }
 
-    pub(crate) fn handle_network_data(&mut self, packet: Packet) -> Result<(), Error> {
+    pub fn handle_network_data(&mut self, packet: Packet) -> Result<(), Error> {
         match packet {
             Packet::Connect(_) => return Err(Error::DuplicateConnect),
             Packet::ConnAck(_) => return Err(Error::ClientConnAck),
@@ -161,7 +174,7 @@ impl State {
         Ok(())
     }
 
-    pub(crate) fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), Error> {
+    pub fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), Error> {
         if let Some(publish) = self.check_collision(puback.pkid) {
             publish
                 .write(&mut self.write)
@@ -180,7 +193,7 @@ impl State {
         }
     }
 
-    pub(crate) fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), Error> {
+    pub fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), Error> {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             // NOTE: Inflight - 1 for qos2 in comp
             Some(_) => {
@@ -198,7 +211,7 @@ impl State {
         }
     }
 
-    pub(crate) fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), Error> {
+    pub fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), Error> {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
                 let response = PubComp::new(pubrel.pkid);
@@ -214,7 +227,7 @@ impl State {
         }
     }
 
-    pub(crate) fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), Error> {
+    pub fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), Error> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
             publish
                 .write(&mut self.write)
@@ -233,7 +246,7 @@ impl State {
         }
     }
 
-    pub(crate) fn handle_incoming_pingreq(&mut self) -> Result<(), Error> {
+    pub fn handle_incoming_pingreq(&mut self) -> Result<(), Error> {
         PingResp
             .write(&mut self.write)
             .map_err(Error::Serialization)?;

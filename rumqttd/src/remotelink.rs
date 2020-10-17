@@ -104,8 +104,8 @@ impl RemoteLink {
     pub async fn start(&mut self) -> Result<(), Error> {
         self.network.set_keepalive(self.connect.keep_alive);
 
-        // Note: Shouldn't result in bounded queue deadlocks because of blocking
-        // n/w send
+        // Note:
+        // Shouldn't result in bounded queue deadlocks because of blocking n/w send
         loop {
             select! {
                 o = self.network.readb(&mut self.state) => {
@@ -124,7 +124,7 @@ impl RemoteLink {
 
     async fn handle_network_data(&mut self) -> Result<(), Error> {
         let data = self.state.take_incoming();
-        self.network.flush(&mut self.state.write).await?;
+        self.network.flush(self.state.write_mut()).await?;
 
         if !data.is_empty() {
             trace!(
@@ -175,7 +175,6 @@ impl RemoteLink {
                 }
 
                 self.total += payload_count;
-                // dbg!(self.total);
                 for p in reply.payload {
                     let publish = Publish::from_bytes(&reply.topic, qos(reply.qos).unwrap(), p);
                     self.state.outgoing_publish(publish)?;
@@ -187,8 +186,7 @@ impl RemoteLink {
             }
         }
 
-        // FIXME Early returns above will prevent router send and network write
-        self.network.flush(&mut self.state.write).await?;
+        self.network.flush(self.state.write_mut()).await?;
         Ok(())
     }
 }
