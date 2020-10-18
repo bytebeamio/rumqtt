@@ -33,7 +33,7 @@ async fn run(eventloop: &mut EventLoop, reconnect: bool) -> Result<(), Connectio
     }
 }
 
-async fn tick(
+async fn _tick(
     eventloop: &mut EventLoop,
     reconnect: bool,
     count: usize,
@@ -311,6 +311,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
 
     task::spawn(async move {
         let mut broker = Broker::new(1891, 0).await;
+
         // read all incoming packets first
         for i in 1..=4 {
             let packet = broker.read_publish().await;
@@ -338,23 +339,24 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     time::delay_for(Duration::from_secs(1)).await;
 
     // sends 4 requests and receives ack 3, 4. 5th request will trigger collision
-    match run(&mut eventloop, false).await {
-        Err(ConnectionError::MqttState(StateError::Collision(1))) => (),
-        o => panic!("Expecting collision error. Found = {:?}", o),
+    // Poll until there is collision.
+    loop {
+        match eventloop.poll().await {
+            Err(ConnectionError::MqttState(StateError::Collision(1))) => break,
+            _ => continue, // v => panic!("Unexpected event = {:?}", v),
+        }
     }
 
-    // Next poll will receive ack = 1 in 5 seconds and fixes collision
-    let start = Instant::now();
-    let event = eventloop.poll().await.unwrap();
-    assert_eq!(event, Event::Incoming(Packet::PubAck(PubAck::new(1))));
-    assert_eq!(start.elapsed().as_secs(), 5);
-
-    // Next poll unblocks failed publish due to collision
-    let event = eventloop.poll().await.unwrap();
-    assert_eq!(event, Event::Outgoing(Outgoing::Publish(1)));
-
-    // handle remaining outgoing and incoming packets
-    tick(&mut eventloop, false, 10).await.unwrap();
+    loop {
+        let start = Instant::now();
+        match eventloop.poll().await {
+            Ok(Event::Outgoing(Outgoing::Publish(ack))) if ack == 1 => {
+                assert_eq!(start.elapsed().as_secs(), 5)
+            }
+            Err(_) => break,
+            _ => continue,
+        }
+    }
 }
 
 #[tokio::test]
