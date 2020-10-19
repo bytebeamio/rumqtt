@@ -49,6 +49,7 @@ pub struct MqttState {
     /// resolving collisions will result in error
     /// Last incoming packet time
     pub collision_ping_count: usize,
+    /// Last incoming packet time
     last_incoming: Instant,
     /// Last outgoing packet time
     last_outgoing: Instant,
@@ -59,13 +60,13 @@ pub struct MqttState {
     /// Maximum number of allowed inflight
     pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub(crate) outgoing_pub: Vec<Option<PublishRaw>>,
+    pub(crate) outgoing_pub: Vec<Option<Publish>>,
     /// Packet ids of released QoS 2 publishes
     pub(crate) outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
     pub(crate) incoming_pub: Vec<Option<u16>>,
     /// Last collision due to broker not acking in order
-    pub collision: Option<PublishRaw>,
+    pub collision: Option<Publish>,
     /// Buffered incoming packets
     pub events: VecDeque<Event>,
     /// Write buffer
@@ -102,7 +103,7 @@ impl MqttState {
         // remove and collect pending publishes
         for publish in self.outgoing_pub.iter_mut() {
             if let Some(publish) = publish.take() {
-                let request = Request::PublishRaw(publish);
+                let request = Request::Publish(publish);
                 pending.push(request);
             }
         }
@@ -135,7 +136,6 @@ impl MqttState {
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
         match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
-            Request::PublishRaw(publish) => self.outgoing_raw_publish(publish)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
@@ -178,11 +178,6 @@ impl MqttState {
     fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
         debug!("Publish. Topc = {}", publish.topic);
 
-        let publish = match publish.raw() {
-            Ok(publish) => publish,
-            Err(e) => return Err(StateError::Serialization(e)),
-        };
-
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
@@ -203,46 +198,15 @@ impl MqttState {
         Ok(())
     }
 
-    /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
-    /// it buy wrapping publish in packet
-    fn outgoing_raw_publish(&mut self, publish: PublishRaw) -> Result<(), StateError> {
-        debug!(
-            "Publish.  Pkid = {:?}, Payload Size = {:?}",
-            publish.pkid,
-            publish.payload.len()
-        );
-
-        let publish = match publish.qos {
-            QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
-        };
-
-        publish
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
-        let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-        self.events.push_back(event);
-        Ok(())
-    }
-
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
-        if let Some(publish) = &self.collision {
-            if publish.pkid == puback.pkid {
-                // remove acked, previously collided packet from the state
-                // get previously failed publish due to collision for
-                // eventloop to send it
-                self.collision.take().unwrap();
-                self.collision_ping_count = 0;
+        if let Some(publish) = self.check_collision(puback.pkid) {
+            publish
+                .write(&mut self.write)
+                .map_err(StateError::Serialization)?;
 
-                let publish = self.outgoing_pub[puback.pkid as usize].clone().take();
-                publish
-                    .unwrap()
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
-                return Ok(());
-            }
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
+            self.collision_ping_count = 0;
         }
 
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
@@ -327,21 +291,12 @@ impl MqttState {
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
-        if let Some(publish) = &self.collision {
-            if publish.pkid == pubcomp.pkid {
-                // remove acked, previously collided packet from the state
-                // get previously failed publish due to collision for
-                // eventloop to send it
-                self.collision.take().unwrap();
-                self.collision_ping_count = 0;
-                let publish = self.outgoing_pub[pubcomp.pkid as usize].clone().take();
-                publish
-                    .unwrap()
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
+        if let Some(publish) = self.check_collision(pubcomp.pkid) {
+            publish
+                .write(&mut self.write)
+                .map_err(StateError::Serialization)?;
 
-                return Ok(());
-            }
+            self.collision_ping_count = 0;
         }
 
         match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
@@ -447,31 +402,51 @@ impl MqttState {
         Ok(())
     }
 
+    fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
+        if let Some(publish) = &self.collision {
+            // remove acked, previously collided packet from the state
+            if publish.pkid == pkid {
+                self.collision.take().unwrap();
+                let publish = self.outgoing_pub[pkid as usize].clone().take();
+                return publish;
+            }
+        }
+
+        None
+    }
+
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn add_packet_id_and_save(
-        &mut self,
-        mut publish: PublishRaw,
-    ) -> Result<PublishRaw, StateError> {
+    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) as uninitialized packets
             0 => {
                 let pkid = self.next_pkid();
-                publish.set_pkid(pkid);
+                publish.pkid = pkid;
                 publish
             }
             _ => publish,
         };
 
-        // if there is an existing publish at this pkid, this implies that broker hasn't acked this
-        // packet yet. This error is possible only when broker isn't acking sequentially
-        let pkid = publish.pkid as usize;
-        if let Some(v) = mem::replace(&mut self.outgoing_pub[pkid], Some(publish.clone())) {
-            warn!("Replacing unacked packet {:?}", v);
-            self.collision = Some(v);
-            return Err(StateError::Collision(publish.pkid));
+        // If there is an existing publish at this pkid, this implies that client
+        // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
+        // after a count of 'inflight' messages. This error is possible only when
+        // client isn't acking sequentially
+        let pkid = publish.pkid;
+        if self
+            .outgoing_pub
+            .get(publish.pkid as usize)
+            .unwrap()
+            .is_some()
+        {
+            warn!("Collision on packet id = {:?}", publish.pkid);
+            self.collision = Some(publish);
+            return Err(StateError::Collision(pkid));
         }
 
+        // if there is an existing publish at this pkid, this implies that broker hasn't acked this
+        // packet yet. This error is possible only when broker isn't acking sequentially
+        self.outgoing_pub[pkid as usize] = Some(publish.clone());
         self.inflight += 1;
         Ok(publish)
     }

@@ -305,7 +305,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     let requests_tx = eventloop.handle();
 
     task::spawn(async move {
-        start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
+        start_requests(8, QoS::AtLeastOnce, 0, requests_tx).await;
         time::delay_for(Duration::from_secs(60)).await;
     });
 
@@ -338,20 +338,28 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
 
     time::delay_for(Duration::from_secs(1)).await;
 
-    // sends 4 requests and receives ack 3, 4. 5th request will trigger collision
+    // sends 4 requests. 5th request will trigger collision
     // Poll until there is collision.
     loop {
         match eventloop.poll().await {
             Err(ConnectionError::MqttState(StateError::Collision(1))) => break,
-            _ => continue, // v => panic!("Unexpected event = {:?}", v),
+            v => {
+                println!("Poll = {:?}", v);
+                continue;
+            }
         }
     }
 
     loop {
         let start = Instant::now();
-        match eventloop.poll().await {
-            Ok(Event::Outgoing(Outgoing::Publish(ack))) if ack == 1 => {
-                assert_eq!(start.elapsed().as_secs(), 5)
+        let event = eventloop.poll().await;
+        println!("Poll = {:?}", event);
+
+        match event {
+            Ok(Event::Outgoing(Outgoing::Publish(ack))) => {
+                if ack == 1 {
+                    assert_eq!(start.elapsed().as_secs(), 5)
+                }
             }
             Err(_) => break,
             _ => continue,
