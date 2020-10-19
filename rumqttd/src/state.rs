@@ -15,6 +15,8 @@ pub enum Error {
     DuplicateConnect,
     #[error("Client connack")]
     ClientConnAck,
+    #[error("Client disconnect")]
+    Disconnect,
 }
 
 /// State of the mqtt connection.
@@ -141,6 +143,15 @@ impl State {
         match packet {
             Packet::Connect(_) => return Err(Error::DuplicateConnect),
             Packet::ConnAck(_) => return Err(Error::ClientConnAck),
+            Packet::Publish(publish) => {
+                let forward = self.handle_incoming_publish(&publish)?;
+                if forward {
+                    self.incoming.push(Packet::Publish(publish));
+                }
+            }
+            Packet::Subscribe(subscribe) => {
+                self.incoming.push(Packet::Subscribe(subscribe));
+            }
             Packet::PubAck(ack) => {
                 self.handle_incoming_puback(&ack)?;
             }
@@ -156,15 +167,7 @@ impl State {
             Packet::PingReq => {
                 self.handle_incoming_pingreq()?;
             }
-            Packet::Publish(publish) => {
-                self.incoming.push(Packet::Publish(publish));
-            }
-            Packet::Subscribe(subscribe) => {
-                self.incoming.push(Packet::Subscribe(subscribe));
-            }
-            Packet::Disconnect => {
-                // TODO Add correct disconnection handling
-            }
+            Packet::Disconnect => return Err(Error::Disconnect),
             packet => {
                 error!("Packet = {:?} not supported yet", packet);
                 // return Err(Error::UnsupportedPacket(packet))
@@ -172,6 +175,26 @@ impl State {
         }
 
         Ok(())
+    }
+
+    /// Filters duplicate qos 2 publishes and returns true if publish should be forwarded
+    /// to the router.
+    pub fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<bool, Error> {
+        if publish.qos == QoS::ExactlyOnce {
+            let pkid = publish.pkid;
+
+            // If publish packet is already recorded before, this is a duplicate
+            // qos 2 publish which should be filtered here.
+            if let Some(_) = mem::replace(&mut self.incoming_pub[pkid as usize], Some(pkid)) {
+                PubRec::new(pkid)
+                    .write(&mut self.write)
+                    .map_err(Error::Serialization)?;
+
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
     pub fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), Error> {
