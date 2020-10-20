@@ -376,19 +376,36 @@ impl Router {
             topic,
             payload,
             qos,
+            retain,
             ..
         } = publish;
 
-        let (is_new_topic, (_segment, offset)) = match self.datalog.append(id, &topic, payload) {
-            Some(v) => v,
-            None => return,
-        };
+        let is_new_topic = if retain {
+            let is_new_topic = match self.datalog.retain(id, &topic, payload) {
+                Some(v) => v,
+                None => return,
+            };
 
-        if qos as u8 > 0 {
-            let watermarks = self.watermarks.get_mut(id).unwrap();
-            watermarks.push_publish_ack(pkid, qos as u8);
-            watermarks.update_pkid_offset_map(&topic, pkid, offset);
-        }
+            if qos as u8 > 0 {
+                let watermarks = self.watermarks.get_mut(id).unwrap();
+                watermarks.push_publish_ack(pkid, qos as u8);
+            }
+
+            is_new_topic
+        } else {
+            let (is_new_topic, (_, offset)) = match self.datalog.append(id, &topic, payload) {
+                Some(v) => v,
+                None => return,
+            };
+
+            if qos as u8 > 0 {
+                let watermarks = self.watermarks.get_mut(id).unwrap();
+                watermarks.push_publish_ack(pkid, qos as u8);
+                watermarks.update_pkid_offset_map(&topic, pkid, offset);
+            }
+
+            is_new_topic
+        };
 
         // If there is a new unique append, send it to connection waiting on it
         // This is equivalent to hybrid of block and poll and we don't need timers.

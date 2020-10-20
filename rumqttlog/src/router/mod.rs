@@ -109,6 +109,8 @@ pub struct DataRequest {
     pub(crate) qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub(crate) cursors: [(u64, u64); 3],
+    /// Last retain id
+    pub(crate) last_retain: u64,
     /// Maximum count of payload buffer per replica
     max_count: usize,
 }
@@ -118,9 +120,10 @@ impl DataRequest {
     pub fn new(topic: String, qos: u8) -> DataRequest {
         DataRequest {
             topic,
-            cursors: [(0, 0); 3],
-            max_count: 100,
             qos,
+            cursors: [(0, 0); 3],
+            last_retain: 0,
+            max_count: 100,
         }
     }
 
@@ -128,9 +131,10 @@ impl DataRequest {
     pub fn offsets(topic: String, qos: u8, cursors: [(u64, u64); 3]) -> DataRequest {
         DataRequest {
             topic,
-            cursors,
-            max_count: 100,
             qos,
+            cursors,
+            last_retain: 0,
+            max_count: 100,
         }
     }
 }

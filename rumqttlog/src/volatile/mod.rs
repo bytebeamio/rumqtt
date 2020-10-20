@@ -21,6 +21,8 @@ pub struct Log {
     active_segment: Segment,
     /// All the segments in a ringbuffer
     segments: FnvHashMap<u64, Segment>,
+    /// Retained publish
+    retained: Option<(u64, Bytes)>,
 }
 
 impl Log {
@@ -36,7 +38,13 @@ impl Log {
             max_segments,
             segments: FnvHashMap::default(),
             active_segment: Segment::new(0),
+            retained: None,
         }
+    }
+
+    pub fn retain(&mut self, record: Bytes) {
+        let retained = self.retained.get_or_insert((0, record));
+        retained.0 += 1;
     }
 
     /// Appends this record to the tail and returns the offset of this append.
@@ -103,7 +111,12 @@ impl Log {
     /// data is not of active segment. Set your max_segment size keeping tail
     /// latencies of all the concurrent connections mind
     /// (some runtimes support internal preemption using await points)
-    pub fn readv(&mut self, segment: u64, offset: u64) -> (Option<u64>, u64, u64, Vec<Bytes>) {
+    pub fn readv(
+        &mut self,
+        segment: u64,
+        offset: u64,
+        last_retain: u64,
+    ) -> (Option<u64>, u64, u64, Vec<Bytes>) {
         let mut base_offset = segment;
         let mut offset = offset;
 
@@ -115,13 +128,13 @@ impl Log {
             offset = self.head_offset;
         }
 
-        loop {
+        let mut data = loop {
             // read from active segment if base offset matches active segment's base offset
             if base_offset == self.active_segment.base_offset() {
                 let relative_offset = (offset - base_offset) as usize;
                 let out = self.active_segment.readv(relative_offset);
                 let next_record_offset = offset + out.len() as u64;
-                return (
+                break (
                     None,
                     self.active_segment.base_offset(),
                     next_record_offset,
@@ -137,7 +150,7 @@ impl Log {
                 if !out.is_empty() {
                     let next_record_offset = offset + out.len() as u64;
                     let next_segment_offset = segment.base_offset() + segment.len() as u64;
-                    return (
+                    break (
                         Some(next_segment_offset),
                         segment.base_offset(),
                         next_record_offset,
@@ -156,7 +169,15 @@ impl Log {
                     continue;
                 };
             }
+        };
+
+        if let Some((id, publish)) = &self.retained {
+            if *id != last_retain {
+                data.3.push(publish.clone())
+            }
         }
+
+        data
     }
 }
 
