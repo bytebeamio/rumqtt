@@ -140,7 +140,7 @@ pub enum Outgoing {
 /// operations.
 /// Upcoming feature: When 'manual' feature is turned on
 /// provides the ability to reply with acks when the user sees fit
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Request {
     Publish(Publish),
     PublishRaw(PublishRaw),
@@ -158,7 +158,7 @@ pub enum Request {
 }
 
 /// Key type for TLS authentication
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Key {
     RSA,
     ECC,
@@ -183,7 +183,7 @@ impl From<Unsubscribe> for Request {
 }
 
 /// Client authentication option for mqtt connect packet
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SecurityOptions {
     /// No authentication.
     None,
