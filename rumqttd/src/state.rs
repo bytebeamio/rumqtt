@@ -42,7 +42,7 @@ pub struct State {
     /// Last collision due to broker not acking in order
     collision: Option<Publish>,
     /// Collected incoming packets
-    incoming: Vec<Packet>,
+    pub incoming: Vec<Packet>,
     /// Write buffer
     write: BytesMut,
 }
@@ -139,7 +139,7 @@ impl State {
         Ok(())
     }
 
-    pub fn handle_network_data(&mut self, packet: Packet) -> Result<(), Error> {
+    pub fn handle_network_data(&mut self, packet: Packet) -> Result<bool, Error> {
         match packet {
             Packet::Connect(_) => return Err(Error::DuplicateConnect),
             Packet::ConnAck(_) => return Err(Error::ClientConnAck),
@@ -167,14 +167,14 @@ impl State {
             Packet::PingReq => {
                 self.handle_incoming_pingreq()?;
             }
-            Packet::Disconnect => return Err(Error::Disconnect),
+            Packet::Disconnect => return Ok(true),
             packet => {
                 error!("Packet = {:?} not supported yet", packet);
                 // return Err(Error::UnsupportedPacket(packet))
             }
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// Filters duplicate qos 2 publishes and returns true if publish should be forwarded

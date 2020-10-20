@@ -103,38 +103,40 @@ impl Network {
         }
     }
 
-    pub async fn readb(&mut self, state: &mut State) -> Result<(), Error> {
+    pub async fn readb(&mut self, state: &mut State) -> Result<bool, Error> {
         if self.keepalive.as_secs() > 0 {
-            time::timeout(self.keepalive, async {
-                self.collect(state).await?;
-                Ok::<(), Error>(())
+            let disconnect = time::timeout(self.keepalive, async {
+                let disconnect = self.collect(state).await?;
+                Ok::<_, Error>(disconnect)
             })
             .await??;
 
-            Ok(())
+            Ok(disconnect)
         } else {
-            self.collect(state).await?;
-            Ok(())
+            let disconnect = self.collect(state).await?;
+            Ok(disconnect)
         }
     }
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub async fn collect(&mut self, state: &mut State) -> Result<(), Error> {
+    pub async fn collect(&mut self, state: &mut State) -> Result<bool, Error> {
         let mut count = 0;
+        let mut disconnect = false;
+
         loop {
             match mqtt_read(&mut self.read, self.max_incoming_size) {
                 // Store packet and return after enough packets are accumulated
                 Ok(packet) => {
-                    state.handle_network_data(packet)?;
-
+                    disconnect = state.handle_network_data(packet)?;
                     count += 1;
+
                     if count >= self.max_readb_count {
-                        return Ok(());
+                        return Ok(disconnect);
                     }
                 }
                 // If some packets are already framed, return those
-                Err(mqtt4bytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                Err(mqtt4bytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(disconnect),
                 // Wait for more bytes until a frame can be created
                 Err(mqtt4bytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;

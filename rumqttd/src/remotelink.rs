@@ -44,6 +44,8 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Payload count greater than max inflight")]
     TooManyPayloads(usize),
+    #[error("Disconnect request")]
+    Disconnect,
 }
 
 impl RemoteLink {
@@ -109,8 +111,12 @@ impl RemoteLink {
         loop {
             select! {
                 o = self.network.readb(&mut self.state) => {
-                    o?;
+                    let disconnect = o?;
                     self.handle_network_data().await?;
+
+                    if disconnect {
+                        return Err(Error::Disconnect)
+                    }
                 }
                 // Receive from router when previous when state isn't in collision
                 // due to previously received data request
