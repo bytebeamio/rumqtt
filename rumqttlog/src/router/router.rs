@@ -204,9 +204,12 @@ impl Router {
                             // If data is yielded by commitlog, register a new data request
                             // in the tracker with next offset and send data notification to
                             // the connection
-                            let (topic, qos, cursors) =
-                                (data.topic.clone(), data.qos, data.cursors);
-                            let request = DataRequest::offsets(topic, qos, cursors);
+                            let topic = data.topic.clone();
+                            let qos = data.qos;
+                            let cursors = data.cursors;
+                            let last_retain = data.last_retain;
+
+                            let request = DataRequest::offsets(topic, qos, cursors, last_retain);
                             tracker.register_data_request(request);
                             let notification = Notification::Data(data);
                             let pause = notify(&mut self.connections, id, notification);
@@ -330,7 +333,7 @@ impl Router {
                 while let Some(mut topic) = tracker.next_matched() {
                     self.datalog.seek_offsets_to_end(self.id, &mut topic);
                     let (topic, qos, cursors) = (topic.0, topic.1, topic.2);
-                    let request = DataRequest::offsets(topic, qos, cursors);
+                    let request = DataRequest::offsets(topic, qos, cursors, 0);
                     tracker.register_data_request(request);
 
                     // If connection is removed from ready queue because of 0 requests,
@@ -366,11 +369,6 @@ impl Router {
     }
 
     fn handle_connection_publish(&mut self, id: ConnectionId, publish: Publish) {
-        if publish.payload.is_empty() {
-            error!("Empty publish. ID = {:?}, topic = {:?}", id, publish.topic);
-            return;
-        }
-
         let Publish {
             pkid,
             topic,
@@ -393,6 +391,11 @@ impl Router {
 
             is_new_topic
         } else {
+            if payload.is_empty() {
+                error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
+                return;
+            }
+
             let (is_new_topic, (_, offset)) = match self.datalog.append(id, &topic, payload) {
                 Some(v) => v,
                 None => return,
@@ -557,8 +560,13 @@ impl Router {
             }
 
             let tracker = self.trackers.get_mut(link_id).unwrap();
-            let (topic, qos, cursors) = (request.topic, request.qos, request.cursors);
-            let request = DataRequest::offsets(topic, qos, cursors);
+
+            let topic = request.topic;
+            let qos = request.qos;
+            let cursors = request.cursors;
+            let last_retain = request.last_retain;
+
+            let request = DataRequest::offsets(topic, qos, cursors, last_retain);
             tracker.register_data_request(request);
 
             // If connection is removed from ready queue because of 0 requests,

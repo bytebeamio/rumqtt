@@ -128,12 +128,17 @@ impl DataRequest {
     }
 
     /// New data request with provided offsets
-    pub fn offsets(topic: String, qos: u8, cursors: [(u64, u64); 3]) -> DataRequest {
+    pub fn offsets(
+        topic: String,
+        qos: u8,
+        cursors: [(u64, u64); 3],
+        last_retain: u64,
+    ) -> DataRequest {
         DataRequest {
             topic,
             qos,
             cursors,
-            last_retain: 0,
+            last_retain,
             max_count: 100,
         }
     }
@@ -156,6 +161,8 @@ pub struct Data {
     pub qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursors: [(u64, u64); 3],
+    /// Next retain publish id
+    pub last_retain: u64,
     /// Payload size
     pub size: usize,
     /// Reply data chain
@@ -167,12 +174,14 @@ impl Data {
         topic: String,
         qos: u8,
         cursors: [(u64, u64); 3],
+        last_retain: u64,
         size: usize,
         payload: Vec<Bytes>,
     ) -> Data {
         Data {
             topic,
             cursors,
+            last_retain,
             size,
             payload,
             qos,

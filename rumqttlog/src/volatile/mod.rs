@@ -43,8 +43,14 @@ impl Log {
     }
 
     pub fn retain(&mut self, record: Bytes) {
-        let retained = self.retained.get_or_insert((0, record));
+        if record.is_empty() {
+            self.retained = None;
+            return;
+        }
+
+        let retained = self.retained.get_or_insert((0, record.clone()));
         retained.0 += 1;
+        retained.1 = record;
     }
 
     /// Appends this record to the tail and returns the offset of this append.
@@ -116,7 +122,7 @@ impl Log {
         segment: u64,
         offset: u64,
         last_retain: u64,
-    ) -> (Option<u64>, u64, u64, Vec<Bytes>) {
+    ) -> (Option<u64>, u64, u64, u64, Vec<Bytes>) {
         let mut base_offset = segment;
         let mut offset = offset;
 
@@ -138,6 +144,7 @@ impl Log {
                     None,
                     self.active_segment.base_offset(),
                     next_record_offset,
+                    last_retain,
                     out,
                 );
             }
@@ -154,6 +161,7 @@ impl Log {
                         Some(next_segment_offset),
                         segment.base_offset(),
                         next_record_offset,
+                        last_retain,
                         out,
                     );
                 } else {
@@ -171,9 +179,10 @@ impl Log {
             }
         };
 
-        if let Some((id, publish)) = &self.retained {
+        if let Some((id, publish)) = &mut self.retained {
             if *id != last_retain {
-                data.3.push(publish.clone())
+                data.4.push(publish.clone());
+                data.3 = *id;
             }
         }
 

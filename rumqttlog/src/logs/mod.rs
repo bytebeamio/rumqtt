@@ -95,14 +95,24 @@ impl DataLog {
         let commitlog = &mut self.commitlog[native_id];
 
         let (segment, offset) = cursors[native_id];
-        let mut reply = Data::new(request.topic.clone(), request.qos, cursors, 0, Vec::new());
+        let mut reply = Data::new(
+            request.topic.clone(),
+            request.qos,
+            cursors,
+            last_retain,
+            0,
+            Vec::new(),
+        );
 
         match commitlog.readv(topic, segment, offset, last_retain) {
-            Ok(Some((jump, base_offset, record_offset, payload))) => {
+            Ok(Some((jump, base_offset, record_offset, last_retain, payload))) => {
                 match jump {
                     Some(next) => reply.cursors[native_id] = (next, next),
                     None => reply.cursors[native_id] = (base_offset, record_offset),
                 }
+
+                // Update retain id (incase readv has retained publish to consider)
+                reply.last_retain = last_retain;
 
                 // Update reply's cursors only when read has returned some data
                 // Move the reply to next segment if we are done with the current one
@@ -124,8 +134,7 @@ impl DataLog {
     /// log is caught up or encountered an error while reading data
     pub(crate) fn extract_all_data(&mut self, request: &DataRequest) -> Option<Data> {
         let topic = &request.topic;
-        let last_retain = request.last_retain;
-
+        let mut last_retain = request.last_retain;
         let mut cursors = [(0, 0); 3];
         let mut payload = Vec::new();
 
@@ -134,11 +143,14 @@ impl DataLog {
             let (segment, offset) = request.cursors[i];
             match commitlog.readv(topic, segment, offset, last_retain) {
                 Ok(Some(v)) => {
-                    let (jump, base_offset, record_offset, mut data) = v;
+                    let (jump, base_offset, record_offset, retain, mut data) = v;
                     match jump {
                         Some(next) => cursors[i] = (next, next),
                         None => cursors[i] = (base_offset, record_offset),
                     }
+
+                    // Update retain id (incase readv has retained publish to consider)
+                    last_retain = retain;
 
                     if data.is_empty() {
                         continue;
@@ -162,6 +174,7 @@ impl DataLog {
                 request.topic.clone(),
                 request.qos,
                 cursors,
+                last_retain,
                 0,
                 payload,
             )),

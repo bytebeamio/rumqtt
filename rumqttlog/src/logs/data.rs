@@ -76,7 +76,7 @@ impl DataLog {
         in_segment: u64,
         in_offset: u64,
         last_retain: u64,
-    ) -> io::Result<Option<(Option<u64>, u64, u64, Vec<Bytes>)>> {
+    ) -> io::Result<Option<(Option<u64>, u64, u64, u64, Vec<Bytes>)>> {
         // Router during data request and notifications will check both
         // native and replica commitlog where this topic doesn't exist
         let log = match self.logs.get_mut(topic) {
@@ -84,7 +84,8 @@ impl DataLog {
             None => return Ok(None),
         };
 
-        let (jump, segment, offset, data) = log.readv(in_segment, in_offset, last_retain);
+        let (jump, segment, offset, last_retain, data) =
+            log.readv(in_segment, in_offset, last_retain);
 
         // For debugging. Will be removed later
         // println!(
@@ -95,6 +96,6 @@ impl DataLog {
         //     offset,
         //     data.len()
         // );
-        Ok(Some((jump, segment, offset, data)))
+        Ok(Some((jump, segment, offset, last_retain, data)))
     }
 }

@@ -162,7 +162,7 @@ impl Tracker {
         // A concrete subscription match
         if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
-            let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3]);
+            let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3], 0);
             return Some(request);
         }
 
@@ -170,7 +170,7 @@ impl Tracker {
         for (filter, qos) in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
-                let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3]);
+                let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3], 0);
                 return Some(request);
             }
         }
