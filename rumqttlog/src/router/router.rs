@@ -169,11 +169,19 @@ impl Router {
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
         info!(
-            "{:11} {:14} Id = {}, Remote id = {}",
-            "connection", "clean", id, disconnect.id,
+            "{:11} {:14} Id = {}, Remote = {}",
+            "connection", "", id, disconnect.id,
         );
 
-        self.connections.remove(id);
+        // Forward connection will
+        let mut connection = self.connections.remove(id).unwrap();
+        if disconnect.execute_will {
+            if let Some(will) = connection.will() {
+                let publish = Publish::from_bytes(will.topic, will.qos, will.message);
+                self.handle_connection_publish(id, publish);
+            }
+        }
+
         self.trackers.remove(id);
         self.watermarks.remove(id);
         self.data_waiters.remove(id);

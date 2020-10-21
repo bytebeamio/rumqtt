@@ -274,10 +274,11 @@ pub enum ConnectionAck {
 #[derive(Debug)]
 pub struct Disconnection {
     id: String,
+    execute_will: bool,
 }
 
 impl Disconnection {
-    pub fn new(id: String) -> Disconnection {
-        Disconnection { id }
+    pub fn new(id: String, execute_will: bool) -> Disconnection {
+        Disconnection { id, execute_will }
     }
 }

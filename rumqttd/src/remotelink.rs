@@ -58,7 +58,7 @@ impl RemoteLink {
         // DOS attacks by filling total connections that the server can handle with idle open
         // connections which results in server rejecting new connections
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
-        let connect = time::timeout(timeout, async {
+        let mut connect = time::timeout(timeout, async {
             let connect = network.read_connect().await?;
             Ok::<_, Error>(connect)
         })
@@ -67,7 +67,13 @@ impl RemoteLink {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new_remote(&client_id, 10);
+        let (mut connection, link_rx) = Connection::new_remote(&client_id, 10);
+
+        // Add last will to conneciton
+        if let Some(will) = connect.last_will.take() {
+            connection.set_will(will);
+        }
+
         let message = (0, Event::Connect(connection));
         router_tx.send(message).unwrap();
 
