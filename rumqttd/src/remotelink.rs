@@ -44,6 +44,8 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Payload count greater than max inflight")]
     TooManyPayloads(usize),
+    #[error("Persistent session requires valid client id")]
+    InvalidClientId,
     #[error("Disconnect request")]
     Disconnect,
 }
@@ -67,6 +69,10 @@ impl RemoteLink {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
+        if !connect.clean_session && client_id.is_empty() {
+            return Err(Error::InvalidClientId);
+        }
+
         let (mut connection, link_rx) = Connection::new_remote(&client_id, 10);
 
         // Add last will to conneciton
