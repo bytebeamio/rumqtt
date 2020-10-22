@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub type ConnectionId = usize;
+pub type RouterId = usize;
 pub type Topic = String;
 pub type TopicId = usize;
 

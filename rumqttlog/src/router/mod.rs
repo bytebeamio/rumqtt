@@ -9,7 +9,7 @@ mod watermarks;
 
 use connection::Connection;
 pub use router::Router;
-use tracker::Tracker;
+pub use tracker::Tracker;
 
 use self::bytes::Bytes;
 use mqtt4bytes::Packet;
@@ -265,8 +265,9 @@ impl Acks {
 
 #[derive(Debug)]
 pub enum ConnectionAck {
-    /// Id assigned by the router for this connectiobackn
-    Success(usize),
+    /// Id assigned by the router for this connection and
+    /// previous session status
+    Success((usize, bool)),
     /// Failure and reason for failure string
     Failure(String),
 }

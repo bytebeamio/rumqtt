@@ -10,9 +10,9 @@ use super::slab::Slab;
 use super::watermarks::Watermarks;
 use super::*;
 
-use crate::logs::{DataLog, TopicsLog};
+use crate::logs::{ConnectionsLog, DataLog, TopicsLog};
 use crate::waiters::{DataWaiters, TopicsWaiters};
-use crate::{Config, DataRequest, Disconnection, ReplicationData};
+use crate::{Config, ConnectionId, DataRequest, Disconnection, ReplicationData, RouterId};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -21,14 +21,15 @@ pub enum RouterError {
     Disconnected,
 }
 
-type ConnectionId = usize;
-
 pub struct Router {
     /// Router configuration
     _config: Arc<Config>,
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
-    id: ConnectionId,
+    id: RouterId,
+    /// Connections log to handle persitent session and synchronize connection
+    /// information between nodes
+    connectionslog: ConnectionsLog,
     /// Data logs grouped by replica
     datalog: DataLog,
     /// Topic log
@@ -64,6 +65,7 @@ impl Router {
         let watermarks = Slab::with_capacity(max_connections);
 
         // Global data
+        let connectionslog = ConnectionsLog::new();
         let datalog: DataLog = DataLog::new(id, config.clone());
         let topicslog = TopicsLog::new();
 
@@ -75,6 +77,7 @@ impl Router {
         let router = Router {
             _config: config,
             id,
+            connectionslog,
             datalog,
             topicslog,
             connections,
@@ -136,25 +139,19 @@ impl Router {
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {
-        let id = match connection.conn.clone() {
+        let clean = connection.clean();
+
+        let (id, mut tracker) = match connection.conn.clone() {
             ConnectionType::Replicator(id) => {
+                info!("{:11} {:14} Id = {}", "connection", "replicator", id,);
                 self.connections.insert_at(connection, id);
-                self.trackers.insert_at(Tracker::new(), id);
-                self.watermarks.insert_at(Watermarks::new(), id);
-                self.readyqueue.push_back(id);
-                id
+                (id, None)
             }
             ConnectionType::Device(did) => match self.connections.insert(connection) {
                 Some(id) => {
-                    self.trackers.insert(Tracker::new()).unwrap();
-                    self.watermarks.insert(Watermarks::new()).unwrap();
-                    self.readyqueue.push_back(id);
-                    info!(
-                        "{:11} {:14} Id = {}, Remote id = {}",
-                        "connection", "new", id, did,
-                    );
-
-                    id
+                    info!("{:11} {:14} Id = {}:{}", "connection", "remote", did, id);
+                    let tracker = self.connectionslog.add(&did);
+                    (id, tracker)
                 }
                 None => {
                     error!("No space for new connection!!");
@@ -163,26 +160,42 @@ impl Router {
             },
         };
 
-        let message = Notification::ConnectionAck(ConnectionAck::Success(id));
+        let previous_session = tracker.is_some();
+
+        // Add a new tracker or resume from previous topics and offsets
+        match tracker.take() {
+            Some(tracker) if !clean => self.trackers.insert_at(tracker, id),
+            _ => self.trackers.insert_at(Tracker::new(), id),
+        }
+
+        self.watermarks.insert_at(Watermarks::new(), id);
+        self.readyqueue.push_back(id);
+
+        let message = Notification::ConnectionAck(ConnectionAck::Success((id, previous_session)));
         notify(&mut self.connections, id, message);
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
-        info!(
-            "{:11} {:14} Id = {}, Remote = {}",
-            "connection", "", id, disconnect.id,
-        );
+        let did = disconnect.id;
+        let execute_will = disconnect.execute_will;
 
+        info!("{:11} {:14} Id = {}:{}", "disconnect", "", did, id);
         // Forward connection will
         let mut connection = self.connections.remove(id).unwrap();
-        if disconnect.execute_will {
+        let clean = connection.clean();
+
+        if execute_will {
             if let Some(will) = connection.will() {
                 let publish = Publish::from_bytes(will.topic, will.qos, will.message);
                 self.handle_connection_publish(id, publish);
             }
         }
 
-        self.trackers.remove(id);
+        let tracker = self.trackers.remove(id);
+        if !clean {
+            self.connectionslog.save(&did, tracker.unwrap());
+        }
+
         self.watermarks.remove(id);
         self.data_waiters.remove(id);
         self.topics_waiters.remove(id);

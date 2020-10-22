@@ -69,11 +69,12 @@ impl RemoteLink {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        if !connect.clean_session && client_id.is_empty() {
+        let clean_session = connect.clean_session;
+        if clean_session && client_id.is_empty() {
             return Err(Error::InvalidClientId);
         }
 
-        let (mut connection, link_rx) = Connection::new_remote(&client_id, 10);
+        let (mut connection, link_rx) = Connection::new_remote(&client_id, clean_session, 10);
 
         // Add last will to conneciton
         if let Some(will) = connect.last_will.take() {
@@ -83,20 +84,20 @@ impl RemoteLink {
         let message = (0, Event::Connect(connection));
         router_tx.send(message).unwrap();
 
-        // Send connection acknowledgement back to the client
-        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-        network.connack(connack).await?;
-
         // TODO When a new connection request is sent to the router, router should ack with error
         // TODO if it exceeds maximum allowed active connections
         // Right now link identifies failure with dropped rx in router, which is probably ok for now
-        let id = match link_rx.recv()? {
+        let (id, session) = match link_rx.recv()? {
             Notification::ConnectionAck(ack) => match ack {
-                ConnectionAck::Success(id) => id,
+                ConnectionAck::Success((id, session)) => (id, session),
                 ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason)),
             },
             message => return Err(Error::RouterMessage(message)),
         };
+
+        // Send connection acknowledgement back to the client
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, session);
+        network.connack(connack).await?;
 
         let max_inflight_count = config.max_inflight_count;
         Ok((

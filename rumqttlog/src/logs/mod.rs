@@ -1,3 +1,4 @@
+mod connections;
 mod data;
 mod topics;
 
@@ -5,6 +6,7 @@ use crate::{Config, Data, DataRequest};
 use bytes::Bytes;
 use std::sync::Arc;
 
+pub use connections::ConnectionsLog;
 pub use topics::TopicsLog;
 
 type Id = usize;
