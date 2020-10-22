@@ -862,12 +862,12 @@ mod test {
     }
 
     fn add_new_replica_connection(router: &mut Router, id: usize) {
-        let (connection, _rx) = Connection::new_replica(id, 10);
+        let (connection, _rx) = Connection::new_replica(id, true, 10);
         router.handle_new_connection(connection);
     }
 
     fn add_new_remote_connection(router: &mut Router, client_id: &str) -> Receiver<Notification> {
-        let (connection, rx) = Connection::new_remote(client_id, 10);
+        let (connection, rx) = Connection::new_remote(client_id, true, 10);
         router.handle_new_connection(connection);
         rx
     }
