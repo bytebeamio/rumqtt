@@ -167,6 +167,7 @@ impl State {
             }
             Packet::PubComp(ack) => ack.write(&mut self.write),
             Packet::SubAck(ack) => ack.write(&mut self.write),
+            Packet::UnsubAck(ack) => ack.write(&mut self.write),
             _ => unimplemented!(),
         }
         .map_err(Error::Serialization)?;
@@ -185,6 +186,9 @@ impl State {
             }
             Packet::Subscribe(subscribe) => {
                 self.incoming.push(Packet::Subscribe(subscribe));
+            }
+            Packet::Unsubscribe(unsubscribe) => {
+                self.incoming.push(Packet::Unsubscribe(unsubscribe));
             }
             Packet::PubAck(ack) => {
                 self.handle_incoming_puback(&ack)?;

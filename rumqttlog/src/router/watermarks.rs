@@ -98,6 +98,12 @@ impl Watermarks {
         self.acks.push((pkid, suback))
     }
 
+    pub fn push_unsubscribe_ack(&mut self, pkid: u16) {
+        let unsuback = UnsubAck::new(pkid);
+        let unsuback = Packet::UnsubAck(unsuback);
+        self.acks.push((pkid, unsuback))
+    }
+
     /// Returns committed acks by take
     pub fn acks(&mut self) -> Vec<(Pkid, Packet)> {
         mem::take(&mut self.acks)

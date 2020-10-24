@@ -2,6 +2,7 @@ use crate::router::{AcksRequest, Request, TopicsRequest};
 use crate::DataRequest;
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::mem;
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
@@ -176,5 +177,43 @@ impl Tracker {
         }
 
         None
+    }
+
+    /// Removes a subscription and removes matched topics in tracker
+    pub fn remove_subscription_and_unmatch(&mut self, filters: Vec<String>) {
+        let mut requests = mem::replace(&mut self.requests, VecDeque::new());
+
+        for filter in filters.iter() {
+            if has_wildcards(filter) {
+                if let Some(index) = self.wild_subscriptions.iter().position(|v| v.0 == *filter) {
+                    self.wild_subscriptions.swap_remove(index);
+                }
+            } else {
+                self.concrete_subscriptions.remove(filter);
+            }
+        }
+
+        // Remove requests that matches unsubscribe filters
+        while let Some(request) = requests.pop_front() {
+            match request {
+                Request::Data(data) => {
+                    let mut delete = false;
+                    for filter in filters.iter() {
+                        // If request matches atleast one filter, set delete
+                        // flag to not add back the request to request queue
+                        if matches(&data.topic, filter) {
+                            delete = true;
+                            break;
+                        }
+                    }
+
+                    if !delete {
+                        self.requests.push_back(Request::Data(data));
+                    }
+                }
+                Request::Topics(topics) => self.requests.push_back(Request::Topics(topics)),
+                Request::Acks(acks) => self.requests.push_back(Request::Acks(acks)),
+            }
+        }
     }
 }

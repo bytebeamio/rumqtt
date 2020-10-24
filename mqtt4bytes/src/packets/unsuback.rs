@@ -8,6 +8,10 @@ pub struct UnsubAck {
 }
 
 impl UnsubAck {
+    pub fn new(pkid: u16) -> UnsubAck {
+        UnsubAck { pkid }
+    }
+
     pub(crate) fn assemble(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect);

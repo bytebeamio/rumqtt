@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use jackiechan::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes};
+use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes, Unsubscribe};
 use thiserror::Error;
 
 use super::connection::ConnectionType;
@@ -315,6 +315,9 @@ impl Router {
             match publish {
                 Packet::Publish(publish) => self.handle_connection_publish(id, publish),
                 Packet::Subscribe(subscribe) => self.handle_connection_subscribe(id, subscribe),
+                Packet::Unsubscribe(unsubscribe) => {
+                    self.handle_connection_unsubscribe(id, unsubscribe)
+                }
                 incoming => {
                     warn!("Packet = {:?} not supported by router yet", incoming);
                 }
@@ -327,8 +330,8 @@ impl Router {
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
         trace!("{:11} {:14} Id = {}", "subscribe", "", id);
         let topics = self.topicslog.readv(0, 0);
-
         let tracker = self.trackers.get_mut(id).unwrap();
+
         let mut return_codes = Vec::new();
         for filter in subscribe.topics.iter() {
             return_codes.push(SubscribeReturnCodes::Success(filter.qos));
@@ -392,6 +395,18 @@ impl Router {
         // Update acks and triggers acks notification for suback
         let watermarks = self.watermarks.get_mut(id).unwrap();
         watermarks.push_subscribe_ack(subscribe.pkid, return_codes);
+        self.fresh_acks_notification(id);
+    }
+
+    fn handle_connection_unsubscribe(&mut self, id: ConnectionId, unsubscribe: Unsubscribe) {
+        trace!("{:11} {:14} Id = {}", "unsubscribe", "", id);
+
+        let tracker = self.trackers.get_mut(id).unwrap();
+        tracker.remove_subscription_and_unmatch(unsubscribe.topics);
+
+        // Update acks and triggers acks notification for suback
+        let watermarks = self.watermarks.get_mut(id).unwrap();
+        watermarks.push_unsubscribe_ack(unsubscribe.pkid);
         self.fresh_acks_notification(id);
     }
 
