@@ -43,7 +43,7 @@ impl LinkTx {
         // We need this here to get id assigned by router
         match link_rx.recv()? {
             Notification::ConnectionAck(ack) => match ack {
-                ConnectionAck::Success((id, _)) => self.id = id,
+                ConnectionAck::Success((id, _, _)) => self.id = id,
                 ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
             },
             message => return Err(LinkError::NotConnectionAck(message)),
@@ -106,6 +106,9 @@ impl LinkRx {
     fn handle_router_response(&mut self, message: Notification) -> Result<Option<Data>, LinkError> {
         match message {
             Notification::ConnectionAck(_) => Ok(None),
+            Notification::Message(_) => {
+                unreachable!("Local links are always clean");
+            }
             Notification::Data(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Count = {}",

@@ -6,8 +6,8 @@ use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
 
-use std::io;
 use std::sync::Arc;
+use std::{io, mem};
 use tokio::time::{Duration, Elapsed};
 use tokio::{select, time};
 
@@ -16,10 +16,11 @@ pub struct RemoteLink {
     connect: Connect,
     id: Id,
     network: Network,
-    state: State,
     router_tx: Sender<(Id, Event)>,
     link_rx: Receiver<Notification>,
     total: usize,
+    pending: Vec<Notification>,
+    pub(crate) state: State,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -87,9 +88,9 @@ impl RemoteLink {
         // TODO When a new connection request is sent to the router, router should ack with error
         // TODO if it exceeds maximum allowed active connections
         // Right now link identifies failure with dropped rx in router, which is probably ok for now
-        let (id, session) = match link_rx.recv()? {
+        let (id, session, pending) = match link_rx.recv()? {
             Notification::ConnectionAck(ack) => match ack {
-                ConnectionAck::Success((id, session)) => (id, session),
+                ConnectionAck::Success((id, session, pending)) => (id, session, pending),
                 ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason)),
             },
             message => return Err(Error::RouterMessage(message)),
@@ -108,16 +109,40 @@ impl RemoteLink {
                 connect,
                 id,
                 network,
-                state: State::new(max_inflight_count),
                 router_tx,
                 link_rx,
                 total: 0,
+                pending,
+                state: State::new(max_inflight_count),
             },
         ))
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
         self.network.set_keepalive(self.connect.keep_alive);
+        let pending = mem::replace(&mut self.pending, Vec::new());
+        let mut pending = pending.into_iter();
+
+        loop {
+            select! {
+                o = self.network.readb(&mut self.state) => {
+                    let disconnect = o?;
+                    self.handle_network_data().await?;
+
+                    if disconnect {
+                        return Err(Error::Disconnect)
+                    }
+                }
+                // Receive from router when previous when state isn't in collision
+                // due to previously received data request
+                message = async { pending.next() } => {
+                    match message {
+                        Some(message) => self.handle_router_response(message).await?,
+                        None => break
+                    };
+                }
+            }
+        }
 
         // Note:
         // Shouldn't result in bounded queue deadlocks because of blocking n/w send
@@ -176,6 +201,21 @@ impl RemoteLink {
                 for (_pkid, ack) in reply.acks.into_iter() {
                     self.state.outgoing_ack(ack)?;
                 }
+            }
+            Notification::Message(reply) => {
+                trace!(
+                    "{:11} {:14} Id = {}, Topic = {}, Count = {}",
+                    "data",
+                    "pending",
+                    self.id,
+                    reply.topic,
+                    reply.payload.len()
+                );
+
+                let qos = qos(reply.qos).unwrap();
+                let payload = reply.payload;
+                let publish = Publish::from_bytes(&reply.topic, qos, payload);
+                self.state.outgoing_publish(publish)?;
             }
             Notification::Data(reply) => {
                 trace!(

@@ -1,4 +1,5 @@
 use mqtt4bytes::{Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, QoS};
+use rumqttlog::{Acks, Message, Notification};
 
 use bytes::BytesMut;
 use std::mem;
@@ -78,6 +79,32 @@ impl State {
         &mut self.write
     }
 
+    /// Returns inflight outgoing packets and clears internal queues
+    pub fn clean(&mut self) -> Vec<Notification> {
+        let mut pending = Vec::new();
+        let mut acks = Acks::empty();
+
+        // remove and collect pending releases
+        for rel in self.outgoing_rel.iter_mut() {
+            if let Some(pkid) = rel.take() {
+                let packet = Packet::PubRel(PubRel::new(pkid));
+                acks.push((pkid, packet));
+            }
+        }
+
+        pending.push(Notification::Acks(acks));
+
+        // remove and collect pending publishes
+        for publish in self.outgoing_pub.iter_mut() {
+            if let Some(publish) = publish.take() {
+                let message = Message::new(publish.topic, publish.qos as u8, publish.payload);
+                pending.push(Notification::Message(message));
+            }
+        }
+
+        pending
+    }
+
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     pub(crate) fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), Error> {
@@ -131,6 +158,13 @@ impl State {
         match ack {
             Packet::PubAck(ack) => ack.write(&mut self.write),
             Packet::PubRec(ack) => ack.write(&mut self.write),
+            // Pending outgoing release given by router. Replay
+            // pubrec with these pkids. In normal flow, release
+            // id a response for incoming pubrec
+            Packet::PubRel(ack) => {
+                self.handle_incoming_pubrec(&PubRec::new(ack.pkid))?;
+                Ok(10)
+            }
             Packet::PubComp(ack) => ack.write(&mut self.write),
             Packet::SubAck(ack) => ack.write(&mut self.write),
             _ => unimplemented!(),

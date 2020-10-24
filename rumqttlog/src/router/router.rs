@@ -141,17 +141,17 @@ impl Router {
     fn handle_new_connection(&mut self, connection: Connection) {
         let clean = connection.clean();
 
-        let (id, mut tracker) = match connection.conn.clone() {
+        let (id, mut tracker, mut pending) = match connection.conn.clone() {
             ConnectionType::Replicator(id) => {
                 info!("{:11} {:14} Id = {}", "connection", "replicator", id,);
                 self.connections.insert_at(connection, id);
-                (id, None)
+                (id, None, None)
             }
             ConnectionType::Device(did) => match self.connections.insert(connection) {
                 Some(id) => {
                     info!("{:11} {:14} Id = {}:{}", "connection", "remote", did, id);
-                    let tracker = self.connectionslog.add(&did);
-                    (id, tracker)
+                    let (tracker, pending) = self.connectionslog.add(&did);
+                    (id, tracker, pending)
                 }
                 None => {
                     error!("No space for new connection!!");
@@ -168,16 +168,22 @@ impl Router {
             _ => self.trackers.insert_at(Tracker::new(), id),
         }
 
+        let ack = match pending.take() {
+            Some(pending) => ConnectionAck::Success((id, previous_session, pending)),
+            None => ConnectionAck::Success((id, previous_session, Vec::new())),
+        };
+
         self.watermarks.insert_at(Watermarks::new(), id);
         self.readyqueue.push_back(id);
 
-        let message = Notification::ConnectionAck(ConnectionAck::Success((id, previous_session)));
+        let message = Notification::ConnectionAck(ack);
         notify(&mut self.connections, id, message);
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, disconnect: Disconnection) {
         let did = disconnect.id;
         let execute_will = disconnect.execute_will;
+        let pending = disconnect.pending;
 
         info!("{:11} {:14} Id = {}:{}", "disconnect", "", did, id);
         // Forward connection will
@@ -193,7 +199,7 @@ impl Router {
 
         let tracker = self.trackers.remove(id);
         if !clean {
-            self.connectionslog.save(&did, tracker.unwrap());
+            self.connectionslog.save(&did, tracker.unwrap(), pending);
         }
 
         self.watermarks.remove(id);
@@ -413,8 +419,10 @@ impl Router {
             is_new_topic
         } else {
             if payload.is_empty() {
-                error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
-                return;
+                warn!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
+                // Some tests in paho test suite are sending empty publishes.
+                // Disabling this filter for the time being
+                // return;
             }
 
             let (is_new_topic, (_, offset)) = match self.datalog.append(id, &topic, payload) {

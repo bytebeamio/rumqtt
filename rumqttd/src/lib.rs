@@ -198,29 +198,29 @@ impl Connector {
 
         // Start the link
         let (client_id, id, mut link) = RemoteLink::new(config, router_tx, network).await?;
-        let execute_will = match link.start().await {
+        let (execute_will, pending) = match link.start().await {
             // Connection get close. This shouldn't usually happen
             Ok(_) => {
                 error!("Link stopped!! Id = {}, Client Id = {}", id, client_id);
-                true
+                (true, link.state.clean())
             }
             // We are representing clean close as Abort in `Network`
             Err(remotelink::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
                 info!("Link closed!! Id = {}, Client Id = {}", id, client_id);
-                true
+                (true, link.state.clean())
             }
             Err(remotelink::Error::Disconnect) => {
                 error!("Disconnected!! Id = {}, Client Id = {}", id, client_id);
-                false
+                (false, link.state.clean())
             }
             // Any other error
             Err(e) => {
                 error!("Stopped!! Id = {}, Client Id = {}, {:?}", id, client_id, e);
-                true
+                (true, link.state.clean())
             }
         };
 
-        let disconnect = Disconnection::new(client_id, execute_will);
+        let disconnect = Disconnection::new(client_id, execute_will, pending);
         let disconnect = Event::Disconnect(disconnect);
         let message = (id, disconnect);
         self.router_tx.send(message)?;

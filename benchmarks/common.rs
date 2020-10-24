@@ -30,7 +30,7 @@ pub async fn new_connection(
     router_tx.send(message).unwrap();
 
     // wait for ack from router
-    let (id, _) = match this_rx.recv().unwrap() {
+    let (id, ..) = match this_rx.recv().unwrap() {
         Notification::ConnectionAck(ConnectionAck::Success(id)) => id,
         Notification::ConnectionAck(ConnectionAck::Failure(e)) => {
             panic!("Connection failed {:?}", e)

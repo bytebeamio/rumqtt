@@ -178,7 +178,7 @@ impl Connections {
         let message = Event::Connect(connection);
         self.router_tx.send((0, message)).unwrap();
 
-        let (connection_id, _) = match link_rx.recv().unwrap() {
+        let (connection_id, ..) = match link_rx.recv().unwrap() {
             Notification::ConnectionAck(ConnectionAck::Success(id)) => id,
             o => panic!("Unexpected connection ack = {:?}", o),
         };

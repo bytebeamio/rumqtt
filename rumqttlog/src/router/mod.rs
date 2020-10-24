@@ -48,6 +48,8 @@ pub enum Request {
 pub enum Notification {
     /// Connection reply
     ConnectionAck(ConnectionAck),
+    /// Individual publish
+    Message(Message),
     /// Data reply
     Data(Data),
     /// Watermarks reply
@@ -154,6 +156,36 @@ impl fmt::Debug for DataRequest {
     }
 }
 
+pub struct Message {
+    /// Log to sweep
+    pub topic: String,
+    /// Qos of the topic
+    pub qos: u8,
+    /// Reply data chain
+    pub payload: Bytes,
+}
+
+impl Message {
+    pub fn new(topic: String, qos: u8, payload: Bytes) -> Message {
+        Message {
+            topic,
+            payload,
+            qos,
+        }
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Topic = {:?}, Payload size = {}",
+            self.topic,
+            self.payload.len()
+        )
+    }
+}
+
 pub struct Data {
     /// Log to sweep
     pub topic: String,
@@ -254,8 +286,16 @@ pub struct Acks {
 }
 
 impl Acks {
+    pub fn empty() -> Acks {
+        Acks { acks: Vec::new() }
+    }
+
     pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
         Acks { acks }
+    }
+
+    pub fn push(&mut self, ack: (u16, Packet)) {
+        self.acks.push(ack);
     }
 
     pub fn len(&self) -> usize {
@@ -267,7 +307,7 @@ impl Acks {
 pub enum ConnectionAck {
     /// Id assigned by the router for this connection and
     /// previous session status
-    Success((usize, bool)),
+    Success((usize, bool, Vec<Notification>)),
     /// Failure and reason for failure string
     Failure(String),
 }
@@ -276,10 +316,15 @@ pub enum ConnectionAck {
 pub struct Disconnection {
     id: String,
     execute_will: bool,
+    pending: Vec<Notification>,
 }
 
 impl Disconnection {
-    pub fn new(id: String, execute_will: bool) -> Disconnection {
-        Disconnection { id, execute_will }
+    pub fn new(id: String, execute_will: bool, pending: Vec<Notification>) -> Disconnection {
+        Disconnection {
+            id,
+            execute_will,
+            pending,
+        }
     }
 }
