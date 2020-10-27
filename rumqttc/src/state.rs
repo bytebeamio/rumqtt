@@ -5,6 +5,7 @@ use mqtt4bytes::*;
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
 
+/// Errors during state handling
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
     /// Io Error while state is passed to network

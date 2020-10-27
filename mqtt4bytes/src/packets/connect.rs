@@ -131,17 +131,12 @@ pub struct LastWill {
 }
 
 impl LastWill {
-    pub fn new(
-        topic: impl Into<String>,
-        payload: impl Into<Vec<u8>>,
-        qos: QoS,
-        retain: bool,
-    ) -> LastWill {
+    pub fn new(topic: impl Into<String>, qos: QoS, payload: impl Into<Vec<u8>>) -> LastWill {
         LastWill {
             topic: topic.into(),
             message: Bytes::from(payload.into()),
             qos,
-            retain,
+            retain: false,
         }
     }
 
@@ -187,6 +182,7 @@ impl LastWill {
     }
 }
 
+/// Username, password authentication
 #[derive(Debug, Clone, PartialEq)]
 pub struct Login {
     username: String,
@@ -332,7 +328,7 @@ mod test {
                 keep_alive: 10,
                 client_id: "test".to_owned(),
                 clean_session: true,
-                last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false,)),
+                last_will: Some(LastWill::new("/a", QoS::AtLeastOnce, "offline")),
                 login: Some(Login::new("rumq", "mq"))
             }
         );
@@ -375,7 +371,7 @@ mod test {
             keep_alive: 10,
             client_id: "test".to_owned(),
             clean_session: true,
-            last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
+            last_will: Some(LastWill::new("/a", QoS::AtLeastOnce, "offline")),
             login: Some(Login::new("rust", "mq")),
         };
 
