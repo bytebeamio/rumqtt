@@ -1,6 +1,7 @@
 use crate::*;
 use bytes::{BufMut, BytesMut};
 
+/// Ping request packet
 pub struct PingReq;
 
 impl PingReq {
@@ -10,6 +11,7 @@ impl PingReq {
     }
 }
 
+/// Ping response packet
 pub struct PingResp;
 
 impl PingResp {

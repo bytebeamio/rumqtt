@@ -3,14 +3,12 @@ use crate::*;
 use bytes::{BufMut, BytesMut};
 
 /// Raw publish is used to perform serialization in current
-/// thread rather the eventloop. Also client's eventloop stores
-/// serialized `PublishRaw` in state to prevent computation while
-/// retrying
+/// thread rather the eventloop.
 #[derive(Clone, PartialEq)]
 pub struct PublishRaw {
     pub header: BytesMut,
     pub payload: Bytes,
-    /// Packet properties which are part of the header
+    // Packet properties which are part of the header
     pub qos: QoS,
     pub pkid: u16,
 }

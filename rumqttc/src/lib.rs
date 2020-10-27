@@ -72,18 +72,29 @@
 //!
 //! In short, everything necessary to maintain a robust connection
 //!
-//! **NOTE**: Looping on `connection.iter()/eventloop.poll()` is necessary to
-//! run the eventloop and make progress. It yields incoming and outgoing activity
-//! notifications which allows customization as user sees fit.
-//!
-//! **IMPORTANT** Blocking inside `eventloop.poll()/eonnection.iter()` loop
-//! will block connection progress
-//!
 //! Since the eventloop is externally polled (with `iter()/poll()` in a loop)
 //! out side the library and `Eventloop` is accessible, users can
 //! - Distribute incoming messages based on topics
 //! - Stop it when required
 //! - Access internal state for use cases like graceful shutdown or to modify options before reconnection
+//!
+//! ## Important notes
+//!
+//! - Looping on `connection.iter()`/`eventloop.poll()` is necessary to run the
+//!   event loop and make progress. It yields incoming and outgoing activity
+//!   notifications which allows customization as you see fit.
+//!
+//! - Blocking inside the `connection.iter()`/`eventloop.poll()` loop will block
+//!   connection progress.
+//!
+//! ## FAQ
+//! **Connecting to a broker using raw ip doesn't work**
+//!
+//! You cannot create a TLS connection to a bare IP address with a self-signed
+//! certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
+//! One workaround, which only works under *nix/BSD-like systems, is to add an
+//! entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
+//! address and use that name in your code.
 
 #[macro_use]
 extern crate log;
@@ -134,11 +145,7 @@ pub enum Outgoing {
 }
 
 /// Requests by the client to mqtt event loop. Request are
-/// handled one by one. This is a duplicate of possible MQTT
-/// packets along with the ability to tag data and do bulk
-/// operations.
-/// Upcoming feature: When 'manual' feature is turned on
-/// provides the ability to reply with acks when the user sees fit
+/// handled one by one.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
     Publish(Publish),
@@ -190,10 +197,6 @@ pub enum SecurityOptions {
     UsernamePassword(String, String),
 }
 
-// TODO: Should all the options be exposed as public? Drawback
-// would be loosing the ability to panic when the user options
-// are wrong (e.g empty client id) or aggressive (keep alive time)
-/// Options to configure the behaviour of mqtt connection
 #[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to

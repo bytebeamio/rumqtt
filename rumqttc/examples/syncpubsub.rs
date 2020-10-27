@@ -6,7 +6,7 @@ fn main() {
     pretty_env_logger::init();
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+    let will = LastWill::new("hello/world", QoS::AtMostOnce, "good bye");
     mqttoptions.set_keep_alive(5).set_last_will(will);
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
