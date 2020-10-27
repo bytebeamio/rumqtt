@@ -174,11 +174,11 @@ impl Connections {
     }
 
     pub fn connection(&self, id: &str, cap: usize) -> (ConnectionId, Receiver<Notification>) {
-        let (connection, link_rx) = rumqttlog::Connection::new_remote(id, cap);
+        let (connection, link_rx) = rumqttlog::Connection::new_remote(id, true, cap);
         let message = Event::Connect(connection);
         self.router_tx.send((0, message)).unwrap();
 
-        let connection_id = match link_rx.recv().unwrap() {
+        let (connection_id, ..) = match link_rx.recv().unwrap() {
             Notification::ConnectionAck(ConnectionAck::Success(id)) => id,
             o => panic!("Unexpected connection ack = {:?}", o),
         };

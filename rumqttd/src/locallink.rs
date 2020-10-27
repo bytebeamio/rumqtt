@@ -1,8 +1,7 @@
 use crate::Id;
 use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
 use rumqttlog::{
-    Connection, ConnectionAck, Data, Receiver, RecvError, Event,
-    Notification, SendError, Sender,
+    Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -34,7 +33,8 @@ impl LinkTx {
 
     pub fn connect(&mut self, max_inflight_requests: usize) -> Result<LinkRx, LinkError> {
         // connection queue capacity should match that maximum inflight requests
-        let (connection, link_rx) = Connection::new_remote(&self.client_id, max_inflight_requests);
+        let (connection, link_rx) =
+            Connection::new_remote(&self.client_id, true, max_inflight_requests);
 
         let message = (0, Event::Connect(connection));
         self.router_tx.send(message).unwrap();
@@ -43,18 +43,14 @@ impl LinkTx {
         // We need this here to get id assigned by router
         match link_rx.recv()? {
             Notification::ConnectionAck(ack) => match ack {
-                ConnectionAck::Success(id) => self.id = id,
+                ConnectionAck::Success((id, _, _)) => self.id = id,
                 ConnectionAck::Failure(reason) => return Err(LinkError::ConnectionAck(reason)),
             },
             message => return Err(LinkError::NotConnectionAck(message)),
         };
 
         // Send initialization requests from tracker [topics request and acks request]
-        let rx = LinkRx::new(
-            self.id,
-            self.router_tx.clone(),
-            link_rx,
-        );
+        let rx = LinkRx::new(self.id, self.router_tx.clone(), link_rx);
 
         Ok(rx)
     }
@@ -110,6 +106,9 @@ impl LinkRx {
     fn handle_router_response(&mut self, message: Notification) -> Result<Option<Data>, LinkError> {
         match message {
             Notification::ConnectionAck(_) => Ok(None),
+            Notification::Message(_) => {
+                unreachable!("Local links are always clean");
+            }
             Notification::Data(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Count = {}",

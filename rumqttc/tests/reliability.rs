@@ -33,7 +33,7 @@ async fn run(eventloop: &mut EventLoop, reconnect: bool) -> Result<(), Connectio
     }
 }
 
-async fn tick(
+async fn _tick(
     eventloop: &mut EventLoop,
     reconnect: bool,
     count: usize,
@@ -305,12 +305,13 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     let requests_tx = eventloop.handle();
 
     task::spawn(async move {
-        start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
+        start_requests(8, QoS::AtLeastOnce, 0, requests_tx).await;
         time::delay_for(Duration::from_secs(60)).await;
     });
 
     task::spawn(async move {
         let mut broker = Broker::new(1891, 0).await;
+
         // read all incoming packets first
         for i in 1..=4 {
             let packet = broker.read_publish().await;
@@ -337,24 +338,33 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
 
     time::delay_for(Duration::from_secs(1)).await;
 
-    // sends 4 requests and receives ack 3, 4. 5th request will trigger collision
-    match run(&mut eventloop, false).await {
-        Err(ConnectionError::MqttState(StateError::Collision(1))) => (),
-        o => panic!("Expecting collision error. Found = {:?}", o),
+    // sends 4 requests. 5th request will trigger collision
+    // Poll until there is collision.
+    loop {
+        match eventloop.poll().await {
+            Err(ConnectionError::MqttState(StateError::Collision(1))) => break,
+            v => {
+                println!("Poll = {:?}", v);
+                continue;
+            }
+        }
     }
 
-    // Next poll will receive ack = 1 in 5 seconds and fixes collision
-    let start = Instant::now();
-    let event = eventloop.poll().await.unwrap();
-    assert_eq!(event, Event::Incoming(Packet::PubAck(PubAck::new(1))));
-    assert_eq!(start.elapsed().as_secs(), 5);
+    loop {
+        let start = Instant::now();
+        let event = eventloop.poll().await;
+        println!("Poll = {:?}", event);
 
-    // Next poll unblocks failed publish due to collision
-    let event = eventloop.poll().await.unwrap();
-    assert_eq!(event, Event::Outgoing(Outgoing::Publish(1)));
-
-    // handle remaining outgoing and incoming packets
-    tick(&mut eventloop, false, 10).await.unwrap();
+        match event {
+            Ok(Event::Outgoing(Outgoing::Publish(ack))) => {
+                if ack == 1 {
+                    assert_eq!(start.elapsed().as_secs(), 5)
+                }
+            }
+            Err(_) => break,
+            _ => continue,
+        }
+    }
 }
 
 #[tokio::test]

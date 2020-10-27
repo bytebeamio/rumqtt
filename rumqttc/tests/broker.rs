@@ -1,18 +1,21 @@
 use mqtt4bytes::*;
 use std::collections::VecDeque;
+use std::io;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::{task, time};
 
 use async_channel::{bounded, Receiver, Sender};
-use rumqttc::{Event, Network, Request};
+use bytes::BytesMut;
+use rumqttc::{Event, Incoming, Outgoing, Packet};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub struct Broker {
     pub(crate) framed: Network,
     pub(crate) incoming: VecDeque<Packet>,
-    outgoing_tx: Sender<Request>,
-    outgoing_rx: Receiver<Request>,
+    outgoing_tx: Sender<Packet>,
+    outgoing_rx: Receiver<Packet>,
 }
 
 impl Broker {
@@ -25,8 +28,9 @@ impl Broker {
         let mut framed = Network::new(stream, 10 * 1024);
         let mut incoming = VecDeque::new();
         let (outgoing_tx, outgoing_rx) = bounded(10);
+        framed.readb(&mut incoming).await.unwrap();
 
-        match framed.readb(&mut incoming).await.unwrap() {
+        match incoming.pop_front().unwrap() {
             Packet::Connect(_) => {
                 let connack = match connack {
                     0 => ConnAck::new(ConnectReturnCode::Accepted, false),
@@ -59,49 +63,43 @@ impl Broker {
     // Reads a publish packet from the stream with 2 second timeout
     pub async fn read_publish(&mut self) -> Option<Publish> {
         loop {
-            let packet = time::timeout(Duration::from_secs(2), async {
-                self.framed.readb(&mut self.incoming).await
-            });
+            let packet = if self.incoming.len() > 0 {
+                self.incoming.pop_front().unwrap()
+            } else {
+                let packet = time::timeout(Duration::from_secs(2), async {
+                    self.framed.readb(&mut self.incoming).await.unwrap();
+                    self.incoming.pop_front().unwrap()
+                })
+                .await;
 
-            match packet.await {
-                Ok(Ok(Packet::Publish(publish))) => return Some(publish),
-                Ok(Ok(Packet::PingReq)) => {
-                    self.framed.write(Request::PingResp).await.unwrap();
+                match packet {
+                    Ok(packet) => packet,
+                    Err(_e) => return None,
+                }
+            };
+
+            match packet {
+                Packet::Publish(publish) => return Some(publish),
+                Packet::PingReq => {
+                    self.framed.write(Packet::PingResp).await.unwrap();
                     continue;
                 }
-                Ok(Ok(packet)) => panic!("Expecting a publish. Received = {:?}", packet),
-                Ok(Err(e)) => panic!("Error = {:?}", e),
-                // timed out
-                Err(_) => return None,
+                packet => panic!("Expecting a publish. Received = {:?}", packet),
             }
         }
     }
 
     /// Reads next packet from the stream
     pub async fn read_packet(&mut self) -> Packet {
-        let packet = time::timeout(Duration::from_secs(30), async {
+        time::timeout(Duration::from_secs(30), async {
             let p = self.framed.readb(&mut self.incoming).await;
             // println!("Broker read = {:?}", p);
             p.unwrap()
-        });
+        })
+        .await
+        .unwrap();
 
-        let packet = packet.await.unwrap();
-        packet
-    }
-
-    pub async fn _read_packet_and_respond(&mut self) -> Packet {
-        let packet = time::timeout(Duration::from_secs(30), async {
-            self.framed.readb(&mut self.incoming).await
-        });
-
-        let packet = packet.await.unwrap().unwrap();
-        if let Packet::Publish(publish) = packet.clone() {
-            if publish.pkid > 0 {
-                let packet = PubAck::new(publish.pkid);
-                self.framed.write(Request::PubAck(packet)).await.unwrap();
-            }
-        }
-
+        let packet = self.incoming.pop_front().unwrap();
         packet
     }
 
@@ -114,13 +112,13 @@ impl Broker {
 
     /// Sends an acknowledgement
     pub async fn ack(&mut self, pkid: u16) {
-        let packet = Request::PubAck(PubAck::new(pkid));
+        let packet = Packet::PubAck(PubAck::new(pkid));
         self.framed.write(packet).await.unwrap();
     }
 
     /// Sends an acknowledgement
     pub async fn pingresp(&mut self) {
-        let packet = Request::PingResp;
+        let packet = Packet::PingResp;
         self.framed.write(packet).await.unwrap();
     }
 
@@ -137,7 +135,7 @@ impl Broker {
                     publish.pkid = i as u16;
                 }
 
-                let packet = Request::Publish(publish);
+                let packet = Packet::Publish(publish);
                 tx.send(packet).await.unwrap();
                 time::delay_for(Duration::from_secs(delay)).await;
             }
@@ -153,9 +151,153 @@ impl Broker {
                 Event::Outgoing(outgoing)
             }
             packet = self.framed.readb(&mut self.incoming) => {
-                let incoming = packet.unwrap();
+                packet.unwrap();
+                let incoming = self.incoming.pop_front().unwrap();
                 Event::Incoming(incoming)
             }
         }
     }
 }
+
+/// Network transforms packets <-> frames efficiently. It takes
+/// advantage of pre-allocation, buffering and vectorization when
+/// appropriate to achieve performance
+pub struct Network {
+    /// Socket for IO
+    socket: Box<dyn N>,
+    /// Buffered reads
+    read: BytesMut,
+    /// Buffered writes
+    write: BytesMut,
+    /// Maximum packet size
+    max_incoming_size: usize,
+    /// Maximum readv count
+    max_readb_count: usize,
+}
+
+impl Network {
+    pub fn new(socket: impl N + 'static, max_incoming_size: usize) -> Network {
+        let socket = Box::new(socket) as Box<dyn N>;
+        Network {
+            socket,
+            read: BytesMut::with_capacity(10 * 1024),
+            write: BytesMut::with_capacity(10 * 1024),
+            max_incoming_size,
+            max_readb_count: 10,
+        }
+    }
+
+    /// Reads more than 'required' bytes to frame a packet into self.read buffer
+    async fn read_bytes(&mut self, required: usize) -> io::Result<usize> {
+        let mut total_read = 0;
+        loop {
+            let read = self.socket.read_buf(&mut self.read).await?;
+            if 0 == read {
+                return if self.read.is_empty() {
+                    Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "connection closed by peer",
+                    ))
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        "connection reset by peer",
+                    ))
+                };
+            }
+
+            total_read += read;
+            if total_read >= required {
+                return Ok(total_read);
+            }
+        }
+    }
+
+    pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {
+        let mut write = BytesMut::new();
+        let len = match connack.write(&mut write) {
+            Ok(size) => size,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+        };
+
+        self.socket.write_all(&write[..]).await?;
+        Ok(len)
+    }
+
+    /// Read packets in bulk. This allow replies to be in bulk. This method is used
+    /// after the connection is established to read a bunch of incoming packets
+    pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> Result<(), io::Error> {
+        let mut count = 0;
+        loop {
+            match mqtt_read(&mut self.read, self.max_incoming_size) {
+                Ok(packet) => {
+                    incoming.push_back(packet);
+                    count += 1;
+                    if count >= self.max_readb_count {
+                        return Ok(());
+                    }
+                }
+                // If some packets are already framed, return those
+                Err(Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                // Wait for more bytes until a frame can be created
+                Err(Error::InsufficientBytes(required)) => {
+                    self.read_bytes(required).await?;
+                }
+                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+            };
+        }
+    }
+
+    #[inline]
+    async fn write(&mut self, packet: Packet) -> Result<Outgoing, Error> {
+        let outgoing = outgoing(&packet);
+        match packet {
+            Packet::Publish(packet) => packet.write(&mut self.write)?,
+            Packet::PubRel(packet) => packet.write(&mut self.write)?,
+            Packet::PingReq => {
+                let packet = PingReq;
+                packet.write(&mut self.write)?
+            }
+            Packet::PingResp => {
+                let packet = PingResp;
+                packet.write(&mut self.write)?
+            }
+            Packet::Subscribe(packet) => packet.write(&mut self.write)?,
+            Packet::SubAck(packet) => packet.write(&mut self.write)?,
+            Packet::Unsubscribe(packet) => packet.write(&mut self.write)?,
+            Packet::UnsubAck(packet) => packet.write(&mut self.write)?,
+            Packet::Disconnect => {
+                let packet = Disconnect;
+                packet.write(&mut self.write)?
+            }
+            Packet::PubAck(packet) => packet.write(&mut self.write)?,
+            Packet::PubRec(packet) => packet.write(&mut self.write)?,
+            Packet::PubComp(packet) => packet.write(&mut self.write)?,
+            _ => unimplemented!(),
+        };
+
+        self.socket.write_all(&self.write[..]).await.unwrap();
+        self.write.clear();
+
+        Ok(outgoing)
+    }
+}
+
+fn outgoing(packet: &Packet) -> Outgoing {
+    match packet {
+        Packet::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Packet::PubAck(puback) => Outgoing::PubAck(puback.pkid),
+        Packet::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
+        Packet::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
+        Packet::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
+        Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
+        Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
+        Packet::PingReq => Outgoing::PingReq,
+        Packet::PingResp => Outgoing::PingResp,
+        Packet::Disconnect => Outgoing::Disconnect,
+        packet => panic!("Invalid outgoing packet = {:?}", packet),
+    }
+}
+
+pub trait N: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}

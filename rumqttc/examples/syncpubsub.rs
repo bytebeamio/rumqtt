@@ -1,4 +1,4 @@
-use rumqttc::{self, Client, MqttOptions, QoS};
+use rumqttc::{self, Client, LastWill, MqttOptions, QoS};
 use std::thread;
 use std::time::Duration;
 
@@ -6,24 +6,18 @@ fn main() {
     pretty_env_logger::init();
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions.set_keep_alive(5);
+    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+    mqttoptions.set_keep_alive(5).set_last_will(will);
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {
+        println!("Notification = {:?}", notification);
+
         if i == 10 {
             break;
         }
-
-        println!("Notification = {:?}", notification);
-    }
-
-    println!("Iterator 1 done!!");
-
-    // muliple iterators continue the state (after reconnection)
-    for notification in connection.iter() {
-        println!("Notification = {:?}", notification);
     }
 
     println!("Done with the stream!!");
@@ -31,7 +25,7 @@ fn main() {
 
 fn publish(mut client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
-    for i in 0..300 {
+    for i in 0..10 {
         let payload = vec![1; i as usize];
         let topic = format!("hello/{}/world", i);
         let qos = QoS::AtLeastOnce;

@@ -84,15 +84,24 @@ impl Watermarks {
         }
     }
 
-    pub fn push_publish_ack(&mut self, pkid: u16) {
-        let puback = Packet::PubAck(PubAck::new(pkid));
-        self.acks.push((pkid, puback))
+    pub fn push_publish_ack(&mut self, pkid: u16, qos: u8) {
+        match qos {
+            1 => self.acks.push((pkid, Packet::PubAck(PubAck::new(pkid)))),
+            2 => self.acks.push((pkid, Packet::PubRec(PubRec::new(pkid)))),
+            _ => return,
+        }
     }
 
     pub fn push_subscribe_ack(&mut self, pkid: u16, return_codes: Vec<SubscribeReturnCodes>) {
         let suback = SubAck::new(pkid, return_codes);
         let suback = Packet::SubAck(suback);
         self.acks.push((pkid, suback))
+    }
+
+    pub fn push_unsubscribe_ack(&mut self, pkid: u16) {
+        let unsuback = UnsubAck::new(pkid);
+        let unsuback = Packet::UnsubAck(unsuback);
+        self.acks.push((pkid, unsuback))
     }
 
     /// Returns committed acks by take

@@ -101,7 +101,6 @@ mod tls;
 pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use framed::Network;
 pub use mqtt4bytes::*;
 pub use state::{MqttState, StateError};
 pub use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};

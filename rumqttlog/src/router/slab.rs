@@ -72,8 +72,9 @@ impl<T> Slab<T> {
         self.entries[at] = Some(val);
     }
 
-    pub fn remove(&mut self, key: usize) {
-        let _ = mem::replace(&mut self.entries[key], None);
+    pub fn remove(&mut self, key: usize) -> Option<T> {
+        let data = mem::replace(&mut self.entries[key], None);
         self.next.push_back(key);
+        data
     }
 }

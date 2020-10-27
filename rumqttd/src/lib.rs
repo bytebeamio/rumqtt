@@ -195,22 +195,33 @@ impl Connector {
     async fn new_connection(&self, network: Network) -> Result<(), Error> {
         let config = self.config.clone();
         let router_tx = self.router_tx.clone();
+
         // Start the link
         let (client_id, id, mut link) = RemoteLink::new(config, router_tx, network).await?;
-        match link.start().await {
+        let (execute_will, pending) = match link.start().await {
             // Connection get close. This shouldn't usually happen
-            Ok(_) => error!("Link stopped!! Id = {}, Client Id = {}", id, client_id),
+            Ok(_) => {
+                error!("Link stopped!! Id = {}, Client Id = {}", id, client_id);
+                (true, link.state.clean())
+            }
             // We are representing clean close as Abort in `Network`
             Err(remotelink::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
-                info!("Link closed!! Id = {}, Client Id = {}", id, client_id)
+                info!("Link closed!! Id = {}, Client Id = {}", id, client_id);
+                (true, link.state.clean())
+            }
+            Err(remotelink::Error::Disconnect) => {
+                error!("Disconnected!! Id = {}, Client Id = {}", id, client_id);
+                (false, link.state.clean())
             }
             // Any other error
-            Err(e) => error!(
-                "Link stopped with error!! Id = {}, Client Id = {}, {:?}",
-                id, client_id, e
-            ),
-        }
-        let disconnect = Event::Disconnect(Disconnection::new(client_id));
+            Err(e) => {
+                error!("Stopped!! Id = {}, Client Id = {}, {:?}", id, client_id, e);
+                (true, link.state.clean())
+            }
+        };
+
+        let disconnect = Disconnection::new(client_id, execute_will, pending);
+        let disconnect = Event::Disconnect(disconnect);
         let message = (id, disconnect);
         self.router_tx.send(message)?;
         Ok(())

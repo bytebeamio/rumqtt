@@ -1,5 +1,5 @@
 use crate::framed::Network;
-use crate::{tls, Incoming, MqttState, Request, StateError};
+use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
@@ -9,7 +9,6 @@ use tokio::select;
 use tokio::stream::{Stream, StreamExt};
 use tokio::time::{self, Delay, Elapsed, Instant};
 
-use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
 use std::vec::IntoIter;
@@ -45,10 +44,6 @@ pub struct EventLoop {
     pub requests_rx: Receiver<Request>,
     /// Requests handle to send requests
     pub requests_tx: Sender<Request>,
-    /// Buffered incoming packets
-    pub incoming: VecDeque<Incoming>,
-    /// Buffered outgoing packets
-    pub outgoing: VecDeque<Outgoing>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
@@ -58,11 +53,11 @@ pub struct EventLoop {
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
-    pub(crate) cancel_tx: Option<Sender<()>>,
+    pub(crate) cancel_tx: Sender<()>,
 }
 
 /// Events which can be yielded by the event loop
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Event {
     Incoming(Incoming),
     Outgoing(Outgoing),
@@ -85,13 +80,11 @@ impl EventLoop {
             state: MqttState::new(max_inflight),
             requests_tx,
             requests_rx,
-            incoming: VecDeque::with_capacity(100),
-            outgoing: VecDeque::with_capacity(100),
             pending,
             network: None,
             keepalive_timeout: None,
             cancel_rx,
-            cancel_tx: Some(cancel_tx),
+            cancel_tx,
         }
     }
 
@@ -104,8 +97,8 @@ impl EventLoop {
     ///
     /// Can be useful in cases when connection should be halted immediately
     /// between half-open connection detections or (re)connection timeouts
-    pub(crate) fn take_cancel_handle(&mut self) -> Option<Sender<()>> {
-        self.cancel_tx.take()
+    pub(crate) fn cancel_handle(&mut self) -> Sender<()> {
+        self.cancel_tx.clone()
     }
 
     fn clean(&mut self) {
@@ -156,44 +149,20 @@ impl EventLoop {
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
 
-        // Return buffered outgoing notification first so that, if incoming
-        // packets 1, 2, 3 are acked in bulk before reading new incoming packet,
-        // we return buffered outgoing notifications of sent packets first before
-        // new incoming notification. This ensures that notification order is in
-        // sync with the order in which select is doing things
-        if let Some(outgoing) = self.outgoing.pop_front() {
-            return Ok(Event::Outgoing(outgoing));
-        }
-
-        // Return buffered incoming packets before hitting network again
-        if let Some(incoming) = self.incoming.pop_front() {
-            return Ok(Event::Incoming(incoming));
+        // Read buffered events from previous polls before calling a new poll
+        if let Some(event) = self.state.events.pop_front() {
+            return Ok(event);
         }
 
         // this loop is necessary since self.incoming.pop_front() might return None. In that case,
         // instead of returning a None event, we try again.
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.incoming) => {
-                let incoming = o?;
-
-                // handle 1st incoming packet
-                if let Some(request) = self.state.handle_incoming_packet(&incoming)? {
-                    let outgoing = network.fill(request)?;
-                    self.outgoing.push_back(outgoing)
-                }
-
-                // be eager to handle more incoming packets
-                for incoming in self.incoming.iter() {
-                    if let Some(request) = self.state.handle_incoming_packet(incoming)? {
-                        let outgoing = network.fill(request)?;
-                        self.outgoing.push_back(outgoing)
-                    }
-                }
-
+            o = network.readb(&mut self.state) => {
+                o?;
                 // flush all the acks and return first incoming packet
-                network.flush().await?;
-                Ok(Event::Incoming(incoming))
+                network.flush(&mut self.state.write).await?;
+                Ok(self.state.events.pop_front().unwrap())
             },
             // Pull next request from user requests channel.
             // If conditions in the below branch are for flow control. We read next user
@@ -211,20 +180,6 @@ impl EventLoop {
             // user request's packet id will roll to 1. This replaces existing packet id 1.
             // Resulting in a collision
             //
-            // This can be fixed in 2 ways
-            //
-            // 1. using packet id boundary instead of count for flow control
-            // ---------------------
-            // Full inflight queue will look like -> [1, 2, 3, 4, 5].
-            // If 3 is acked instead of 1 first   -> [1, 2, x, 4, 5].
-            // If we flow control at boundary (5) to make sure that all the packet ids before
-            // 5 are acked, there would be no collisions.
-            // But this method comes at the cost of throughput. Synchronizing all the acks
-            // everytime at boundary will affect throughput, even if the broker is acking in
-            // sequence
-            //
-            // 2. using collisions for flow control
-            // ---------------------
             // Eventloop can stop receiving outgoing user requests when previous outgoing
             // request collided. I.e collision state. Collision state will be cleared only
             // when correct ack is received
@@ -235,46 +190,28 @@ impl EventLoop {
             // outgoing requests (along with 1b).
             o = self.requests_rx.next(), if !inflight_full && !pending && !collision => match o {
                 Some(request) => {
-                    let request = self.state.handle_outgoing_packet(request)?;
-                    let outgoing = network.fill(request)?;
-                    // During high load, pull more data from channel to batch more requests.
-                    // Note: Make sure size of total inflight messages isn't greater than
-                    // OS tcp write buffer size to prevent bounded buffer deadlocks
-                    for _ in 0..self.options.max_request_batch {
-                        // Honor inflight limitations during batching
-                        if self.state.inflight >= self.options.inflight { break }
-                        match self.requests_rx.try_recv() {
-                            Ok(r) => {
-                                // handle, send and buffer outgoing packet ids
-                                let request = self.state.handle_outgoing_packet(r)?;
-                                let outgoing = network.fill(request)?;
-                                self.outgoing.push_back(outgoing);
-                            }
-                            Err(_) => break,
-                        };
-
-                    }
-
-                    network.flush().await?;
-                    Ok(Event::Outgoing(outgoing))
+                    self.state.handle_outgoing_packet(request)?;
+                    network.flush(&mut self.state.write).await?;
+                    Ok(self.state.events.pop_front().unwrap())
                 }
                 None => Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
-                let request = self.state.handle_outgoing_packet(request)?;
-                let outgoing = network.write(request).await?;
-                Ok(Event::Outgoing(outgoing))
+                self.state.handle_outgoing_packet(request)?;
+                network.flush(&mut self.state.write).await?;
+                Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = self.keepalive_timeout.as_mut().unwrap() => {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.reset(Instant::now() + self.options.keep_alive);
-                let request = self.state.handle_outgoing_packet(Request::PingReq)?;
-                let outgoing = network.write(request).await?;
-                Ok(Event::Outgoing(outgoing))
+
+                self.state.handle_outgoing_packet(Request::PingReq)?;
+                network.flush(&mut self.state.write).await?;
+                Ok(self.state.events.pop_front().unwrap())
             }
             // cancellation requests to stop the polling
             _ = self.cancel_rx.next() => {

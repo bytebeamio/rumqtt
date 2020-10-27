@@ -1,3 +1,4 @@
+mod connections;
 mod data;
 mod topics;
 
@@ -5,6 +6,7 @@ use crate::{Config, Data, DataRequest};
 use bytes::Bytes;
 use std::sync::Arc;
 
+pub use connections::ConnectionsLog;
 pub use topics::TopicsLog;
 
 type Id = usize;
@@ -55,6 +57,24 @@ impl DataLog {
         }
     }
 
+    pub fn retain(&mut self, id: Id, topic: &str, bytes: Bytes) -> Option<bool> {
+        // id 0-10 are reserved for replications which are linked to other routers in the mesh
+        let replication_data = id < 10;
+        let commitlog = if replication_data {
+            self.commitlog.get_mut(id).unwrap()
+        } else {
+            self.commitlog.get_mut(self.id).unwrap()
+        };
+
+        match commitlog.retain(&topic, bytes) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                error!("Commitlog append failed. Error = {:?}", e);
+                None
+            }
+        }
+    }
+
     pub fn handle_data_request(&mut self, id: Id, request: &DataRequest) -> Option<Data> {
         // Replicator asking data implies that previous data has been replicated
         // We update replication watermarks at this point
@@ -71,18 +91,30 @@ impl DataLog {
     pub(crate) fn extract_connection_data(&mut self, request: &DataRequest) -> Option<Data> {
         let native_id = self.id;
         let topic = &request.topic;
-        let commitlog = &mut self.commitlog[native_id];
+        let last_retain = request.last_retain;
         let cursors = request.cursors;
 
-        let (segment, offset) = cursors[native_id];
-        let mut reply = Data::new(request.topic.clone(), cursors, 0, Vec::new());
+        let commitlog = &mut self.commitlog[native_id];
 
-        match commitlog.readv(topic, segment, offset) {
-            Ok(Some((jump, base_offset, record_offset, payload))) => {
+        let (segment, offset) = cursors[native_id];
+        let mut reply = Data::new(
+            request.topic.clone(),
+            request.qos,
+            cursors,
+            last_retain,
+            0,
+            Vec::new(),
+        );
+
+        match commitlog.readv(topic, segment, offset, last_retain) {
+            Ok(Some((jump, base_offset, record_offset, last_retain, payload))) => {
                 match jump {
                     Some(next) => reply.cursors[native_id] = (next, next),
                     None => reply.cursors[native_id] = (base_offset, record_offset),
                 }
+
+                // Update retain id (incase readv has retained publish to consider)
+                reply.last_retain = last_retain;
 
                 // Update reply's cursors only when read has returned some data
                 // Move the reply to next segment if we are done with the current one
@@ -104,20 +136,23 @@ impl DataLog {
     /// log is caught up or encountered an error while reading data
     pub(crate) fn extract_all_data(&mut self, request: &DataRequest) -> Option<Data> {
         let topic = &request.topic;
-
+        let mut last_retain = request.last_retain;
         let mut cursors = [(0, 0); 3];
         let mut payload = Vec::new();
 
         // Iterate through native and replica commitlogs to collect data (of a topic)
         for (i, commitlog) in self.commitlog.iter_mut().enumerate() {
             let (segment, offset) = request.cursors[i];
-            match commitlog.readv(topic, segment, offset) {
+            match commitlog.readv(topic, segment, offset, last_retain) {
                 Ok(Some(v)) => {
-                    let (jump, base_offset, record_offset, mut data) = v;
+                    let (jump, base_offset, record_offset, retain, mut data) = v;
                     match jump {
                         Some(next) => cursors[i] = (next, next),
                         None => cursors[i] = (base_offset, record_offset),
                     }
+
+                    // Update retain id (incase readv has retained publish to consider)
+                    last_retain = retain;
 
                     if data.is_empty() {
                         continue;
@@ -137,7 +172,14 @@ impl DataLog {
         // the request with updated offsets
         match payload.is_empty() {
             true => None,
-            false => Some(Data::new(request.topic.clone(), cursors, 0, payload)),
+            false => Some(Data::new(
+                request.topic.clone(),
+                request.qos,
+                cursors,
+                last_retain,
+                0,
+                payload,
+            )),
         }
     }
 }

@@ -23,14 +23,14 @@ pub async fn new_connection(
     cap: usize,
     router_tx: &Sender<(usize, Event)>,
 ) -> (usize, Receiver<Notification>) {
-    let (connection, this_rx) = Connection::new_remote(id, cap);
+    let (connection, this_rx) = Connection::new_remote(id, true, cap);
 
     // send a connection request with a dummy id
     let message = (0, Event::Connect(connection));
     router_tx.send(message).unwrap();
 
     // wait for ack from router
-    let id = match this_rx.recv().unwrap() {
+    let (id, ..) = match this_rx.recv().unwrap() {
         Notification::ConnectionAck(ConnectionAck::Success(id)) => id,
         Notification::ConnectionAck(ConnectionAck::Failure(e)) => {
             panic!("Connection failed {:?}", e)

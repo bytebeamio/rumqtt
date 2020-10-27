@@ -69,14 +69,13 @@ impl Tracker {
         self.requests.pop_front()
     }
 
-    pub fn register_data_request(&mut self, topic: String, cursors: [(u64, u64); 3]) {
-        let request = DataRequest::offsets(topic, cursors);
+    pub fn register_data_request(&mut self, request: DataRequest) {
         let request = Request::Data(request);
         self.requests.push_back(request);
     }
 
-    pub fn register_topics_request(&mut self, next_offset: usize) {
-        let request = TopicsRequest::offset(next_offset);
+    pub fn register_topics_request(&mut self, request: TopicsRequest) {
+        // let request = TopicsRequest::offset(next_offset);
         let request = Request::Topics(request);
         self.requests.push_back(request);
     }
@@ -91,8 +90,8 @@ impl Tracker {
     pub fn track_matched_topics(&mut self, topics: &[String]) -> usize {
         let mut matched_count = 0;
         for topic in topics {
-            if self.match_with_subscriptions(topic) {
-                self.register_data_request(topic.to_owned(), [(0, 0); 3]);
+            if let Some(request) = self.match_with_subscriptions(topic) {
+                self.register_data_request(request);
                 matched_count += 1;
             }
         }
@@ -154,26 +153,131 @@ impl Tracker {
     /// topics should be tracked by tracker from offset 0.
     /// Returns true if this topic matches a subscription for
     /// router to trigger new topic notification
-    fn match_with_subscriptions(&mut self, topic: &str) -> bool {
+    fn match_with_subscriptions(&mut self, topic: &str) -> Option<DataRequest> {
         // ignore if the topic is already being tracked
         if self.topics_index.contains(topic) {
-            return false;
+            return None;
         }
 
         // A concrete subscription match
-        if let Some(_qos) = self.concrete_subscriptions.get(topic) {
+        if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
-            return true;
+            let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3], 0);
+            return Some(request);
         }
 
         // Wildcard subscription match. We return after first match
-        for (filter, _qos) in self.wild_subscriptions.iter() {
+        for (filter, qos) in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
-                return true;
+                let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3], 0);
+                return Some(request);
             }
         }
 
-        false
+        None
+    }
+
+    /// Removes a subscription and removes matched topics in tracker
+    pub fn remove_subscription_and_unmatch(&mut self, filters: Vec<String>) -> VecDeque<String> {
+        let mut matching = VecDeque::new();
+
+        // Remove subscriptions and collect topics that match filters
+        for filter in filters.iter() {
+            // Collect topics matching current filter
+            for topic in self.topics_index.iter() {
+                if matches(topic, filter) {
+                    matching.push_back(topic.clone());
+                }
+            }
+
+            // Remove the subscription
+            if has_wildcards(filter) {
+                if let Some(index) = self.wild_subscriptions.iter().position(|v| v.0 == *filter) {
+                    self.wild_subscriptions.swap_remove(index);
+                }
+            } else {
+                self.concrete_subscriptions.remove(filter);
+            }
+        }
+
+        let mut pending = VecDeque::new();
+        while let Some(topic) = matching.pop_front() {
+            // Remove this tracked topic from index
+            self.topics_index.remove(&topic);
+
+            // Find the topic in request queue
+            let position = self.requests.iter().position(|request| match request {
+                Request::Data(data) if data.topic == topic => true,
+                _ => false,
+            });
+
+            match position {
+                Some(i) => {
+                    self.requests.swap_remove_back(i);
+                }
+                None => pending.push_back(topic),
+            }
+        }
+
+        pending
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use mqtt4bytes::*;
+
+    #[test]
+    fn unsubscribe_removes_requests_from_queue() {
+        let mut tracker = Tracker::new();
+
+        let topics = vec!["a/b".to_owned(), "c/d".to_owned(), "e".to_owned()];
+        let filter = vec![
+            SubscribeTopic::new("+/+".to_owned(), QoS::AtLeastOnce),
+            SubscribeTopic::new("+".to_owned(), QoS::AtLeastOnce),
+        ];
+
+        tracker.add_subscription_and_match(filter, topics.as_slice());
+
+        while let Some((topic, qos, cursors)) = tracker.next_matched() {
+            tracker.register_data_request(DataRequest::offsets(topic, qos, cursors, 0));
+        }
+
+        let mut t = tracker.requests.iter();
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Acks(AcksRequest::new()));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("a/b".to_owned(), 1)));
+        assert!(tracker.topics_index.contains("a/b"));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("c/d".to_owned(), 1)));
+        assert!(tracker.topics_index.contains("c/d"));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("e".to_owned(), 1)));
+        assert!(tracker.topics_index.contains("e"));
+
+        // Remove an inflight request
+        tracker.requests.swap_remove_front(1);
+
+        let o = tracker.remove_subscription_and_unmatch(vec!["+/+".to_owned()]);
+        assert_eq!(o, vec!["a/b".to_owned()]);
+
+        let mut t = tracker.requests.iter();
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Acks(AcksRequest::new()));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("e".to_owned(), 1)));
+
+        assert!(tracker.topics_index.contains("e"));
+        assert!(!tracker.topics_index.contains("a/b"));
+        assert!(!tracker.topics_index.contains("c/d"));
     }
 }

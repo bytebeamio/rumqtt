@@ -37,9 +37,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let commandline: CommandLine = argh::from_env();
     let config: Config = confy::load_path(commandline.config)?;
 
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    let _guard = pprof::ProfilerGuard::new(100).unwrap();
     ctrlc::set_handler(move || {
-        profile("rumqttd.pb", &guard);
+        // profile("rumqttd.pb", &guard);
         exit(0);
     })
     .expect("Error setting Ctrl-C handler");
@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn profile(name: &str, guard: &ProfilerGuard) {
+fn _profile(name: &str, guard: &ProfilerGuard) {
     if let Ok(report) = guard.report().build() {
         let mut file = File::create(name).unwrap();
         let profile = report.pprof().unwrap();

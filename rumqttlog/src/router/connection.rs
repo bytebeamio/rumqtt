@@ -1,5 +1,6 @@
 use crate::Notification;
 use jackiechan::{bounded, Receiver, Sender, TrySendError};
+use mqtt4bytes::LastWill;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,10 @@ pub struct Connection {
     /// Replicator connection are only created from inside this library.
     /// All the external connections are of 'device' type
     pub conn: ConnectionType,
+    /// Clean session
+    clean: bool,
+    /// Connection will
+    will: Option<LastWill>,
     /// Last failed message to connection
     last_failed: Option<Notification>,
     /// Handle which is given to router to allow router to comminicate with
@@ -28,11 +33,17 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<Notification>) {
+    pub fn new_remote(
+        id: &str,
+        clean: bool,
+        capacity: usize,
+    ) -> (Connection, Receiver<Notification>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
             conn: ConnectionType::Device(id.to_owned()),
+            clean,
+            will: None,
             last_failed: None,
             handle: this_tx,
             capacity,
@@ -42,11 +53,17 @@ impl Connection {
         (connection, this_rx)
     }
 
-    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<Notification>) {
+    pub fn new_replica(
+        id: usize,
+        clean: bool,
+        capacity: usize,
+    ) -> (Connection, Receiver<Notification>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
             conn: ConnectionType::Replicator(id),
+            clean,
+            will: None,
             last_failed: None,
             handle: this_tx,
             capacity,
@@ -54,6 +71,18 @@ impl Connection {
         };
 
         (connection, this_rx)
+    }
+
+    pub fn clean(&self) -> bool {
+        self.clean
+    }
+
+    pub fn will(&mut self) -> Option<LastWill> {
+        self.will.take()
+    }
+
+    pub fn set_will(&mut self, will: LastWill) {
+        self.will = Some(will);
     }
 
     /// Sends notification and returns status to unschedule this connection

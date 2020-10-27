@@ -9,7 +9,7 @@ mod watermarks;
 
 use connection::Connection;
 pub use router::Router;
-use tracker::Tracker;
+pub use tracker::Tracker;
 
 use self::bytes::Bytes;
 use mqtt4bytes::Packet;
@@ -33,7 +33,7 @@ pub enum Event {
 }
 
 /// Requests for pull operations
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Request {
     /// Data request
     Data(DataRequest),
@@ -48,6 +48,8 @@ pub enum Request {
 pub enum Notification {
     /// Connection reply
     ConnectionAck(ConnectionAck),
+    /// Individual publish
+    Message(Message),
     /// Data reply
     Data(Data),
     /// Watermarks reply
@@ -101,49 +103,45 @@ impl ReplicationAck {
 /// NOTE Connection can make one sweep request to get data from multiple topics
 /// but we'll keep it simple for now as multiple requests in one message can
 /// makes constant extraction size harder
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct DataRequest {
     /// Log to sweep
     pub(crate) topic: String,
+    /// QoS of the request
+    pub(crate) qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub(crate) cursors: [(u64, u64); 3],
+    /// Last retain id
+    pub(crate) last_retain: u64,
     /// Maximum count of payload buffer per replica
     max_count: usize,
 }
 
 impl DataRequest {
     /// New data request with offsets starting from 0
-    pub fn new(topic: String) -> DataRequest {
+    pub fn new(topic: String, qos: u8) -> DataRequest {
         DataRequest {
             topic,
+            qos,
             cursors: [(0, 0); 3],
-            max_count: 100,
-        }
-    }
-
-    pub fn with(topic: String, max_count: usize) -> DataRequest {
-        DataRequest {
-            topic,
-            cursors: [(0, 0); 3],
-            max_count,
-        }
-    }
-
-    /// New data request with provided offsets
-    pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
-        DataRequest {
-            topic,
-            cursors,
+            last_retain: 0,
             max_count: 100,
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets_with(topic: String, cursors: [(u64, u64); 3], max_count: usize) -> DataRequest {
+    pub fn offsets(
+        topic: String,
+        qos: u8,
+        cursors: [(u64, u64); 3],
+        last_retain: u64,
+    ) -> DataRequest {
         DataRequest {
             topic,
+            qos,
             cursors,
-            max_count,
+            last_retain,
+            max_count: 100,
         }
     }
 }
@@ -158,11 +156,45 @@ impl fmt::Debug for DataRequest {
     }
 }
 
+pub struct Message {
+    /// Log to sweep
+    pub topic: String,
+    /// Qos of the topic
+    pub qos: u8,
+    /// Reply data chain
+    pub payload: Bytes,
+}
+
+impl Message {
+    pub fn new(topic: String, qos: u8, payload: Bytes) -> Message {
+        Message {
+            topic,
+            payload,
+            qos,
+        }
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Topic = {:?}, Payload size = {}",
+            self.topic,
+            self.payload.len()
+        )
+    }
+}
+
 pub struct Data {
     /// Log to sweep
     pub topic: String,
+    /// Qos of the topic
+    pub qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursors: [(u64, u64); 3],
+    /// Next retain publish id
+    pub last_retain: u64,
     /// Payload size
     pub size: usize,
     /// Reply data chain
@@ -170,12 +202,21 @@ pub struct Data {
 }
 
 impl Data {
-    pub fn new(topic: String, cursors: [(u64, u64); 3], size: usize, payload: Vec<Bytes>) -> Data {
+    pub fn new(
+        topic: String,
+        qos: u8,
+        cursors: [(u64, u64); 3],
+        last_retain: u64,
+        size: usize,
+        payload: Vec<Bytes>,
+    ) -> Data {
         Data {
             topic,
             cursors,
+            last_retain,
             size,
             payload,
+            qos,
         }
     }
 }
@@ -193,7 +234,7 @@ impl fmt::Debug for Data {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TopicsRequest {
     /// Start from this offset
     offset: usize,
@@ -229,7 +270,7 @@ impl<'a> Topics<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AcksRequest;
 
 impl AcksRequest {
@@ -245,8 +286,16 @@ pub struct Acks {
 }
 
 impl Acks {
+    pub fn empty() -> Acks {
+        Acks { acks: Vec::new() }
+    }
+
     pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
         Acks { acks }
+    }
+
+    pub fn push(&mut self, ack: (u16, Packet)) {
+        self.acks.push(ack);
     }
 
     pub fn len(&self) -> usize {
@@ -256,8 +305,9 @@ impl Acks {
 
 #[derive(Debug)]
 pub enum ConnectionAck {
-    /// Id assigned by the router for this connectiobackn
-    Success(usize),
+    /// Id assigned by the router for this connection and
+    /// previous session status
+    Success((usize, bool, Vec<Notification>)),
     /// Failure and reason for failure string
     Failure(String),
 }
@@ -265,10 +315,16 @@ pub enum ConnectionAck {
 #[derive(Debug)]
 pub struct Disconnection {
     id: String,
+    execute_will: bool,
+    pending: Vec<Notification>,
 }
 
 impl Disconnection {
-    pub fn new(id: String) -> Disconnection {
-        Disconnection { id }
+    pub fn new(id: String, execute_will: bool, pending: Vec<Notification>) -> Disconnection {
+        Disconnection {
+            id,
+            execute_will,
+            pending,
+        }
     }
 }

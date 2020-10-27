@@ -1,14 +1,14 @@
 use crate::network::Network;
 use crate::state::{self, State};
-use crate::{Id, ServerSettings};
-use mqtt4bytes::{ConnAck, Connect, ConnectReturnCode, Packet, Publish, QoS};
+use crate::{network, Id, ServerSettings};
+use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode, Publish};
 use rumqttlog::{
-    Connection, ConnectionAck, Receiver, RecvError, Event,
-    Notification, SendError, Sender,
+    Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
-use std::io;
+
 use std::sync::Arc;
-use tokio::time::{Duration, Elapsed, Instant};
+use std::{io, mem};
+use tokio::time::{Duration, Elapsed};
 use tokio::{select, time};
 
 pub struct RemoteLink {
@@ -16,20 +16,19 @@ pub struct RemoteLink {
     connect: Connect,
     id: Id,
     network: Network,
-    state: State,
     router_tx: Sender<(Id, Event)>,
     link_rx: Receiver<Notification>,
-    acks_required: usize,
-    stored_message: Option<Notification>,
     total: usize,
+    pending: Vec<Notification>,
+    pub(crate) state: State,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
-    // #[error("Packet not supported yet")]
-    // UnsupportedPacket(Packet),
+    #[error("Network error {0}")]
+    Network(#[from] network::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("State error")]
@@ -46,6 +45,10 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Payload count greater than max inflight")]
     TooManyPayloads(usize),
+    #[error("Persistent session requires valid client id")]
+    InvalidClientId,
+    #[error("Disconnect request")]
+    Disconnect,
 }
 
 impl RemoteLink {
@@ -58,7 +61,7 @@ impl RemoteLink {
         // DOS attacks by filling total connections that the server can handle with idle open
         // connections which results in server rejecting new connections
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
-        let connect = time::timeout(timeout, async {
+        let mut connect = time::timeout(timeout, async {
             let connect = network.read_connect().await?;
             Ok::<_, Error>(connect)
         })
@@ -67,24 +70,35 @@ impl RemoteLink {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let (connection, link_rx) = Connection::new_remote(&client_id, 10);
+        let clean_session = connect.clean_session;
+        if !clean_session && client_id.is_empty() {
+            return Err(Error::InvalidClientId);
+        }
+
+        let (mut connection, link_rx) = Connection::new_remote(&client_id, clean_session, 10);
+
+        // Add last will to conneciton
+        if let Some(will) = connect.last_will.take() {
+            connection.set_will(will);
+        }
+
         let message = (0, Event::Connect(connection));
         router_tx.send(message).unwrap();
-
-        // Send connection acknowledgement back to the client
-        let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
-        network.connack(connack).await?;
 
         // TODO When a new connection request is sent to the router, router should ack with error
         // TODO if it exceeds maximum allowed active connections
         // Right now link identifies failure with dropped rx in router, which is probably ok for now
-        let id = match link_rx.recv()? {
+        let (id, session, pending) = match link_rx.recv()? {
             Notification::ConnectionAck(ack) => match ack {
-                ConnectionAck::Success(id) => id,
+                ConnectionAck::Success((id, session, pending)) => (id, session, pending),
                 ConnectionAck::Failure(reason) => return Err(Error::ConnAck(reason)),
             },
             message => return Err(Error::RouterMessage(message)),
         };
+
+        // Send connection acknowledgement back to the client
+        let connack = ConnAck::new(ConnectReturnCode::Accepted, session);
+        network.connack(connack).await?;
 
         let max_inflight_count = config.max_inflight_count;
         Ok((
@@ -95,45 +109,56 @@ impl RemoteLink {
                 connect,
                 id,
                 network,
-                state: State::new(max_inflight_count),
                 router_tx,
                 link_rx,
-                acks_required: 0,
-                stored_message: None,
                 total: 0,
+                pending,
+                state: State::new(max_inflight_count),
             },
         ))
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let keep_alive = Duration::from_secs(self.connect.keep_alive.into());
-        let keep_alive = keep_alive + keep_alive.mul_f32(0.5);
-        let mut timeout = time::delay_for(keep_alive);
+        self.network.set_keepalive(self.connect.keep_alive);
+        let pending = mem::replace(&mut self.pending, Vec::new());
+        let mut pending = pending.into_iter();
 
-        // DESIGN: Shouldn't result in bounded queue deadlocks because of blocking n/w send
-        //         Router shouldn't drop messages
-        // NOTE: Right now we request data by topic, instead if can request data
-        // of multiple topics at once, we can have better utilization of
-        // network and system calls for n publisher and 1 subscriber workloads
-        // as data from multiple topics can be batched (for a given connection)
         loop {
-            let keep_alive2 = &mut timeout;
-            if self.acks_required == 0 {
-                if let Some(message) = self.stored_message.take() {
-                    self.handle_router_response(message).await?;
-                }
-            }
-
             select! {
-                _ = keep_alive2 => return Err(Error::KeepAlive),
-                packets = self.network.readb() => {
-                    timeout.reset(Instant::now() + keep_alive);
-                    let packets = packets?;
-                    self.handle_network_data(packets).await?;
+                o = self.network.readb(&mut self.state) => {
+                    let disconnect = o?;
+                    self.handle_network_data().await?;
+
+                    if disconnect {
+                        return Err(Error::Disconnect)
+                    }
                 }
                 // Receive from router when previous when state isn't in collision
-                // due to previously recived data request
-                message = self.link_rx.async_recv(), if self.acks_required == 0 => {
+                // due to previously received data request
+                message = async { pending.next() } => {
+                    match message {
+                        Some(message) => self.handle_router_response(message).await?,
+                        None => break
+                    };
+                }
+            }
+        }
+
+        // Note:
+        // Shouldn't result in bounded queue deadlocks because of blocking n/w send
+        loop {
+            select! {
+                o = self.network.readb(&mut self.state) => {
+                    let disconnect = o?;
+                    self.handle_network_data().await?;
+
+                    if disconnect {
+                        return Err(Error::Disconnect)
+                    }
+                }
+                // Receive from router when previous when state isn't in collision
+                // due to previously received data request
+                message = self.link_rx.async_recv(), if !self.state.pause_outgoing() => {
                     let message = message?;
                     self.handle_router_response(message).await?;
                 }
@@ -141,8 +166,29 @@ impl RemoteLink {
         }
     }
 
+    async fn handle_network_data(&mut self) -> Result<(), Error> {
+        let data = self.state.take_incoming();
+        self.network.flush(self.state.write_mut()).await?;
+
+        if !data.is_empty() {
+            trace!(
+                "{:11} {:14} Id = {}, Count = {}",
+                "data",
+                "remote",
+                self.id,
+                data.len()
+            );
+
+            let message = Event::Data(data);
+            self.router_tx.send((self.id, message))?;
+        }
+
+        Ok(())
+    }
+
     async fn handle_router_response(&mut self, message: Notification) -> Result<(), Error> {
         match message {
+            Notification::ConnectionAck(_) => {}
             Notification::Acks(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Count = {}",
@@ -153,10 +199,24 @@ impl RemoteLink {
                 );
 
                 for (_pkid, ack) in reply.acks.into_iter() {
-                    self.network.fill(ack)?;
+                    self.state.outgoing_ack(ack)?;
                 }
             }
-            Notification::ConnectionAck(_) => {}
+            Notification::Message(reply) => {
+                trace!(
+                    "{:11} {:14} Id = {}, Topic = {}, Count = {}",
+                    "data",
+                    "pending",
+                    self.id,
+                    reply.topic,
+                    reply.payload.len()
+                );
+
+                let qos = qos(reply.qos).unwrap();
+                let payload = reply.payload;
+                let publish = Publish::from_bytes(&reply.topic, qos, payload);
+                self.state.outgoing_publish(publish)?;
+            }
             Notification::Data(reply) => {
                 trace!(
                     "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
@@ -167,30 +227,16 @@ impl RemoteLink {
                     reply.cursors,
                     reply.payload.len()
                 );
+
                 let payload_count = reply.payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count));
                 }
 
-                // Save this message and set collision flag to not receive any
-                // messages from router until there are acks on network. When
-                // correct number of acks are received to ensure stored message
-                // wont collide, collision flag is reset and the stored message
-                // is retrieved by looping logic to be sent to network again
-                let no_collision_count = self.state.no_collision_count(reply.payload.len());
-                if no_collision_count > 0 {
-                    self.acks_required = no_collision_count;
-                    self.stored_message = Some(Notification::Data(reply));
-                    return Ok(());
-                }
-
                 self.total += payload_count;
-                // dbg!(self.total);
                 for p in reply.payload {
-                    let publish = Publish::from_bytes(&reply.topic, QoS::AtLeastOnce, p);
-                    let publish = self.state.handle_router_data(publish)?;
-                    let publish = Packet::Publish(publish);
-                    self.network.fill(publish)?;
+                    let publish = Publish::from_bytes(&reply.topic, qos(reply.qos).unwrap(), p);
+                    self.state.outgoing_publish(publish)?;
                 }
             }
             Notification::Pause => {
@@ -199,68 +245,7 @@ impl RemoteLink {
             }
         }
 
-        // FIXME Early returns above will prevent router send and network write
-        self.network.flush().await?;
-        Ok(())
-    }
-
-    async fn handle_network_data(&mut self, incoming: Vec<Packet>) -> Result<(), Error> {
-        let mut data = Vec::new();
-
-        for packet in incoming {
-            // debug!("Id = {}[{}], Packet packet = {:?}", self.connect.client_id, self.id, packet);
-            match packet {
-                Packet::PubAck(ack) => {
-                    if self.acks_required > 0 {
-                        self.acks_required -= 1;
-                    }
-
-                    self.state.handle_network_puback(ack)?;
-                }
-                Packet::Publish(publish) => {
-                    // collect publishes from this batch
-                    let incoming = Packet::Publish(publish);
-                    data.push(incoming);
-                }
-                Packet::Subscribe(subscribe) => {
-                    trace!(
-                        "{:11} {:14} Id = {}, Topics = {:?}",
-                        "subscribe",
-                        "commit",
-                        self.id,
-                        subscribe.topics
-                    );
-                    let incoming = Packet::Subscribe(subscribe);
-                    data.push(incoming);
-                }
-                Packet::PingReq => {
-                    self.network.fill(Packet::PingResp)?;
-                }
-                Packet::Disconnect => {
-                    // TODO Add correct disconnection handling
-                }
-                packet => {
-                    error!("Packet = {:?} not supported yet", packet);
-                    // return Err(Error::UnsupportedPacket(packet))
-                }
-            }
-        }
-
-        // FIXME Early returns above will prevent router send and network write
-        self.network.flush().await?;
-        if !data.is_empty() {
-            trace!(
-                "{:11} {:14} Id = {}, Count = {}",
-                "data",
-                "commit",
-                self.id,
-                data.len()
-            );
-            let message = Event::Data(data);
-            self.router_tx.send((self.id, message))?;
-        }
-
+        self.network.flush(self.state.write_mut()).await?;
         Ok(())
     }
 }
-

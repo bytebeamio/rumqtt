@@ -31,10 +31,15 @@ impl DataWaiters {
     }
 
     /// Remove a connection from waiters
-    pub fn remove(&mut self, id: ConnectionId) {
+    pub fn remove(&mut self, id: ConnectionId) -> VecDeque<DataRequest> {
+        let mut pending = VecDeque::new();
         for waiters in self.waiters.values_mut() {
-            waiters.remove(id)
+            if let Some(request) = waiters.remove(id) {
+                pending.push_back(request)
+            }
         }
+
+        pending
     }
 }
 
@@ -85,9 +90,10 @@ impl<T> Waiters<T> {
     }
 
     /// Remove a connection from waiters
-    pub fn remove(&mut self, id: ConnectionId) {
-        if let Some(index) = self.current.iter().position(|x| x.0 == id) {
-            self.current.swap_remove_back(index);
+    pub fn remove(&mut self, id: ConnectionId) -> Option<T> {
+        match self.current.iter().position(|x| x.0 == id) {
+            Some(index) => self.current.swap_remove_back(index).map(|v| v.1),
+            None => None,
         }
     }
 }

@@ -21,6 +21,8 @@ pub struct Log {
     active_segment: Segment,
     /// All the segments in a ringbuffer
     segments: FnvHashMap<u64, Segment>,
+    /// Retained publish
+    retained: Option<(u64, Bytes)>,
 }
 
 impl Log {
@@ -36,7 +38,19 @@ impl Log {
             max_segments,
             segments: FnvHashMap::default(),
             active_segment: Segment::new(0),
+            retained: None,
         }
+    }
+
+    pub fn retain(&mut self, record: Bytes) {
+        if record.is_empty() {
+            self.retained = None;
+            return;
+        }
+
+        let retained = self.retained.get_or_insert((0, record.clone()));
+        retained.0 += 1;
+        retained.1 = record;
     }
 
     /// Appends this record to the tail and returns the offset of this append.
@@ -103,7 +117,12 @@ impl Log {
     /// data is not of active segment. Set your max_segment size keeping tail
     /// latencies of all the concurrent connections mind
     /// (some runtimes support internal preemption using await points)
-    pub fn readv(&mut self, segment: u64, offset: u64) -> (Option<u64>, u64, u64, Vec<Bytes>) {
+    pub fn readv(
+        &mut self,
+        segment: u64,
+        offset: u64,
+        last_retain: u64,
+    ) -> (Option<u64>, u64, u64, u64, Vec<Bytes>) {
         let mut base_offset = segment;
         let mut offset = offset;
 
@@ -115,16 +134,17 @@ impl Log {
             offset = self.head_offset;
         }
 
-        loop {
+        let mut data = loop {
             // read from active segment if base offset matches active segment's base offset
             if base_offset == self.active_segment.base_offset() {
                 let relative_offset = (offset - base_offset) as usize;
                 let out = self.active_segment.readv(relative_offset);
                 let next_record_offset = offset + out.len() as u64;
-                return (
+                break (
                     None,
                     self.active_segment.base_offset(),
                     next_record_offset,
+                    last_retain,
                     out,
                 );
             }
@@ -137,10 +157,11 @@ impl Log {
                 if !out.is_empty() {
                     let next_record_offset = offset + out.len() as u64;
                     let next_segment_offset = segment.base_offset() + segment.len() as u64;
-                    return (
+                    break (
                         Some(next_segment_offset),
                         segment.base_offset(),
                         next_record_offset,
+                        last_retain,
                         out,
                     );
                 } else {
@@ -156,7 +177,16 @@ impl Log {
                     continue;
                 };
             }
+        };
+
+        if let Some((id, publish)) = &mut self.retained {
+            if *id != last_retain {
+                data.4.push(publish.clone());
+                data.3 = *id;
+            }
         }
+
+        data
     }
 }
 
@@ -234,7 +264,7 @@ mod test {
         }
 
         // Read a segment from start. This returns full segment
-        let (jump, base_offset, next_offset, data) = log.readv(0, 0);
+        let (jump, base_offset, next_offset, _, data) = log.readv(0, 0, 0);
         assert_eq!(data.len(), 10);
         assert_eq!(base_offset, 0);
         assert_eq!(next_offset, 10);
@@ -247,7 +277,7 @@ mod test {
         assert_eq!(data[0], 50);
 
         // Read a segment from the middle. This returns all the remaining elements
-        let (jump, base_offset, next_offset, data) = log.readv(10, 15);
+        let (jump, base_offset, next_offset, _, data) = log.readv(10, 15, 0);
         assert_eq!(data.len(), 5);
         assert_eq!(base_offset, 10);
         assert_eq!(next_offset, 20);
@@ -256,11 +286,11 @@ mod test {
         assert_eq!(jump, Some(20));
 
         // Read a segment from scratch. gets full segment
-        let (_, _, _, data) = log.readv(10, 10);
+        let (_, _, _, _, data) = log.readv(10, 10, 0);
         assert_eq!(data.len(), 10);
 
         // Read a segment from middle. gets full segment from middle
-        let (_, _, _, data) = log.readv(10, 15);
+        let (_, _, _, _, data) = log.readv(10, 15, 0);
         assert_eq!(data.len(), 5);
     }
 
@@ -278,7 +308,7 @@ mod test {
         }
 
         // read active segment
-        let (jump, segment, offset, data) = log.readv(190, 190);
+        let (jump, segment, offset, _, data) = log.readv(190, 190, 0);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 190);
         assert_eq!(offset, 200);
@@ -300,7 +330,7 @@ mod test {
         }
 
         // read active segment
-        let (jump, segment, offset, data) = log.readv(80, 80);
+        let (jump, segment, offset, _, data) = log.readv(80, 80, 0);
         assert_eq!(data.len(), 5);
         assert_eq!(segment, 80);
         assert_eq!(offset, 85);
@@ -314,7 +344,7 @@ mod test {
         }
 
         // read active segment
-        let (jump, segment, offset, data) = log.readv(segment, offset);
+        let (jump, segment, offset, _, data) = log.readv(segment, offset, 0);
         assert_eq!(data.len(), 5);
         assert_eq!(segment, 80);
         assert_eq!(offset, 90);
@@ -336,7 +366,7 @@ mod test {
 
         // read active segment. there's no next segment. so active segment
         // is not done yet
-        let (jump, segment, offset, data) = log.readv(80, 80);
+        let (jump, segment, offset, _, data) = log.readv(80, 80, 0);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 80);
         assert_eq!(offset, 90);
@@ -350,14 +380,14 @@ mod test {
         }
 
         // read from the next offset of previous active segment
-        let (jump, segment, offset, data) = log.readv(segment, offset);
+        let (jump, segment, offset, _, data) = log.readv(segment, offset, 0);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 90);
         assert_eq!(offset, 100);
         assert_eq!(jump, Some(100));
 
         // read active segment again
-        let (jump, segment, offset, data) = log.readv(segment, offset);
+        let (jump, segment, offset, _, data) = log.readv(segment, offset, 0);
         assert_eq!(data.len(), 10);
         assert_eq!(segment, 100);
         assert_eq!(offset, 110);
@@ -379,7 +409,7 @@ mod test {
 
         // Read 15K. Crosses boundaries of the segment and offset will be in
         // the middle of 2nd segment
-        let (jump, segment, offset, _data) = log.readv(0, 0);
+        let (jump, segment, offset, _, _data) = log.readv(0, 0, 0);
         assert_eq!(segment, 100);
         assert_eq!(offset, 110);
         assert_eq!(jump, Some(110));

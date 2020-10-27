@@ -11,7 +11,8 @@ use std::path::PathBuf;
 
 pub use router::connection::Connection;
 pub use router::{
-    ConnectionAck, Data, DataRequest, Disconnection, Event, Notification, ReplicationData, Router,
+    Acks, ConnectionAck, Data, DataRequest, Disconnection, Event, Message, Notification,
+    ReplicationData, Router,
 };
 pub use storage::segment::Segment;
 pub use storage::Log;
@@ -22,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub type ConnectionId = usize;
+pub type RouterId = usize;
 pub type Topic = String;
 pub type TopicId = usize;
 
