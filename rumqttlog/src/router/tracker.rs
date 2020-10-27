@@ -74,8 +74,8 @@ impl Tracker {
         self.requests.push_back(request);
     }
 
-    pub fn register_topics_request(&mut self, next_offset: usize) {
-        let request = TopicsRequest::offset(next_offset);
+    pub fn register_topics_request(&mut self, request: TopicsRequest) {
+        // let request = TopicsRequest::offset(next_offset);
         let request = Request::Topics(request);
         self.requests.push_back(request);
     }

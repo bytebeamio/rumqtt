@@ -186,6 +186,7 @@ impl Router {
         let pending = disconnect.pending;
 
         info!("{:11} {:14} Id = {}:{}", "disconnect", "", did, id);
+
         // Forward connection will
         let mut connection = self.connections.remove(id).unwrap();
         let clean = connection.clean();
@@ -197,15 +198,32 @@ impl Router {
             }
         }
 
-        let tracker = self.trackers.remove(id);
-        if !clean {
-            self.connectionslog.save(&did, tracker.unwrap(), pending);
-        }
-
+        let mut tracker = self.trackers.remove(id);
+        let inflight_data_requests = self.data_waiters.remove(id);
+        let mut inflight_topics_request = self.topics_waiters.remove(id);
         self.watermarks.remove(id);
-        self.data_waiters.remove(id);
-        self.topics_waiters.remove(id);
         self.readyqueue.remove(id);
+
+        if !clean {
+            if let Some(mut tracker) = tracker.take() {
+                // Add inflight data requests back to tracker
+                for request in inflight_data_requests {
+                    tracker.register_data_request(request);
+                }
+
+                // Add inflight topics request back to tracker
+                if let Some(request) = inflight_topics_request.take() {
+                    tracker.register_topics_request(request);
+                }
+
+                // Add acks request. This might be a duplicate
+                // TODO Get this from 'watermarks.remove'
+                tracker.register_acks_request();
+
+                // Save tracker
+                self.connectionslog.save(&did, tracker, pending);
+            }
+        }
     }
 
     fn connection_ready(&mut self, id: ConnectionId, max_iterations: usize) {
@@ -258,7 +276,7 @@ impl Router {
                         if let Some(data) = handle_topics_request(id, request, topicslog, waiters) {
                             // Register for new topics request if previous request is handled
                             tracker.track_matched_topics(data.topics);
-                            tracker.register_topics_request(data.offset);
+                            tracker.register_topics_request(TopicsRequest::offset(data.offset));
                         }
                     }
                     Request::Acks(_) => {
@@ -357,7 +375,7 @@ impl Router {
                 // and store matched topics interna. If this is the first subscription,
                 // register topics request
                 if tracker.add_subscription_and_match(subscribe.topics, topics) {
-                    tracker.register_topics_request(topics.len());
+                    tracker.register_topics_request(TopicsRequest::offset(topics.len()));
 
                     // If connection is removed from ready queue because of 0 requests,
                     // but connection itself is ready for more notifications, add
@@ -390,7 +408,7 @@ impl Router {
                 // Router did not receive data from any topics yet. Add subscription and
                 // register topics request from offset 0
                 if tracker.add_subscription_and_match(subscribe.topics, &[]) {
-                    tracker.register_topics_request(0);
+                    tracker.register_topics_request(TopicsRequest::offset(0));
 
                     // If connection is removed from ready queue because of 0 requests,
                     // but connection itself is ready for more notifications, add
@@ -590,7 +608,7 @@ impl Router {
             // Even though there are new topics, it's possible that they didn't match
             // subscriptions held by this connection.
             // Register next topics request in the router
-            tracker.register_topics_request(request.offset);
+            tracker.register_topics_request(TopicsRequest::offset(request.offset));
 
             // If connection is removed from ready queue because of 0 requests,
             // but connection itself is ready for more notifications, add
