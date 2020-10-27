@@ -328,7 +328,14 @@ impl Router {
     }
 
     fn handle_connection_subscribe(&mut self, id: ConnectionId, subscribe: Subscribe) {
-        trace!("{:11} {:14} Id = {}", "subscribe", "", id);
+        trace!(
+            "{:11} {:14} Id = {} Filters = {:?}",
+            "data",
+            "subscribe",
+            id,
+            subscribe.topics
+        );
+
         let topics = self.topicslog.readv(0, 0);
         let tracker = self.trackers.get_mut(id).unwrap();
 
@@ -399,10 +406,22 @@ impl Router {
     }
 
     fn handle_connection_unsubscribe(&mut self, id: ConnectionId, unsubscribe: Unsubscribe) {
-        trace!("{:11} {:14} Id = {}", "unsubscribe", "", id);
+        trace!(
+            "{:11} {:14} Id = {} Filters = {:?}",
+            "data",
+            "unsubscribe",
+            id,
+            unsubscribe.topics
+        );
 
         let tracker = self.trackers.get_mut(id).unwrap();
-        tracker.remove_subscription_and_unmatch(unsubscribe.topics);
+        let inflight = tracker.remove_subscription_and_unmatch(unsubscribe.topics);
+
+        for topic in inflight.into_iter() {
+            if let Some(waiters) = self.data_waiters.get_mut(&topic) {
+                waiters.remove(id);
+            }
+        }
 
         // Update acks and triggers acks notification for suback
         let watermarks = self.watermarks.get_mut(id).unwrap();

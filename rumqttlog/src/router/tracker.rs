@@ -2,7 +2,6 @@ use crate::router::{AcksRequest, Request, TopicsRequest};
 use crate::DataRequest;
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::mem;
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
@@ -180,10 +179,19 @@ impl Tracker {
     }
 
     /// Removes a subscription and removes matched topics in tracker
-    pub fn remove_subscription_and_unmatch(&mut self, filters: Vec<String>) {
-        let mut requests = mem::replace(&mut self.requests, VecDeque::new());
+    pub fn remove_subscription_and_unmatch(&mut self, filters: Vec<String>) -> VecDeque<String> {
+        let mut matching = VecDeque::new();
 
+        // Remove subscriptions and collect topics that match filters
         for filter in filters.iter() {
+            // Collect topics matching current filter
+            for topic in self.topics_index.iter() {
+                if matches(topic, filter) {
+                    matching.push_back(topic.clone());
+                }
+            }
+
+            // Remove the subscription
             if has_wildcards(filter) {
                 if let Some(index) = self.wild_subscriptions.iter().position(|v| v.0 == *filter) {
                     self.wild_subscriptions.swap_remove(index);
@@ -193,27 +201,83 @@ impl Tracker {
             }
         }
 
-        // Remove requests that matches unsubscribe filters
-        while let Some(request) = requests.pop_front() {
-            match request {
-                Request::Data(data) => {
-                    let mut delete = false;
-                    for filter in filters.iter() {
-                        // If request matches atleast one filter, set delete
-                        // flag to not add back the request to request queue
-                        if matches(&data.topic, filter) {
-                            delete = true;
-                            break;
-                        }
-                    }
+        let mut pending = VecDeque::new();
+        while let Some(topic) = matching.pop_front() {
+            // Remove this tracked topic from index
+            self.topics_index.remove(&topic);
 
-                    if !delete {
-                        self.requests.push_back(Request::Data(data));
-                    }
+            // Find the topic in request queue
+            let position = self.requests.iter().position(|request| match request {
+                Request::Data(data) if data.topic == topic => true,
+                _ => false,
+            });
+
+            match position {
+                Some(i) => {
+                    self.requests.swap_remove_back(i);
                 }
-                Request::Topics(topics) => self.requests.push_back(Request::Topics(topics)),
-                Request::Acks(acks) => self.requests.push_back(Request::Acks(acks)),
+                None => pending.push_back(topic),
             }
         }
+
+        pending
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use mqtt4bytes::*;
+
+    #[test]
+    fn unsubscribe_removes_requests_from_queue() {
+        let mut tracker = Tracker::new();
+
+        let topics = vec!["a/b".to_owned(), "c/d".to_owned(), "e".to_owned()];
+        let filter = vec![
+            SubscribeTopic::new("+/+".to_owned(), QoS::AtLeastOnce),
+            SubscribeTopic::new("+".to_owned(), QoS::AtLeastOnce),
+        ];
+
+        tracker.add_subscription_and_match(filter, topics.as_slice());
+
+        while let Some((topic, qos, cursors)) = tracker.next_matched() {
+            tracker.register_data_request(DataRequest::offsets(topic, qos, cursors, 0));
+        }
+
+        let mut t = tracker.requests.iter();
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Acks(AcksRequest::new()));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("a/b".to_owned(), 1)));
+        assert!(tracker.topics_index.contains("a/b"));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("c/d".to_owned(), 1)));
+        assert!(tracker.topics_index.contains("c/d"));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("e".to_owned(), 1)));
+        assert!(tracker.topics_index.contains("e"));
+
+        // Remove an inflight request
+        tracker.requests.swap_remove_front(1);
+
+        let o = tracker.remove_subscription_and_unmatch(vec!["+/+".to_owned()]);
+        assert_eq!(o, vec!["a/b".to_owned()]);
+
+        let mut t = tracker.requests.iter();
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Acks(AcksRequest::new()));
+
+        let v = t.next().unwrap();
+        assert_eq!(*v, Request::Data(DataRequest::new("e".to_owned(), 1)));
+
+        assert!(tracker.topics_index.contains("e"));
+        assert!(!tracker.topics_index.contains("a/b"));
+        assert!(!tracker.topics_index.contains("c/d"));
     }
 }
