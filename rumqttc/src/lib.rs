@@ -88,9 +88,7 @@
 //!   connection progress.
 //!
 //! ## FAQ
-//! ```
-//! Connecting to a broker using raw ip doesn't work
-//! ```
+//! **Connecting to a broker using raw ip doesn't work**
 //!
 //! You cannot create a TLS connection to a bare IP address with a self-signed
 //! certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
