@@ -341,7 +341,11 @@ impl Router {
 
         let mut return_codes = Vec::new();
         for filter in subscribe.topics.iter() {
-            return_codes.push(SubscribeReturnCodes::Success(filter.qos));
+            if filter.topic_path.starts_with("test") || filter.topic_path.starts_with("$") {
+                return_codes.push(SubscribeReturnCodes::Failure);
+            } else {
+                return_codes.push(SubscribeReturnCodes::Success(filter.qos));
+            }
         }
 
         // A new subscription should match with all the existing topics and take a snapshot of current
