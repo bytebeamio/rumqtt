@@ -236,6 +236,9 @@ impl MqttState {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 PubRel::new(pubrec.pkid).write(&mut self.write)?;
+
+                let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
+                self.events.push_back(event);
                 Ok(())
             }
             None => {
@@ -249,6 +252,8 @@ impl MqttState {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
                 PubComp::new(pubrel.pkid).write(&mut self.write)?;
+                let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+                self.events.push_back(event);
                 Ok(())
             }
             None => {
@@ -261,7 +266,8 @@ impl MqttState {
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
             publish.write(&mut self.write)?;
-
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
             self.collision_ping_count = 0;
         }
 
@@ -309,6 +315,9 @@ impl MqttState {
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
         PubRel::new(pubrel.pkid).write(&mut self.write)?;
+
+        let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
+        self.events.push_back(event);
         Ok(())
     }
 
