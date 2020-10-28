@@ -35,6 +35,12 @@ pub enum StateError {
     Serialization(mqtt4bytes::Error),
 }
 
+impl From<mqtt4bytes::Error> for StateError {
+    fn from(e: mqtt4bytes::Error) -> StateError {
+        StateError::Serialization(e)
+    }
+}
+
 /// State of the mqtt connection.
 // Design: Methods will just modify the state of the object without doing any network operations
 // Design: All inflight queues are maintained in a pre initialized vec with index as packet id.
@@ -190,10 +196,7 @@ impl MqttState {
             publish.payload.len()
         );
 
-        publish
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        publish.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
         self.events.push_back(event);
         Ok(())
@@ -201,10 +204,7 @@ impl MqttState {
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(puback.pkid) {
-            publish
-                .write(&mut self.write)
-                .map_err(StateError::Serialization)?;
-
+            publish.write(&mut self.write)?;
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -235,10 +235,7 @@ impl MqttState {
             Some(_) => {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                PubRel::new(pubrec.pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
+                PubRel::new(pubrec.pkid).write(&mut self.write)?;
                 Ok(())
             }
             None => {
@@ -257,18 +254,13 @@ impl MqttState {
             QoS::AtMostOnce => Ok(()),
             QoS::AtLeastOnce => {
                 let pkid = publish.pkid;
-                PubAck::new(pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
+                PubAck::new(pkid).write(&mut self.write)?;
 
                 Ok(())
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
-                PubRec::new(pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
+                PubRec::new(pkid).write(&mut self.write)?;
                 self.incoming_pub[pkid as usize] = Some(pkid);
                 Ok(())
             }
@@ -278,10 +270,7 @@ impl MqttState {
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
-                PubComp::new(pubrel.pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
+                PubComp::new(pubrel.pkid).write(&mut self.write)?;
                 Ok(())
             }
             None => {
@@ -293,9 +282,7 @@ impl MqttState {
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
-            publish
-                .write(&mut self.write)
-                .map_err(StateError::Serialization)?;
+            publish.write(&mut self.write)?;
 
             self.collision_ping_count = 0;
         }
@@ -341,10 +328,7 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        PingReq
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        PingReq.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PingReq);
         self.events.push_back(event);
         Ok(())
@@ -364,10 +348,7 @@ impl MqttState {
             subscription.topics, subscription.pkid
         );
 
-        subscription
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        subscription.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
         self.events.push_back(event);
         Ok(())
@@ -382,10 +363,7 @@ impl MqttState {
             unsub.topics, unsub.pkid
         );
 
-        unsub
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        unsub.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
         self.events.push_back(event);
         Ok(())
@@ -395,20 +373,14 @@ impl MqttState {
         let pubrel = self.save_pubrel(pubrel)?;
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
-        PubRel::new(pubrel.pkid)
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        PubRel::new(pubrel.pkid).write(&mut self.write)?;
         Ok(())
     }
 
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
 
-        Disconnect
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        Disconnect.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
         Ok(())
