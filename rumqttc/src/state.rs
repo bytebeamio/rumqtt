@@ -48,7 +48,6 @@ pub struct MqttState {
     /// Collision ping count. Collisions stop user requests
     /// which inturn trigger pings. Multiple pings without
     /// resolving collisions will result in error
-    /// Last incoming packet time
     pub collision_ping_count: usize,
     /// Last incoming packet time
     last_incoming: Instant,
@@ -137,6 +136,7 @@ impl MqttState {
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
         match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
+            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
@@ -181,7 +181,7 @@ impl MqttState {
 
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
+            QoS::AtLeastOnce | QoS::ExactlyOnce => self.save_publish(publish)?,
         };
 
         debug!(
@@ -391,6 +391,17 @@ impl MqttState {
         Ok(())
     }
 
+    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<(), StateError> {
+        let pubrel = self.save_pubrel(pubrel)?;
+
+        debug!("Pubrel. Pkid = {}", pubrel.pkid);
+        PubRel::new(pubrel.pkid)
+            .write(&mut self.write)
+            .map_err(StateError::Serialization)?;
+
+        Ok(())
+    }
+
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
 
@@ -416,14 +427,27 @@ impl MqttState {
         None
     }
 
+    fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {
+        let pubrel = match pubrel.pkid {
+            // consider PacketIdentifier(0) as uninitialized packets
+            0 => {
+                pubrel.pkid = self.next_pkid();
+                pubrel
+            }
+            _ => pubrel,
+        };
+
+        self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
+        Ok(pubrel)
+    }
+
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
+    fn save_publish(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) as uninitialized packets
             0 => {
-                let pkid = self.next_pkid();
-                publish.pkid = pkid;
+                publish.pkid = self.next_pkid();
                 publish
             }
             _ => publish,
