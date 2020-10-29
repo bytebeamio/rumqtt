@@ -1,7 +1,7 @@
 use rumqttlog::ConnectionId;
 use rumqttlog::{Connection, ConnectionAck, Event, Notification, Receiver, Sender};
-use std::thread;
-use std::time::Duration;
+use std::sync::Arc;
+use warp::Filter;
 
 pub struct ConsoleLink {
     id: ConnectionId,
@@ -29,14 +29,18 @@ impl ConsoleLink {
             id,
         }
     }
+}
 
-    pub fn start(&mut self) {
-        loop {
-            let message = Event::Metrics(None);
-            self.router_tx.send((self.id, message)).unwrap();
-            let notification = self.link_rx.recv();
-            println!("{:?}", notification);
-            thread::sleep(Duration::from_secs(1));
-        }
-    }
+#[tokio::main(core_threads = 1)]
+pub async fn start(console: Arc<ConsoleLink>) {
+    let console = console.clone();
+
+    let routes = warp::any().map(move || {
+        let message = Event::Metrics(None);
+        console.router_tx.send((console.id, message)).unwrap();
+        let notification = console.link_rx.recv();
+        format!("{:?}", notification)
+    });
+
+    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }

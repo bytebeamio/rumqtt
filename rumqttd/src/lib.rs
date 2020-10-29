@@ -128,9 +128,10 @@ impl Broker {
         router_thread.spawn(move || router.start())?;
 
         // spawn console thread
-        let mut console = ConsoleLink::new(self.router_tx.clone());
+        let console = ConsoleLink::new(self.router_tx.clone());
+        let console = Arc::new(console);
         let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
-        console_thread.spawn(move || console.start())?;
+        console_thread.spawn(move || consolelink::start(console))?;
 
         let mut rt = tokio::runtime::Builder::new()
             .basic_scheduler()
