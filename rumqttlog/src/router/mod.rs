@@ -1,6 +1,7 @@
 extern crate bytes;
 
 pub(crate) mod connection;
+mod metrics;
 mod readyqueue;
 mod router;
 mod slab;
@@ -12,6 +13,8 @@ pub use router::Router;
 pub use tracker::Tracker;
 
 use self::bytes::Bytes;
+use crate::router::metrics::{ConnectionMetrics, Metrics};
+use crate::ConnectionId;
 use mqtt4bytes::Packet;
 use std::fmt;
 
@@ -30,10 +33,12 @@ pub enum Event {
     ReplicationAcks(Vec<ReplicationAck>),
     /// Disconnection request
     Disconnect(Disconnection),
+    /// Get metrics of a connection or all connections
+    Metrics(Option<ConnectionId>),
 }
 
 /// Requests for pull operations
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Request {
     /// Data request
     Data(DataRequest),
@@ -56,6 +61,10 @@ pub enum Notification {
     Acks(Acks),
     /// Connection paused by router
     Pause,
+    /// All metrics
+    Metrics(Metrics),
+    /// Connection metrics
+    ConnectionMetrics(ConnectionMetrics),
 }
 
 /// Data sent router to be written to commitlog

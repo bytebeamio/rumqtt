@@ -243,6 +243,9 @@ impl RemoteLink {
                 let message = (self.id, Event::Ready);
                 self.router_tx.send(message)?;
             }
+            notification => {
+                warn!("{:?} not supported in remote link", notification);
+            }
         }
 
         self.network.flush(self.state.write_mut()).await?;

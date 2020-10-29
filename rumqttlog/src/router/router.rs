@@ -11,6 +11,7 @@ use super::watermarks::Watermarks;
 use super::*;
 
 use crate::logs::{ConnectionsLog, DataLog, TopicsLog};
+use crate::router::metrics::Metrics;
 use crate::waiters::{DataWaiters, TopicsWaiters};
 use crate::{Config, ConnectionId, DataRequest, Disconnection, ReplicationData, RouterId};
 
@@ -51,6 +52,8 @@ pub struct Router {
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
     router_rx: Receiver<(ConnectionId, Event)>,
+    /// Aggregates for all connections
+    metrics: Metrics,
 }
 
 impl Router {
@@ -73,6 +76,7 @@ impl Router {
         let data_waiters = DataWaiters::new();
         let topics_waiters = TopicsWaiters::new();
         let readyqueue = ReadyQueue::new();
+        let metrics = Metrics::new(id);
 
         let router = Router {
             _config: config,
@@ -87,6 +91,7 @@ impl Router {
             data_waiters,
             topics_waiters,
             router_rx,
+            metrics,
         };
 
         (router, router_tx)
@@ -135,7 +140,16 @@ impl Router {
             Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
             Event::Disconnect(request) => self.handle_disconnection(id, request),
             Event::Ready => self.connection_ready(id, 100),
+            Event::Metrics(connection_id) => self.retrieve_metrics(id, connection_id),
         }
+    }
+
+    fn retrieve_metrics(&mut self, id: ConnectionId, connection_id: Option<ConnectionId>) {
+        info!("{:11} {:14} Id = {}", "console", "metrics", id);
+        let metrics = self.metrics.clone();
+
+        let message = Notification::Metrics(metrics);
+        notify(&mut self.connections, id, message);
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {

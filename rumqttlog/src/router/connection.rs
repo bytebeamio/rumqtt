@@ -1,3 +1,4 @@
+use crate::router::metrics::ConnectionMetrics;
 use crate::Notification;
 use jackiechan::{bounded, Receiver, Sender, TrySendError};
 use mqtt4bytes::LastWill;
@@ -30,6 +31,8 @@ pub struct Connection {
     capacity: usize,
     /// Last seen remaining space in the channel
     remaining_space: usize,
+    /// Connection metrics
+    metrics: ConnectionMetrics,
 }
 
 impl Connection {
@@ -48,6 +51,7 @@ impl Connection {
             handle: this_tx,
             capacity,
             remaining_space: capacity,
+            metrics: ConnectionMetrics::new(id.to_owned()),
         };
 
         (connection, this_rx)
@@ -68,6 +72,7 @@ impl Connection {
             handle: this_tx,
             capacity,
             remaining_space: capacity,
+            metrics: ConnectionMetrics::new(id.to_string()),
         };
 
         (connection, this_rx)

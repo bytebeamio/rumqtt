@@ -125,8 +125,8 @@ impl LinkRx {
                 self.router_tx.send(message)?;
                 Ok(None)
             }
-            Notification::Acks(_) => {
-                warn!("Acks not supported in local link");
+            notification => {
+                warn!("{:?} not supported in local link", notification);
                 Ok(None)
             }
         }

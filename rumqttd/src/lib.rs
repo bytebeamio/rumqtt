@@ -17,11 +17,13 @@ use tokio::net::TcpListener;
 use tokio::task;
 use tokio::time;
 
+mod consolelink;
 mod locallink;
 mod network;
 mod remotelink;
 mod state;
 
+use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
 
@@ -120,12 +122,16 @@ impl Broker {
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
-        let mut router = self.router.take().unwrap();
-        let name = "rumqttd-router".to_owned();
-        let thread = thread::Builder::new().name(name);
-
         // spawn the router in a separate thread
-        thread.spawn(move || router.start())?;
+        let mut router = self.router.take().unwrap();
+        let router_thread = thread::Builder::new().name("rumqttd-router".to_owned());
+        router_thread.spawn(move || router.start())?;
+
+        // spawn console thread
+        let mut console = ConsoleLink::new(self.router_tx.clone());
+        let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
+        console_thread.spawn(move || console.start())?;
+
         let mut rt = tokio::runtime::Builder::new()
             .basic_scheduler()
             .enable_all()

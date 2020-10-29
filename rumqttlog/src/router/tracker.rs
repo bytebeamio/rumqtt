@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
 /// communicate with this connection
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tracker {
     /// Connection unschedule (from ready queue) status
     /// because of request exhaustion
