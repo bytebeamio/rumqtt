@@ -1,6 +1,6 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, Event, MqttOptions, QoS};
+use rumqttc::{self, AsyncClient, Event, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -20,7 +20,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         match eventloop.poll().await? {
-            Event::Incoming(i) => println!("Incoming = {:?}", i),
+            Event::Incoming(i) => {
+                println!("Incoming = {:?}", i);
+
+                // Extract topic (String) & payload (Bytes)
+                if let Incoming::Publish(p) = i {
+                    println!("Topic: {}, Payload: {:?}", p.topic, p.payload);
+                }
+            },
             Event::Outgoing(o) => println!("Outgoing = {:?}", o),
         }
     }
