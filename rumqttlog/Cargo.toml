@@ -13,7 +13,7 @@ memmap = "0.7"
 bytes = "0.5"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.3" }
 tokio = { version = "0.2", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 thiserror = "1"
 log = "0.4"
 fnv = "1"

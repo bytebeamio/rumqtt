@@ -1,17 +1,33 @@
 use crate::router::Tracker;
-use crate::{ConnectionId, RouterId};
+use crate::{Config, RouterId};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
-pub struct Metrics {
+pub enum MetricsRequest {
+    Config,
+    Router,
+    Connection(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum MetricsReply {
+    Config(Arc<Config>),
+    Router(RouterMetrics),
+    Connection(ConnectionMetrics),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterMetrics {
     pub router_id: RouterId,
     pub total_connections: usize,
     pub total_topics: usize,
     pub total_subscriptions: usize,
 }
 
-impl Metrics {
-    pub fn new(router_id: RouterId) -> Metrics {
-        Metrics {
+impl RouterMetrics {
+    pub fn new(router_id: RouterId) -> RouterMetrics {
+        RouterMetrics {
             router_id,
             total_connections: 0,
             total_topics: 0,
@@ -20,14 +36,14 @@ impl Metrics {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionMetrics {
     id: String,
     tracker: Option<Tracker>,
 }
 
 impl ConnectionMetrics {
-    pub fn new(id: String) -> ConnectionMetrics {
-        ConnectionMetrics { id, tracker: None }
+    pub fn new(id: String, tracker: Option<Tracker>) -> ConnectionMetrics {
+        ConnectionMetrics { id, tracker }
     }
 }

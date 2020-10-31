@@ -1,5 +1,7 @@
 use rumqttlog::ConnectionId;
-use rumqttlog::{Connection, ConnectionAck, Event, Notification, Receiver, Sender};
+use rumqttlog::{
+    Connection, ConnectionAck, Event, MetricsReply, MetricsRequest, Notification, Receiver, Sender,
+};
 use std::sync::Arc;
 use warp::Filter;
 
@@ -33,14 +35,48 @@ impl ConsoleLink {
 
 #[tokio::main(core_threads = 1)]
 pub async fn start(console: Arc<ConsoleLink>) {
-    let console = console.clone();
+    let config_console = console.clone();
+    let config = warp::path!("node" / "config").map(move || {
+        let message = Event::Metrics(MetricsRequest::Config);
+        config_console
+            .router_tx
+            .send((config_console.id, message))
+            .unwrap();
 
-    let routes = warp::any().map(move || {
-        let message = Event::Metrics(None);
-        console.router_tx.send((console.id, message)).unwrap();
-        let notification = console.link_rx.recv();
-        format!("{:?}", notification)
+        match config_console.link_rx.recv().unwrap() {
+            Notification::Metrics(MetricsReply::Config(v)) => warp::reply::json(&v),
+            v => unreachable!("{:?}", v),
+        }
     });
 
+    let router_console = console.clone();
+    let router = warp::path!("node" / "router").map(move || {
+        let message = Event::Metrics(MetricsRequest::Router);
+        router_console
+            .router_tx
+            .send((router_console.id, message))
+            .unwrap();
+
+        match router_console.link_rx.recv().unwrap() {
+            Notification::Metrics(MetricsReply::Router(v)) => warp::reply::json(&v),
+            v => unreachable!("{:?}", v),
+        }
+    });
+
+    let connection_console = console.clone();
+    let connection = warp::path!("node" / String).map(move |id| {
+        let message = Event::Metrics(MetricsRequest::Connection(id));
+        connection_console
+            .router_tx
+            .send((connection_console.id, message))
+            .unwrap();
+
+        match connection_console.link_rx.recv().unwrap() {
+            Notification::Metrics(MetricsReply::Connection(v)) => warp::reply::json(&v),
+            v => unreachable!("{:?}", v),
+        }
+    });
+
+    let routes = warp::get().and(config.or(router).or(connection));
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
