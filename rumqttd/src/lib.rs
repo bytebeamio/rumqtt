@@ -93,13 +93,14 @@ impl Default for ServerSettings {
 }
 
 pub struct Broker {
-    config: Config,
+    config: Arc<Config>,
     router_tx: Sender<(Id, Event)>,
     router: Option<Router>,
 }
 
 impl Broker {
     pub fn new(config: Config) -> Broker {
+        let config = Arc::new(config);
         let router_config = Arc::new(config.router.clone());
         let (router, router_tx) = Router::new(router_config);
         Broker {
@@ -128,7 +129,7 @@ impl Broker {
         router_thread.spawn(move || router.start())?;
 
         // spawn console thread
-        let console = ConsoleLink::new(self.router_tx.clone());
+        let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
         let console = Arc::new(console);
         let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
         console_thread.spawn(move || consolelink::start(console))?;
@@ -138,7 +139,7 @@ impl Broker {
             .enable_all()
             .build()?;
 
-        let server = self.config.clone().servers.into_iter().next().unwrap();
+        let server = self.config.servers.clone().into_iter().next().unwrap();
         let router_tx = self.router_tx.clone();
 
         rt.block_on(async {
