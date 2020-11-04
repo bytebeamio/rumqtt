@@ -29,9 +29,9 @@ pub type TopicId = usize;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshConfig {
-    id: usize,
-    host: String,
-    port: u16,
+    pub id: usize,
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

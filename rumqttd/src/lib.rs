@@ -21,11 +21,13 @@ mod consolelink;
 mod locallink;
 mod network;
 mod remotelink;
+mod replicationlink;
 mod state;
 
 use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
+use crate::replicationlink::Mesh;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -48,6 +50,7 @@ pub enum Error {
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     servers: Vec<ServerSettings>,
+    replicator: ServerSettings,
     router: rumqttlog::Config,
 }
 
@@ -133,6 +136,11 @@ impl Broker {
         let console = Arc::new(console);
         let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
         console_thread.spawn(move || consolelink::start(console))?;
+
+        // replication mesh
+        let mut mesh = Mesh::new(self.config.clone(), self.router_tx.clone());
+        let console_thread = thread::Builder::new().name("rumqttd-replicator".to_owned());
+        console_thread.spawn(move || mesh.start())?;
 
         let mut rt = tokio::runtime::Builder::new()
             .basic_scheduler()
