@@ -1,4 +1,4 @@
-use crate::{Config, Id, MeshConfig};
+use crate::{Config, Id, MeshSettings};
 
 use crate::network::Network;
 use crate::replicationlink::link::ReplicationLink;
@@ -30,7 +30,7 @@ pub struct Mesh {
     /// Router handle to pass to links
     router_tx: Sender<(Id, Event)>,
     /// Handles to all the links
-    links: HashMap<usize, LinkHandle>,
+    links: HashMap<String, LinkHandle>,
 }
 
 impl Mesh {
@@ -48,11 +48,16 @@ impl Mesh {
     /// correct task's handle
     #[tokio::main(core_threads = 1)]
     pub(crate) async fn start(&mut self) {
-        let (head, this, tail) = self.extract_servers();
+        if self.config.replicator.is_none() || self.config.cluster.is_none() {
+            return;
+        }
+
+        let local_id = self.config.id;
+        let (incoming, this, outgoing) = self.extract_servers();
 
         // start outgoing (client) links and then incoming (server) links
-        self.start_replicators(this.id, tail, true).await;
-        self.start_replicators(this.id, head, false).await;
+        self.start_replicators(local_id, outgoing, true).await;
+        self.start_replicators(local_id, incoming, false).await;
 
         let addr = format!("{}:{}", this.host, this.port);
         let mut listener = TcpListener::bind(&addr).await.unwrap();
@@ -82,19 +87,19 @@ impl Mesh {
     async fn start_replicators(
         &mut self,
         local_id: usize,
-        remote: Vec<MeshConfig>,
+        remote: HashMap<String, MeshSettings>,
         is_client: bool,
     ) {
-        for server in remote.iter() {
+        for (server_id, server) in remote.into_iter() {
             let (connections_tx, connections_rx) = bounded(1);
             let router_tx = self.router_tx.clone();
             let addr = format!("{}:{}", server.host, server.port);
-            let server_id = server.id;
-            let link_handle = LinkHandle::new(server_id, addr.clone(), connections_tx);
-            self.links.insert(server_id, link_handle);
+
+            let link_handle = LinkHandle::new(server_id.clone(), addr.clone(), connections_tx);
+            self.links.insert(server_id.clone(), link_handle);
 
             let remote = if is_client { addr } else { "".to_owned() };
-            let config = Arc::new(self.config.replicator.clone());
+            let config = Arc::new(self.config.replicator.clone().unwrap());
 
             task::spawn(async move {
                 let mut replicator = match ReplicationLink::new(
@@ -125,28 +130,49 @@ impl Mesh {
     /// - Incoming connections that this router is expecting
     /// - Config of this router
     /// - Outgoing connections that this router should make
-    fn extract_servers(&self) -> (Vec<MeshConfig>, MeshConfig, Vec<MeshConfig>) {
-        let id = self.config.router.id.clone();
-        let mut routers = self.config.router.mesh.clone().unwrap();
-        let position = routers.iter().position(|v| v.id == id);
-        let position = position.unwrap();
+    fn extract_servers(
+        &self,
+    ) -> (
+        HashMap<String, MeshSettings>,
+        MeshSettings,
+        HashMap<String, MeshSettings>,
+    ) {
+        let id = self.config.id.to_string();
 
-        let tail = routers.split_off(position + 1);
-        let (this, head) = routers.split_last().unwrap().clone();
+        let mut cluster = self.config.cluster.clone().unwrap();
+        let mut incoming = HashMap::new();
+        let mut outgoing = HashMap::new();
+        let this = cluster.remove(&id).unwrap();
 
-        (head.into(), this.clone(), tail)
+        // Link establishment algorithm: Manners towards new guests
+        // - Old guests initiates handshake with new guests
+        // - New guests wait for handshake from old guests
+        //
+        // 0 creates outgoing connections for 1 and 2
+        // 1 waits for incoming connection from 0 and creates outgoing connection for 2
+        // 2 waits for incoming connection from 0 and 1
+        for (node_id, node) in cluster.into_iter() {
+            // Current node is older in comparison. Initiate handshake to `node_id`
+            if id < node_id {
+                outgoing.insert(node_id, node);
+            }
+            // Current node is newer in comparison. Expect handshake from `node_id`
+            else if id > node_id {
+                incoming.insert(node_id, node);
+            }
+        }
+
+        (incoming, this, outgoing)
     }
 }
 
 /// Await mqtt connect packet for incoming connections from a router
-async fn await_connect(network: &mut Network) -> Result<usize, Error> {
+async fn await_connect(network: &mut Network) -> Result<String, Error> {
     let id = time::timeout(Duration::from_secs(5), async {
         let connect = network.read_connect().await?;
-
-        let id: usize = connect.client_id.parse().unwrap();
         let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
         network.connack(connack).await?;
-        Ok::<_, Error>(id)
+        Ok::<_, Error>(connect.client_id)
     })
     .await??;
 
@@ -154,13 +180,13 @@ async fn await_connect(network: &mut Network) -> Result<usize, Error> {
 }
 
 pub struct LinkHandle {
-    pub id: usize,
+    pub id: String,
     pub addr: String,
     pub connections_tx: Sender<Network>,
 }
 
 impl LinkHandle {
-    pub fn new(id: usize, addr: String, connections_tx: Sender<Network>) -> LinkHandle {
+    pub fn new(id: String, addr: String, connections_tx: Sender<Network>) -> LinkHandle {
         LinkHandle {
             id,
             addr,
@@ -172,7 +198,7 @@ impl LinkHandle {
 impl Clone for LinkHandle {
     fn clone(&self) -> Self {
         LinkHandle {
-            id: self.id,
+            id: self.id.clone(),
             addr: self.addr.to_string(),
             connections_tx: self.connections_tx.clone(),
         }

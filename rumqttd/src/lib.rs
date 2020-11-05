@@ -28,6 +28,7 @@ use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
 use crate::replicationlink::Mesh;
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -47,22 +48,28 @@ pub enum Error {
     WrongPacket(Packet),
 }
 
+type Id = usize;
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
-    servers: Vec<ServerSettings>,
-    replicator: ServerSettings,
+    id: usize,
     router: rumqttlog::Config,
+    servers: HashMap<String, ServerSettings>,
+    cluster: Option<HashMap<String, MeshSettings>>,
+    replicator: Option<ConnectionSettings>,
 }
-
-type Id = usize;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
     pub port: u16,
-    pub connection_timeout_ms: u16,
     pub next_connection_delay_ms: u64,
+    pub connections: ConnectionSettings,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConnectionSettings {
+    pub connection_timeout_ms: u16,
     pub max_client_id_len: usize,
-    pub max_connections: usize,
     pub throttle_delay_ms: u64,
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
@@ -74,24 +81,21 @@ pub struct ServerSettings {
     pub password: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshSettings {
+    pub host: String,
+    pub port: u16,
+}
+
 impl Default for ServerSettings {
     fn default() -> Self {
-        ServerSettings {
-            port: 1883,
-            connection_timeout_ms: 100,
-            next_connection_delay_ms: 0,
-            max_client_id_len: 10,
-            max_connections: 100,
-            throttle_delay_ms: 0,
-            max_payload_size: 2 * 1024,
-            max_inflight_count: 100,
-            max_inflight_size: 100 * 1024,
-            ca_path: None,
-            cert_path: None,
-            key_path: None,
-            username: None,
-            password: None,
-        }
+        panic!("Server settings should be derived from a configuration file")
+    }
+}
+
+impl Default for ConnectionSettings {
+    fn default() -> Self {
+        panic!("Server settings should be derived from a configuration file")
     }
 }
 
@@ -147,7 +151,7 @@ impl Broker {
             .enable_all()
             .build()?;
 
-        let server = self.config.servers.clone().into_iter().next().unwrap();
+        let (_id, server) = self.config.servers.clone().into_iter().next().unwrap();
         let router_tx = self.router_tx.clone();
 
         rt.block_on(async {
@@ -171,6 +175,7 @@ async fn accept_loop(
     let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
     let mut count = 0;
 
+    let config = Arc::new(config.connections.clone());
     loop {
         let (stream, addr) = listener.accept().await?;
         count += 1;
@@ -178,7 +183,6 @@ async fn accept_loop(
 
         let config = config.clone();
         let router_tx = router_tx.clone();
-
         task::spawn(async {
             let connector = Connector::new(config, router_tx);
 
@@ -194,12 +198,12 @@ async fn accept_loop(
 }
 
 struct Connector {
-    config: Arc<ServerSettings>,
+    config: Arc<ConnectionSettings>,
     router_tx: Sender<(Id, Event)>,
 }
 
 impl Connector {
-    fn new(config: Arc<ServerSettings>, router_tx: Sender<(Id, Event)>) -> Connector {
+    fn new(config: Arc<ConnectionSettings>, router_tx: Sender<(Id, Event)>) -> Connector {
         Connector { config, router_tx }
     }
 

@@ -2,7 +2,7 @@ use std::io;
 
 use crate::network::Network;
 use crate::remotelink::RemoteLink;
-use crate::{remotelink, Id, ServerSettings};
+use crate::{remotelink, ConnectionSettings, Id};
 use mqtt4bytes::Connect;
 use rumqttlog::{Event, Receiver, Sender};
 use std::sync::Arc;
@@ -20,9 +20,9 @@ pub enum LinkError {
 
 /// A link is a connection to another router
 pub struct ReplicationLink {
-    config: Arc<ServerSettings>,
+    config: Arc<ConnectionSettings>,
     /// Id of the link. Id of the replica node that this connection is linked with
-    remote_id: usize,
+    remote_id: String,
     /// Id of this router node. MQTT connection is made with this ID
     local_id: usize,
     /// Handle to communicate with router
@@ -41,9 +41,9 @@ impl ReplicationLink {
     /// which establishes a new connection on behalf of the link and forwards the connection to this
     /// task. If this link is a server, it waits for the other end to initiate the connection
     pub async fn new(
-        config: Arc<ServerSettings>,
+        config: Arc<ConnectionSettings>,
         local_id: usize,
-        remote_id: usize,
+        remote_id: String,
         router_tx: Sender<(Id, Event)>,
         connections_rx: Receiver<Network>,
         remote: String,
