@@ -1,6 +1,6 @@
 use crate::network::Network;
 use crate::state::{self, State};
-use crate::{network, Id, ServerSettings};
+use crate::{network, ConnectionSettings, Id};
 use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode, Publish};
 use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
@@ -12,7 +12,7 @@ use tokio::time::{Duration, Elapsed};
 use tokio::{select, time};
 
 pub struct RemoteLink {
-    config: Arc<ServerSettings>,
+    config: Arc<ConnectionSettings>,
     connect: Connect,
     id: Id,
     network: Network,
@@ -53,7 +53,7 @@ pub enum Error {
 
 impl RemoteLink {
     pub async fn new(
-        config: Arc<ServerSettings>,
+        config: Arc<ConnectionSettings>,
         router_tx: Sender<(Id, Event)>,
         mut network: Network,
     ) -> Result<(String, Id, RemoteLink), Error> {
@@ -242,6 +242,9 @@ impl RemoteLink {
             Notification::Pause => {
                 let message = (self.id, Event::Ready);
                 self.router_tx.send(message)?;
+            }
+            notification => {
+                warn!("{:?} not supported in remote link", notification);
             }
         }
 

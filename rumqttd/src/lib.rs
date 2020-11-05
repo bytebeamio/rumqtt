@@ -17,13 +17,18 @@ use tokio::net::TcpListener;
 use tokio::task;
 use tokio::time;
 
+mod consolelink;
 mod locallink;
 mod network;
 mod remotelink;
+mod replicationlink;
 mod state;
 
+use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
+use crate::replicationlink::Mesh;
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -43,21 +48,28 @@ pub enum Error {
     WrongPacket(Packet),
 }
 
+type Id = usize;
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
-    servers: Vec<ServerSettings>,
+    id: usize,
     router: rumqttlog::Config,
+    servers: HashMap<String, ServerSettings>,
+    cluster: Option<HashMap<String, MeshSettings>>,
+    replicator: Option<ConnectionSettings>,
 }
-
-type Id = usize;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
     pub port: u16,
-    pub connection_timeout_ms: u16,
     pub next_connection_delay_ms: u64,
+    pub connections: ConnectionSettings,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConnectionSettings {
+    pub connection_timeout_ms: u16,
     pub max_client_id_len: usize,
-    pub max_connections: usize,
     pub throttle_delay_ms: u64,
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
@@ -69,35 +81,33 @@ pub struct ServerSettings {
     pub password: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshSettings {
+    pub host: String,
+    pub port: u16,
+}
+
 impl Default for ServerSettings {
     fn default() -> Self {
-        ServerSettings {
-            port: 1883,
-            connection_timeout_ms: 100,
-            next_connection_delay_ms: 0,
-            max_client_id_len: 10,
-            max_connections: 100,
-            throttle_delay_ms: 0,
-            max_payload_size: 2 * 1024,
-            max_inflight_count: 100,
-            max_inflight_size: 100 * 1024,
-            ca_path: None,
-            cert_path: None,
-            key_path: None,
-            username: None,
-            password: None,
-        }
+        panic!("Server settings should be derived from a configuration file")
+    }
+}
+
+impl Default for ConnectionSettings {
+    fn default() -> Self {
+        panic!("Server settings should be derived from a configuration file")
     }
 }
 
 pub struct Broker {
-    config: Config,
+    config: Arc<Config>,
     router_tx: Sender<(Id, Event)>,
     router: Option<Router>,
 }
 
 impl Broker {
     pub fn new(config: Config) -> Broker {
+        let config = Arc::new(config);
         let router_config = Arc::new(config.router.clone());
         let (router, router_tx) = Router::new(router_config);
         Broker {
@@ -120,18 +130,28 @@ impl Broker {
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
-        let mut router = self.router.take().unwrap();
-        let name = "rumqttd-router".to_owned();
-        let thread = thread::Builder::new().name(name);
-
         // spawn the router in a separate thread
-        thread.spawn(move || router.start())?;
+        let mut router = self.router.take().unwrap();
+        let router_thread = thread::Builder::new().name("rumqttd-router".to_owned());
+        router_thread.spawn(move || router.start())?;
+
+        // spawn console thread
+        let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
+        let console = Arc::new(console);
+        let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
+        console_thread.spawn(move || consolelink::start(console))?;
+
+        // replication mesh
+        let mut mesh = Mesh::new(self.config.clone(), self.router_tx.clone());
+        let console_thread = thread::Builder::new().name("rumqttd-replicator".to_owned());
+        console_thread.spawn(move || mesh.start())?;
+
         let mut rt = tokio::runtime::Builder::new()
             .basic_scheduler()
             .enable_all()
             .build()?;
 
-        let server = self.config.clone().servers.into_iter().next().unwrap();
+        let (_id, server) = self.config.servers.clone().into_iter().next().unwrap();
         let router_tx = self.router_tx.clone();
 
         rt.block_on(async {
@@ -155,6 +175,7 @@ async fn accept_loop(
     let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
     let mut count = 0;
 
+    let config = Arc::new(config.connections.clone());
     loop {
         let (stream, addr) = listener.accept().await?;
         count += 1;
@@ -162,7 +183,6 @@ async fn accept_loop(
 
         let config = config.clone();
         let router_tx = router_tx.clone();
-
         task::spawn(async {
             let connector = Connector::new(config, router_tx);
 
@@ -178,12 +198,12 @@ async fn accept_loop(
 }
 
 struct Connector {
-    config: Arc<ServerSettings>,
+    config: Arc<ConnectionSettings>,
     router_tx: Sender<(Id, Event)>,
 }
 
 impl Connector {
-    fn new(config: Arc<ServerSettings>, router_tx: Sender<(Id, Event)>) -> Connector {
+    fn new(config: Arc<ConnectionSettings>, router_tx: Sender<(Id, Event)>) -> Connector {
         Connector { config, router_tx }
     }
 

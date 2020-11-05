@@ -97,6 +97,18 @@ impl Network {
         match packet {
             Packet::Connect(connect) => Ok(connect),
             packet => {
+                let error = format!("Expecting connect. Received = {:?}", packet);
+                Err(io::Error::new(io::ErrorKind::InvalidData, error))
+            }
+        }
+    }
+
+    pub async fn read_connack(&mut self) -> io::Result<ConnAck> {
+        let packet = self.read().await?;
+
+        match packet {
+            Packet::ConnAck(connack) => Ok(connack),
+            packet => {
                 let error = format!("Expecting connack. Received = {:?}", packet);
                 Err(io::Error::new(io::ErrorKind::InvalidData, error))
             }
@@ -144,6 +156,17 @@ impl Network {
                 Err(e) => return Err(Error::Mqtt(e)),
             };
         }
+    }
+
+    pub async fn connect(&mut self, connect: Connect) -> Result<usize, io::Error> {
+        let mut write = BytesMut::new();
+        let len = match connect.write(&mut write) {
+            Ok(size) => size,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+        };
+
+        self.socket.write_all(&write[..]).await?;
+        Ok(len)
     }
 
     pub async fn connack(&mut self, connack: ConnAck) -> Result<usize, io::Error> {

@@ -1,6 +1,7 @@
 extern crate bytes;
 
 pub(crate) mod connection;
+mod metrics;
 mod readyqueue;
 mod router;
 mod slab;
@@ -12,7 +13,9 @@ pub use router::Router;
 pub use tracker::Tracker;
 
 use self::bytes::Bytes;
+pub use crate::router::metrics::{ConnectionMetrics, MetricsReply, MetricsRequest};
 use mqtt4bytes::Packet;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Messages from connection to router
@@ -30,10 +33,12 @@ pub enum Event {
     ReplicationAcks(Vec<ReplicationAck>),
     /// Disconnection request
     Disconnect(Disconnection),
+    /// Get metrics of a connection or all connections
+    Metrics(MetricsRequest),
 }
 
 /// Requests for pull operations
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Request {
     /// Data request
     Data(DataRequest),
@@ -56,6 +61,8 @@ pub enum Notification {
     Acks(Acks),
     /// Connection paused by router
     Pause,
+    /// All metrics
+    Metrics(MetricsReply),
 }
 
 /// Data sent router to be written to commitlog
@@ -103,7 +110,7 @@ impl ReplicationAck {
 /// NOTE Connection can make one sweep request to get data from multiple topics
 /// but we'll keep it simple for now as multiple requests in one message can
 /// makes constant extraction size harder
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataRequest {
     /// Log to sweep
     pub(crate) topic: String,
@@ -234,7 +241,7 @@ impl fmt::Debug for Data {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TopicsRequest {
     /// Start from this offset
     offset: usize,
@@ -270,7 +277,7 @@ impl<'a> Topics<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AcksRequest;
 
 impl AcksRequest {
