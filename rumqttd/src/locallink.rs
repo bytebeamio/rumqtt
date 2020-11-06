@@ -103,6 +103,12 @@ impl LinkRx {
         Ok(message)
     }
 
+    pub async fn async_recv(&mut self) -> Result<Option<Data>, LinkError> {
+        let message = self.link_rx.recv()?;
+        let message = self.handle_router_response(message)?;
+        Ok(message)
+    }
+
     fn handle_router_response(&mut self, message: Notification) -> Result<Option<Data>, LinkError> {
         match message {
             Notification::ConnectionAck(_) => Ok(None),
