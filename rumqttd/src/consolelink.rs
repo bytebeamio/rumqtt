@@ -36,7 +36,7 @@ impl ConsoleLink {
     }
 }
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(worker_threads = 1)]
 pub async fn start(console: Arc<ConsoleLink>) {
     let config_console = console.clone();
     let config = warp::path!("node" / "config").map(move || {

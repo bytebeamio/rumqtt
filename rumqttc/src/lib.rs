@@ -38,7 +38,7 @@
 //! use std::time::Duration;
 //! use std::error::Error;
 //!
-//! # #[tokio::main(core_threads = 1)]
+//! # #[tokio::main(worker_threads = 1)]
 //! # async fn main() {
 //! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
 //! mqttoptions.set_keep_alive(5);
@@ -49,14 +49,14 @@
 //! task::spawn(async move {
 //!     for i in 0..10 {
 //!         client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).await.unwrap();
-//!         time::delay_for(Duration::from_millis(100)).await;
+//!         time::sleep(Duration::from_millis(100)).await;
 //!     }
 //! });
 //!
 //! loop {
 //!     let notification = eventloop.poll().await.unwrap();
 //!     println!("Received = {:?}", notification);
-//!     tokio::time::delay_for(Duration::from_secs(1)).await;
+//!     tokio::time::sleep(Duration::from_secs(1)).await;
 //! }
 //! # }
 //! ```

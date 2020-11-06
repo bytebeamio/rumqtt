@@ -4,7 +4,7 @@ use rumqttc::{self, AsyncClient, Event, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     task::spawn(async move {
         requests(client).await;
-        time::delay_for(Duration::from_secs(3)).await;
+        time::sleep(Duration::from_secs(3)).await;
     });
 
     loop {
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if let Incoming::Publish(p) = i {
                     println!("Topic: {}, Payload: {:?}", p.topic, p.payload);
                 }
-            },
+            }
             Event::Outgoing(o) => println!("Outgoing = {:?}", o),
         }
     }
@@ -44,8 +44,8 @@ async fn requests(client: AsyncClient) {
             .publish("hello/world", QoS::AtLeastOnce, false, vec![i; i as usize])
             .await
             .unwrap();
-        time::delay_for(Duration::from_secs(1)).await;
+        time::sleep(Duration::from_secs(1)).await;
     }
 
-    time::delay_for(Duration::from_secs(120)).await;
+    time::sleep(Duration::from_secs(120)).await;
 }

@@ -15,7 +15,7 @@ async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Req
         let publish = Publish::new(topic, qos, payload);
         let request = Request::Publish(publish);
         let _ = requests_tx.send(request).await;
-        time::delay_for(Duration::from_secs(delay)).await;
+        time::sleep(Duration::from_secs(delay)).await;
     }
 }
 
@@ -59,10 +59,10 @@ async fn _tick(
 async fn connection_should_timeout_on_time() {
     task::spawn(async move {
         let _broker = Broker::new(1880, 3).await;
-        time::delay_for(Duration::from_secs(10)).await;
+        time::sleep(Duration::from_secs(10)).await;
     });
 
-    time::delay_for(Duration::from_secs(1)).await;
+    time::sleep(Duration::from_secs(1)).await;
     let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
     let mut eventloop = EventLoop::new(options, 5);
 
@@ -209,7 +209,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
         broker.blackhole().await;
     });
 
-    time::delay_for(Duration::from_secs(1)).await;
+    time::sleep(Duration::from_secs(1)).await;
     let start = Instant::now();
     let mut eventloop = EventLoop::new(options, 5);
     loop {
@@ -267,7 +267,7 @@ async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
 
     task::spawn(async move {
         start_requests(5, QoS::AtLeastOnce, 1, requests_tx).await;
-        time::delay_for(Duration::from_secs(60)).await;
+        time::sleep(Duration::from_secs(60)).await;
     });
 
     // start the eventloop
@@ -306,7 +306,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
 
     task::spawn(async move {
         start_requests(8, QoS::AtLeastOnce, 0, requests_tx).await;
-        time::delay_for(Duration::from_secs(60)).await;
+        time::sleep(Duration::from_secs(60)).await;
     });
 
     task::spawn(async move {
@@ -321,7 +321,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
         // out of order ack
         broker.ack(3).await;
         broker.ack(4).await;
-        time::delay_for(Duration::from_secs(5)).await;
+        time::sleep(Duration::from_secs(5)).await;
         broker.ack(1).await;
         broker.ack(2).await;
 
@@ -333,10 +333,10 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
             broker.ack(packet.pkid).await;
         }
 
-        time::delay_for(Duration::from_secs(5)).await;
+        time::sleep(Duration::from_secs(5)).await;
     });
 
-    time::delay_for(Duration::from_secs(1)).await;
+    time::sleep(Duration::from_secs(1)).await;
 
     // sends 4 requests. 5th request will trigger collision
     // Poll until there is collision.
@@ -380,7 +380,7 @@ async fn packet_id_collisions_are_timedout_on_second_ping() {
 
     task::spawn(async move {
         start_requests(10, QoS::AtLeastOnce, 0, requests_tx).await;
-        time::delay_for(Duration::from_secs(60)).await;
+        time::sleep(Duration::from_secs(60)).await;
     });
 
     task::spawn(async move {
@@ -394,10 +394,10 @@ async fn packet_id_collisions_are_timedout_on_second_ping() {
         // out of order ack
         broker.ack(3).await;
         broker.ack(4).await;
-        time::delay_for(Duration::from_secs(15)).await;
+        time::sleep(Duration::from_secs(15)).await;
     });
 
-    time::delay_for(Duration::from_secs(1)).await;
+    time::sleep(Duration::from_secs(1)).await;
 
     // Collision error but no network disconneciton
     match run(&mut eventloop, false).await {
@@ -421,10 +421,10 @@ async fn next_poll_after_connect_failure_reconnects() {
     task::spawn(async move {
         let _broker = Broker::new(3000, 1).await;
         let _broker = Broker::new(3000, 0).await;
-        time::delay_for(Duration::from_secs(15)).await;
+        time::sleep(Duration::from_secs(15)).await;
     });
 
-    time::delay_for(Duration::from_secs(1)).await;
+    time::sleep(Duration::from_secs(1)).await;
     let mut eventloop = EventLoop::new(options, 5);
 
     let event = eventloop.poll().await;
@@ -449,7 +449,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     let requests_tx = eventloop.handle();
     task::spawn(async move {
         start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
-        time::delay_for(Duration::from_secs(10)).await;
+        time::sleep(Duration::from_secs(10)).await;
     });
 
     // start the eventloop
@@ -491,7 +491,7 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
     let requests_tx = eventloop.handle();
     task::spawn(async move {
         start_requests(10, QoS::AtLeastOnce, 1, requests_tx).await;
-        time::delay_for(Duration::from_secs(10)).await;
+        time::sleep(Duration::from_secs(10)).await;
     });
 
     // start the client eventloop
