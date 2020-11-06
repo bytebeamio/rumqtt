@@ -1,6 +1,6 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, Event, MqttOptions, QoS};
+use rumqttc::{self, AsyncClient, Event, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -19,9 +19,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     loop {
-        match eventloop.poll().await? {
-            Event::Incoming(i) => println!("Incoming = {:?}", i),
-            Event::Outgoing(o) => println!("Outgoing = {:?}", o),
+        match eventloop.poll().await {
+            Ok(Event::Incoming(Incoming::Publish(p))) => {
+                println!("Topic: {}, Payload: {:?}", p.topic, p.payload)
+            }
+            Ok(Event::Incoming(i)) => {
+                println!("Incoming = {:?}", i);
+            }
+            Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
+            Err(e) => {
+                println!("Error = {:?}", e);
+                continue;
+            }
         }
     }
 }
@@ -34,9 +43,10 @@ async fn requests(client: AsyncClient) {
 
     for i in 1..=10 {
         client
-            .publish("hello/world", QoS::AtLeastOnce, false, vec![i; i as usize])
+            .publish("hello/world", QoS::ExactlyOnce, false, vec![i; 1000 * 1024])
             .await
             .unwrap();
+
         time::delay_for(Duration::from_secs(1)).await;
     }
 

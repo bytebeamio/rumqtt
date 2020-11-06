@@ -291,15 +291,14 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
-        debug!("Publish. Topc = {}", publish.topic);
-
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.save_publish(publish)?,
         };
 
         debug!(
-            "Publish. Pkid = {:?}, Payload Size = {:?}",
+            "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic,
             publish.pkid,
             publish.payload.len()
         );
