@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::task;
-use tokio::time::{self, Elapsed};
+use tokio::time::{self, error::Elapsed};
 
 mod link;
 
@@ -46,7 +46,7 @@ impl Mesh {
     /// to the router along with the connection handle. Each router connection task can now pull
     /// data it required from the router. Router will put data retrieved from the commitlog into
     /// correct task's handle
-    #[tokio::main(core_threads = 1)]
+    #[tokio::main(worker_threads = 1)]
     pub(crate) async fn start(&mut self) {
         if self.config.replicator.is_none() || self.config.cluster.is_none() {
             return;
@@ -60,7 +60,7 @@ impl Mesh {
         self.start_replicators(local_id, incoming, false).await;
 
         let addr = format!("{}:{}", this.host, this.port);
-        let mut listener = TcpListener::bind(&addr).await.unwrap();
+        let listener = TcpListener::bind(&addr).await.unwrap();
         info!("Listening on address: {}", addr);
 
         // start the supervision

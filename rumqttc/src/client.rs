@@ -125,8 +125,7 @@ impl Client {
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
-        let runtime = runtime::Builder::new()
-            .basic_scheduler()
+        let runtime = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
@@ -242,7 +241,7 @@ impl<'a> Iterator for Iter<'a> {
 impl<'a> Drop for Iter<'a> {
     fn drop(&mut self) {
         // TODO: Don't create new runtime in drop
-        let runtime = runtime::Builder::new().basic_scheduler().build().unwrap();
+        let runtime = runtime::Builder::new_current_thread().build().unwrap();
         self.connection.runtime = Some(mem::replace(&mut self.runtime, runtime));
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.2.0"
+version = "0.3.0"
 description = "An efficient and robust mqtt client for your connected devices"
 license = "Apache-2.0"
 repository = "https://github.com/bytebeamio/rumqtt"
@@ -12,22 +12,22 @@ categories = ["network-programming"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "0.2", features = ["full"] }
-bytes = "0.5"
+tokio = { version = "0.3.2", features = ["full"] }
+bytes = "0.6"
 webpki = "0.21"
-tokio-rustls = "0.14"
-mqtt4bytes = { path = "../mqtt4bytes", version = "0.3"}
+tokio-rustls = "0.20"
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.4"}
 pollster = "0.2"
-async-channel = "1.4"
+async-channel = "1.5"
 log = "0.4"
-thiserror = "1.0.15"
+thiserror = "1.0.21"
 
 [dev-dependencies]
 pretty_env_logger = "0.4"
-color-backtrace = "0.3"
-crossbeam-channel = "0.4"
+color-backtrace = "0.4"
+crossbeam-channel = "0.5"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
 jsonwebtoken = "7"
-tokio = { version = "0.2", features = ["full", "macros"] }
+tokio = { version = "0.3.2", features = ["full", "macros"] }
 matches = "0.1.8"

@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::state;
 use crate::state::State;
 use std::io::{self, ErrorKind};
-use tokio::time::{self, Duration, Elapsed};
+use tokio::time::{self, error::Elapsed, Duration};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

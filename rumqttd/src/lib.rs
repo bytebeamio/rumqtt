@@ -8,7 +8,7 @@ use std::{io, thread};
 
 use mqtt4bytes::Packet;
 use rumqttlog::*;
-use tokio::time::Elapsed;
+use tokio::time::error::Elapsed;
 
 use crate::remotelink::RemoteLink;
 pub use rumqttlog::Config as RouterConfig;
@@ -146,8 +146,7 @@ impl Broker {
         let console_thread = thread::Builder::new().name("rumqttd-replicator".to_owned());
         console_thread.spawn(move || mesh.start())?;
 
-        let mut rt = tokio::runtime::Builder::new()
-            .basic_scheduler()
+        let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
 
@@ -171,7 +170,7 @@ async fn accept_loop(
     let addr = format!("0.0.0.0:{}", config.port);
     info!("Waiting for connections on {}", addr);
 
-    let mut listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(addr).await?;
     let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
     let mut count = 0;
 
@@ -193,7 +192,7 @@ async fn accept_loop(
             }
         });
 
-        time::delay_for(accept_loop_delay).await;
+        time::sleep(accept_loop_delay).await;
     }
 }
 

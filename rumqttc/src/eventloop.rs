@@ -7,7 +7,7 @@ use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
-use tokio::time::{self, Delay, Elapsed, Instant};
+use tokio::time::{self, error::Elapsed, Instant, Sleep};
 
 use std::io;
 use std::time::Duration;
@@ -49,7 +49,7 @@ pub struct EventLoop {
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
-    pub(crate) keepalive_timeout: Option<Delay>,
+    pub(crate) keepalive_timeout: Option<Sleep>,
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
@@ -119,7 +119,7 @@ impl EventLoop {
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(time::delay_for(self.options.keep_alive));
+                self.keepalive_timeout = Some(time::sleep(self.options.keep_alive));
             }
 
             return Ok(Event::Incoming(connack));
@@ -332,7 +332,7 @@ pub(crate) async fn next_pending(
     pending: &mut IntoIter<Request>,
 ) -> Option<Request> {
     // return next packet with a delay
-    time::delay_for(delay).await;
+    time::sleep(delay).await;
     pending.next()
 }
 

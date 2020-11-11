@@ -8,7 +8,7 @@ use rumqttlog::{
 
 use std::sync::Arc;
 use std::{io, mem};
-use tokio::time::{Duration, Elapsed};
+use tokio::time::{error::Elapsed, Duration};
 use tokio::{select, time};
 
 pub struct RemoteLink {

@@ -94,7 +94,7 @@ async fn connect(addr: &str, local_id: usize, connections_rx: &Receiver<Network>
                 Ok(s) => s,
                 Err(e) => {
                     error!("Failed to connect to node {}. Error = {:?}", addr, e);
-                    time::delay_for(Duration::from_secs(1)).await;
+                    time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
             };
@@ -103,7 +103,7 @@ async fn connect(addr: &str, local_id: usize, connections_rx: &Receiver<Network>
             let connect = Connect::new(local_id.to_string());
             if let Err(e) = network.connect(connect).await {
                 error!("Failed to mqtt connect to node {}. Error = {:?}", addr, e);
-                time::delay_for(Duration::from_secs(1)).await;
+                time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
 
@@ -112,7 +112,7 @@ async fn connect(addr: &str, local_id: usize, connections_rx: &Receiver<Network>
                     "Failed to read connack from node = {}. Error = {:?}",
                     addr, e
                 );
-                time::delay_for(Duration::from_secs(1)).await;
+                time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
 
