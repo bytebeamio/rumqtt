@@ -20,7 +20,6 @@ pub use storage::Log;
 pub use jackiechan::{bounded, Receiver, RecvError, SendError, Sender};
 pub use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncWrite};
 
 pub type ConnectionId = usize;
 pub type RouterId = usize;
@@ -48,5 +47,3 @@ impl Default for Config {
     }
 }
 
-pub trait IO: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T: AsyncRead + AsyncWrite + Send + Unpin> IO for T {}
