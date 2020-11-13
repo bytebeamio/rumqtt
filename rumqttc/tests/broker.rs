@@ -22,7 +22,7 @@ impl Broker {
     /// Create a new broker which accepts 1 mqtt connection
     pub async fn new(port: u16, connack: u8) -> Broker {
         let addr = format!("127.0.0.1:{}", port);
-        let mut listener = TcpListener::bind(&addr).await.unwrap();
+        let listener = TcpListener::bind(&addr).await.unwrap();
 
         let (stream, _) = listener.accept().await.unwrap();
         let mut framed = Network::new(stream, 10 * 1024);
@@ -137,7 +137,7 @@ impl Broker {
 
                 let packet = Packet::Publish(publish);
                 tx.send(packet).await.unwrap();
-                time::delay_for(Duration::from_secs(delay)).await;
+                time::sleep(Duration::from_secs(delay)).await;
             }
         });
     }

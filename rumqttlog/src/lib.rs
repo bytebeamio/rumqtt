@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 pub use router::connection::Connection;
 pub use router::{
-    Acks, ConnectionAck, Data, DataRequest, Disconnection, Event, Message, Notification,
-    ReplicationData, Router,
+    Acks, ConnectionAck, Data, DataRequest, Disconnection, Event, Message, MetricsReply,
+    MetricsRequest, Notification, ReplicationData, Router,
 };
 pub use storage::segment::Segment;
 pub use storage::Log;
@@ -28,20 +28,12 @@ pub type Topic = String;
 pub type TopicId = usize;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MeshConfig {
-    id: usize,
-    host: String,
-    port: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub id: usize,
     pub dir: PathBuf,
     pub max_segment_size: usize,
     pub max_segment_count: usize,
     pub max_connections: usize,
-    pub mesh: Option<Vec<MeshConfig>>,
 }
 
 impl Default for Config {
@@ -52,7 +44,6 @@ impl Default for Config {
             max_segment_size: 5 * 1024 * 1024,
             max_segment_count: 1024,
             max_connections: 1010,
-            mesh: None,
         }
     }
 }

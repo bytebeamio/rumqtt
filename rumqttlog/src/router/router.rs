@@ -11,6 +11,7 @@ use super::watermarks::Watermarks;
 use super::*;
 
 use crate::logs::{ConnectionsLog, DataLog, TopicsLog};
+use crate::router::metrics::RouterMetrics;
 use crate::waiters::{DataWaiters, TopicsWaiters};
 use crate::{Config, ConnectionId, DataRequest, Disconnection, ReplicationData, RouterId};
 
@@ -23,7 +24,7 @@ pub enum RouterError {
 
 pub struct Router {
     /// Router configuration
-    _config: Arc<Config>,
+    config: Arc<Config>,
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
     id: RouterId,
@@ -51,6 +52,8 @@ pub struct Router {
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
     router_rx: Receiver<(ConnectionId, Event)>,
+    /// Aggregates for all connections
+    metrics: RouterMetrics,
 }
 
 impl Router {
@@ -73,9 +76,10 @@ impl Router {
         let data_waiters = DataWaiters::new();
         let topics_waiters = TopicsWaiters::new();
         let readyqueue = ReadyQueue::new();
+        let metrics = RouterMetrics::new(id);
 
         let router = Router {
-            _config: config,
+            config,
             id,
             connectionslog,
             datalog,
@@ -87,6 +91,7 @@ impl Router {
             data_waiters,
             topics_waiters,
             router_rx,
+            metrics,
         };
 
         (router, router_tx)
@@ -135,7 +140,32 @@ impl Router {
             Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
             Event::Disconnect(request) => self.handle_disconnection(id, request),
             Event::Ready => self.connection_ready(id, 100),
+            Event::Metrics(metrics) => self.retrieve_metrics(id, metrics),
         }
+    }
+
+    fn retrieve_metrics(&mut self, id: ConnectionId, metrics: MetricsRequest) {
+        info!("{:11} {:14} Id = {}", "console", "metrics", id);
+        let message = match metrics {
+            MetricsRequest::Config => {
+                Notification::Metrics(MetricsReply::Config(self.config.clone()))
+            }
+            MetricsRequest::Router => {
+                Notification::Metrics(MetricsReply::Router(self.metrics.clone()))
+            }
+            MetricsRequest::Connection(device_id) => {
+                let tracker = match self.connectionslog.id(&device_id) {
+                    Some(id) => self.trackers.get_mut(id).cloned(),
+                    None => None,
+                };
+
+                Notification::Metrics(MetricsReply::Connection(ConnectionMetrics::new(
+                    device_id, tracker,
+                )))
+            }
+        };
+
+        notify(&mut self.connections, id, message);
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {
@@ -150,7 +180,7 @@ impl Router {
             ConnectionType::Device(did) => match self.connections.insert(connection) {
                 Some(id) => {
                     info!("{:11} {:14} Id = {}:{}", "connection", "remote", did, id);
-                    let (tracker, pending) = self.connectionslog.add(&did);
+                    let (tracker, pending) = self.connectionslog.add(&did, id);
                     (id, tracker, pending)
                 }
                 None => {

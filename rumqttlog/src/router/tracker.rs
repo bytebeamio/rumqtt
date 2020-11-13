@@ -1,12 +1,13 @@
 use crate::router::{AcksRequest, Request, TopicsRequest};
 use crate::DataRequest;
 use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
 /// communicate with this connection
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tracker {
     /// Connection unschedule (from ready queue) status
     /// because of request exhaustion
