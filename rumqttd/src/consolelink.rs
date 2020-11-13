@@ -5,6 +5,7 @@ use rumqttlog::{
 };
 use std::sync::Arc;
 use warp::Filter;
+use tokio_compat_02::FutureExt;
 
 pub struct ConsoleLink {
     config: Arc<Config>,
@@ -36,7 +37,7 @@ impl ConsoleLink {
     }
 }
 
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(worker_threads=1)]
 pub async fn start(console: Arc<ConsoleLink>) {
     let config_console = console.clone();
     let config = warp::path!("node" / "config").map(move || {
@@ -73,5 +74,5 @@ pub async fn start(console: Arc<ConsoleLink>) {
     });
 
     let routes = warp::get().and(config.or(router).or(connection));
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(routes).run(([127, 0, 0, 1], 3030)).compat().await;
 }
