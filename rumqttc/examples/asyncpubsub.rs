@@ -19,16 +19,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     loop {
-        match eventloop.poll().await? {
-            Event::Incoming(i) => {
-                println!("Incoming = {:?}", i);
-
-                // Extract topic (String) & payload (Bytes)
-                if let Incoming::Publish(p) = i {
-                    println!("Topic: {}, Payload: {:?}", p.topic, p.payload);
-                }
+        match eventloop.poll().await {
+            Ok(Event::Incoming(Incoming::Publish(p))) => {
+                println!("Topic: {}, Payload: {:?}", p.topic, p.payload)
             }
-            Event::Outgoing(o) => println!("Outgoing = {:?}", o),
+            Ok(Event::Incoming(i)) => {
+                println!("Incoming = {:?}", i);
+            }
+            Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
+            Err(e) => {
+                println!("Error = {:?}", e);
+                continue;
+            }
         }
     }
 }
@@ -41,9 +43,10 @@ async fn requests(client: AsyncClient) {
 
     for i in 1..=10 {
         client
-            .publish("hello/world", QoS::AtLeastOnce, false, vec![i; i as usize])
+            .publish("hello/world", QoS::ExactlyOnce, false, vec![i; 1000 * 1024])
             .await
             .unwrap();
+
         time::sleep(Duration::from_secs(1)).await;
     }
 

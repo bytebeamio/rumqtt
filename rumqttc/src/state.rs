@@ -35,6 +35,12 @@ pub enum StateError {
     Serialization(mqtt4bytes::Error),
 }
 
+impl From<mqtt4bytes::Error> for StateError {
+    fn from(e: mqtt4bytes::Error) -> StateError {
+        StateError::Serialization(e)
+    }
+}
+
 /// State of the mqtt connection.
 // Design: Methods will just modify the state of the object without doing any network operations
 // Design: All inflight queues are maintained in a pre initialized vec with index as packet id.
@@ -48,7 +54,6 @@ pub struct MqttState {
     /// Collision ping count. Collisions stop user requests
     /// which inturn trigger pings. Multiple pings without
     /// resolving collisions will result in error
-    /// Last incoming packet time
     pub collision_ping_count: usize,
     /// Last incoming packet time
     last_incoming: Instant,
@@ -137,6 +142,7 @@ impl MqttState {
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
         match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
+            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
@@ -174,37 +180,39 @@ impl MqttState {
         Ok(())
     }
 
-    /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
-    /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
-        debug!("Publish. Topc = {}", publish.topic);
-
-        let publish = match publish.qos {
-            QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.add_packet_id_and_save(publish)?,
-        };
-
-        debug!(
-            "Publish. Pkid = {:?}, Payload Size = {:?}",
-            publish.pkid,
-            publish.payload.len()
-        );
-
-        publish
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
-        let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-        self.events.push_back(event);
+    fn handle_incoming_suback(&mut self) -> Result<(), StateError> {
         Ok(())
+    }
+
+    fn handle_incoming_unsuback(&mut self) -> Result<(), StateError> {
+        Ok(())
+    }
+
+    /// Results in a publish notification in all the QoS cases. Replys with an ack
+    /// in case of QoS1 and Replys rec in case of QoS while also storing the message
+    fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<(), StateError> {
+        let qos = publish.qos;
+
+        match qos {
+            QoS::AtMostOnce => Ok(()),
+            QoS::AtLeastOnce => {
+                let pkid = publish.pkid;
+                PubAck::new(pkid).write(&mut self.write)?;
+
+                Ok(())
+            }
+            QoS::ExactlyOnce => {
+                let pkid = publish.pkid;
+                PubRec::new(pkid).write(&mut self.write)?;
+                self.incoming_pub[pkid as usize] = Some(pkid);
+                Ok(())
+            }
+        }
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(puback.pkid) {
-            publish
-                .write(&mut self.write)
-                .map_err(StateError::Serialization)?;
-
+            publish.write(&mut self.write)?;
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -222,23 +230,15 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_suback(&mut self) -> Result<(), StateError> {
-        Ok(())
-    }
-
-    fn handle_incoming_unsuback(&mut self) -> Result<(), StateError> {
-        Ok(())
-    }
-
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), StateError> {
         match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
             Some(_) => {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                PubRel::new(pubrec.pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
+                PubRel::new(pubrec.pkid).write(&mut self.write)?;
 
+                let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
+                self.events.push_back(event);
                 Ok(())
             }
             None => {
@@ -248,40 +248,12 @@ impl MqttState {
         }
     }
 
-    /// Results in a publish notification in all the QoS cases. Replys with an ack
-    /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<(), StateError> {
-        let qos = publish.qos;
-
-        match qos {
-            QoS::AtMostOnce => Ok(()),
-            QoS::AtLeastOnce => {
-                let pkid = publish.pkid;
-                PubAck::new(pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
-                Ok(())
-            }
-            QoS::ExactlyOnce => {
-                let pkid = publish.pkid;
-                PubRec::new(pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
-                self.incoming_pub[pkid as usize] = Some(pkid);
-                Ok(())
-            }
-        }
-    }
-
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
-                PubComp::new(pubrel.pkid)
-                    .write(&mut self.write)
-                    .map_err(StateError::Serialization)?;
-
+                PubComp::new(pubrel.pkid).write(&mut self.write)?;
+                let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+                self.events.push_back(event);
                 Ok(())
             }
             None => {
@@ -293,10 +265,9 @@ impl MqttState {
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
-            publish
-                .write(&mut self.write)
-                .map_err(StateError::Serialization)?;
-
+            publish.write(&mut self.write)?;
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
             self.collision_ping_count = 0;
         }
 
@@ -310,6 +281,43 @@ impl MqttState {
                 Err(StateError::Unsolicited(pubcomp.pkid))
             }
         }
+    }
+
+    fn handle_incoming_pingresp(&mut self) -> Result<(), StateError> {
+        self.await_pingresp = false;
+        Ok(())
+    }
+
+    /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
+    /// it buy wrapping publish in packet
+    fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
+        let publish = match publish.qos {
+            QoS::AtMostOnce => publish,
+            QoS::AtLeastOnce | QoS::ExactlyOnce => self.save_publish(publish)?,
+        };
+
+        debug!(
+            "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
+            publish.topic,
+            publish.pkid,
+            publish.payload.len()
+        );
+
+        publish.write(&mut self.write)?;
+        let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+        self.events.push_back(event);
+        Ok(())
+    }
+
+    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<(), StateError> {
+        let pubrel = self.save_pubrel(pubrel)?;
+
+        debug!("Pubrel. Pkid = {}", pubrel.pkid);
+        PubRel::new(pubrel.pkid).write(&mut self.write)?;
+
+        let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
+        self.events.push_back(event);
+        Ok(())
     }
 
     /// check when the last control packet/pingreq packet is received and return
@@ -341,17 +349,9 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        PingReq
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        PingReq.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PingReq);
         self.events.push_back(event);
-        Ok(())
-    }
-
-    fn handle_incoming_pingresp(&mut self) -> Result<(), StateError> {
-        self.await_pingresp = false;
         Ok(())
     }
 
@@ -364,10 +364,7 @@ impl MqttState {
             subscription.topics, subscription.pkid
         );
 
-        subscription
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        subscription.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
         self.events.push_back(event);
         Ok(())
@@ -382,10 +379,7 @@ impl MqttState {
             unsub.topics, unsub.pkid
         );
 
-        unsub
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        unsub.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
         self.events.push_back(event);
         Ok(())
@@ -394,10 +388,7 @@ impl MqttState {
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
 
-        Disconnect
-            .write(&mut self.write)
-            .map_err(StateError::Serialization)?;
-
+        Disconnect.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
         Ok(())
@@ -416,14 +407,27 @@ impl MqttState {
         None
     }
 
+    fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {
+        let pubrel = match pubrel.pkid {
+            // consider PacketIdentifier(0) as uninitialized packets
+            0 => {
+                pubrel.pkid = self.next_pkid();
+                pubrel
+            }
+            _ => pubrel,
+        };
+
+        self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
+        Ok(pubrel)
+    }
+
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn add_packet_id_and_save(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
+    fn save_publish(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
         let publish = match publish.pkid {
             // consider PacketIdentifier(0) as uninitialized packets
             0 => {
-                let pkid = self.next_pkid();
-                publish.pkid = pkid;
+                publish.pkid = self.next_pkid();
                 publish
             }
             _ => publish,
