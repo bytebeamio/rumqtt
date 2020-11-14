@@ -33,9 +33,9 @@ use std::collections::HashMap;
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
 pub enum Error {
-    #[error("I/O")]
+    #[error("I/O {0}")]
     Io(#[from] io::Error),
-    #[error("Connection error")]
+    #[error("Connection error {0}")]
     Connection(#[from] remotelink::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
@@ -57,6 +57,7 @@ pub struct Config {
     servers: HashMap<String, ServerSettings>,
     cluster: Option<HashMap<String, MeshSettings>>,
     replicator: Option<ConnectionSettings>,
+    console: ConsoleSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -87,6 +88,11 @@ pub struct MeshSettings {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsoleSettings {
+    pub port: u16,
+}
+
 impl Default for ServerSettings {
     fn default() -> Self {
         panic!("Server settings should be derived from a configuration file")
@@ -96,6 +102,12 @@ impl Default for ServerSettings {
 impl Default for ConnectionSettings {
     fn default() -> Self {
         panic!("Server settings should be derived from a configuration file")
+    }
+}
+
+impl Default for ConsoleSettings {
+    fn default() -> Self {
+        panic!("Console settings should be derived from configuration file")
     }
 }
 
@@ -155,7 +167,7 @@ impl Broker {
 
         rt.block_on(async {
             if let Err(e) = accept_loop(Arc::new(server), router_tx).await {
-                error!("Accept loop error: {:?}", e);
+                error!("Accept loop error: {:?}", e.to_string());
             }
         });
 
@@ -211,9 +223,20 @@ impl Connector {
     /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
     /// denial of service attacks (rogue clients which only does network connection without sending
     /// mqtt connection packet to make make the server reach its concurrent connection limit)
-    async fn new_connection(&self, network: Network) -> Result<(), Error> {
+    async fn new_connection(&self, mut network: Network) -> Result<(), Error> {
         let config = self.config.clone();
         let router_tx = self.router_tx.clone();
+
+        // Wait for MQTT connect packet and error out if it's not received in time to prevent
+        // DOS attacks by filling total connections that the server can handle with idle open
+        // connections which results in server rejecting new connections. This is moved outside
+        // remotelink to be able to use it as client connection as well in replication
+        let timeout = Duration::from_millis(config.connection_timeout_ms.into());
+        time::timeout(timeout, async {
+            let connect = network.read_connect().await?;
+            Ok::<_, Error>(connect)
+        })
+        .await??;
 
         // Start the link
         let (client_id, id, mut link) = RemoteLink::new(config, router_tx, network).await?;
