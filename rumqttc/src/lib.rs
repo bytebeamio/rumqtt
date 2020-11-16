@@ -13,7 +13,7 @@
 //! use std::time::Duration;
 //! use std::thread;
 //!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org:1883");
+//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
 //! mqttoptions.set_keep_alive(5);
 //!
 //! let (mut client, mut connection) = Client::new(mqttoptions, 10);
@@ -38,9 +38,9 @@
 //! use std::time::Duration;
 //! use std::error::Error;
 //!
-//! # #[tokio::main(core_threads = 1)]
+//! # #[tokio::main(worker_threads = 1)]
 //! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org:1883");
+//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
 //! mqttoptions.set_keep_alive(5);
 //!
 //! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -49,14 +49,14 @@
 //! task::spawn(async move {
 //!     for i in 0..10 {
 //!         client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).await.unwrap();
-//!         time::delay_for(Duration::from_millis(100)).await;
+//!         time::sleep(Duration::from_millis(100)).await;
 //!     }
 //! });
 //!
 //! loop {
 //!     let notification = eventloop.poll().await.unwrap();
 //!     println!("Received = {:?}", notification);
-//!     tokio::time::delay_for(Duration::from_secs(1)).await;
+//!     tokio::time::sleep(Duration::from_secs(1)).await;
 //! }
 //! # }
 //! ```
@@ -72,25 +72,36 @@
 //!
 //! In short, everything necessary to maintain a robust connection
 //!
-//! **NOTE**: Looping on `connection.iter()/eventloop.poll()` is necessary to
-//! run the eventloop and make progress. It yields incoming and outgoing activity
-//! notifications which allows customization as user sees fit.
-//!
-//! **IMPORTANT** Blocking inside `eventloop.poll()/eonnection.iter()` loop
-//! will block connection progress
-//!
 //! Since the eventloop is externally polled (with `iter()/poll()` in a loop)
 //! out side the library and `Eventloop` is accessible, users can
 //! - Distribute incoming messages based on topics
 //! - Stop it when required
 //! - Access internal state for use cases like graceful shutdown or to modify options before reconnection
+//!
+//! ## Important notes
+//!
+//! - Looping on `connection.iter()`/`eventloop.poll()` is necessary to run the
+//!   event loop and make progress. It yields incoming and outgoing activity
+//!   notifications which allows customization as you see fit.
+//!
+//! - Blocking inside the `connection.iter()`/`eventloop.poll()` loop will block
+//!   connection progress.
+//!
+//! ## FAQ
+//! **Connecting to a broker using raw ip doesn't work**
+//!
+//! You cannot create a TLS connection to a bare IP address with a self-signed
+//! certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
+//! One workaround, which only works under *nix/BSD-like systems, is to add an
+//! entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
+//! address and use that name in your code.
 
 #[macro_use]
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
-use std::{convert::{TryFrom, TryInto}, time::Duration};
+use std::time::Duration;
 
 mod client;
 mod eventloop;
@@ -101,7 +112,6 @@ mod tls;
 pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use framed::Network;
 pub use mqtt4bytes::*;
 pub use state::{MqttState, StateError};
 pub use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
@@ -114,33 +124,29 @@ pub type Incoming = Packet;
 pub enum Outgoing {
     /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
-    /// Publishes
-    Publishes(Vec<u16>),
     /// Subscribe packet with packet identifier
     Subscribe(u16),
     /// Unsubscribe packet with packet identifier
     Unsubscribe(u16),
     /// PubAck packet
     PubAck(u16),
-    /// PubAck packet
-    PubAcks(Vec<u16>),
     /// PubRec packet
     PubRec(u16),
+    /// PubRel packet
+    PubRel(u16),
     /// PubComp packet
     PubComp(u16),
     /// Ping request packet
     PingReq,
+    /// Ping response packet
+    PingResp,
     /// Disconnect packet
     Disconnect,
 }
 
 /// Requests by the client to mqtt event loop. Request are
-/// handled one by one. This is a duplicate of possible MQTT
-/// packets along with the ability to tag data and do bulk
-/// operations.
-/// Upcoming feature: When 'manual' feature is turned on
-/// provides the ability to reply with acks when the user sees fit
-#[derive(Debug)]
+/// handled one by one.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Request {
     Publish(Publish),
     PublishRaw(PublishRaw),
@@ -155,12 +161,10 @@ pub enum Request {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect,
-    Publishes(Vec<Publish>),
-    PubAcks(Vec<PubAck>),
 }
 
 /// Key type for TLS authentication
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Key {
     RSA,
     ECC,
@@ -185,7 +189,7 @@ impl From<Unsubscribe> for Request {
 }
 
 /// Client authentication option for mqtt connect packet
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SecurityOptions {
     /// No authentication.
     None,
@@ -201,20 +205,6 @@ pub enum Protocol {
     Wss,
 }
 
-impl TryFrom<&str> for Protocol {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "http" => Ok(Protocol::Http),
-            "https" => Ok(Protocol::Https),
-            "ws" => Ok(Protocol::Ws),
-            "wss" => Ok(Protocol::Wss),
-            _ => Err(()),
-        }
-    }
-}
-
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
@@ -226,7 +216,7 @@ pub struct MqttOptions {
     /// broker port
     port: u16,
     // What transport protocol to use
-    protocol: Protocol,
+    protocol: Option<Protocol>,
     /// keep alive time to send pingreq to broker when the connection is idle
     keep_alive: Duration,
     /// clean (or) persistent session
@@ -270,24 +260,16 @@ pub struct MqttOptions {
 
 impl MqttOptions {
     /// New mqtt options
-    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T) -> MqttOptions {
+    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         let id = id.into();
         if id.starts_with(' ') || id.is_empty() {
             panic!("Invalid client id")
         }
 
-        let host = host.into();
-
-        let url = match url::Url::parse(&host) {
-            Ok(u) => u,
-            Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(&format!("http://{}", &host)).unwrap(),
-            Err(e) => panic!(e)
-        };
-
         MqttOptions {
-            broker_addr: url.host_str().unwrap().to_owned(),
-            port: url.port_or_known_default().unwrap_or_else(|| 1883),
-            protocol: url.scheme().try_into().unwrap_or_else(|_| Protocol::Http),
+            broker_addr: host.into(),
+            port,
+            protocol: None,
             keep_alive: Duration::from_secs(60),
             clean_session: true,
             client_id: id,
@@ -319,8 +301,17 @@ impl MqttOptions {
         self
     }
 
-    pub fn last_will(&mut self) -> Option<LastWill> {
+    pub fn last_will(&self) -> Option<LastWill> {
         self.last_will.clone()
+    }
+
+    pub fn set_protocol(&mut self, protocol: Protocol) -> &mut Self {
+        self.protocol = Some(protocol);
+        self
+    }
+
+    pub fn protocol(&self) -> Option<Protocol> {
+        self.protocol.clone()
     }
 
     /// Set the CA certificate to use for TLS connections. Doing so implicitly enables TLS.
@@ -564,26 +555,28 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1").set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
     }
 
     #[test]
     fn no_scheme() {
-        let _mqtt_opts = MqttOptions::new("client_a", "wss://127.0.0.1");
-        assert_eq!(_mqtt_opts.protocol, crate::Protocol::Wss);
+        let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8k0ccx04zas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAJUTLOBJQ4QBBBIIA%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
+        _mqtt_opts.set_protocol(crate::Protocol::Wss);
+        assert_eq!(_mqtt_opts.protocol, Some(crate::Protocol::Wss));
+        assert_eq!(_mqtt_opts.broker_addr, "a3f8k0ccx04zas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAJUTLOBJQ4QBBBIIA%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
     }
 
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1").set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
 
     #[test]
     #[should_panic]
     fn ca_and_client_config() {
         let client_config = ClientConfig::new();
-        let mut mqtt_opts = MqttOptions::new("client", "127.0.0.1");
+        let mut mqtt_opts = MqttOptions::new("client", "127.0.0.1", 1883);
         mqtt_opts
             .set_tls_client_config(Arc::new(client_config))
             .set_ca(vec![]);

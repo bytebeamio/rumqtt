@@ -5,7 +5,6 @@ use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use async_channel::{SendError, Sender};
 use mqtt4bytes::*;
 use std::mem;
-use std::time::Duration;
 use tokio::runtime;
 use tokio::runtime::Runtime;
 
@@ -29,11 +28,11 @@ pub struct AsyncClient {
 }
 
 impl AsyncClient {
-    /// Create a new `Client`
+    /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.take_cancel_handle().unwrap();
+        let cancel_tx = eventloop.cancel_handle();
 
         let client = AsyncClient {
             request_tx,
@@ -41,6 +40,15 @@ impl AsyncClient {
         };
 
         (client, eventloop)
+    }
+
+    /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
+    /// creating a test instance.
+    pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
+        AsyncClient {
+            request_tx,
+            cancel_tx,
+        }
     }
 
     /// Sends a MQTT Publish to the eventloop
@@ -117,8 +125,7 @@ impl Client {
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
-        let runtime = runtime::Builder::new()
-            .basic_scheduler()
+        let runtime = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
@@ -183,17 +190,11 @@ pub struct Connection {
 }
 
 impl Connection {
-    fn new(mut eventloop: EventLoop, runtime: Runtime) -> Connection {
-        eventloop.set_reconnection_delay(Duration::from_secs(1));
+    fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
         Connection {
             eventloop,
             runtime: Some(runtime),
         }
-    }
-
-    /// Set delay between (automatic) re-connections (on error).
-    pub fn set_reconnection_delay(&mut self, delay: Duration) {
-        self.eventloop.set_reconnection_delay(delay)
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
@@ -240,7 +241,7 @@ impl<'a> Iterator for Iter<'a> {
 impl<'a> Drop for Iter<'a> {
     fn drop(&mut self) {
         // TODO: Don't create new runtime in drop
-        let runtime = runtime::Builder::new().basic_scheduler().build().unwrap();
+        let runtime = runtime::Builder::new_current_thread().build().unwrap();
         self.connection.runtime = Some(mem::replace(&mut self.runtime, runtime));
     }
 }

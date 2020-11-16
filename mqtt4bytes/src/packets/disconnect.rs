@@ -1,6 +1,7 @@
 use crate::*;
 use bytes::{BufMut, BytesMut};
 
+/// Disconnect packet
 pub struct Disconnect;
 
 impl Disconnect {

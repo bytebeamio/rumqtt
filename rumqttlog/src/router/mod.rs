@@ -1,57 +1,68 @@
 extern crate bytes;
 
-mod commitlog;
+pub(crate) mod connection;
+mod metrics;
+mod readyqueue;
 mod router;
 mod slab;
-mod subscriptions;
+mod tracker;
 mod watermarks;
 
+use connection::Connection;
 pub use router::Router;
-use subscriptions::Subscription;
+pub use tracker::Tracker;
 
 use self::bytes::Bytes;
-use flume::{bounded, Receiver, Sender, TrySendError};
-use mqtt4bytes::{Packet, Publish};
+pub use crate::router::metrics::{ConnectionMetrics, MetricsReply, MetricsRequest};
+use mqtt4bytes::Packet;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Messages going into router
+/// Messages from connection to router
 #[derive(Debug)]
-pub enum RouterInMessage {
+pub enum Event {
     /// Client id and connection handle
     Connect(Connection),
-    /// Data for native commitlog
-    Publish(Publish),
+    /// Connection ready to receive more data
+    Ready,
     /// Data for native commitlog
     Data(Vec<Packet>),
     /// Data for commitlog of a replica
     ReplicationData(Vec<ReplicationData>),
     /// Replication acks
     ReplicationAcks(Vec<ReplicationAck>),
-    /// Data request
-    DataRequest(DataRequest),
-    /// Subscription request
-    SubscriptionRequest(SubscriptionRequest),
-    /// Topics request
-    TopicsRequest(TopicsRequest),
-    /// Acks request
-    AcksRequest(AcksRequest),
     /// Disconnection request
     Disconnect(Disconnection),
+    /// Get metrics of a connection or all connections
+    Metrics(MetricsRequest),
 }
 
-/// Messages coming from router
+/// Requests for pull operations
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum Request {
+    /// Data request
+    Data(DataRequest),
+    /// Topics request
+    Topics(TopicsRequest),
+    /// Acks request
+    Acks(AcksRequest),
+}
+
+/// Notification from router to connection
 #[derive(Debug)]
-pub enum RouterOutMessage {
+pub enum Notification {
     /// Connection reply
     ConnectionAck(ConnectionAck),
+    /// Individual publish
+    Message(Message),
     /// Data reply
-    DataReply(DataReply),
-    /// Subscription reply
-    SubscriptionReply(SubscriptionReply),
-    /// Topics reply
-    TopicsReply(TopicsReply),
+    Data(Data),
     /// Watermarks reply
-    AcksReply(AcksReply),
+    Acks(Acks),
+    /// Connection paused by router
+    Pause,
+    /// All metrics
+    Metrics(MetricsReply),
 }
 
 /// Data sent router to be written to commitlog
@@ -99,49 +110,45 @@ impl ReplicationAck {
 /// NOTE Connection can make one sweep request to get data from multiple topics
 /// but we'll keep it simple for now as multiple requests in one message can
 /// makes constant extraction size harder
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataRequest {
     /// Log to sweep
-    topic: String,
+    pub(crate) topic: String,
+    /// QoS of the request
+    pub(crate) qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    cursors: [(u64, u64); 3],
+    pub(crate) cursors: [(u64, u64); 3],
+    /// Last retain id
+    pub(crate) last_retain: u64,
     /// Maximum count of payload buffer per replica
     max_count: usize,
 }
 
 impl DataRequest {
     /// New data request with offsets starting from 0
-    pub fn new(topic: String) -> DataRequest {
+    pub fn new(topic: String, qos: u8) -> DataRequest {
         DataRequest {
             topic,
+            qos,
             cursors: [(0, 0); 3],
-            max_count: 100,
-        }
-    }
-
-    pub fn with(topic: String, max_count: usize) -> DataRequest {
-        DataRequest {
-            topic,
-            cursors: [(0, 0); 3],
-            max_count,
-        }
-    }
-
-    /// New data request with provided offsets
-    pub fn offsets(topic: String, cursors: [(u64, u64); 3]) -> DataRequest {
-        DataRequest {
-            topic,
-            cursors,
+            last_retain: 0,
             max_count: 100,
         }
     }
 
     /// New data request with provided offsets
-    pub fn offsets_with(topic: String, cursors: [(u64, u64); 3], max_count: usize) -> DataRequest {
+    pub fn offsets(
+        topic: String,
+        qos: u8,
+        cursors: [(u64, u64); 3],
+        last_retain: u64,
+    ) -> DataRequest {
         DataRequest {
             topic,
+            qos,
             cursors,
-            max_count,
+            last_retain,
+            max_count: 100,
         }
     }
 }
@@ -156,34 +163,72 @@ impl fmt::Debug for DataRequest {
     }
 }
 
-pub struct DataReply {
+pub struct Message {
     /// Log to sweep
     pub topic: String,
+    /// Qos of the topic
+    pub qos: u8,
+    /// Reply data chain
+    pub payload: Bytes,
+}
+
+impl Message {
+    pub fn new(topic: String, qos: u8, payload: Bytes) -> Message {
+        Message {
+            topic,
+            payload,
+            qos,
+        }
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Topic = {:?}, Payload size = {}",
+            self.topic,
+            self.payload.len()
+        )
+    }
+}
+
+pub struct Data {
+    /// Log to sweep
+    pub topic: String,
+    /// Qos of the topic
+    pub qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
     pub cursors: [(u64, u64); 3],
+    /// Next retain publish id
+    pub last_retain: u64,
     /// Payload size
     pub size: usize,
     /// Reply data chain
     pub payload: Vec<Bytes>,
 }
 
-impl DataReply {
+impl Data {
     pub fn new(
         topic: String,
+        qos: u8,
         cursors: [(u64, u64); 3],
+        last_retain: u64,
         size: usize,
         payload: Vec<Bytes>,
-    ) -> DataReply {
-        DataReply {
+    ) -> Data {
+        Data {
             topic,
             cursors,
+            last_retain,
             size,
             payload,
+            qos,
         }
     }
 }
 
-impl fmt::Debug for DataReply {
+impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -196,7 +241,7 @@ impl fmt::Debug for DataReply {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TopicsRequest {
     /// Start from this offset
     offset: usize,
@@ -221,36 +266,18 @@ impl TopicsRequest {
     }
 }
 
-#[derive(Debug)]
-pub struct TopicsReply {
-    /// Last topic offset
-    pub offset: usize,
-    /// list of new topics along with the offsets
-    /// that tracker should poll from
-    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
+pub struct Topics<'a> {
+    offset: usize,
+    topics: &'a [String],
 }
 
-impl TopicsReply {
-    fn new(offset: usize, topics: Vec<(String, u8, [(u64, u64); 3])>) -> TopicsReply {
-        TopicsReply { offset, topics }
+impl<'a> Topics<'a> {
+    pub fn new(offset: usize, topics: &'a [String]) -> Topics {
+        Topics { offset, topics }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SubscriptionRequest;
-
-#[derive(Debug, Clone)]
-pub struct SubscriptionReply {
-    pub topics: Vec<(String, u8, [(u64, u64); 3])>,
-}
-
-impl SubscriptionReply {
-    fn new(topics: Vec<(String, u8, [(u64, u64); 3])>) -> SubscriptionReply {
-        SubscriptionReply { topics }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AcksRequest;
 
 impl AcksRequest {
@@ -260,96 +287,51 @@ impl AcksRequest {
 }
 
 #[derive(Debug)]
-pub struct AcksReply {
+pub struct Acks {
     /// packet ids that can be acked
     pub acks: Vec<(u16, Packet)>,
 }
 
-impl AcksReply {
-    pub fn new(acks: Vec<(u16, Packet)>) -> AcksReply {
-        AcksReply { acks }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectionType {
-    Device(String),
-    Replicator(usize),
-}
-
-/// Used to register a new connection with the router
-/// Connection messages encompasses a handle for router to
-/// communicate with this connection
-#[derive(Clone)]
-pub struct Connection {
-    /// Kind of connection. A replicator connection or a device connection
-    /// Replicator connection are only created from inside this library.
-    /// All the external connections are of 'device' type
-    pub(crate) conn: ConnectionType,
-    /// Handle which is given to router to allow router to comminicate with
-    /// this connection
-    pub handle: Sender<RouterOutMessage>,
-}
-
-impl Connection {
-    pub fn new_remote(id: &str, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
-        let (this_tx, this_rx) = bounded(capacity);
-
-        let connection = Connection {
-            conn: ConnectionType::Device(id.to_owned()),
-            handle: this_tx,
-        };
-
-        (connection, this_rx)
+impl Acks {
+    pub fn empty() -> Acks {
+        Acks { acks: Vec::new() }
     }
 
-    pub fn new_replica(id: usize, capacity: usize) -> (Connection, Receiver<RouterOutMessage>) {
-        let (this_tx, this_rx) = bounded(capacity);
-
-        let connection = Connection {
-            conn: ConnectionType::Replicator(id),
-            handle: this_tx,
-        };
-
-        (connection, this_rx)
+    pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
+        Acks { acks }
     }
 
-    /// Send message to link
-    fn reply(&mut self, reply: RouterOutMessage) {
-        if let Err(e) = self.handle.try_send(reply) {
-            match e {
-                TrySendError::Full(e) => {
-                    error!("Channel full. Id = {:?}, Message = {:?}", self.conn, e)
-                }
-                TrySendError::Disconnected(e) => {
-                    info!("Channel closed. Id = {:?}, Message = {:?}", self.conn, e)
-                }
-            }
-        }
+    pub fn push(&mut self, ack: (u16, Packet)) {
+        self.acks.push(ack);
+    }
+
+    pub fn len(&self) -> usize {
+        self.acks.len()
     }
 }
 
 #[derive(Debug)]
 pub enum ConnectionAck {
-    /// Id assigned by the router for this connectiobackn
-    Success(usize),
+    /// Id assigned by the router for this connection and
+    /// previous session status
+    Success((usize, bool, Vec<Notification>)),
     /// Failure and reason for failure string
     Failure(String),
-}
-
-impl fmt::Debug for Connection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.conn)
-    }
 }
 
 #[derive(Debug)]
 pub struct Disconnection {
     id: String,
+    execute_will: bool,
+    pending: Vec<Notification>,
 }
 
 impl Disconnection {
-    pub fn new(id: String) -> Disconnection {
-        Disconnection { id }
+    pub fn new(id: String, execute_will: bool, pending: Vec<Notification>) -> Disconnection {
+        Disconnection {
+            id,
+            execute_will,
+            pending,
+        }
     }
 }

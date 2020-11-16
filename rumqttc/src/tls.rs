@@ -34,7 +34,7 @@ impl From<()> for Error {
     }
 }
 
-pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, Error> {
+pub async fn tls_connector(options: &MqttOptions) -> Result<TlsConnector, Error> {
     let config = if let Some(config) = &options.tls_client_config {
         config.clone()
     } else {
@@ -78,10 +78,13 @@ pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, 
 
         Arc::new(config)
     };
+    Ok(TlsConnector::from(config))
+}
 
+pub async fn tls_connect(options: &MqttOptions) -> Result<TlsStream<TcpStream>, Error> {
     let addr = options.broker_addr.as_str();
     let port = options.port;
-    let connector = TlsConnector::from(config);
+    let connector = tls_connector(options).await?;
     let domain = DNSNameRef::try_from_ascii_str(&options.broker_addr)?;
     let tcp = TcpStream::connect((addr, port)).await?;
     let tls = connector.connect(domain, tcp).await?;

@@ -15,6 +15,7 @@ pub use packets::*;
 pub use read::*;
 pub use topic::*;
 
+/// Serialization/Deserialization errors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     InvalidConnectReturnCode(u8),

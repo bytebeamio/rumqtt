@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.1.1"
+version = "0.3.0"
 description = "An efficient and robust mqtt client for your connected devices"
 license = "Apache-2.0"
 repository = "https://github.com/bytebeamio/rumqtt"
@@ -12,25 +12,27 @@ categories = ["network-programming"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "0.2", features = ["full"] }
-bytes = "0.5"
+tokio = { version = "0.3.2", features = ["full"] }
+bytes = "0.6"
 webpki = "0.21"
-tokio-rustls = "0.14"
-async-tungstenite = { version = "0.5.0", features = ["tokio-runtime", "tokio-tls"] }
-ws_stream_tungstenite = { version = "0.2", features = ["tokio_io"] }
-mqtt4bytes = { path = "../mqtt4bytes", version = "0.2"}
+tokio-rustls = "0.20"
+tokio-tls = "0.3.1"
+async-tungstenite = { version = "0.10.0", features = ["tokio-rustls"] }
+ws_stream_tungstenite = { version = "0.4.0-beta.1", features = ["tokio_io"] }
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.4" }
 pollster = "0.2"
-async-channel = "1.4"
+async-channel = "1.5"
 log = "0.4"
-thiserror = "1.0.15"
-url = "2.1.1"
+url = "2.2"
+thiserror = "1.0.21"
+http = "^0.2"
 
 [dev-dependencies]
 pretty_env_logger = "0.4"
-color-backtrace = "0.3"
-crossbeam-channel = "0.4"
+color-backtrace = "0.4"
+crossbeam-channel = "0.5"
 serde = {version = "1", features = ["derive"]}
 envy = "0.4"
 jsonwebtoken = "7"
-tokio = { version = "0.2", features = ["full", "macros"] }
+tokio = { version = "0.3.2", features = ["full", "macros"] }
 matches = "0.1.8"
