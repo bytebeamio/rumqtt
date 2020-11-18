@@ -5,6 +5,7 @@ members = [
   "mqtt5bytes",
   "rumqttc",
   "rumqttlog",
+  "rumqttmesh",
   "rumqttd",
   "benchmarks"
 ]
