@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 tokio = { version = "0.3", features = ["full"] }
-tokio-util = "0.5"
+tokio-util = { version = "0.5", features = ["codec"]}
+bytes = "0.6"
 rumqttlog = "0.1"
