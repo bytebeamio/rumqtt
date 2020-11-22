@@ -11,3 +11,11 @@ categories = ["network-programming"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bytes = { version = "0.5", default-features = false }
+
+[dev-dependencies]
+tokio = { version = "0.2", features = ["full"] }
+pretty_assertions = "0.6.1"
+rand = "0.7"
+criterion = "0.3"
+
