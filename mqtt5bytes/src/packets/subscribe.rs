@@ -121,12 +121,17 @@ impl Subscribe {
     }
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        // write packet type
         buffer.put_u8(0x82);
 
+        // write remaining length
         let remaining_len = self.len();
         let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
+
+        // write packet id
         buffer.put_u16(self.pkid);
 
+        // write properties
         match &self.properties {
             Some(properties) => properties.write(buffer)?,
             None => {
@@ -134,6 +139,7 @@ impl Subscribe {
             }
         };
 
+        // write filters
         for filter in self.filters.iter() {
             filter.write(buffer);
         }
@@ -380,5 +386,48 @@ mod test {
         // println!("{:X?}", buf);
         // println!("{:#04X?}", &buf[..]);
         assert_eq!(&buf[..], sample_bytes());
+    }
+
+    fn sample2() -> Subscribe {
+        let mut filter = SubscribeFilter::new("hello/world".to_owned(), QoS::AtLeastOnce);
+        Subscribe {
+            pkid: 42,
+            filters: vec![filter],
+            properties: None,
+        }
+    }
+
+    fn sample2_bytes() -> Vec<u8> {
+        vec![
+            0x82, 0x11, 0x00, 0x2a, 0x00, 0x00, 0x0b, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x2f, 0x77,
+            0x6f, 0x72, 0x6c, 0x64, 0x01,
+        ]
+    }
+
+    #[test]
+    fn subscribe2_parsing_works_correctly() {
+        let mut stream = BytesMut::new();
+        let packetstream = &sample2_bytes();
+
+        stream.extend_from_slice(&packetstream[..]);
+        let packet = mqtt_read(&mut stream, 200).unwrap();
+        let packet = match packet {
+            Packet::Subscribe(subscribe) => subscribe,
+            packet => panic!("Invalid packet = {:?}", packet),
+        };
+
+        let subscribe = sample();
+        assert_eq!(packet, subscribe);
+    }
+
+    #[test]
+    fn subscribe2_encoding_works_correctly() {
+        let publish = sample2();
+        let mut buf = BytesMut::new();
+        publish.write(&mut buf).unwrap();
+
+        println!("{:X?}", buf);
+        println!("{:#04X?}", &buf[..]);
+        assert_eq!(&buf[..], sample2_bytes());
     }
 }

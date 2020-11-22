@@ -1,5 +1,0 @@
-{
-  "dependencies": {
-    "mqtt-packet": "^6.6.0"
-  }
-}
