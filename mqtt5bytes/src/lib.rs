@@ -25,6 +25,7 @@ pub enum Error {
     InvalidPropertyType(u8),
     InvalidRetainForwardRule(u8),
     InvalidQoS(u8),
+    InvalidSubscribeReasonCode(u8),
     PacketIdZero,
     SubscriptionIdZero,
     PayloadSizeIncorrect,

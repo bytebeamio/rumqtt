@@ -319,7 +319,7 @@ impl fmt::Debug for SubscribeFilter {
 mod test {
     use crate::*;
     use alloc::vec;
-    use bytes::{Bytes, BytesMut};
+    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     fn sample() -> Subscribe {
