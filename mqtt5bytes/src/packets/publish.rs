@@ -140,7 +140,8 @@ impl Publish {
         };
 
         buffer.extend_from_slice(&self.payload);
-        // TODO: Returned length is worong in other packets. Fix it
+
+        // TODO: Returned length is wrong in other packets. Fix it
         Ok(1 + count + len)
     }
 }

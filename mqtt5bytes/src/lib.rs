@@ -23,6 +23,7 @@ pub enum Error {
     IncorrectPacketFormat,
     InvalidPacketType(u8),
     InvalidPropertyType(u8),
+    InvalidRetainForwardRule(u8),
     InvalidQoS(u8),
     PacketIdZero,
     SubscriptionIdZero,

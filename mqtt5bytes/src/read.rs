@@ -105,5 +105,6 @@ pub(crate) fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     if !done {
         return Err(Error::InsufficientBytes(1));
     }
+
     Ok((remaining_len_len, remaining_len))
 }
