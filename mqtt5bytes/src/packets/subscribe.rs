@@ -416,7 +416,7 @@ mod test {
             packet => panic!("Invalid packet = {:?}", packet),
         };
 
-        let subscribe = sample();
+        let subscribe = sample2();
         assert_eq!(packet, subscribe);
     }
 
