@@ -22,7 +22,6 @@ mqtt4bytes = { path = "../mqtt4bytes", version = "0.4" }
 pollster = "0.2"
 async-channel = "1.5"
 log = "0.4"
-url = "2.2"
 thiserror = "1.0.21"
 http = "^0.2"
 
