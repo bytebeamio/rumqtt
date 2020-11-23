@@ -14,6 +14,6 @@ Cargo.lock
 *.der
 *.pb
 perf.data*
-utils/benchmark/benchmark
+node_modules
 cachegrind.out
 *.txt
