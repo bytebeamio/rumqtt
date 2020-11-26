@@ -188,15 +188,6 @@ impl From<Unsubscribe> for Request {
     }
 }
 
-/// Client authentication option for mqtt connect packet
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SecurityOptions {
-    /// No authentication.
-    None,
-    /// Use the specified `(username, password)` tuple to authenticate.
-    UsernamePassword(String, String),
-}
-
 #[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
