@@ -1,13 +1,15 @@
-use crate::framed::Network;
+use crate::{framed::Network, Transport};
 use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
+use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
 use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::stream::{Stream, StreamExt};
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
+use ws_stream_tungstenite::WsStream;
 
 use std::io;
 use std::time::Duration;
@@ -264,14 +266,47 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
-    let network = if options.ca.is_some() || options.tls_client_config.is_some() {
-        let socket = tls::tls_connect(options).await?;
-        Network::new(socket, options.max_incoming_packet_size)
-    } else {
-        let addr = options.broker_addr.as_str();
-        let port = options.port;
-        let socket = TcpStream::connect((addr, port)).await?;
-        Network::new(socket, options.max_incoming_packet_size)
+    let network = match options.transport() {
+        Transport::Tcp => {
+            let addr = options.broker_addr.as_str();
+            let port = options.port;
+            let socket = TcpStream::connect((addr, port)).await?;
+            Network::new(socket, options.max_incoming_packet_size)
+        }
+        Transport::Tls(tls_config) => {
+            let socket = tls::tls_connect(&options, &tls_config).await?;
+            Network::new(socket, options.max_incoming_packet_size)
+        }
+        Transport::Ws => {
+            let request = http::Request::builder()
+                .method(http::Method::GET)
+                .uri(options.broker_addr.as_str())
+                .header("Sec-WebSocket-Protocol", "mqttv3.1")
+                .body(())
+                .unwrap();
+
+            let (socket, _) = connect_async(request)
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+
+            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+        }
+        Transport::Wss(tls_config) => {
+            let request = http::Request::builder()
+                .method(http::Method::GET)
+                .uri(options.broker_addr.as_str())
+                .header("Sec-WebSocket-Protocol", "mqttv3.1")
+                .body(())
+                .unwrap();
+
+            let connector = tls::tls_connector(&tls_config).await?;
+
+            let (socket, _) = connect_async_with_tls_connector(request, Some(connector))
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+
+            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+        }
     };
 
     Ok(network)

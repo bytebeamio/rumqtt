@@ -164,10 +164,10 @@ pub enum Request {
 }
 
 /// Key type for TLS authentication
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Key {
-    RSA,
-    ECC,
+    RSA(Vec<u8>),
+    ECC(Vec<u8>),
 }
 
 impl From<Publish> for Request {
@@ -189,23 +189,107 @@ impl From<Unsubscribe> for Request {
 }
 
 #[derive(Clone)]
+pub enum Transport {
+    Tcp,
+    Tls(TlsConfiguration),
+    Ws,
+    Wss(TlsConfiguration),
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Self::tcp()
+    }
+}
+
+impl Transport {
+    /// Use regular tcp as transport (default)
+    pub fn tcp() -> Self {
+        Self::Tcp
+    }
+
+    /// Use secure tcp with tls as transport
+    pub fn tls(
+        ca: Vec<u8>,
+        client_auth: Option<(Vec<u8>, Key)>,
+        alpn: Option<Vec<Vec<u8>>>,
+    ) -> Self {
+        let config = TlsConfiguration::Simple {
+            ca,
+            alpn,
+            client_auth,
+        };
+
+        Self::tls_with_config(config)
+    }
+
+    pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
+        Self::Tls(tls_config)
+    }
+
+    /// Use websockets as transport
+    pub fn ws() -> Self {
+        Self::Ws
+    }
+
+    /// Use secure websockets with tls as transport
+    pub fn wss(
+        ca: Vec<u8>,
+        client_auth: Option<(Vec<u8>, Key)>,
+        alpn: Option<Vec<Vec<u8>>>,
+    ) -> Self {
+        let config = TlsConfiguration::Simple {
+            ca,
+            client_auth,
+            alpn,
+        };
+
+        Self::wss_with_config(config)
+    }
+
+    pub fn wss_with_config(tls_config: TlsConfiguration) -> Self {
+        Self::Wss(tls_config)
+    }
+}
+
+#[derive(Clone)]
+pub enum TlsConfiguration {
+    Simple {
+        /// connection method
+        ca: Vec<u8>,
+        /// alpn settings
+        alpn: Option<Vec<Vec<u8>>>,
+        /// tls client_authentication
+        client_auth: Option<(Vec<u8>, Key)>,
+    },
+    /// Injected rustls ClientConfig for TLS, to allow more customisation.
+    Rustls(Arc<ClientConfig>),
+}
+
+impl From<ClientConfig> for TlsConfiguration {
+    fn from(config: ClientConfig) -> Self {
+        TlsConfiguration::Rustls(Arc::new(config))
+    }
+}
+
+// TODO: Should all the options be exposed as public? Drawback
+// would be loosing the ability to panic when the user options
+// are wrong (e.g empty client id) or aggressive (keep alive time)
+/// Options to configure the behaviour of mqtt connection
+#[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
     broker_addr: String,
     /// broker port
     port: u16,
+    // What transport protocol to use
+    transport: Transport,
     /// keep alive time to send pingreq to broker when the connection is idle
     keep_alive: Duration,
     /// clean (or) persistent session
     clean_session: bool,
     /// client identifier
     client_id: String,
-    /// connection method
-    ca: Option<Vec<u8>>,
-    /// tls client_authentication
-    client_auth: Option<(Vec<u8>, Vec<u8>)>,
-    /// alpn settings
-    alpn: Option<Vec<Vec<u8>>>,
     /// username and password
     credentials: Option<(String, String)>,
     /// maximum incoming packet size (verifies remaining length of the packet)
@@ -226,10 +310,6 @@ pub struct MqttOptions {
     inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
-    /// Key type for TLS
-    key_type: Key,
-    /// Injected rustls ClientConfig for TLS, to allow more customisation.
-    tls_client_config: Option<Arc<ClientConfig>>,
     /// Enabling will wait for incoming packets to avoid collisions
     collision_safety: bool,
     conn_timeout: u64,
@@ -246,12 +326,10 @@ impl MqttOptions {
         MqttOptions {
             broker_addr: host.into(),
             port,
+            transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
             clean_session: true,
             client_id: id,
-            ca: None,
-            client_auth: None,
-            alpn: None,
             credentials: None,
             max_incoming_packet_size: 10 * 1024,
             max_outgoing_packet_size: 10 * 1024,
@@ -260,8 +338,6 @@ impl MqttOptions {
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
-            key_type: Key::RSA,
-            tls_client_config: None,
             collision_safety: false,
             conn_timeout: 5,
         }
@@ -281,47 +357,13 @@ impl MqttOptions {
         self.last_will.clone()
     }
 
-    /// Set the CA certificate to use for TLS connections. Doing so implicitly enables TLS.
-    ///
-    /// See `set_client_auth`, `set_alpn` and `set_key_type`. If you want to control more options
-    /// then you can inject a rustls ClientConfig directly with `set_tls_client_config`.
-    pub fn set_ca(&mut self, ca: Vec<u8>) -> &mut Self {
-        assert!(
-            self.tls_client_config.is_none(),
-            "Can't set both tls_client_config and ca."
-        );
-        self.ca = Some(ca);
+    pub fn set_transport(&mut self, transport: Transport) -> &mut Self {
+        self.transport = transport;
         self
     }
 
-    pub fn ca(&self) -> Option<Vec<u8>> {
-        self.ca.clone()
-    }
-
-    pub fn set_client_auth(&mut self, cert: Vec<u8>, key: Vec<u8>) -> &mut Self {
-        assert!(
-            self.tls_client_config.is_none(),
-            "Can't set both tls_client_config and ca."
-        );
-        self.client_auth = Some((cert, key));
-        self
-    }
-
-    pub fn client_auth(&self) -> Option<(Vec<u8>, Vec<u8>)> {
-        self.client_auth.clone()
-    }
-
-    pub fn set_alpn(&mut self, alpn: Vec<Vec<u8>>) -> &mut Self {
-        assert!(
-            self.tls_client_config.is_none(),
-            "Can't set both tls_client_config and alpn."
-        );
-        self.alpn = Some(alpn);
-        self
-    }
-
-    pub fn alpn(&self) -> Option<Vec<Vec<u8>>> {
-        self.alpn.clone()
+    pub fn transport(&self) -> Transport {
+        self.transport.clone()
     }
 
     /// Set number of seconds after which client should ping the broker
@@ -427,43 +469,6 @@ impl MqttOptions {
         self.inflight
     }
 
-    /// Use this setter to modify key_type enum, by default RSA
-    pub fn set_key_type(&mut self, key_type: Key) -> &mut Self {
-        self.key_type = key_type;
-        self
-    }
-
-    /// get key type
-    pub fn get_key_type(&self) -> Key {
-        self.key_type
-    }
-
-    /// Inject a rustls ClientConfig to use for making a TLS connection.
-    ///
-    /// Doing so implicitly enabled TLS. You must not set both this and the other TLS options
-    /// (set_ca, set_client_auth, set_alpn)
-    pub fn set_tls_client_config(&mut self, tls_client_config: Arc<ClientConfig>) -> &mut Self {
-        assert!(
-            self.ca.is_none(),
-            "Can't set both tls_client_config and ca."
-        );
-        assert!(
-            self.client_auth.is_none(),
-            "Can't set both tls_client_config and client_auth."
-        );
-        assert!(
-            self.alpn.is_none(),
-            "Can't set both tls_client_config and alpn."
-        );
-        self.tls_client_config = Some(tls_client_config);
-        self
-    }
-
-    /// Get the ClientConfig which was previously set, if any.
-    pub fn tls_client_config(&self) -> Option<Arc<ClientConfig>> {
-        self.tls_client_config.clone()
-    }
-
     pub fn set_collision_safety(&mut self, c: bool) -> &mut Self {
         self.collision_safety = c;
         self
@@ -495,9 +500,6 @@ impl Debug for MqttOptions {
             .field("keep_alive", &self.keep_alive)
             .field("clean_session", &self.clean_session)
             .field("client_id", &self.client_id)
-            .field("ca", &self.ca)
-            .field("client_auth", &self.client_auth)
-            .field("alpn", &self.alpn)
             .field("credentials", &self.credentials)
             .field("max_packet_size", &self.max_incoming_packet_size)
             .field("request_channel_capacity", &self.request_channel_capacity)
@@ -505,11 +507,6 @@ impl Debug for MqttOptions {
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
-            .field("key_type", &self.key_type)
-            .field(
-                "tls_client_config",
-                &self.tls_client_config.as_ref().map(|_| "..."),
-            )
             .field("conn_timeout", &self.conn_timeout)
             .finish()
     }
@@ -526,18 +523,30 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
-    fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
+    fn no_scheme() {
+        let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
+
+        _mqtt_opts.set_transport(crate::Transport::wss(Vec::from("Test CA"), None, None));
+
+        if let crate::Transport::Wss(TlsConfiguration::Simple {
+            ca,
+            client_auth,
+            alpn,
+        }) = _mqtt_opts.transport
+        {
+            assert_eq!(ca, Vec::from("Test CA"));
+            assert_eq!(client_auth, None);
+            assert_eq!(alpn, None);
+        } else {
+            panic!("Unexpected transport!");
+        }
+
+        assert_eq!(_mqtt_opts.broker_addr, "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
     }
 
     #[test]
     #[should_panic]
-    fn ca_and_client_config() {
-        let client_config = ClientConfig::new();
-        let mut mqtt_opts = MqttOptions::new("client", "127.0.0.1", 1883);
-        mqtt_opts
-            .set_tls_client_config(Arc::new(client_config))
-            .set_ca(vec![]);
+    fn no_client_id() {
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
 }

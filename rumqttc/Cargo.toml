@@ -16,11 +16,14 @@ tokio = { version = "0.3.2", features = ["full"] }
 bytes = "0.6"
 webpki = "0.21"
 tokio-rustls = "0.20"
-mqtt4bytes = { path = "../mqtt4bytes", version = "0.4"}
+async-tungstenite = { version = "0.10.0", default-features = false, features = ["tokio-rustls"] }
+ws_stream_tungstenite = { version = "0.4.0-beta.2", default-features = false, features = ["tokio_io"] }
+mqtt4bytes = { path = "../mqtt4bytes", version = "0.4" }
 pollster = "0.2"
 async-channel = "1.5"
 log = "0.4"
 thiserror = "1.0.21"
+http = "^0.2"
 
 [dev-dependencies]
 pretty_env_logger = "0.4"
