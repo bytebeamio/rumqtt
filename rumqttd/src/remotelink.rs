@@ -224,7 +224,7 @@ impl RemoteLink {
                     "reply",
                     self.id,
                     reply.topic,
-                    reply.cursors,
+                    reply.cursor,
                     reply.payload.len()
                 );
 

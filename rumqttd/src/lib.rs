@@ -216,20 +216,9 @@ impl Connector {
     /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
     /// denial of service attacks (rogue clients which only does network connection without sending
     /// mqtt connection packet to make make the server reach its concurrent connection limit)
-    async fn new_connection(&self, mut network: Network) -> Result<(), Error> {
+    async fn new_connection(&self, network: Network) -> Result<(), Error> {
         let config = self.config.clone();
         let router_tx = self.router_tx.clone();
-
-        // Wait for MQTT connect packet and error out if it's not received in time to prevent
-        // DOS attacks by filling total connections that the server can handle with idle open
-        // connections which results in server rejecting new connections. This is moved outside
-        // remotelink to be able to use it as client connection as well in replication
-        let timeout = Duration::from_millis(config.connection_timeout_ms.into());
-        time::timeout(timeout, async {
-            let connect = network.read_connect().await?;
-            Ok::<_, Error>(connect)
-        })
-        .await??;
 
         // Start the link
         let (client_id, id, mut link) = RemoteLink::new(config, router_tx, network).await?;

@@ -24,7 +24,7 @@ pub struct Tracker {
     /// Wildcard subscriptions on this topic
     wild_subscriptions: Vec<(String, u8)>,
     /// Topics Matches on new subscription waiting for offset updates
-    matched: VecDeque<(String, u8, [(u64, u64); 3])>,
+    matched: VecDeque<(String, u8, (u64, u64))>,
 }
 
 impl Tracker {}
@@ -101,7 +101,7 @@ impl Tracker {
     }
 
     /// Updates offsets and moves matches to the tracker
-    pub fn next_matched(&mut self) -> Option<(String, u8, [(u64, u64); 3])> {
+    pub fn next_matched(&mut self) -> Option<(String, u8, (u64, u64))> {
         self.matched.pop_front()
     }
 
@@ -141,7 +141,7 @@ impl Tracker {
                 if matches(&topic, &filter.topic_path) {
                     self.topics_index.insert(topic.clone());
                     let qos = filter.qos as u8;
-                    self.matched.push_back((topic.clone(), qos, [(0, 0); 3]));
+                    self.matched.push_back((topic.clone(), qos, (0, 0)));
                     continue;
                 }
             }
@@ -163,7 +163,7 @@ impl Tracker {
         // A concrete subscription match
         if let Some(qos) = self.concrete_subscriptions.get(topic) {
             self.topics_index.insert(topic.to_owned());
-            let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3], 0);
+            let request = DataRequest::offsets(topic.to_owned(), *qos, (0, 0), 0);
             return Some(request);
         }
 
@@ -171,7 +171,7 @@ impl Tracker {
         for (filter, qos) in self.wild_subscriptions.iter() {
             if matches(&topic, filter) {
                 self.topics_index.insert(topic.to_owned());
-                let request = DataRequest::offsets(topic.to_owned(), *qos, [(0, 0); 3], 0);
+                let request = DataRequest::offsets(topic.to_owned(), *qos, (0, 0), 0);
                 return Some(request);
             }
         }
