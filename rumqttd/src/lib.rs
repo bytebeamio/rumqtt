@@ -21,13 +21,11 @@ mod consolelink;
 mod locallink;
 mod network;
 mod remotelink;
-mod replicationlink;
 mod state;
 
 use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
-use crate::replicationlink::Mesh;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
@@ -152,11 +150,6 @@ impl Broker {
         let console = Arc::new(console);
         let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
         console_thread.spawn(move || consolelink::start(console))?;
-
-        // replication mesh
-        let mut mesh = Mesh::new(self.config.clone(), self.router_tx.clone());
-        let console_thread = thread::Builder::new().name("rumqttd-replicator".to_owned());
-        console_thread.spawn(move || mesh.start())?;
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
