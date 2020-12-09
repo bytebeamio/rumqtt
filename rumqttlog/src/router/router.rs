@@ -7,13 +7,13 @@ use thiserror::Error;
 use super::connection::ConnectionType;
 use super::readyqueue::ReadyQueue;
 use super::slab::Slab;
-use super::watermarks::Watermarks;
+use crate::logs::acks::Acks;
 use super::*;
 
 use crate::logs::{ConnectionsLog, DataLog, TopicsLog};
 use crate::router::metrics::RouterMetrics;
 use crate::waiters::{DataWaiters, TopicsWaiters};
-use crate::{Config, ConnectionId, DataRequest, Disconnection, ReplicationData, RouterId};
+use crate::{Config, ConnectionId, DataRequest, Disconnection, RouterId};
 
 #[derive(Error, Debug)]
 #[error("...")]
@@ -27,7 +27,7 @@ pub struct Router {
     config: Arc<Config>,
     /// Id of this router. Used to index native commitlog to store data from
     /// local connections
-    id: RouterId,
+    _id: RouterId,
     /// Connections log to handle persitent session and synchronize connection
     /// information between nodes
     connectionslog: ConnectionsLog,
@@ -40,7 +40,7 @@ pub struct Router {
     /// Subscriptions and matching topics maintained per connection
     trackers: Slab<Tracker>,
     /// Watermarks of a connection
-    watermarks: Slab<Watermarks>,
+    watermarks: Slab<Acks>,
     /// Connections with more pending requests and ready to make progress
     readyqueue: ReadyQueue,
     /// Waiter on a topic. These are used to wake connections/replicators
@@ -69,7 +69,7 @@ impl Router {
 
         // Global data
         let connectionslog = ConnectionsLog::new();
-        let datalog: DataLog = DataLog::new(id, config.clone());
+        let datalog: DataLog = DataLog::new(config.clone());
         let topicslog = TopicsLog::new();
 
         // Waiters to notify new data or topics
@@ -80,7 +80,7 @@ impl Router {
 
         let router = Router {
             config,
-            id,
+            _id: id,
             connectionslog,
             datalog,
             topicslog,
@@ -136,8 +136,6 @@ impl Router {
         match data {
             Event::Connect(connection) => self.handle_new_connection(connection),
             Event::Data(data) => self.handle_connection_data(id, data),
-            Event::ReplicationData(data) => self.handle_replication_data(id, data),
-            Event::ReplicationAcks(ack) => self.handle_replication_acks(id, ack),
             Event::Disconnect(request) => self.handle_disconnection(id, request),
             Event::Ready => self.connection_ready(id, 100),
             Event::Metrics(metrics) => self.retrieve_metrics(id, metrics),
@@ -203,7 +201,7 @@ impl Router {
             None => ConnectionAck::Success((id, previous_session, Vec::new())),
         };
 
-        self.watermarks.insert_at(Watermarks::new(), id);
+        self.watermarks.insert_at(Acks::new(), id);
         self.readyqueue.push_back(id);
 
         let message = Notification::ConnectionAck(ack);
@@ -281,7 +279,7 @@ impl Router {
                             // the connection
                             let topic = data.topic.clone();
                             let qos = data.qos;
-                            let cursors = data.cursors;
+                            let cursors = data.cursor;
                             let last_retain = data.last_retain;
 
                             let request = DataRequest::offsets(topic, qos, cursors, last_retain);
@@ -420,7 +418,7 @@ impl Router {
                 // necessary because new subscription should yield only subsequent data
                 // FIXME: Verify logic of self.id. Should this be seeked for replicators as well?
                 while let Some(mut topic) = tracker.next_matched() {
-                    self.datalog.seek_offsets_to_end(self.id, &mut topic);
+                    self.datalog.seek_offsets_to_end(&mut topic);
                     let (topic, qos, cursors) = (topic.0, topic.1, topic.2);
                     let request = DataRequest::offsets(topic, qos, cursors, 0);
                     tracker.register_data_request(request);
@@ -492,7 +490,7 @@ impl Router {
         } = publish;
 
         let is_new_topic = if retain {
-            let is_new_topic = match self.datalog.retain(id, &topic, payload) {
+            let is_new_topic = match self.datalog.retain(&topic, payload) {
                 Some(v) => v,
                 None => return,
             };
@@ -511,7 +509,7 @@ impl Router {
                 // return;
             }
 
-            let (is_new_topic, (_, offset)) = match self.datalog.append(id, &topic, payload) {
+            let (is_new_topic, _) = match self.datalog.append(&topic, payload) {
                 Some(v) => v,
                 None => return,
             };
@@ -519,7 +517,6 @@ impl Router {
             if qos as u8 > 0 {
                 let watermarks = self.watermarks.get_mut(id).unwrap();
                 watermarks.push_publish_ack(pkid, qos as u8);
-                watermarks.update_pkid_offset_map(&topic, pkid, offset);
             }
 
             is_new_topic
@@ -535,73 +532,15 @@ impl Router {
         // has duplicate topics. Tracker filters these duplicates though
         if is_new_topic {
             self.topicslog.append(&topic);
-            self.fresh_topics_notification(id);
+            self.fresh_topics_notification();
         }
 
         // Notify waiters on this topic of new data
-        self.fresh_data_notification(id, &topic);
+        self.fresh_data_notification(&topic);
 
         // Data from topics with replication factor = 0 should be acked immediately if there are
         // waiters registered. We shouldn't rely on replication acks for data acks in this case
         self.fresh_acks_notification(id);
-    }
-
-    fn handle_replication_data(&mut self, id: ConnectionId, data: Vec<ReplicationData>) {
-        trace!(
-            "{:11} {:14} Id = {} Count = {}",
-            "data",
-            "replicacommit",
-            id,
-            data.len()
-        );
-        for data in data {
-            let ReplicationData {
-                pkid,
-                topic,
-                payload,
-                ..
-            } = data;
-            let mut is_new_topic = false;
-            for payload in payload {
-                if payload.is_empty() {
-                    error!("Empty publish. ID = {:?}, topic = {:?}", id, topic);
-                    return;
-                }
-
-                if let Some((new_topic, _)) = self.datalog.append(id, &topic, payload) {
-                    is_new_topic = new_topic;
-                }
-            }
-
-            // TODO: Is this necessary for replicated data
-            let watermarks = self.watermarks.get_mut(id).unwrap();
-
-            // TODO we can ignore offset mapping for replicated data
-            watermarks.update_pkid_offset_map(&topic, pkid, 0);
-
-            if is_new_topic {
-                self.topicslog.append(&topic);
-                self.fresh_topics_notification(id);
-            }
-
-            // we can probably handle multiple requests better
-            self.fresh_data_notification(id, &topic);
-
-            // Replicated data should be acked immediately when there are pending requests
-            // in waiters
-            self.fresh_acks_notification(id);
-        }
-    }
-
-    fn handle_replication_acks(&mut self, _id: ConnectionId, acks: Vec<ReplicationAck>) {
-        for ack in acks {
-            // TODO: Take ReplicationAck and use connection ids in it for notifications
-            // TODO: Using wrong id to make code compile. Loop over ids in ReplicationAck
-            let watermarks = self.watermarks.get_mut(0).unwrap();
-            watermarks.update_cluster_offsets(0, ack.offset);
-            watermarks.commit(&ack.topic);
-            self.fresh_acks_notification(0);
-        }
     }
 
     /// Send notifications to links which registered them. Id is only used to
@@ -609,8 +548,7 @@ impl Router {
     /// New topic from one connection involves notifying other connections which
     /// are possibly interested in these topics. So this involves going through
     /// all the topic waiters
-    fn fresh_topics_notification(&mut self, id: ConnectionId) {
-        let replication_data = id < 10;
+    fn fresh_topics_notification(&mut self) {
         let waiters = &mut self.topics_waiters;
 
         while let Some((link_id, request)) = waiters.pop_front() {
@@ -618,17 +556,6 @@ impl Router {
             let tracker = self.trackers.get_mut(link_id).unwrap();
             if tracker.subscription_count() == 0 {
                 // panic!("Topics request registration for 0 subscription connection");
-                continue;
-            }
-
-            // Don't send replicated topic notifications to replication link. Replicator 1
-            // should not track replicator 2's topics (This will lead to circular replication)
-            // False notification. This connection should be notified in the next call of
-            // this method. Push this request to next queue in waiter and swap at the end.
-            // TODO: Split waiters into remote and replicator connections.
-            // TODO: Ignore replicators for notifications from replicators
-            if replication_data && link_id < 10 {
-                waiters.push_back(link_id, request);
                 continue;
             }
 
@@ -653,7 +580,7 @@ impl Router {
     }
 
     /// Send data to links which registered them
-    fn fresh_data_notification(&mut self, id: ConnectionId, topic: &str) {
+    fn fresh_data_notification(&mut self, topic: &str) {
         // There might not be any waiters on this topic
         // FIXME: Every notification trigger is a hashmap lookup
         let waiters = match self.data_waiters.get_mut(topic) {
@@ -661,24 +588,12 @@ impl Router {
             None => return,
         };
 
-        let replication_data = id < 10;
         while let Some((link_id, request)) = waiters.pop_front() {
-            let is_replicator = link_id < 10;
-
-            // Ignore new data notification if the current notification awaiting
-            // link is a replicator link and data is also from a replicator
-            // False positive. This connection should be notified in the next call of
-            // this method. Push this request to next queue in waiter and swap at the end.
-            if is_replicator && replication_data {
-                waiters.push_back(link_id, request);
-                continue;
-            }
-
             let tracker = self.trackers.get_mut(link_id).unwrap();
 
             let topic = request.topic;
             let qos = request.qos;
-            let cursors = request.cursors;
+            let cursors = request.cursor;
             let last_retain = request.last_retain;
 
             let request = DataRequest::offsets(topic, qos, cursors, last_retain);
@@ -733,10 +648,10 @@ fn handle_data_request(
         "request",
         id,
         request.topic,
-        request.cursors
+        request.cursor
     );
 
-    let data = match datalog.handle_data_request(id, &request) {
+    let data = match datalog.extract_data(&request) {
         Some(data) => {
             trace!(
                 "{:11} {:14} Id = {} Topic = {} Offsets = {:?} Count = {}",
@@ -744,7 +659,7 @@ fn handle_data_request(
                 "response",
                 id,
                 data.topic,
-                data.cursors,
+                data.cursor,
                 data.payload.len()
             );
 
@@ -804,7 +719,7 @@ fn handle_topics_request<'a>(
     Some(topics)
 }
 
-fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> {
+fn handle_acks_request(id: ConnectionId, acks: &mut Acks) -> Option<Vec<Packet>> {
     trace!("{:11} {:14} Id = {}", "acks", "request", id);
     let acks = match acks.handle_acks_request() {
         Some(acks) => {
@@ -813,7 +728,7 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
                 "acks",
                 "response",
                 id,
-                acks.acks.len()
+                acks.len()
             );
 
             acks
@@ -851,13 +766,6 @@ mod test {
         let (mut router, _tx) = Router::new(Arc::new(Config::default()));
 
         // Instantiate replica connections with subscriptions and topic request notifications
-        for i in 0..10 {
-            add_new_replica_connection(&mut router, i);
-            add_new_subscription(&mut router, i, "hello/world");
-            router.topics_waiters.register(i, TopicsRequest::new());
-        }
-
-        // Instantiate replica connections with subscriptions and topic request notifications
         for i in 10..20 {
             let client_id = &format!("{}", i);
             add_new_remote_connection(&mut router, client_id);
@@ -867,12 +775,8 @@ mod test {
 
         router.topicslog.append("hello/world");
 
-        // A new topic notification from a replicator. This is a false positive
-        // for all the replicators
-        router.fresh_topics_notification(1);
-
         // Next iteration of `fresh_topics_notification` will have all missed notifications
-        for i in 0..10 {
+        for i in 10..20 {
             let request = router.topics_waiters.pop_front().unwrap();
             assert_eq!(i, request.0);
         }
@@ -882,34 +786,20 @@ mod test {
     fn data_notifications_does_not_create_infinite_loops() {
         let (mut router, _tx) = Router::new(Arc::new(Config::default()));
 
-        // Instantiate replica connections with subscriptions and
-        // data request notifications
-        for i in 0..10 {
-            add_new_replica_connection(&mut router, i);
-            add_new_subscription(&mut router, i, "hello/world");
-
-            let request = DataRequest::new("hello/world".to_owned(), 1);
-            router.data_waiters.register(i, request);
-        }
-
         // Instantiate replica connections with subscriptions and topic request notifications
         for i in 10..20 {
             let client_id = &format!("{}", i);
             add_new_remote_connection(&mut router, client_id);
             add_new_subscription(&mut router, i, "hello/world");
-            router.topics_waiters.register(i, TopicsRequest::new());
+            router.data_waiters.register(i, DataRequest::new("hello/world".to_owned(), 1));
         }
 
         let payload = Bytes::from(vec![1, 2, 3]);
-        router.datalog.append(1, "hello/world", payload);
-
-        // A new topic notification from a replicator. This is a false positive
-        // for all the replicators
-        router.fresh_data_notification(1, "hello/world");
+        router.datalog.append("hello/world", payload);
 
         // Next iteration of `fresh_topics_notification` will have all missed notifications
         let waiters = router.data_waiters.get_mut("hello/world").unwrap();
-        for i in 0..10 {
+        for i in 10..20 {
             let request = waiters.pop_front().unwrap();
             assert_eq!(i, request.0);
         }

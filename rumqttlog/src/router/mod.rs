@@ -6,7 +6,6 @@ mod readyqueue;
 mod router;
 mod slab;
 mod tracker;
-mod watermarks;
 
 use connection::Connection;
 pub use router::Router;
@@ -27,10 +26,6 @@ pub enum Event {
     Ready,
     /// Data for native commitlog
     Data(Vec<Packet>),
-    /// Data for commitlog of a replica
-    ReplicationData(Vec<ReplicationData>),
-    /// Replication acks
-    ReplicationAcks(Vec<ReplicationAck>),
     /// Disconnection request
     Disconnect(Disconnection),
     /// Get metrics of a connection or all connections
@@ -58,52 +53,11 @@ pub enum Notification {
     /// Data reply
     Data(Data),
     /// Watermarks reply
-    Acks(Acks),
+    Acks(Vec<Packet>),
     /// Connection paused by router
     Pause,
     /// All metrics
     Metrics(MetricsReply),
-}
-
-/// Data sent router to be written to commitlog
-#[derive(Debug)]
-pub struct ReplicationData {
-    /// Id of the packet that connection received
-    pkid: u16,
-    /// Topic of publish
-    topic: String,
-    /// Publish payload
-    payload: Vec<Bytes>,
-}
-
-impl ReplicationData {
-    pub fn with_capacity(pkid: u16, topic: String, cap: usize) -> ReplicationData {
-        ReplicationData {
-            pkid,
-            topic,
-            payload: Vec::with_capacity(cap),
-        }
-    }
-
-    pub fn push(&mut self, payload: Bytes) {
-        self.payload.push(payload)
-    }
-}
-
-/// Replication connection frames this after receiving an ack from other replica
-/// This is used by router to update watermarks, which is used to send acks
-/// for replicated data
-#[derive(Debug)]
-pub struct ReplicationAck {
-    topic: String,
-    /// Packet id that router assigned
-    offset: u64,
-}
-
-impl ReplicationAck {
-    pub fn new(topic: String, offset: u64) -> ReplicationAck {
-        ReplicationAck { topic, offset }
-    }
 }
 
 /// Request that connection/linker makes to extract data from commitlog
@@ -117,7 +71,7 @@ pub struct DataRequest {
     /// QoS of the request
     pub(crate) qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    pub(crate) cursors: [(u64, u64); 3],
+    pub(crate) cursor: (u64, u64),
     /// Last retain id
     pub(crate) last_retain: u64,
     /// Maximum count of payload buffer per replica
@@ -130,7 +84,7 @@ impl DataRequest {
         DataRequest {
             topic,
             qos,
-            cursors: [(0, 0); 3],
+            cursor: (0, 0),
             last_retain: 0,
             max_count: 100,
         }
@@ -140,13 +94,13 @@ impl DataRequest {
     pub fn offsets(
         topic: String,
         qos: u8,
-        cursors: [(u64, u64); 3],
+        cursor: (u64, u64),
         last_retain: u64,
     ) -> DataRequest {
         DataRequest {
             topic,
             qos,
-            cursors,
+            cursor,
             last_retain,
             max_count: 100,
         }
@@ -158,7 +112,7 @@ impl fmt::Debug for DataRequest {
         write!(
             f,
             "Topic = {}, cursors = {:?}, max_count = {}",
-            self.topic, self.cursors, self.max_count
+            self.topic, self.cursor, self.max_count
         )
     }
 }
@@ -199,7 +153,7 @@ pub struct Data {
     /// Qos of the topic
     pub qos: u8,
     /// (segment, offset) tuples per replica (1 native and 2 replicas)
-    pub cursors: [(u64, u64); 3],
+    pub cursor: (u64, u64),
     /// Next retain publish id
     pub last_retain: u64,
     /// Payload size
@@ -212,14 +166,14 @@ impl Data {
     pub fn new(
         topic: String,
         qos: u8,
-        cursors: [(u64, u64); 3],
+        cursor: (u64, u64),
         last_retain: u64,
         size: usize,
         payload: Vec<Bytes>,
     ) -> Data {
         Data {
             topic,
-            cursors,
+            cursor,
             last_retain,
             size,
             payload,
@@ -234,7 +188,7 @@ impl fmt::Debug for Data {
             f,
             "Topic = {:?}, Cursors = {:?}, Payload size = {}, Payload count = {}",
             self.topic,
-            self.cursors,
+            self.cursor,
             self.size,
             self.payload.len()
         )
@@ -283,30 +237,6 @@ pub struct AcksRequest;
 impl AcksRequest {
     pub fn new() -> AcksRequest {
         AcksRequest
-    }
-}
-
-#[derive(Debug)]
-pub struct Acks {
-    /// packet ids that can be acked
-    pub acks: Vec<(u16, Packet)>,
-}
-
-impl Acks {
-    pub fn empty() -> Acks {
-        Acks { acks: Vec::new() }
-    }
-
-    pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
-        Acks { acks }
-    }
-
-    pub fn push(&mut self, ack: (u16, Packet)) {
-        self.acks.push(ack);
-    }
-
-    pub fn len(&self) -> usize {
-        self.acks.len()
     }
 }
 

@@ -20,7 +20,8 @@ path = "src/bin.rs"
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.3"}
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.4" }
-tokio = { version = "0.3", features = ["full"]}
+tokio = { version = "0.3", features = ["full"] }
+tokio-compat-02 = "0.1"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 thiserror = "1"

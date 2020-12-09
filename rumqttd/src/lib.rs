@@ -21,21 +21,19 @@ mod consolelink;
 mod locallink;
 mod network;
 mod remotelink;
-mod replicationlink;
 mod state;
 
 use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
-use crate::replicationlink::Mesh;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
 pub enum Error {
-    #[error("I/O")]
+    #[error("I/O {0}")]
     Io(#[from] io::Error),
-    #[error("Connection error")]
+    #[error("Connection error {0}")]
     Connection(#[from] remotelink::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
@@ -57,6 +55,7 @@ pub struct Config {
     servers: HashMap<String, ServerSettings>,
     cluster: Option<HashMap<String, MeshSettings>>,
     replicator: Option<ConnectionSettings>,
+    console: ConsoleSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -87,6 +86,11 @@ pub struct MeshSettings {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsoleSettings {
+    pub port: u16,
+}
+
 impl Default for ServerSettings {
     fn default() -> Self {
         panic!("Server settings should be derived from a configuration file")
@@ -96,6 +100,12 @@ impl Default for ServerSettings {
 impl Default for ConnectionSettings {
     fn default() -> Self {
         panic!("Server settings should be derived from a configuration file")
+    }
+}
+
+impl Default for ConsoleSettings {
+    fn default() -> Self {
+        panic!("Console settings should be derived from configuration file")
     }
 }
 
@@ -141,11 +151,6 @@ impl Broker {
         let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
         console_thread.spawn(move || consolelink::start(console))?;
 
-        // replication mesh
-        let mut mesh = Mesh::new(self.config.clone(), self.router_tx.clone());
-        let console_thread = thread::Builder::new().name("rumqttd-replicator".to_owned());
-        console_thread.spawn(move || mesh.start())?;
-
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
@@ -155,7 +160,7 @@ impl Broker {
 
         rt.block_on(async {
             if let Err(e) = accept_loop(Arc::new(server), router_tx).await {
-                error!("Accept loop error: {:?}", e);
+                error!("Accept loop error: {:?}", e.to_string());
             }
         });
 

@@ -103,7 +103,7 @@ impl Network {
         }
     }
 
-    pub async fn read_connack(&mut self) -> io::Result<ConnAck> {
+    pub async fn _read_connack(&mut self) -> io::Result<ConnAck> {
         let packet = self.read().await?;
 
         match packet {
@@ -158,7 +158,7 @@ impl Network {
         }
     }
 
-    pub async fn connect(&mut self, connect: Connect) -> Result<usize, io::Error> {
+    pub async fn _connect(&mut self, connect: Connect) -> Result<usize, io::Error> {
         let mut write = BytesMut::new();
         let len = match connect.write(&mut write) {
             Ok(size) => size,

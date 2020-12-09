@@ -1,5 +1,5 @@
 use mqtt4bytes::{Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, QoS};
-use rumqttlog::{Acks, Message, Notification};
+use rumqttlog::{Message, Notification};
 
 use bytes::BytesMut;
 use std::mem;
@@ -82,13 +82,13 @@ impl State {
     /// Returns inflight outgoing packets and clears internal queues
     pub fn clean(&mut self) -> Vec<Notification> {
         let mut pending = Vec::new();
-        let mut acks = Acks::empty();
+        let mut acks = Vec::new();
 
         // remove and collect pending releases
         for rel in self.outgoing_rel.iter_mut() {
             if let Some(pkid) = rel.take() {
                 let packet = Packet::PubRel(PubRel::new(pkid));
-                acks.push((pkid, packet));
+                acks.push(packet);
             }
         }
 

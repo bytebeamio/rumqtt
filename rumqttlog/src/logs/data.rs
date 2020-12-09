@@ -7,15 +7,13 @@ use bytes::Bytes;
 use std::sync::Arc;
 
 pub(crate) struct DataLog {
-    id: usize,
     config: Arc<Config>,
     logs: HashMap<String, Log>,
 }
 
 impl DataLog {
-    pub fn new(config: Arc<Config>, id: usize) -> DataLog {
+    pub fn new(config: Arc<Config>) -> DataLog {
         DataLog {
-            id,
             config,
             logs: HashMap::new(),
         }
@@ -64,9 +62,9 @@ impl DataLog {
         Some(log.next_offset())
     }
 
-    pub fn seek_offsets_to_end(&self, topic: &mut (String, u8, [(u64, u64); 3])) {
+    pub fn seek_offsets_to_end(&self, topic: &mut (String, u8, (u64, u64))) {
         if let Some(last_offset) = self.next_offset(&topic.0) {
-            topic.2[self.id] = last_offset;
+            topic.2 = last_offset;
         }
     }
 

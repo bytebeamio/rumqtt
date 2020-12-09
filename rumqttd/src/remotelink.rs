@@ -195,10 +195,10 @@ impl RemoteLink {
                     "acks",
                     "reply",
                     self.id,
-                    reply.acks.len()
+                    reply.len()
                 );
 
-                for (_pkid, ack) in reply.acks.into_iter() {
+                for ack in reply.into_iter() {
                     self.state.outgoing_ack(ack)?;
                 }
             }
@@ -224,7 +224,7 @@ impl RemoteLink {
                     "reply",
                     self.id,
                     reply.topic,
-                    reply.cursors,
+                    reply.cursor,
                     reply.payload.len()
                 );
 
