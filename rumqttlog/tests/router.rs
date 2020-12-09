@@ -1,4 +1,3 @@
-use rumqttlog::router::Acks;
 use rumqttlog::*;
 use std::sync::Arc;
 use std::thread;
@@ -126,7 +125,7 @@ fn wait_for_data(rx: &Receiver<Notification>) -> Option<Data> {
     }
 }
 
-fn wait_for_acks(rx: &Receiver<Notification>) -> Option<Acks> {
+fn wait_for_acks(rx: &Receiver<Notification>) -> Option<Vec<Packet>> {
     thread::sleep(Duration::from_secs(1));
 
     match rx.try_recv() {
