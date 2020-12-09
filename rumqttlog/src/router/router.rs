@@ -7,7 +7,7 @@ use thiserror::Error;
 use super::connection::ConnectionType;
 use super::readyqueue::ReadyQueue;
 use super::slab::Slab;
-use super::watermarks::Watermarks;
+use crate::logs::acks::Acks;
 use super::*;
 
 use crate::logs::{ConnectionsLog, DataLog, TopicsLog};
@@ -40,7 +40,7 @@ pub struct Router {
     /// Subscriptions and matching topics maintained per connection
     trackers: Slab<Tracker>,
     /// Watermarks of a connection
-    watermarks: Slab<Watermarks>,
+    watermarks: Slab<Acks>,
     /// Connections with more pending requests and ready to make progress
     readyqueue: ReadyQueue,
     /// Waiter on a topic. These are used to wake connections/replicators
@@ -201,7 +201,7 @@ impl Router {
             None => ConnectionAck::Success((id, previous_session, Vec::new())),
         };
 
-        self.watermarks.insert_at(Watermarks::new(), id);
+        self.watermarks.insert_at(Acks::new(), id);
         self.readyqueue.push_back(id);
 
         let message = Notification::ConnectionAck(ack);
@@ -719,7 +719,7 @@ fn handle_topics_request<'a>(
     Some(topics)
 }
 
-fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> {
+fn handle_acks_request(id: ConnectionId, acks: &mut Acks) -> Option<Vec<Packet>> {
     trace!("{:11} {:14} Id = {}", "acks", "request", id);
     let acks = match acks.handle_acks_request() {
         Some(acks) => {
@@ -728,7 +728,7 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Watermarks) -> Option<Acks> 
                 "acks",
                 "response",
                 id,
-                acks.acks.len()
+                acks.len()
             );
 
             acks

@@ -6,7 +6,6 @@ mod readyqueue;
 mod router;
 mod slab;
 mod tracker;
-mod watermarks;
 
 use connection::Connection;
 pub use router::Router;
@@ -54,7 +53,7 @@ pub enum Notification {
     /// Data reply
     Data(Data),
     /// Watermarks reply
-    Acks(Acks),
+    Acks(Vec<Packet>),
     /// Connection paused by router
     Pause,
     /// All metrics
@@ -238,30 +237,6 @@ pub struct AcksRequest;
 impl AcksRequest {
     pub fn new() -> AcksRequest {
         AcksRequest
-    }
-}
-
-#[derive(Debug)]
-pub struct Acks {
-    /// packet ids that can be acked
-    pub acks: Vec<Packet>,
-}
-
-impl Acks {
-    pub fn empty() -> Acks {
-        Acks { acks: Vec::new() }
-    }
-
-    pub fn new(acks: Vec<Packet>) -> Acks {
-        Acks { acks }
-    }
-
-    pub fn push(&mut self, ack: Packet) {
-        self.acks.push(ack);
-    }
-
-    pub fn len(&self) -> usize {
-        self.acks.len()
     }
 }
 

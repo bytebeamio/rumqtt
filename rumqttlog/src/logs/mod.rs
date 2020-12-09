@@ -1,6 +1,7 @@
 mod connections;
 mod data;
 mod topics;
+pub mod acks;
 
 use crate::{Config, Data, DataRequest};
 use bytes::Bytes;

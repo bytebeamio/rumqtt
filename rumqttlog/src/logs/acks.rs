@@ -1,30 +1,29 @@
-use crate::router::Acks;
 use mqtt4bytes::*;
 use std::mem;
 
 /// Watermarks for a given topic
 #[derive(Debug)]
-pub struct Watermarks {
+pub struct Acks {
     pending_acks_request: Option<()>,
     /// Committed packet ids for acks
     acks: Vec<Packet>,
 }
 
-impl Watermarks {
-    pub fn new() -> Watermarks {
-        Watermarks {
+impl Acks {
+    pub fn new() -> Acks {
+        Acks {
             pending_acks_request: None,
             acks: Vec::new(),
         }
     }
 
-    pub fn handle_acks_request(&mut self) -> Option<Acks> {
+    pub fn handle_acks_request(&mut self) -> Option<Vec<Packet>> {
         let acks = self.acks();
         if acks.is_empty() {
             return None;
         }
 
-        Some(Acks::new(acks))
+        Some(acks)
     }
 
     pub fn register_pending_acks_request(&mut self) {

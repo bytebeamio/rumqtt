@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 pub use router::connection::Connection;
 pub use router::{
-    Acks, ConnectionAck, Data, DataRequest, Disconnection, Event, Message, MetricsReply,
+    ConnectionAck, Data, DataRequest, Disconnection, Event, Message, MetricsReply,
     MetricsRequest, Notification, Router,
 };
 pub use storage::segment::Segment;
