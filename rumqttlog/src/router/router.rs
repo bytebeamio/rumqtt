@@ -509,7 +509,7 @@ impl Router {
                 // return;
             }
 
-            let (is_new_topic, (_, offset)) = match self.datalog.append(&topic, payload) {
+            let (is_new_topic, _) = match self.datalog.append(&topic, payload) {
                 Some(v) => v,
                 None => return,
             };
@@ -517,7 +517,6 @@ impl Router {
             if qos as u8 > 0 {
                 let watermarks = self.watermarks.get_mut(id).unwrap();
                 watermarks.push_publish_ack(pkid, qos as u8);
-                watermarks.update_pkid_offset_map(&topic, pkid, offset);
             }
 
             is_new_topic

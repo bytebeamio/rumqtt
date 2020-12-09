@@ -88,7 +88,7 @@ impl State {
         for rel in self.outgoing_rel.iter_mut() {
             if let Some(pkid) = rel.take() {
                 let packet = Packet::PubRel(PubRel::new(pkid));
-                acks.push((pkid, packet));
+                acks.push(packet);
             }
         }
 

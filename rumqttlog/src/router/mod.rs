@@ -244,7 +244,7 @@ impl AcksRequest {
 #[derive(Debug)]
 pub struct Acks {
     /// packet ids that can be acked
-    pub acks: Vec<(u16, Packet)>,
+    pub acks: Vec<Packet>,
 }
 
 impl Acks {
@@ -252,11 +252,11 @@ impl Acks {
         Acks { acks: Vec::new() }
     }
 
-    pub fn new(acks: Vec<(u16, Packet)>) -> Acks {
+    pub fn new(acks: Vec<Packet>) -> Acks {
         Acks { acks }
     }
 
-    pub fn push(&mut self, ack: (u16, Packet)) {
+    pub fn push(&mut self, ack: Packet) {
         self.acks.push(ack);
     }
 

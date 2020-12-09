@@ -198,7 +198,7 @@ impl RemoteLink {
                     reply.acks.len()
                 );
 
-                for (_pkid, ack) in reply.acks.into_iter() {
+                for ack in reply.acks.into_iter() {
                     self.state.outgoing_ack(ack)?;
                 }
             }
