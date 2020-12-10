@@ -11,11 +11,16 @@ use rumqttlog::*;
 use tokio::time::error::Elapsed;
 
 use crate::remotelink::RemoteLink;
-pub use rumqttlog::Config as RouterConfig;
+
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::task;
 use tokio::time;
+use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
+use tokio_rustls::rustls::{
+    AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig, TLSError,
+};
+use tokio_rustls::TlsAcceptor;
 
 mod consolelink;
 mod locallink;
@@ -27,6 +32,8 @@ use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -41,6 +48,18 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),
+    #[error("TLS error {0}")]
+    Tls(#[from] TLSError),
+    #[error("No server cert")]
+    NoServerCert,
+    #[error("No server private key")]
+    NoServerKey,
+    #[error("No ca file")]
+    NoCAFile,
+    #[error("No server cert file")]
+    NoServerCertFile,
+    #[error("No server key file")]
+    NoServerKeyFile,
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet),
@@ -61,6 +80,9 @@ pub struct Config {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
     pub port: u16,
+    pub ca_path: Option<String>,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
 }
@@ -73,9 +95,6 @@ pub struct ConnectionSettings {
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
     pub max_inflight_size: usize,
-    pub ca_path: Option<String>,
-    pub cert_path: Option<String>,
-    pub key_path: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
 }
@@ -145,59 +164,115 @@ impl Broker {
         let router_thread = thread::Builder::new().name("rumqttd-router".to_owned());
         router_thread.spawn(move || router.start())?;
 
-        // spawn console thread
+        // spawn servers in a separate thread
+        for (id, config) in self.config.servers.clone() {
+            let server_name = format!("rumqttd-server-{}", id);
+            let server_thread = thread::Builder::new().name(server_name);
+            let server = Server::new(id, config, self.router_tx.clone());
+            server_thread.spawn(move || {
+                let mut runtime = tokio::runtime::Builder::new_current_thread();
+                let runtime = runtime.enable_all().build().unwrap();
+                runtime.block_on(async {
+                    if let Err(e) = server.start().await {
+                        error!("Accept loop error: {:?}", e.to_string());
+                    }
+                });
+            })?;
+        }
+
+        // run console in current thread
         let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
         let console = Arc::new(console);
-        let console_thread = thread::Builder::new().name("rumqttd-console".to_owned());
-        console_thread.spawn(move || consolelink::start(console))?;
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-
-        let (_id, server) = self.config.servers.clone().into_iter().next().unwrap();
-        let router_tx = self.router_tx.clone();
-
-        rt.block_on(async {
-            if let Err(e) = accept_loop(Arc::new(server), router_tx).await {
-                error!("Accept loop error: {:?}", e.to_string());
-            }
-        });
-
+        consolelink::start(console);
         Ok(())
     }
 }
 
-async fn accept_loop(
-    config: Arc<ServerSettings>,
+struct Server {
+    id: String,
+    config: ServerSettings,
     router_tx: Sender<(Id, Event)>,
-) -> Result<(), Error> {
-    let addr = format!("0.0.0.0:{}", config.port);
-    info!("Waiting for connections on {}", addr);
+}
 
-    let listener = TcpListener::bind(addr).await?;
-    let accept_loop_delay = Duration::from_millis(config.next_connection_delay_ms);
-    let mut count = 0;
+impl Server {
+    pub fn new(id: String, config: ServerSettings, router_tx: Sender<(Id, Event)>) -> Server {
+        Server {
+            id,
+            config,
+            router_tx,
+        }
+    }
 
-    let config = Arc::new(config.connections.clone());
-    loop {
-        let (stream, addr) = listener.accept().await?;
-        count += 1;
-        info!("{}. Accepting from: {}", count, addr);
-
-        let config = config.clone();
-        let router_tx = router_tx.clone();
-        task::spawn(async {
-            let connector = Connector::new(config, router_tx);
-
-            // TODO Remove all max packet size hard codes
-            let network = Network::new(stream, 10 * 1024);
-            if let Err(e) = connector.new_connection(network).await {
-                error!("Dropping link task!! Result = {:?}", e);
+    async fn tls(&self) -> Result<Option<TlsAcceptor>, Error> {
+        let (certs, mut keys) = match &self.config.cert_path {
+            Some(cert_path) => {
+                let mut cert_file = BufReader::new(File::open(&cert_path)?);
+                let key_path = self.config.key_path.as_ref().ok_or(Error::NoServerKey)?;
+                let mut key_file = BufReader::new(File::open(&key_path)?);
+                let certs = certs(&mut cert_file).map_err(|_| Error::NoServerCertFile)?;
+                let keys = rsa_private_keys(&mut key_file).map_err(|_| Error::NoServerKeyFile)?;
+                (certs, keys)
             }
-        });
+            None => return Ok(None),
+        };
 
-        time::sleep(accept_loop_delay).await;
+        // client authentication with a CA. CA isn't required otherwise
+        let mut server_config = match &self.config.ca_path {
+            Some(ca_path) => {
+                let mut ca_store = RootCertStore::empty();
+                let mut ca_file = BufReader::new(File::open(ca_path)?);
+                ca_store
+                    .add_pem_file(&mut ca_file)
+                    .map_err(|_| Error::NoCAFile)?;
+
+                ServerConfig::new(AllowAnyAuthenticatedClient::new(ca_store))
+            }
+            None => ServerConfig::new(NoClientAuth::new()),
+        };
+
+        server_config.set_single_cert(certs, keys.remove(0))?;
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+        Ok(Some(acceptor))
+    }
+
+    async fn start(&self) -> Result<(), Error> {
+        let addr = format!("0.0.0.0:{}", self.config.port);
+
+        let listener = TcpListener::bind(&addr).await?;
+        let delay = Duration::from_millis(self.config.next_connection_delay_ms);
+        let mut count = 0;
+
+        let config = Arc::new(self.config.connections.clone());
+        let acceptor = self.tls().await?;
+        let max_incoming_size = config.max_payload_size;
+
+        info!("Waiting for connections on {}. Server = {}", addr, self.id);
+        loop {
+            let (stream, addr) = listener.accept().await?;
+            let network = match &acceptor {
+                Some(acceptor) => {
+                    info!("{}. Accepting TLS connection from: {}", count, addr);
+                    Network::new(acceptor.accept(stream).await?, max_incoming_size)
+                }
+                None => {
+                    info!("{}. Accepting TCP connection from: {}", count, addr);
+                    Network::new(stream, max_incoming_size)
+                }
+            };
+
+            count += 1;
+
+            let config = config.clone();
+            let router_tx = self.router_tx.clone();
+            task::spawn(async {
+                let connector = Connector::new(config, router_tx);
+                if let Err(e) = connector.new_connection(network).await {
+                    error!("Dropping link task!! Result = {:?}", e);
+                }
+            });
+
+            time::sleep(delay).await;
+        }
     }
 }
 

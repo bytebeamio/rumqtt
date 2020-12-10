@@ -77,7 +77,7 @@ impl RemoteLink {
 
         let (mut connection, link_rx) = Connection::new_remote(&client_id, clean_session, 10);
 
-        // Add last will to conneciton
+        // Add last will to connection
         if let Some(will) = connect.last_will.take() {
             connection.set_will(will);
         }
