@@ -48,8 +48,6 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),
-    #[error("Channel send error")]
-    File(#[from] SendError<(Id, Event)>),
     #[error("TLS error {0}")]
     Tls(#[from] TLSError),
     #[error("No server cert")]
