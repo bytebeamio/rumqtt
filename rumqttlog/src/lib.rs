@@ -3,8 +3,6 @@ extern crate log;
 
 pub mod logs;
 pub mod router;
-pub mod storage;
-pub mod volatile;
 pub mod waiters;
 
 use std::path::PathBuf;
@@ -14,8 +12,6 @@ pub use router::{
     ConnectionAck, Data, DataRequest, Disconnection, Event, Message, MetricsReply,
     MetricsRequest, Notification, Router,
 };
-pub use storage::segment::Segment;
-pub use storage::Log;
 
 pub use jackiechan::{bounded, Receiver, RecvError, SendError, Sender};
 pub use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
