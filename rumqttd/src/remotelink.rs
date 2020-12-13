@@ -1,7 +1,7 @@
 use crate::network::Network;
 use crate::state::{self, State};
 use crate::{network, ConnectionSettings, Id};
-use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode, Publish};
+use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode};
 use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
@@ -203,41 +203,45 @@ impl RemoteLink {
                 }
             }
             Notification::Message(reply) => {
+                let topic = reply.topic;
+                let qos = qos(reply.qos).unwrap();
+                let payload = reply.payload;
+
                 trace!(
                     "{:11} {:14} Id = {}, Topic = {}, Count = {}",
                     "data",
                     "pending",
                     self.id,
-                    reply.topic,
-                    reply.payload.len()
+                    topic,
+                    payload.len()
                 );
 
-                let qos = qos(reply.qos).unwrap();
-                let payload = reply.payload;
-                let publish = Publish::from_bytes(&reply.topic, qos, payload);
-                self.state.outgoing_publish(publish)?;
+                self.state.add_pending(topic, qos, vec![payload]);
+                self.state.write_pending()?;
             }
             Notification::Data(reply) => {
+                let topic = reply.topic;
+                let qos = qos(reply.qos).unwrap();
+                let payload = reply.payload;
+
                 trace!(
                     "{:11} {:14} Id = {}, Topic = {}, Offsets = {:?}, Count = {}",
                     "data",
                     "reply",
                     self.id,
-                    reply.topic,
+                    topic,
                     reply.cursor,
-                    reply.payload.len()
+                    payload.len()
                 );
 
-                let payload_count = reply.payload.len();
+                let payload_count = payload.len();
                 if payload_count > self.config.max_inflight_count as usize {
                     return Err(Error::TooManyPayloads(payload_count));
                 }
 
                 self.total += payload_count;
-                for p in reply.payload {
-                    let publish = Publish::from_bytes(&reply.topic, qos(reply.qos).unwrap(), p);
-                    self.state.outgoing_publish(publish)?;
-                }
+                self.state.add_pending(topic, qos, payload);
+                self.state.write_pending()?;
             }
             Notification::Pause => {
                 let message = (self.id, Event::Ready);

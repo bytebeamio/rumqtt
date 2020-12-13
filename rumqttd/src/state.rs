@@ -1,8 +1,9 @@
 use mqtt4bytes::{Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, QoS};
 use rumqttlog::{Message, Notification};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use std::mem;
+use std::vec::IntoIter;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -20,13 +21,52 @@ pub enum Error {
     Disconnect,
 }
 
+impl From<mqtt4bytes::Error> for Error {
+    fn from(e: mqtt4bytes::Error) -> Error {
+        Error::Serialization(e)
+    }
+}
+
+#[derive(Debug)]
+struct Pending {
+    topic: String,
+    qos: QoS,
+    payload: IntoIter<Bytes>,
+}
+
+impl Pending {
+    pub fn empty() -> Pending {
+        Pending {
+            topic: "".to_string(),
+            qos: QoS::AtMostOnce,
+            payload: vec![].into_iter(),
+        }
+    }
+
+    pub fn new(topic: String, qos: QoS, payload: IntoIter<Bytes>) -> Pending {
+        Pending {
+            topic,
+            qos,
+            payload,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.payload.len()
+    }
+
+    pub fn next(&mut self) -> Option<Bytes> {
+        self.payload.next()
+    }
+}
+
 /// State of the mqtt connection.
 /// Design: Methods will just modify the state of the object without doing any network operations
 /// Design: All inflight queues are maintained in a pre initialized vec with index as packet id.
 /// This is done for 2 reasons
 /// Bad acks or out of order acks aren't O(n) causing cpu spikes
 /// Any missing acks from the broker are detected during the next recycled use of packet ids
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct State {
     /// Packet id of the last outgoing packet
     last_pkid: u16,
@@ -40,6 +80,8 @@ pub struct State {
     outgoing_rel: Vec<Option<u16>>,
     /// Packet ids on incoming QoS 2 publishes
     incoming_pub: Vec<Option<u16>>,
+    /// Pending publishes due to collision
+    pending: Pending,
     /// Last collision due to broker not acking in order
     collision: Option<Publish>,
     /// Collected incoming packets
@@ -61,6 +103,7 @@ impl State {
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
             incoming_pub: vec![None; std::u16::MAX as usize + 1],
+            pending: Pending::empty(),
             collision: None,
             incoming: Vec::with_capacity(10),
             write: BytesMut::with_capacity(10 * 1024),
@@ -68,7 +111,7 @@ impl State {
     }
 
     pub fn pause_outgoing(&self) -> bool {
-        self.inflight > self.max_inflight || self.collision.is_some()
+        self.inflight > self.max_inflight || self.pending.len() > 0
     }
 
     pub fn take_incoming(&mut self) -> Vec<Packet> {
@@ -105,52 +148,49 @@ impl State {
         pending
     }
 
-    /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
-    /// it buy wrapping publish in packet
-    pub(crate) fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), Error> {
-        if let QoS::AtMostOnce = publish.qos {
-            debug!("Publish. Qos 0. Payload size = {:?}", publish.payload.len());
-            publish
-                .write(&mut self.write)
-                .map_err(Error::Serialization)?;
+    pub fn add_pending(&mut self, topic: String, qos: QoS, data: Vec<Bytes>) {
+        self.pending = Pending::new(topic.clone(), qos, data.into_iter());
+    }
 
-            return Ok(());
-        };
+    /// Adds next packet identifier to QoS 1 and 2 publish packets.
+    /// Pending packets collide at the first unacked packet id.
+    /// Processing pending publishes stops at this point. Eventloop
+    /// waits for incoming acks to clear `pause_outgoing` flag and
+    /// process more outgoing packets
+    pub(crate) fn write_pending(&mut self) -> Result<(), Error> {
+        while let Some(payload) = self.pending.next() {
+            let mut publish = Publish::from_bytes(&self.pending.topic, self.pending.qos, payload);
 
-        // consider PacketIdentifier(0) as uninitialized packets
-        let publish = match publish.pkid {
-            0 => {
+            if let QoS::AtMostOnce = publish.qos {
+                debug!("Publish. Qos 0. Payload size = {:?}", publish.payload.len());
+                publish.write(&mut self.write)?;
+                return Ok(());
+            };
+
+            // consider PacketIdentifier(0) as uninitialized packets
+            if 0 == publish.pkid {
                 publish.pkid = self.next_pkid();
-                publish
+            };
+
+            let pkid = publish.pkid as usize;
+            debug!("Publish. Pkid = {}, Size = {}", pkid, publish.payload.len());
+
+            // If there is an existing publish at this pkid, this implies
+            // that client hasn't sent ack packet yet.
+            match self.outgoing_pub.get(pkid).unwrap() {
+                Some(_) => {
+                    warn!("Collision on packet id = {:?}", publish.pkid);
+                    self.collision = Some(publish);
+                    return Ok(());
+                }
+                None => {
+                    publish.write(&mut self.write)?;
+                    self.outgoing_pub[pkid] = Some(publish);
+                    self.inflight += 1;
+                }
             }
-            _ => publish,
-        };
-
-        let pkid = publish.pkid as usize;
-        let payload_len = publish.payload.len();
-        debug!("Publish. Pkid = {:?}, Size = {:?}", pkid, payload_len);
-
-        // If there is an existing publish at this pkid, this implies that client
-        // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
-        // after a count of 'inflight' messages. This error is possible only when
-        // client isn't acking sequentially
-        if self
-            .outgoing_pub
-            .get(publish.pkid as usize)
-            .unwrap()
-            .is_some()
-        {
-            warn!("Collision on packet id = {:?}", publish.pkid);
-            self.collision = Some(publish);
-            return Ok(());
         }
 
-        publish
-            .write(&mut self.write)
-            .map_err(Error::Serialization)?;
-
-        self.outgoing_pub[pkid] = Some(publish);
-        self.inflight += 1;
         Ok(())
     }
 
@@ -224,10 +264,7 @@ impl State {
             // If publish packet is already recorded before, this is a duplicate
             // qos 2 publish which should be filtered here.
             if let Some(_) = mem::replace(&mut self.incoming_pub[pkid as usize], Some(pkid)) {
-                PubRec::new(pkid)
-                    .write(&mut self.write)
-                    .map_err(Error::Serialization)?;
-
+                PubRec::new(pkid).write(&mut self.write)?;
                 return Ok(false);
             }
         }
@@ -236,22 +273,25 @@ impl State {
     }
 
     pub fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), Error> {
-        if let Some(publish) = self.check_collision(puback.pkid) {
-            publish
-                .write(&mut self.write)
-                .map_err(Error::Serialization)?;
-        }
-
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
-                Ok(())
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", puback.pkid);
-                Err(Error::Unsolicited(puback.pkid))
+                return Err(Error::Unsolicited(puback.pkid));
             }
         }
+
+        // Check if there is a collision on this packet id before
+        // and write it
+        if let Some(publish) = self.check_collision(puback.pkid) {
+            publish.write(&mut self.write)?;
+        }
+
+        // Try writing all the previous pending packets because of collision
+        self.write_pending()?;
+        Ok(())
     }
 
     pub fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), Error> {
@@ -259,10 +299,7 @@ impl State {
             // NOTE: Inflight - 1 for qos2 in comp
             Some(_) => {
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                let pubrel = PubRel::new(pubrec.pkid);
-                pubrel
-                    .write(&mut self.write)
-                    .map_err(Error::Serialization)?;
+                PubRel::new(pubrec.pkid).write(&mut self.write)?;
                 Ok(())
             }
             None => {
@@ -276,9 +313,7 @@ impl State {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
                 let response = PubComp::new(pubrel.pkid);
-                response
-                    .write(&mut self.write)
-                    .map_err(Error::Serialization)?;
+                response.write(&mut self.write)?;
                 Ok(())
             }
             None => {
@@ -289,29 +324,29 @@ impl State {
     }
 
     pub fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), Error> {
-        if let Some(publish) = self.check_collision(pubcomp.pkid) {
-            publish
-                .write(&mut self.write)
-                .map_err(Error::Serialization)?;
-        }
-
         match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
-                Ok(())
             }
             None => {
                 error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
-                Err(Error::Unsolicited(pubcomp.pkid))
+                return Err(Error::Unsolicited(pubcomp.pkid));
             }
         }
+
+        // Check if there is a collision on this packet id before
+        // and write it
+        if let Some(publish) = self.check_collision(pubcomp.pkid) {
+            publish.write(&mut self.write)?;
+        }
+
+        // Try writing all the previous pending packets because of collision
+        self.write_pending()?;
+        Ok(())
     }
 
     pub fn handle_incoming_pingreq(&mut self) -> Result<(), Error> {
-        PingResp
-            .write(&mut self.write)
-            .map_err(Error::Serialization)?;
-
+        PingResp.write(&mut self.write)?;
         Ok(())
     }
 
