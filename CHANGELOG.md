@@ -1,3 +1,26 @@
+### R3
+----------------
+mqtt4bytes v0.4.0
+-----------
+- **changed** Update to `bytes` 0.6 [**breaking**]
+
+rumqttc v0.3.0
+-----------
+- **feature** Refactor transport with websockets support
+- **changed** Update to tokio 0.3 [**breaking**]
+
+rumqttd v0.2.0
+-----------
+- **feature** Metrics server
+- **feature** Improve configuration schema
+- **feature** Support multiple servers on different ports
+- **changed** Update to tokio 0.3 and `bytes` 0.6 [**breaking**]
+- **fixed** Fix collisions due to publish batches
+
+misc
+----------
+- Add license file
+- Improve benchmarking suite with plots
 
 ### R2 
 ----------------
