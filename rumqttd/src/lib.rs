@@ -69,12 +69,12 @@ type Id = usize;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
-    id: usize,
-    router: rumqttlog::Config,
-    servers: HashMap<String, ServerSettings>,
-    cluster: Option<HashMap<String, MeshSettings>>,
-    replicator: Option<ConnectionSettings>,
-    console: ConsoleSettings,
+    pub id: usize,
+    pub router: rumqttlog::Config,
+    pub servers: HashMap<String, ServerSettings>,
+    pub cluster: Option<HashMap<String, MeshSettings>>,
+    pub replicator: Option<ConnectionSettings>,
+    pub console: ConsoleSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
