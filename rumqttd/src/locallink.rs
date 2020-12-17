@@ -104,7 +104,7 @@ impl LinkRx {
     }
 
     pub async fn async_recv(&mut self) -> Result<Option<Data>, LinkError> {
-        let message = self.link_rx.recv()?;
+        let message = self.link_rx.async_recv().await?;
         let message = self.handle_router_response(message)?;
         Ok(message)
     }
