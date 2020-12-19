@@ -1,6 +1,7 @@
 use librumqttd::Broker;
 use serde::{Deserialize, Serialize};
 use std::thread;
+use pretty_env_logger;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Config {
