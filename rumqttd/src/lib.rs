@@ -22,6 +22,7 @@ use tokio_rustls::rustls::{
 };
 use tokio_rustls::TlsAcceptor;
 
+pub mod async_locallink;
 mod consolelink;
 mod locallink;
 mod network;
