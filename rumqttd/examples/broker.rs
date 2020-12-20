@@ -1,16 +1,10 @@
-use librumqttd::Broker;
-use serde::{Deserialize, Serialize};
+use librumqttd::{Broker, Config};
 use std::thread;
-
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-struct Config {
-    broker: librumqttd::Config,
-}
 
 fn main() {
     pretty_env_logger::init();
     let config: Config = confy::load_path("config/rumqttd.conf").unwrap();
-    let mut broker = Broker::new(config.broker);
+    let mut broker = Broker::new(config);
 
     let mut tx = broker.link("localclient").unwrap();
     thread::spawn(move || {
