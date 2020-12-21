@@ -41,7 +41,7 @@ impl AsyncLinkTx {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtMostOnce, payload);
         publish.retain = retain;
         let message = Event::Data(vec![Packet::Publish(publish)]);
         self.router_tx.async_send((self.id, message)).await?;
