@@ -61,7 +61,7 @@ impl LinkTx {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtMostOnce, payload);
         publish.retain = retain;
         let message = Event::Data(vec![Packet::Publish(publish)]);
         self.router_tx.send((self.id, message))?;
