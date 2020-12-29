@@ -74,7 +74,7 @@ pub struct Config {
     pub servers: HashMap<String, ServerSettings>,
     pub cluster: Option<HashMap<String, MeshSettings>>,
     pub replicator: Option<ConnectionSettings>,
-    pub console: ConsoleSettings,
+    pub console: Option<ConsoleSettings>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -180,10 +180,13 @@ impl Broker {
             })?;
         }
 
-        // run console in current thread
-        let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
-        let console = Arc::new(console);
-        consolelink::start(console);
+        // Run console in current thread, if it is configured.
+        if self.config.console.is_some() {
+            let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
+            let console = Arc::new(console);
+            consolelink::start(console);
+        }
+
         Ok(())
     }
 }
