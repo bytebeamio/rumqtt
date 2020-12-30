@@ -40,7 +40,12 @@ impl ConsoleLink {
 #[tokio::main(worker_threads = 1)]
 pub async fn start(console: Arc<ConsoleLink>) {
     let config_console = console.clone();
-    let port = config_console.config.console.port;
+    let port = config_console
+        .config
+        .console
+        .as_ref()
+        .expect("Console should only be started if it is configured")
+        .port;
     let config = warp::path!("node" / "config").map(move || {
         let config = config_console.config.clone();
         warp::reply::json(&config)
