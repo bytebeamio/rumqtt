@@ -10,7 +10,7 @@ description = "kafka inspired rumqtt's mqtt commitlog"
 [dependencies]
 byteorder = "1"
 memmap = "0.7"
-bytes = "0.6"
+bytes = "1.0"
 mqtt4bytes = { path = "../mqtt4bytes", version = "0.4" }
 serde = { version = "1", features = ["derive", "rc"] }
 segments = "0.1"

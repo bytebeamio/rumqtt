@@ -49,14 +49,14 @@ client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
 task::spawn(async move {
     for i in 0..10 {
         client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).await.unwrap();
-        time::delay_for(Duration::from_millis(100)).await;
+        time::sleep(Duration::from_millis(100)).await;
     }
 });
 
 loop {
     let notification = eventloop.poll().await.unwrap();
     println!("Received = {:?}", notification);
-    tokio::time::delay_for(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 }
 ```
 

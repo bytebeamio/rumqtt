@@ -7,11 +7,12 @@ use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
 use mqtt4bytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
-use tokio::stream::{Stream, StreamExt};
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
+use tokio_stream::{Stream, StreamExt};
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
+use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
 
@@ -51,7 +52,7 @@ pub struct EventLoop {
     /// Network connection to the broker
     pub(crate) network: Option<Network>,
     /// Keep alive time
-    pub(crate) keepalive_timeout: Option<Sleep>,
+    pub(crate) keepalive_timeout: Option<Pin<Box<Sleep>>>,
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
     /// Handle to send cancellation requests (and drops)
@@ -121,7 +122,7 @@ impl EventLoop {
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(time::sleep(self.options.keep_alive));
+                self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
             return Ok(Event::Incoming(connack));
@@ -209,7 +210,7 @@ impl EventLoop {
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = self.keepalive_timeout.as_mut().unwrap() => {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.reset(Instant::now() + self.options.keep_alive);
+                timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
                 network.flush(&mut self.state.write).await?;
