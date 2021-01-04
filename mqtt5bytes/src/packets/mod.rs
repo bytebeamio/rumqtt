@@ -58,20 +58,6 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     }
 }
 
-/// After collecting enough bytes to frame a packet (to pass to packet's frame())
-/// , It's possible that content itself in the stream is wrong. Like expected
-/// packet id or qos not being present. In cases where `read_mqtt_string` or
-/// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
-/// parse qos next, these pre checks will prevent `bytes` crashes
-fn required_minimum(stream: &mut Bytes, required: usize) -> Result<(), Error> {
-    let stream_len = stream.len();
-    if stream_len < required {
-        return Err(Error::MalformedPacket);
-    }
-
-    Ok(())
-}
-
 /// Serializes bytes to stream (including length)
 fn write_mqtt_bytes(stream: &mut BytesMut, bytes: &[u8]) {
     stream.put_u16(bytes.len() as u16);
