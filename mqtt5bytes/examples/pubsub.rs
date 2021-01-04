@@ -4,7 +4,7 @@ use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-#[tokio::main(core_threads = 2)]
+#[tokio::main(worker_threads = 2)]
 async fn main() {
     let mut client = Client::new().await;
 
