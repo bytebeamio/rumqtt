@@ -311,8 +311,9 @@ impl Connector {
                 info!("Link closed!! Id = {}, Client Id = {}", id, client_id);
                 (true, link.state.clean())
             }
+            // Client requested disconnection.
             Err(remotelink::Error::Disconnect) => {
-                error!("Disconnected!! Id = {}, Client Id = {}", id, client_id);
+                info!("Disconnected!! Id = {}, Client Id = {}", id, client_id);
                 (false, link.state.clean())
             }
             // Any other error
