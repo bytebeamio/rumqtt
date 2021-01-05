@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use jackiechan::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use mqtt4bytes::{Packet, Publish, Subscribe, SubscribeReturnCodes, Unsubscribe};
+use mqttbytes::{Packet, Publish, Subscribe, SubscribeReasonCode, Unsubscribe};
 use thiserror::Error;
 
 use super::connection::ConnectionType;
@@ -379,18 +379,19 @@ impl Router {
             "data",
             "subscribe",
             id,
-            subscribe.topics
+            subscribe.filters
         );
 
         let topics = self.topicslog.readv(0, 0);
         let tracker = self.trackers.get_mut(id).unwrap();
 
         let mut return_codes = Vec::new();
-        for filter in subscribe.topics.iter() {
-            if filter.topic_path.starts_with("test") || filter.topic_path.starts_with("$") {
-                return_codes.push(SubscribeReturnCodes::Failure);
+        for filter in subscribe.filters.iter() {
+            if filter.path.starts_with("test") || filter.path.starts_with("$") {
+                return_codes.push(SubscribeReasonCode::TopicFilterInvalid);
             } else {
-                return_codes.push(SubscribeReturnCodes::Success(filter.qos));
+                // TODO: Fix subscribe return code
+                return_codes.push(SubscribeReasonCode::QoS0);
             }
         }
 
@@ -402,7 +403,7 @@ impl Router {
                 // in the (topics) commitlog ant seek them to next offset. Add subscriptions
                 // and store matched topics interna. If this is the first subscription,
                 // register topics request
-                if tracker.add_subscription_and_match(subscribe.topics, topics) {
+                if tracker.add_subscription_and_match(subscribe.filters, topics) {
                     tracker.register_topics_request(TopicsRequest::offset(topics.len()));
 
                     // If connection is removed from ready queue because of 0 requests,
@@ -435,7 +436,7 @@ impl Router {
             None => {
                 // Router did not receive data from any topics yet. Add subscription and
                 // register topics request from offset 0
-                if tracker.add_subscription_and_match(subscribe.topics, &[]) {
+                if tracker.add_subscription_and_match(subscribe.filters, &[]) {
                     tracker.register_topics_request(TopicsRequest::offset(0));
 
                     // If connection is removed from ready queue because of 0 requests,
@@ -759,7 +760,7 @@ fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notificat
 #[cfg(test)]
 mod test {
     use super::*;
-    use mqtt4bytes::{Publish, QoS, Subscribe};
+    use mqttbytes::{Publish, QoS, Subscribe};
 
     #[test]
     fn topics_notifications_does_not_create_infinite_loops() {

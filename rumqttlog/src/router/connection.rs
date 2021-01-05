@@ -1,6 +1,6 @@
 use crate::Notification;
 use jackiechan::{bounded, Receiver, Sender, TrySendError};
-use mqtt4bytes::LastWill;
+use mqttbytes::LastWill;
 use std::fmt;
 
 #[derive(Debug, Clone)]

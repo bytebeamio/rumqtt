@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use mqtt4bytes::*;
+use mqttbytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::state;
@@ -14,7 +14,7 @@ pub enum Error {
     #[error("State = {0}")]
     State(#[from] state::Error),
     #[error("Invalid data = {0}")]
-    Mqtt(mqtt4bytes::Error),
+    Mqtt(mqttbytes::Error),
     #[error["Keep alive timeout"]]
     KeepAlive(#[from] Elapsed),
 }
@@ -79,9 +79,9 @@ impl Network {
 
     pub async fn read(&mut self) -> Result<Packet, io::Error> {
         loop {
-            let required = match mqtt_read(&mut self.read, self.max_incoming_size) {
+            let required = match read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => return Ok(packet),
-                Err(mqtt4bytes::Error::InsufficientBytes(required)) => required,
+                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(io::Error::new(ErrorKind::InvalidData, e.to_string())),
             };
 
@@ -137,7 +137,7 @@ impl Network {
         let mut disconnect = false;
 
         loop {
-            match mqtt_read(&mut self.read, self.max_incoming_size) {
+            match read(&mut self.read, self.max_incoming_size) {
                 // Store packet and return after enough packets are accumulated
                 Ok(packet) => {
                     disconnect = state.handle_network_data(packet)?;
@@ -148,9 +148,9 @@ impl Network {
                     }
                 }
                 // If some packets are already framed, return those
-                Err(mqtt4bytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(disconnect),
+                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(disconnect),
                 // Wait for more bytes until a frame can be created
-                Err(mqtt4bytes::Error::InsufficientBytes(required)) => {
+                Err(mqttbytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
                 Err(e) => return Err(Error::Mqtt(e)),

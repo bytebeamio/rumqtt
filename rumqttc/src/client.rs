@@ -3,7 +3,7 @@
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender};
-use mqtt4bytes::*;
+use mqttbytes::*;
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
@@ -16,7 +16,7 @@ pub enum ClientError {
     #[error("Failed to send mqtt requests to eventloop")]
     Request(#[from] SendError<Request>),
     #[error("Serialization error")]
-    Mqtt4(mqtt4bytes::Error),
+    Mqtt4(mqttbytes::Error),
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
@@ -81,7 +81,7 @@ impl AsyncClient {
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
     pub async fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeTopic>,
+        T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
@@ -159,7 +159,7 @@ impl Client {
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
     pub fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeTopic>,
+        T: IntoIterator<Item = SubscribeFilter>,
     {
         pollster::block_on(self.client.subscribe_many(topics))
     }

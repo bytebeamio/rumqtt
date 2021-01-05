@@ -1,8 +1,7 @@
 [workspace]
 
 members = [
-  "mqtt4bytes",
-  "mqtt5bytes",
+  "mqttbytes",
   "rumqttc",
   "rumqttlog",
   "rumqttmesh",

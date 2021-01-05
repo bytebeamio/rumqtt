@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io, thread};
 
-use mqtt4bytes::Packet;
+use mqttbytes::Packet;
 use rumqttlog::*;
 use tokio::time::error::Elapsed;
 

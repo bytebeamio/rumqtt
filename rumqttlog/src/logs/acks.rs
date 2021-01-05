@@ -1,4 +1,4 @@
-use mqtt4bytes::*;
+use mqttbytes::*;
 use std::mem;
 
 /// Watermarks for a given topic
@@ -42,7 +42,7 @@ impl Acks {
         }
     }
 
-    pub fn push_subscribe_ack(&mut self, pkid: u16, return_codes: Vec<SubscribeReturnCodes>) {
+    pub fn push_subscribe_ack(&mut self, pkid: u16, return_codes: Vec<SubscribeReasonCode>) {
         let suback = SubAck::new(pkid, return_codes);
         let suback = Packet::SubAck(suback);
         self.acks.push(suback)

@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use mqtt4bytes::*;
+use mqttbytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{Incoming, MqttState, StateError};
@@ -58,9 +58,9 @@ impl Network {
 
     pub async fn read(&mut self) -> Result<Incoming, io::Error> {
         loop {
-            let required = match mqtt_read(&mut self.read, self.max_incoming_size) {
+            let required = match read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => return Ok(packet),
-                Err(mqtt4bytes::Error::InsufficientBytes(required)) => required,
+                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
             };
 
@@ -75,7 +75,7 @@ impl Network {
     pub async fn readb(&mut self, state: &mut MqttState) -> Result<(), StateError> {
         let mut count = 0;
         loop {
-            match mqtt_read(&mut self.read, self.max_incoming_size) {
+            match read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => {
                     state.handle_incoming_packet(packet)?;
 

@@ -1,7 +1,7 @@
 use crate::{Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
-use mqtt4bytes::*;
+use mqttbytes::*;
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
 
@@ -32,11 +32,11 @@ pub enum StateError {
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
-    Serialization(mqtt4bytes::Error),
+    Serialization(mqttbytes::Error),
 }
 
-impl From<mqtt4bytes::Error> for StateError {
-    fn from(e: mqtt4bytes::Error) -> StateError {
+impl From<mqttbytes::Error> for StateError {
+    fn from(e: mqttbytes::Error) -> StateError {
         StateError::Serialization(e)
     }
 }
@@ -361,7 +361,7 @@ impl MqttState {
 
         debug!(
             "Subscribe. Topics = {:?}, Pkid = {:?}",
-            subscription.topics, subscription.pkid
+            subscription.filters, subscription.pkid
         );
 
         subscription.write(&mut self.write)?;
@@ -480,7 +480,7 @@ impl MqttState {
 mod test {
     use super::{MqttState, StateError};
     use crate::{Incoming, MqttOptions, Request};
-    use mqtt4bytes::*;
+    use mqttbytes::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -586,7 +586,7 @@ mod test {
         let publish = build_incoming_publish(QoS::ExactlyOnce, 1);
 
         mqtt.handle_incoming_publish(&publish).unwrap();
-        let packet = mqtt_read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubRec(pubrec) => assert_eq!(pubrec.pkid, 1),
             _ => panic!("Invalid network request: {:?}", packet),
@@ -641,14 +641,14 @@ mod test {
 
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
         mqtt.outgoing_publish(publish).unwrap();
-        let packet = mqtt_read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::Publish(publish) => assert_eq!(publish.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
         }
 
         mqtt.handle_incoming_pubrec(&PubRec::new(1)).unwrap();
-        let packet = mqtt_read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubRel(pubrel) => assert_eq!(pubrel.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
@@ -661,14 +661,14 @@ mod test {
         let publish = build_incoming_publish(QoS::ExactlyOnce, 1);
 
         mqtt.handle_incoming_publish(&publish).unwrap();
-        let packet = mqtt_read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubRec(pubrec) => assert_eq!(pubrec.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
         }
 
         mqtt.handle_incoming_pubrel(&PubRel::new(1)).unwrap();
-        let packet = mqtt_read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubComp(pubcomp) => assert_eq!(pubcomp.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),

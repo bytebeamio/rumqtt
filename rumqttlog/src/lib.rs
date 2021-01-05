@@ -14,7 +14,7 @@ pub use router::{
 };
 
 pub use jackiechan::{bounded, Receiver, RecvError, SendError, Sender};
-pub use mqtt4bytes::{Packet, Publish, QoS, Subscribe};
+pub use mqttbytes::{Packet, Publish, QoS, Subscribe};
 use serde::{Deserialize, Serialize};
 
 pub type ConnectionId = usize;

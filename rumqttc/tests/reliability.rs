@@ -435,7 +435,7 @@ async fn next_poll_after_connect_failure_reconnects() {
     }
 
     let event = eventloop.poll().await.unwrap();
-    let connack = ConnAck::new(ConnectReturnCode::Accepted, false);
+    let connack = ConnAck::new(ConnectReturnCode::Success, false);
     assert_eq!(event, Event::Incoming(Packet::ConnAck(connack)));
 }
 

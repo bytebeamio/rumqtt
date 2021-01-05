@@ -1,4 +1,4 @@
-use mqtt4bytes::{Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, QoS};
+use mqttbytes::{Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, QoS};
 use rumqttlog::{Message, Notification};
 
 use bytes::{Bytes, BytesMut};
@@ -10,7 +10,7 @@ pub enum Error {
     #[error("Received unsolicited ack from the device. {0}")]
     Unsolicited(u16),
     #[error("Collision with an unacked packet")]
-    Serialization(mqtt4bytes::Error),
+    Serialization(mqttbytes::Error),
     #[error("Collision with an unacked packet")]
     Collision,
     #[error("Duplicate connect")]
@@ -21,8 +21,8 @@ pub enum Error {
     Disconnect,
 }
 
-impl From<mqtt4bytes::Error> for Error {
-    fn from(e: mqtt4bytes::Error) -> Error {
+impl From<mqttbytes::Error> for Error {
+    fn from(e: mqttbytes::Error) -> Error {
         Error::Serialization(e)
     }
 }
