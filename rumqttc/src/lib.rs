@@ -56,7 +56,6 @@
 //! loop {
 //!     let notification = eventloop.poll().await.unwrap();
 //!     println!("Received = {:?}", notification);
-//!     tokio::time::sleep(Duration::from_secs(1)).await;
 //! }
 //! # }
 //! ```
