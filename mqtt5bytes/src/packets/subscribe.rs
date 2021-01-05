@@ -389,7 +389,7 @@ mod test {
     }
 
     fn sample2() -> Subscribe {
-        let mut filter = SubscribeFilter::new("hello/world".to_owned(), QoS::AtLeastOnce);
+        let filter = SubscribeFilter::new("hello/world".to_owned(), QoS::AtLeastOnce);
         Subscribe {
             pkid: 42,
             filters: vec![filter],

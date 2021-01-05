@@ -3,10 +3,8 @@ use mqtt5bytes::{mqtt_read, Connect, Error, Packet, Publish, QoS, Subscribe};
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time;
-use tokio::time::Duration;
 
-#[tokio::main(core_threads = 2)]
+#[tokio::main(worker_threads = 2)]
 async fn main() {
     let mut client = Client::new().await;
 

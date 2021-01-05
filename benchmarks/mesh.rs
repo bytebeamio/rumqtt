@@ -7,7 +7,7 @@ use rumqttlog::router::{Data};
 
 mod common;
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(worker_threads = 1)]
 async fn main() {
     pretty_env_logger::init();
 
@@ -28,7 +28,7 @@ async fn main() {
     read(tx).await;
 }
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(worker_threads = 1)]
 async fn start_router(mut router: Router) {
     router.start().await;
 }

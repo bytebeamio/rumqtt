@@ -11,7 +11,7 @@ mod common;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-#[tokio::main(core_threads = 2)]
+#[tokio::main(worker_threads = 2)]
 async fn main() {
     // pretty_env_logger::init();
     let guard = pprof::ProfilerGuard::new(100).unwrap();
@@ -42,7 +42,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
             .publish("hello/benchmarks/world", qos, false, payload)
             .await
             .unwrap();
-        time::delay_for(Duration::from_secs(10)).await;
+        time::sleep(Duration::from_secs(10)).await;
     });
 
     let start = Instant::now();

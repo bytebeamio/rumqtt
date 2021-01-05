@@ -31,8 +31,8 @@ fn three_node_mesh() {
     thread::sleep(Duration::from_secs(10));
 }
 
-// TODO not workin with core_threads = 1. Investigate
-#[tokio::main(core_threads = 2)]
+// TODO: Not working with worker_threads = 1. Investigate.
+#[tokio::main(worker_threads = 2)]
 async fn node_1() {
     let config = config(1);
     let (router, router_tx) = Router::new(config);
@@ -55,7 +55,7 @@ async fn node_1() {
     }
 }
 
-#[tokio::main(core_threads = 2)]
+#[tokio::main(worker_threads = 2)]
 async fn node_2() {
     let config = config(2);
     let (router, router_tx) = Router::new(config);
@@ -87,7 +87,7 @@ async fn receive_ack(this_rx: &Receiver<RouterOutMessage>, pkid: u64) {
 }
 
 async fn wait_for_new_data(rx: &Receiver<RouterOutMessage>) -> DataReply {
-    tokio::time::delay_for(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
     match rx.try_recv() {
         Ok(RouterOutMessage::DataReply(reply)) => reply,
         v => panic!("Expecting Data Reply. {:?}", v),

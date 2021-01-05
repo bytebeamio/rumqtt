@@ -5,7 +5,7 @@ use std::error::Error;
 use mqtt::AsyncClient;
 use futures::executor::block_on;
 
-#[tokio::main(core_threads=2)]
+#[tokio::main(worker_threads=2)]
 async fn main() {
     let _o = start("paho-rust-async", 100, 100000);
 }
