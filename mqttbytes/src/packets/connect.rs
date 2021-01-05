@@ -960,7 +960,15 @@ mod test {
     }
 
     fn v5_sample2() -> Connect {
-        Connect::new("hackathonmqtt5test")
+        Connect {
+            protocol: Protocol::V5,
+            keep_alive: 10,
+            properties: None,
+            client_id: "hackathonmqtt5test".to_owned(),
+            clean_session: true,
+            last_will: None,
+            login: None,
+        }
     }
 
     fn v5_sample2_bytes() -> Vec<u8> {

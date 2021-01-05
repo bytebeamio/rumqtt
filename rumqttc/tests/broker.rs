@@ -26,35 +26,26 @@ impl Broker {
 
         let (stream, _) = listener.accept().await.unwrap();
         let mut framed = Network::new(stream, 10 * 1024);
-        let mut incoming = VecDeque::new();
         let (outgoing_tx, outgoing_rx) = bounded(10);
-        framed.readb(&mut incoming).await.unwrap();
 
-        match incoming.pop_front().unwrap() {
-            Packet::Connect(_) => {
-                let connack = match connack {
-                    0 => ConnAck::new(ConnectReturnCode::Success, false),
-                    1 => ConnAck::new(ConnectReturnCode::BadUserNamePassword, false),
-                    _ => {
-                        return Broker {
-                            framed,
-                            incoming,
-                            outgoing_tx,
-                            outgoing_rx,
-                        }
-                    }
-                };
-
-                framed.connack(connack).await.unwrap();
-            }
+        framed.read_connect().await.unwrap();
+        let connack = match connack {
+            0 => ConnAck::new(ConnectReturnCode::Success, false),
+            1 => ConnAck::new(ConnectReturnCode::BadUserNamePassword, false),
             _ => {
-                panic!("Expecting connect packet");
+                return Broker {
+                    framed,
+                    incoming: VecDeque::new(),
+                    outgoing_tx,
+                    outgoing_rx,
+                }
             }
-        }
+        };
 
+        framed.connack(connack).await.unwrap();
         Broker {
             framed,
-            incoming,
+            incoming: VecDeque::new(),
             outgoing_tx,
             outgoing_rx,
         }
@@ -222,6 +213,20 @@ impl Network {
 
         self.socket.write_all(&write[..]).await?;
         Ok(len)
+    }
+
+    pub async fn read_connect(&mut self) -> Result<Connect, io::Error> {
+        loop {
+            let required = match read_connect(&mut self.read, self.max_incoming_size) {
+                Ok(packet) => return Ok(packet),
+                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
+                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+            };
+
+            // read more packets until a frame can be created. This function
+            // blocks until a frame can be created. Use this in a select! branch
+            self.read_bytes(required).await?;
+        }
     }
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used

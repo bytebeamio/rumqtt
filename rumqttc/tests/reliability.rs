@@ -428,7 +428,7 @@ async fn next_poll_after_connect_failure_reconnects() {
     let mut eventloop = EventLoop::new(options, 5);
 
     let event = eventloop.poll().await;
-    let error = "Broker rejected. Reason = BadUsernamePassword";
+    let error = "Broker rejected. Reason = BadUserNamePassword";
     match event {
         Err(ConnectionError::Io(e)) => assert_eq!(e.to_string(), error),
         v => panic!("Expected bad username password error. Found = {:?}", v),
