@@ -11,7 +11,7 @@ mod common;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-#[tokio::main(worker_threads = 2)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     // pretty_env_logger::init();
     let guard = pprof::ProfilerGuard::new(100).unwrap();
@@ -53,9 +53,15 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     let elapsed_ms = start.elapsed().as_millis();
     let throughput = acks_count as usize / elapsed_ms as usize;
     let throughput = throughput * 1000;
-    println!(
-        "Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
-        id, count, payload_size, throughput,
-    );
+
+    let print = common::Print {
+        id: id.to_owned(),
+        messages: count,
+        payload_size,
+        throughput,
+    };
+
+    println!("{}", serde_json::to_string_pretty(&print).unwrap());
+    println!("@");
     Ok(())
 }

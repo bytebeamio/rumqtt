@@ -2,6 +2,7 @@ use pprof::ProfilerGuard;
 use prost::Message;
 use rumqttlog::router::ConnectionAck;
 use rumqttlog::{Connection, Event, Notification, Receiver, Sender};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 
@@ -39,4 +40,12 @@ pub async fn new_connection(
     };
 
     (id, this_rx)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Print {
+    pub id: String,
+    pub messages: usize,
+    pub payload_size: usize,
+    pub throughput: usize,
 }
