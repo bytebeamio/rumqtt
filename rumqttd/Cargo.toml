@@ -19,7 +19,7 @@ path = "src/bin.rs"
 
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.3"}
-mqtt4bytes = { path = "../mqtt4bytes", version = "0.4" }
+mqttbytes = { path = "../mqttbytes", version = "0.1" }
 tokio = { version = "1.0", features = ["full"] }
 tokio-rustls = "0.22"
 tokio-compat-02 = "0.1"

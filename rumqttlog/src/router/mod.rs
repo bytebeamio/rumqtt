@@ -13,7 +13,7 @@ pub use tracker::Tracker;
 
 use self::bytes::Bytes;
 pub use crate::router::metrics::{ConnectionMetrics, MetricsReply, MetricsRequest};
-use mqtt4bytes::Packet;
+use mqttbytes::Packet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -1,7 +1,7 @@
 use crate::network::Network;
 use crate::state::{self, State};
 use crate::{network, ConnectionSettings, Id};
-use mqtt4bytes::{qos, ConnAck, Connect, ConnectReturnCode};
+use mqttbytes::{qos, ConnAck, Connect, ConnectReturnCode};
 use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
@@ -97,7 +97,7 @@ impl RemoteLink {
         };
 
         // Send connection acknowledgement back to the client
-        let connack = ConnAck::new(ConnectReturnCode::Accepted, session);
+        let connack = ConnAck::new(ConnectReturnCode::Success, session);
         network.connack(connack).await?;
 
         let max_inflight_count = config.max_inflight_count;

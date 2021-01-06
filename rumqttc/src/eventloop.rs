@@ -4,11 +4,10 @@ use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
-use mqtt4bytes::*;
+use mqttbytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
-use tokio_stream::{Stream, StreamExt};
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
@@ -24,7 +23,7 @@ pub enum ConnectionError {
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("Packet parsing error: {0}")]
-    Mqtt4Bytes(mqtt4bytes::Error),
+    Mqtt4Bytes(mqttbytes::Error),
     #[error("Network: {0}")]
     Network(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -191,13 +190,13 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.next(), if !inflight_full && !pending && !collision => match o {
-                Some(request) => {
+            o = self.requests_rx.recv(), if !inflight_full && !pending && !collision => match o {
+                Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
-                None => Err(ConnectionError::RequestsDone),
+                Err(_) => Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
@@ -217,7 +216,7 @@ impl EventLoop {
                 Ok(self.state.events.pop_front().unwrap())
             }
             // cancellation requests to stop the polling
-            _ = self.cancel_rx.next() => {
+            _ = self.cancel_rx.recv() => {
                 Err(ConnectionError::Cancel)
             }
         }
@@ -341,7 +340,7 @@ async fn mqtt_connect(
     // wait for 'timeout' time to validate connack
     let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
         let packet = match network.read().await? {
-            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Accepted => {
+            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
                 Packet::ConnAck(connack)
             }
             Incoming::ConnAck(connack) => {
@@ -372,5 +371,3 @@ pub(crate) async fn next_pending(
     pending.next()
 }
 
-pub trait Requests: Stream<Item = Request> + Unpin + Send {}
-impl<T> Requests for T where T: Stream<Item = Request> + Unpin + Send {}

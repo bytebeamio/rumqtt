@@ -1,0 +1,24 @@
+[package]
+name = "mqttbytes"
+version = "0.1.0"
+readme = "README.md"
+authors = ["tekjar <raviteja@bytebeam.io>"]
+edition = "2018"
+license = "Apache-2.0"
+description = "MQTT 4/5 serialization and deserialization"
+keywords = ["mqtt"]
+categories = ["network-programming", "no-std"]
+
+[lib]
+bench = false
+
+[dependencies]
+bytes = { version = "1", default-features = false }
+
+[features]
+v5 = []
+
+[dev-dependencies]
+pretty_assertions = "0.6.1"
+rand = "0.7"
+criterion = "0.3"

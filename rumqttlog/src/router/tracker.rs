@@ -1,6 +1,6 @@
 use crate::router::{AcksRequest, Request, TopicsRequest};
 use crate::DataRequest;
-use mqtt4bytes::{has_wildcards, matches, SubscribeTopic};
+use mqttbytes::{has_wildcards, matches, SubscribeFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -111,7 +111,7 @@ impl Tracker {
     /// matched against provided topics and then added to subscriptions
     pub fn add_subscription_and_match(
         &mut self,
-        filters: Vec<SubscribeTopic>,
+        filters: Vec<SubscribeFilter>,
         topics: &[String],
     ) -> bool {
         // Register topics request during first subscription
@@ -121,12 +121,12 @@ impl Tracker {
         }
 
         for filter in filters {
-            if has_wildcards(&filter.topic_path) {
-                let subscription = filter.topic_path.clone();
+            if has_wildcards(&filter.path) {
+                let subscription = filter.path.clone();
                 let qos = filter.qos as u8;
                 self.wild_subscriptions.push((subscription, qos));
             } else {
-                let subscription = filter.topic_path.clone();
+                let subscription = filter.path.clone();
                 let qos = filter.qos as u8;
                 self.concrete_subscriptions.insert(subscription, qos);
             }
@@ -138,7 +138,7 @@ impl Tracker {
                     continue;
                 }
 
-                if matches(&topic, &filter.topic_path) {
+                if matches(&topic, &filter.path) {
                     self.topics_index.insert(topic.clone());
                     let qos = filter.qos as u8;
                     self.matched.push_back((topic.clone(), qos, (0, 0)));
@@ -228,7 +228,7 @@ impl Tracker {
 #[cfg(test)]
 mod test {
     use super::*;
-    use mqtt4bytes::*;
+    use mqttbytes::*;
 
     #[test]
     fn unsubscribe_removes_requests_from_queue() {
@@ -236,8 +236,8 @@ mod test {
 
         let topics = vec!["a/b".to_owned(), "c/d".to_owned(), "e".to_owned()];
         let filter = vec![
-            SubscribeTopic::new("+/+".to_owned(), QoS::AtLeastOnce),
-            SubscribeTopic::new("+".to_owned(), QoS::AtLeastOnce),
+            SubscribeFilter::new("+/+".to_owned(), QoS::AtLeastOnce),
+            SubscribeFilter::new("+".to_owned(), QoS::AtLeastOnce),
         ];
 
         tracker.add_subscription_and_match(filter, topics.as_slice());

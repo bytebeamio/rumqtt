@@ -8,37 +8,40 @@ edition = "2018"
 
 [dependencies]
 argh = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mqttbytes = { path = "../mqttbytes" }
 rumqttc = { path = "../rumqttc" }
 rumqttlog = { path = "../rumqttlog" }
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3", features = ["compat"] }	
 bytes = "1.0"
-# paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
-# paho-mqtt = "0.7"
-async-channel = "1.5"
+async-channel = "1.4"
 pretty_env_logger = "0.4"
 prost = "0.6"
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
+# paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
+# paho-mqtt = "0.7"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"
 
 [[bin]]
 name = "rumqttasync"
-path = "rumqttasync.rs"
+path = "clients/rumqttasync.rs"
 
 
 [[bin]]
 name = "rumqttasyncqos0"
-path = "rumqttasyncqos0.rs"
+path = "clients/rumqttasyncqos0.rs"
 
 [[bin]]
 name = "rumqttsync"
-path = "rumqttsync.rs"
+path = "clients/rumqttsync.rs"
 
 [[bin]]
 name = "routernxn"
-path = "routernxn.rs"
+path = "router/routernxn.rs"
 
 # [[bin]]
 # name = "pahosync"
@@ -47,3 +50,7 @@ path = "routernxn.rs"
 # [[bin]]
 # name = "pahoasync"
 # path = "pahoasync.rs"
+
+[[bin]]
+name = "mqttbytesparser"
+path = "parsers/mqttbytes.rs"

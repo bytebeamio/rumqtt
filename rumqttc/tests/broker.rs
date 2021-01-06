@@ -1,4 +1,4 @@
-use mqtt4bytes::*;
+use mqttbytes::*;
 use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
@@ -33,8 +33,8 @@ impl Broker {
         match incoming.pop_front().unwrap() {
             Packet::Connect(_) => {
                 let connack = match connack {
-                    0 => ConnAck::new(ConnectReturnCode::Accepted, false),
-                    1 => ConnAck::new(ConnectReturnCode::BadUsernamePassword, false),
+                    0 => ConnAck::new(ConnectReturnCode::Success, false),
+                    1 => ConnAck::new(ConnectReturnCode::BadUserNamePassword, false),
                     _ => {
                         return Broker {
                             framed,
@@ -54,7 +54,7 @@ impl Broker {
 
         Broker {
             framed,
-            incoming,
+            incoming: VecDeque::new(),
             outgoing_tx,
             outgoing_rx,
         }
@@ -229,7 +229,7 @@ impl Network {
     pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> Result<(), io::Error> {
         let mut count = 0;
         loop {
-            match mqtt_read(&mut self.read, self.max_incoming_size) {
+            match read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => {
                     incoming.push_back(packet);
                     count += 1;
