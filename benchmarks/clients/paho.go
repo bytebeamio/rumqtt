@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"time"
 
@@ -15,7 +17,7 @@ var opts struct {
 }
 
 func init() {
-	opts.Messages = 1000000
+	opts.Messages = 100000
 	opts.PayloadSize = 100
 
 	arg.MustParse(&opts)
@@ -68,11 +70,30 @@ func (c *Connection) Start() {
 
 	timeTaken := time.Since(start).Milliseconds()
 	throughputMillis := int64(c.total) / timeTaken
-	fmt.Println("Id =", c.id, ", Messages =", c.total, ", Payload (bytes) =", opts.PayloadSize, ", Throughput (messages/sec) =", throughputMillis*1000)
+	print := Print {
+	    Id: c.id,
+	    Messages: c.total,
+	    PayloadSize: opts.PayloadSize,
+	    Throughput: throughputMillis * 1000,
+	}
+
+	p, err := json.MarshalIndent(&print, "", "    ")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	fmt.Println(string(p))
+	fmt.Println("@")
+}
+
+type Print struct {
+    Id string `json:"id"`
+    Messages int `json:"messages"`
+    PayloadSize int `json:"payload_size"`
+    Throughput int64 `json:"throughput"`
 }
 
 func main() {
-
 	connection := NewConnection("paho-go", opts.Messages)
 	connection.Start()
 }

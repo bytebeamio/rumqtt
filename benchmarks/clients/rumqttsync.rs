@@ -27,9 +27,8 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
         for _i in 0..count {
             let payload = vec![0; payload_size];
             let qos = QoS::AtLeastOnce;
-            client
-                .publish("hello/benchmarks/world", qos, false, payload)
-                .unwrap();
+            let topic = "hello/benchmarks/world";
+            client.publish(topic, qos, false, payload).unwrap();
         }
 
         thread::sleep(Duration::from_secs(1));
@@ -40,20 +39,25 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
     for event in connection.iter() {
         if let Ok(Event::Incoming(Incoming::PubAck(_))) = event {
             acks_count += 1;
-
             if acks_count == count {
                 break;
             }
         }
     }
 
-    let elapsed_ms = start.elapsed().as_millis();
-    let throughput = acks_count as usize / elapsed_ms as usize;
-    let throughput = throughput * 1000;
-    println!(
-        "Id = {}, Messages = {}, Payload (bytes) = {}, Throughput (messages/sec) = {}",
-        id, count, payload_size, throughput,
-    );
+    let elapsed_micros = start.elapsed().as_micros();
+    let throughput = (acks_count * 1000_000) / elapsed_micros as usize;
 
+    // --------------------------- results ---------------------------------------
+
+    let print = common::Print {
+        id: id.to_owned(),
+        messages: count,
+        payload_size,
+        throughput,
+    };
+
+    println!("{}", serde_json::to_string_pretty(&print).unwrap());
+    println!("@");
     Ok(())
 }
