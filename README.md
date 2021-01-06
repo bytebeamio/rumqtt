@@ -5,10 +5,9 @@
 
 MQTT libraries in rust which strives to be simple, robust and performant
 
-* **mqtt4bytes:**        MQTT 3.1.1 serialization and deserialization
-* **mqtt5bytes:**        MQTT 5 serialization and deserialization
-* **rumqttc:**           A high level, easy to use mqtt client
-* **rumqttd:**           A high performance, embeddable, clustered MQTT broker
+- **mqttbytes:**         MQTT 3.1.1/5 serialization and deserialization
+- **rumqttc:**           A high level, easy to use mqtt client
+- **rumqttd:**           A high performance, embeddable, clustered MQTT broker
 
 See respective folders for more details
 

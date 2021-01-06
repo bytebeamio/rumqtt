@@ -1,3 +1,30 @@
+### R4
+----------------
+mqttbytes v0.1.0
+-----------
+- **changed** Deprecate mqtt4/5bytes to combine them in mqttbytes
+
+rumqttc v0.4.0
+-----------
+- **changed** Update to tokio 1.0 [**breaking**]
+
+rumqttd v0.3.0
+-----------
+- **changed** Update to tokio 1.0 and `bytes` 1.0 [**breaking**]
+
+misc
+----------
+- Improve benchmarking suite with plots
+
+Thanks to all the contributors who made this release possible
+
+Andrew Walbran
+Jonas Platte
+Daniel Egger
+Mihail Malo
+Alex Mikhalev
+
+
 ### R3
 ----------------
 mqtt4bytes v0.4.0
