@@ -15,7 +15,7 @@ rumqttc = { path = "../rumqttc" }
 rumqttlog = { path = "../rumqttlog" }
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3", features = ["compat"] }	
-bytes = "0.6"
+bytes = "1.0"
 async-channel = "1.4"
 pretty_env_logger = "0.4"
 prost = "0.6"
