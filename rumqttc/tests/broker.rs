@@ -285,13 +285,19 @@ impl Network {
 
 fn outgoing(packet: &Packet) -> Outgoing {
     match packet {
-        Packet::Publish(publish) => Outgoing::Publish(publish.pkid),
+        Packet::Publish(publish) => Outgoing::Publish(publish.pkid, vec![publish.topic.clone()]),
         Packet::PubAck(puback) => Outgoing::PubAck(puback.pkid),
         Packet::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
         Packet::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
         Packet::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
-        Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
-        Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
+        Packet::Subscribe(subscribe) => Outgoing::Subscribe(
+            subscribe.pkid,
+            subscribe.filters.iter().map(|f| f.path.clone()).collect()
+        ),
+        Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(
+            unsubscribe.pkid,
+            unsubscribe.topics.clone()
+        ),
         Packet::PingReq => Outgoing::PingReq,
         Packet::PingResp => Outgoing::PingResp,
         Packet::Disconnect => Outgoing::Disconnect,
