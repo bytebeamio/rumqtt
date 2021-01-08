@@ -213,7 +213,10 @@ impl MqttState {
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(puback.pkid) {
             publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid, vec![publish.topic]));
+            let event = Event::Outgoing(Outgoing::Publish {
+                pkid: publish.pkid,
+                topics: vec![publish.topic]
+            });
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
@@ -266,7 +269,10 @@ impl MqttState {
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
             publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid, vec![publish.topic]));
+            let event = Event::Outgoing(Outgoing::Publish {
+                pkid: publish.pkid,
+                topics: vec![publish.topic]
+            });
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
@@ -304,7 +310,10 @@ impl MqttState {
         );
 
         publish.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Publish(publish.pkid, vec![publish.topic]));
+        let event = Event::Outgoing(Outgoing::Publish {
+            pkid: publish.pkid,
+            topics: vec![publish.topic]
+        });
         self.events.push_back(event);
         Ok(())
     }
@@ -365,8 +374,10 @@ impl MqttState {
         );
 
         subscription.write(&mut self.write)?;
-        let topics = subscription.filters.into_iter().map(|f| f.path).collect();
-        let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid, topics));
+        let event = Event::Outgoing(Outgoing::Subscribe {
+            pkid: subscription.pkid,
+            topics: subscription.filters.into_iter().map(|f| f.path).collect(),
+        });
         self.events.push_back(event);
         Ok(())
     }
@@ -381,7 +392,10 @@ impl MqttState {
         );
 
         unsub.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid, unsub.topics));
+        let event = Event::Outgoing(Outgoing::Unsubscribe {
+            pkid: unsub.pkid,
+            topics: unsub.topics
+        });
         self.events.push_back(event);
         Ok(())
     }

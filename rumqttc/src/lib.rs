@@ -122,11 +122,20 @@ pub type Incoming = Packet;
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Outgoing {
     /// Publish packet with packet identifier and topics. 0 implies QoS 0
-    Publish(u16, Vec<String>),
+    Publish {
+        pkid: u16,
+        topics: Vec<String>,
+    },
     /// Subscribe packet with packet identifier and topics
-    Subscribe(u16, Vec<String>),
+    Subscribe {
+        pkid: u16,
+        topics: Vec<String>,
+    },
     /// Unsubscribe packet with packet identifier and topics
-    Unsubscribe(u16, Vec<String>),
+    Unsubscribe {
+        pkid: u16,
+        topics: Vec<String>,
+    },
     /// PubAck packet
     PubAck(u16),
     /// PubRec packet
