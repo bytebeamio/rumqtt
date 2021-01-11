@@ -287,7 +287,7 @@ fn outgoing(packet: &Packet) -> Outgoing {
     match packet {
         Packet::Publish(publish) => Outgoing::Publish {
             pkid: publish.pkid,
-            topics: vec![publish.topic.clone()]
+            topic: publish.topic.clone()
         },
         Packet::PubAck(puback) => Outgoing::PubAck(puback.pkid),
         Packet::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),

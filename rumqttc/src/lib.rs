@@ -121,10 +121,10 @@ pub type Incoming = Packet;
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Outgoing {
-    /// Publish packet with packet identifier and topics. 0 implies QoS 0
+    /// Publish packet with packet identifier and topic. 0 implies QoS 0
     Publish {
         pkid: u16,
-        topics: Vec<String>,
+        topic: String,
     },
     /// Subscribe packet with packet identifier and topics
     Subscribe {

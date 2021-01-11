@@ -215,7 +215,7 @@ impl MqttState {
             publish.write(&mut self.write)?;
             let event = Event::Outgoing(Outgoing::Publish {
                 pkid: publish.pkid,
-                topics: vec![publish.topic]
+                topic: publish.topic
             });
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -271,7 +271,7 @@ impl MqttState {
             publish.write(&mut self.write)?;
             let event = Event::Outgoing(Outgoing::Publish {
                 pkid: publish.pkid,
-                topics: vec![publish.topic]
+                topic: publish.topic
             });
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -312,7 +312,7 @@ impl MqttState {
         publish.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Publish {
             pkid: publish.pkid,
-            topics: vec![publish.topic]
+            topic: publish.topic
         });
         self.events.push_back(event);
         Ok(())
