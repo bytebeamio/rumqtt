@@ -3,11 +3,13 @@ use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
+#[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
 use mqttbytes::*;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
+#[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
@@ -277,6 +279,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = tls::tls_connect(&options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
+        #[cfg(feature = "websocket")]
         Transport::Ws => {
             let request = http::Request::builder()
                 .method(http::Method::GET)
@@ -291,6 +294,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
+        #[cfg(feature = "websocket")]
         Transport::Wss(tls_config) => {
             let request = http::Request::builder()
                 .method(http::Method::GET)
@@ -370,4 +374,3 @@ pub(crate) async fn next_pending(
     time::sleep(delay).await;
     pending.next()
 }
-

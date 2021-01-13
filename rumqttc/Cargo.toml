@@ -9,15 +9,20 @@ edition = "2018"
 keywords = ["mqtt", "iot", "coap", "http"]
 categories = ["network-programming"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+websocket = ["async-tungstenite", "ws_stream_tungstenite"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
 bytes = "1.0"
 webpki = "0.21"
 tokio-rustls = "0.22"
-async-tungstenite = { version = "0.11.0", default-features = false, features = ["tokio-rustls"] }
-ws_stream_tungstenite = { version = "0.4.0", default-features = false, features = ["tokio_io"] }
+async-tungstenite = { version = "0.11.0", default-features = false, features = ["tokio-rustls"], optional = true }
+ws_stream_tungstenite = { version = "0.4.0", default-features = false, features = ["tokio_io"], optional = true }
 mqttbytes = { path = "../mqttbytes", version = "0.1" }
 pollster = "0.2"
 async-channel = "1.5"
