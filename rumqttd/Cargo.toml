@@ -34,6 +34,7 @@ prost = "0.6"
 warp = "0.2"
 pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 ctrlc = "=3.1"
+futures-util = "0.3.8"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"
