@@ -19,7 +19,6 @@ import (
 // - Each binary can output multiple thoughputs. E.g parser outputs read and write throughput on one binary
 // - Binary name is identified with PlotData.id. All the binary names form X axis
 
-
 func main() {
 	files, err := ioutil.ReadDir("results")
 	if err != nil {
@@ -120,17 +119,18 @@ func plot(name string, file *os.File, plotsData []*PlotData) {
 	}
 
 	bar.SetGlobalOptions(charts.WithTitleOpts(opts.Title{
-		Title: name,
+		Title:    name,
 		Subtitle: configuration,
 	}),
-	charts.WithLegendOpts(opts.Legend{Show: true}),
-	charts.WithTooltipOpts(opts.Tooltip{Show: true}),
-	charts.WithYAxisOpts( opts.YAxis{Data: true}),
+		charts.WithLegendOpts(opts.Legend{Show: true}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+		charts.WithYAxisOpts(opts.YAxis{Data: true}),
+		charts.WithToolboxOpts(opts.Toolbox{}),
 	)
 
 	bar.SetXAxis(x)
 	for k, v := range throughputs {
-		bar.AddSeries(k, v,  charts.WithBarChartOpts(opts.BarChart{BarGap: "0"}))
+		bar.AddSeries(k, v, charts.WithBarChartOpts(opts.BarChart{BarGap: "0"}))
 	}
 
 	bar = bar.XYReversal()
@@ -151,14 +151,14 @@ type PlotData struct {
 }
 
 func NewPlotData() *PlotData {
-	return &PlotData{ throughputs: map[string]float64{}, configuration: ""}
+	return &PlotData{throughputs: map[string]float64{}, configuration: ""}
 }
 
-func(p *PlotData) addID(id string) {
+func (p *PlotData) addID(id string) {
 	p.id = id
 }
 
-func(p *PlotData) addInformation(info string) {
+func (p *PlotData) addInformation(info string) {
 	if p.configuration == "" {
 		p.configuration = info
 		return
@@ -167,6 +167,6 @@ func(p *PlotData) addInformation(info string) {
 	p.configuration = p.configuration + ", " + info
 }
 
-func(p *PlotData) addThroughput(info string, throughput float64) {
+func (p *PlotData) addThroughput(info string, throughput float64) {
 	p.throughputs[info] = throughput
 }

@@ -83,7 +83,6 @@ func (c *Connection) Start() {
 	}
 
 	fmt.Println(string(p))
-	fmt.Println("@")
 }
 
 type Print struct {

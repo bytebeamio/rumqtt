@@ -63,6 +63,5 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     };
 
     println!("{}", serde_json::to_string_pretty(&print).unwrap());
-    println!("@");
     Ok(())
 }

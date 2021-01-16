@@ -397,12 +397,6 @@ impl MqttOptions {
         self.max_incoming_packet_size
     }
 
-    /// Maximum internal batching of requests
-    pub fn set_max_request_batch(&mut self, max: usize) -> &mut Self {
-        self.max_request_batch = max;
-        self
-    }
-
     /// `clean_session = true` removes all the state from queues & instructs the broker
     /// to clean all the client state when client disconnects.
     ///
