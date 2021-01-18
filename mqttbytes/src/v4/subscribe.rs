@@ -9,8 +9,6 @@ use core::fmt;
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<SubscribeFilter>,
-    #[cfg(v5)]
-    pub properties: Option<SubscribeProperties>,
 }
 
 impl Subscribe {
@@ -28,8 +26,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters,
-            #[cfg(v5)]
-            properties: None,
         }
     }
 
@@ -40,8 +36,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters: topics.into_iter().collect(),
-            #[cfg(v5)]
-            properties: None,
         }
     }
 
@@ -49,8 +43,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters: Vec::new(),
-            #[cfg(v5)]
-            properties: None,
         }
     }
 
@@ -69,17 +61,6 @@ impl Subscribe {
 
     pub fn len(&self) -> usize {
         let len = 2 + self.filters.iter().fold(0, |s, t| s + t.len());
-
-        #[cfg(v5)]
-        if let Some(properties) = &self.properties {
-            let properties_len = properties.len();
-            let properties_len_len = len_len(properties_len);
-            len += properties_len_len + properties_len;
-        } else {
-            // just 1 byte representing 0 len
-            len += 1;
-        }
-
         len
     }
 
@@ -123,8 +104,6 @@ impl Subscribe {
         let subscribe = Subscribe {
             pkid,
             filters,
-            #[cfg(v5)]
-            properties: SubscribeProperties::extract(&mut bytes)?,
         };
 
         Ok(subscribe)
@@ -141,14 +120,6 @@ impl Subscribe {
         // write packet id
         buffer.put_u16(self.pkid);
 
-        #[cfg(v5)]
-        match &self.properties {
-            Some(properties) => properties.write(buffer)?,
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
-        };
-
         // write filters
         for filter in self.filters.iter() {
             filter.write(buffer);
@@ -158,88 +129,6 @@ impl Subscribe {
     }
 }
 
-#[cfg(v5)]
-#[derive(Debug, Clone, PartialEq)]
-pub struct SubscribeProperties {
-    pub id: Option<usize>,
-    pub user_properties: Vec<(String, String)>,
-}
-
-#[cfg(v5)]
-impl SubscribeProperties {
-    pub fn len(&self) -> usize {
-        let mut len = 0;
-
-        if let Some(id) = &self.id {
-            len += 1 + len_len(*id);
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            len += 1 + 2 + key.len() + 2 + value.len();
-        }
-
-        len
-    }
-
-    pub fn extract(mut bytes: &mut Bytes) -> Result<Option<SubscribeProperties>, Error> {
-        let mut id = None;
-        let mut user_properties = Vec::new();
-
-        let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
-
-        if properties_len == 0 {
-            return Ok(None);
-        }
-
-        let mut cursor = 0;
-        // read until cursor reaches property length. properties_len = 0 will skip this loop
-        while cursor < properties_len {
-            let prop = read_u8(&mut bytes)?;
-            cursor += 1;
-
-            match property(prop)? {
-                PropertyType::SubscriptionIdentifier => {
-                    let (id_len, sub_id) = length(bytes.iter())?;
-                    // TODO: Validate 1 +. Tests are working either way
-                    cursor += 1 + id_len;
-                    bytes.advance(id_len);
-                    id = Some(sub_id)
-                }
-                PropertyType::UserProperty => {
-                    let key = read_mqtt_string(&mut bytes)?;
-                    let value = read_mqtt_string(&mut bytes)?;
-                    cursor += 2 + key.len() + 2 + value.len();
-                    user_properties.push((key, value));
-                }
-                _ => return Err(Error::InvalidPropertyType(prop)),
-            }
-        }
-
-        Ok(Some(SubscribeProperties {
-            id,
-            user_properties,
-        }))
-    }
-
-    fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = self.len();
-        write_remaining_length(buffer, len)?;
-
-        if let Some(id) = &self.id {
-            buffer.put_u8(PropertyType::SubscriptionIdentifier as u8);
-            write_remaining_length(buffer, *id)?;
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
-            write_mqtt_string(buffer, key);
-            write_mqtt_string(buffer, value);
-        }
-
-        Ok(())
-    }
-}
 
 ///  Subscription filter
 #[derive(Clone, PartialEq)]
@@ -430,108 +319,3 @@ mod test {
     }
 }
 
-#[cfg(v5)]
-#[cfg(test)]
-mod test {
-    use super::*;
-    use alloc::vec;
-    use bytes::BytesMut;
-    use pretty_assertions::assert_eq;
-
-    fn v5_sample() -> Subscribe {
-        let subscribe_properties = SubscribeProperties {
-            id: Some(100),
-            user_properties: vec![("test".to_owned(), "test".to_owned())],
-        };
-
-        let mut filter = SubscribeFilter::new("hello".to_owned(), QoS::AtLeastOnce);
-        filter
-            .set_nolocal(true)
-            .set_preserve_retain(true)
-            .set_retain_forward_rule(RetainForwardRule::Never);
-
-        Subscribe {
-            pkid: 42,
-            filters: vec![filter],
-            properties: Some(subscribe_properties),
-        }
-    }
-
-    fn v5_sample_bytes() -> Vec<u8> {
-        vec![
-            0x82, // packet type
-            0x1a, // remaining length
-            0x00, 0x2a, // pkid
-            0x0f, // properties len
-            0x0b, 0x64, // subscription identifier
-            0x26, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x04, 0x74, 0x65, 0x73,
-            0x74, // user properties
-            0x00, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, // filter
-            0x2d, // options
-        ]
-    }
-
-    #[test]
-    fn v5_subscribe_parsing_works() {
-        let mut stream = BytesMut::new();
-        let packetstream = &v5_sample_bytes();
-
-        stream.extend_from_slice(&packetstream[..]);
-
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let subscribe_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let subscribe = Subscribe::read(fixed_header, subscribe_bytes, Protocol::V5).unwrap();
-        assert_eq!(subscribe, v5_sample());
-    }
-
-    #[test]
-    fn v5_subscribe_encoding_works() {
-        let publish = v5_sample();
-        let mut buf = BytesMut::new();
-        publish.write(&mut buf, Protocol::V5).unwrap();
-
-        // println!("{:X?}", buf);
-        // println!("{:#04X?}", &buf[..]);
-        assert_eq!(&buf[..], v5_sample_bytes());
-    }
-
-    fn v5_sample2() -> Subscribe {
-        let filter = SubscribeFilter::new("hello/world".to_owned(), QoS::AtLeastOnce);
-        Subscribe {
-            pkid: 42,
-            filters: vec![filter],
-            properties: None,
-        }
-    }
-
-    fn v5_sample2_bytes() -> Vec<u8> {
-        vec![
-            0x82, 0x11, 0x00, 0x2a, 0x00, 0x00, 0x0b, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x2f, 0x77,
-            0x6f, 0x72, 0x6c, 0x64, 0x01,
-        ]
-    }
-
-    #[test]
-    fn v5_subscribe2_parsing_works() {
-        let mut stream = BytesMut::new();
-        let packetstream = &v5_sample2_bytes();
-
-        stream.extend_from_slice(&packetstream[..]);
-
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let subscribe_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let subscribe = Subscribe::read(fixed_header, subscribe_bytes, Protocol::V5).unwrap();
-        assert_eq!(subscribe, v5_sample2());
-    }
-
-    #[test]
-    fn v5_subscribe2_encoding_works() {
-        let publish = v5_sample2();
-        let mut buf = BytesMut::new();
-        publish.write(&mut buf, Protocol::V5).unwrap();
-
-        // println!("{:X?}", buf);
-        // println!("{:#04X?}", &buf[..]);
-        assert_eq!(&buf[..], v5_sample2_bytes());
-    }
-}

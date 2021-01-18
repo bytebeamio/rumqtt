@@ -21,7 +21,6 @@ pub enum PubAckReason {
 pub struct PubAck {
     pub pkid: u16,
     pub reason: PubAckReason,
-    #[cfg(v5)]
     pub properties: Option<PubAckProperties>,
 }
 
@@ -30,13 +29,12 @@ impl PubAck {
         PubAck {
             pkid,
             reason: PubAckReason::Success,
-            #[cfg(v5)]
             properties: None,
         }
     }
 
     fn len(&self) -> usize {
-        let len = 2 + 1; // pkid + reason
+        let mut len = 2 + 1; // pkid + reason
 
         // TODO: Verify modified code
         // if self.reason == PubAckReason::Success && self.properties.is_none() {
@@ -44,7 +42,6 @@ impl PubAck {
             return 2;
         }
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
@@ -67,7 +64,6 @@ impl PubAck {
             return Ok(PubAck {
                 pkid,
                 reason: PubAckReason::Success,
-                #[cfg(v5)]
                 properties: None,
             });
         }
@@ -78,7 +74,6 @@ impl PubAck {
             return Ok(PubAck {
                 pkid,
                 reason: reason(ack_reason)?,
-                #[cfg(v5)]
                 properties: None,
             });
         }
@@ -86,7 +81,6 @@ impl PubAck {
         let puback = PubAck {
             pkid,
             reason: reason(ack_reason)?,
-            #[cfg(v5)]
             properties: PubAckProperties::extract(&mut bytes)?,
         };
 
@@ -108,7 +102,6 @@ impl PubAck {
 
         buffer.put_u8(self.reason as u8);
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
@@ -117,14 +110,12 @@ impl PubAck {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
 }
 
-#[cfg(v5)]
 impl PubAckProperties {
     pub fn len(&self) -> usize {
         let mut len = 0;
@@ -214,39 +205,6 @@ fn reason(num: u8) -> Result<PubAckReason, Error> {
     Ok(code)
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use bytes::BytesMut;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn v4_puback_encoding_works() {
-        let stream = &[
-            0b0100_0000,
-            0x02, // packet type, flags and remaining len
-            0x00,
-            0x0A, // fixed header. packet identifier = 10
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-        let mut stream = BytesMut::from(&stream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let ack_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let packet = PubAck::read(fixed_header, ack_bytes).unwrap();
-
-        assert_eq!(
-            packet,
-            PubAck {
-                pkid: 10,
-                reason: PubAckReason::Success,
-            }
-        );
-    }
-}
-
 #[cfg(v5)]
 #[cfg(test)]
 mod test {
@@ -255,7 +213,7 @@ mod test {
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
-    fn v5_sample() -> PubAck {
+    fn sample() -> PubAck {
         let properties = PubAckProperties {
             reason_string: Some("test".to_owned()),
             user_properties: vec![("test".to_owned(), "test".to_owned())],
@@ -268,7 +226,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x40, // payload type
             0x18, // remaining length
@@ -282,26 +240,26 @@ mod test {
     }
 
     #[test]
-    fn v5_puback_parsing_works() {
+    fn puback_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let puback = PubAck::read(fixed_header, puback_bytes, Protocol::V5).unwrap();
-        assert_eq!(puback, v5_sample());
+        let puback = PubAck::read(fixed_header, puback_bytes).unwrap();
+        assert_eq!(puback, sample());
     }
 
     #[test]
-    fn v5_puback_encoding_works() {
-        let puback = v5_sample();
+    fn puback_encoding_works() {
+        let puback = sample();
         let mut buf = BytesMut::new();
-        puback.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
     }
 
-    fn v5_sample2() -> PubAck {
+    fn sample2() -> PubAck {
         PubAck {
             pkid: 42,
             reason: PubAckReason::NoMatchingSubscribers,
@@ -309,32 +267,32 @@ mod test {
         }
     }
 
-    fn v5_sample2_bytes() -> Vec<u8> {
+    fn sample2_bytes() -> Vec<u8> {
         vec![0x40, 0x03, 0x00, 0x2a, 0x10]
     }
 
     #[test]
-    fn v5_puback2_parsing_works() {
+    fn puback2_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample2_bytes();
+        let packetstream = &sample2_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let puback = PubAck::read(fixed_header, puback_bytes, Protocol::V5).unwrap();
-        assert_eq!(puback, v5_sample2());
+        let puback = PubAck::read(fixed_header, puback_bytes).unwrap();
+        assert_eq!(puback, sample2());
     }
 
     #[test]
-    fn v5_puback2_encoding_works() {
-        let puback = v5_sample2();
+    fn puback2_encoding_works() {
+        let puback = sample2();
         let mut buf = BytesMut::new();
 
-        puback.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample2_bytes());
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample2_bytes());
     }
 
-    fn v5_sample3() -> PubAck {
+    fn sample3() -> PubAck {
         PubAck {
             pkid: 42,
             reason: PubAckReason::Success,
@@ -342,28 +300,28 @@ mod test {
         }
     }
 
-    fn v5_sample3_bytes() -> Vec<u8> {
+    fn sample3_bytes() -> Vec<u8> {
         vec![0x40, 0x02, 0x00, 0x2a]
     }
 
     #[test]
-    fn v5_puback3_parsing_works() {
+    fn puback3_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample3_bytes();
+        let packetstream = &sample3_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let puback = PubAck::read(fixed_header, puback_bytes, Protocol::V5).unwrap();
-        assert_eq!(puback, v5_sample3());
+        let puback = PubAck::read(fixed_header, puback_bytes).unwrap();
+        assert_eq!(puback, sample3());
     }
 
     #[test]
-    fn v5_puback3_encoding_works() {
-        let puback = v5_sample3();
+    fn puback3_encoding_works() {
+        let puback = sample3();
         let mut buf = BytesMut::new();
 
-        puback.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample3_bytes());
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample3_bytes());
     }
 }

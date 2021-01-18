@@ -21,8 +21,6 @@ pub enum PubAckReason {
 pub struct PubAck {
     pub pkid: u16,
     pub reason: PubAckReason,
-    #[cfg(v5)]
-    pub properties: Option<PubAckProperties>,
 }
 
 impl PubAck {
@@ -30,8 +28,6 @@ impl PubAck {
         PubAck {
             pkid,
             reason: PubAckReason::Success,
-            #[cfg(v5)]
-            properties: None,
         }
     }
 
@@ -42,13 +38,6 @@ impl PubAck {
         // if self.reason == PubAckReason::Success && self.properties.is_none() {
         if self.reason == PubAckReason::Success {
             return 2;
-        }
-
-        #[cfg(v5)]
-        if let Some(properties) = &self.properties {
-            let properties_len = properties.len();
-            let properties_len_len = len_len(properties_len);
-            len += properties_len_len + properties_len;
         }
 
         // Unlike other packets, property length can be ignored if there are
@@ -67,8 +56,6 @@ impl PubAck {
             return Ok(PubAck {
                 pkid,
                 reason: PubAckReason::Success,
-                #[cfg(v5)]
-                properties: None,
             });
         }
 
@@ -78,16 +65,12 @@ impl PubAck {
             return Ok(PubAck {
                 pkid,
                 reason: reason(ack_reason)?,
-                #[cfg(v5)]
-                properties: None,
             });
         }
 
         let puback = PubAck {
             pkid,
             reason: reason(ack_reason)?,
-            #[cfg(v5)]
-            properties: PubAckProperties::extract(&mut bytes)?,
         };
 
         Ok(puback)
@@ -107,95 +90,11 @@ impl PubAck {
         }
 
         buffer.put_u8(self.reason as u8);
-
-        #[cfg(v5)]
-        if let Some(properties) = &self.properties {
-            properties.write(buffer)?;
-        }
-
         Ok(1 + count + len)
     }
 }
 
-#[cfg(v5)]
-#[derive(Debug, Clone, PartialEq)]
-pub struct PubAckProperties {
-    pub reason_string: Option<String>,
-    pub user_properties: Vec<(String, String)>,
-}
 
-#[cfg(v5)]
-impl PubAckProperties {
-    pub fn len(&self) -> usize {
-        let mut len = 0;
-
-        if let Some(reason) = &self.reason_string {
-            len += 1 + 2 + reason.len();
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            len += 1 + 2 + key.len() + 2 + value.len();
-        }
-
-        len
-    }
-
-    pub fn extract(mut bytes: &mut Bytes) -> Result<Option<PubAckProperties>, Error> {
-        let mut reason_string = None;
-        let mut user_properties = Vec::new();
-
-        let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
-        if properties_len == 0 {
-            return Ok(None);
-        }
-
-        let mut cursor = 0;
-        // read until cursor reaches property length. properties_len = 0 will skip this loop
-        while cursor < properties_len {
-            let prop = read_u8(&mut bytes)?;
-            cursor += 1;
-
-            match property(prop)? {
-                PropertyType::ReasonString => {
-                    let reason = read_mqtt_string(&mut bytes)?;
-                    cursor += 2 + reason.len();
-                    reason_string = Some(reason);
-                }
-                PropertyType::UserProperty => {
-                    let key = read_mqtt_string(&mut bytes)?;
-                    let value = read_mqtt_string(&mut bytes)?;
-                    cursor += 2 + key.len() + 2 + value.len();
-                    user_properties.push((key, value));
-                }
-                _ => return Err(Error::InvalidPropertyType(prop)),
-            }
-        }
-
-        Ok(Some(PubAckProperties {
-            reason_string,
-            user_properties,
-        }))
-    }
-
-    fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = self.len();
-        write_remaining_length(buffer, len)?;
-
-        if let Some(reason) = &self.reason_string {
-            buffer.put_u8(PropertyType::ReasonString as u8);
-            write_mqtt_string(buffer, reason);
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
-            write_mqtt_string(buffer, key);
-            write_mqtt_string(buffer, value);
-        }
-
-        Ok(())
-    }
-}
 /// Connection return code type
 fn reason(num: u8) -> Result<PubAckReason, Error> {
     let code = match num {
@@ -247,123 +146,3 @@ mod test {
     }
 }
 
-#[cfg(v5)]
-#[cfg(test)]
-mod test {
-    use super::*;
-    use alloc::vec;
-    use bytes::BytesMut;
-    use pretty_assertions::assert_eq;
-
-    fn v5_sample() -> PubAck {
-        let properties = PubAckProperties {
-            reason_string: Some("test".to_owned()),
-            user_properties: vec![("test".to_owned(), "test".to_owned())],
-        };
-
-        PubAck {
-            pkid: 42,
-            reason: PubAckReason::NoMatchingSubscribers,
-            properties: Some(properties),
-        }
-    }
-
-    fn v5_sample_bytes() -> Vec<u8> {
-        vec![
-            0x40, // payload type
-            0x18, // remaining length
-            0x00, 0x2a, // packet id
-            0x10, // reason
-            0x14, // properties len
-            0x1f, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // reason_string
-            0x26, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x04, 0x74, 0x65, 0x73,
-            0x74, // user properties
-        ]
-    }
-
-    #[test]
-    fn v5_puback_parsing_works() {
-        let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
-        stream.extend_from_slice(&packetstream[..]);
-
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let puback = PubAck::read(fixed_header, puback_bytes, Protocol::V5).unwrap();
-        assert_eq!(puback, v5_sample());
-    }
-
-    #[test]
-    fn v5_puback_encoding_works() {
-        let puback = v5_sample();
-        let mut buf = BytesMut::new();
-        puback.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
-    }
-
-    fn v5_sample2() -> PubAck {
-        PubAck {
-            pkid: 42,
-            reason: PubAckReason::NoMatchingSubscribers,
-            properties: None,
-        }
-    }
-
-    fn v5_sample2_bytes() -> Vec<u8> {
-        vec![0x40, 0x03, 0x00, 0x2a, 0x10]
-    }
-
-    #[test]
-    fn v5_puback2_parsing_works() {
-        let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample2_bytes();
-        stream.extend_from_slice(&packetstream[..]);
-
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let puback = PubAck::read(fixed_header, puback_bytes, Protocol::V5).unwrap();
-        assert_eq!(puback, v5_sample2());
-    }
-
-    #[test]
-    fn v5_puback2_encoding_works() {
-        let puback = v5_sample2();
-        let mut buf = BytesMut::new();
-
-        puback.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample2_bytes());
-    }
-
-    fn v5_sample3() -> PubAck {
-        PubAck {
-            pkid: 42,
-            reason: PubAckReason::Success,
-            properties: None,
-        }
-    }
-
-    fn v5_sample3_bytes() -> Vec<u8> {
-        vec![0x40, 0x02, 0x00, 0x2a]
-    }
-
-    #[test]
-    fn v5_puback3_parsing_works() {
-        let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample3_bytes();
-        stream.extend_from_slice(&packetstream[..]);
-
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let puback = PubAck::read(fixed_header, puback_bytes, Protocol::V5).unwrap();
-        assert_eq!(puback, v5_sample3());
-    }
-
-    #[test]
-    fn v5_puback3_encoding_works() {
-        let puback = v5_sample3();
-        let mut buf = BytesMut::new();
-
-        puback.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample3_bytes());
-    }
-}

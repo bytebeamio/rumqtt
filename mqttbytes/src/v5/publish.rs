@@ -12,7 +12,6 @@ pub struct Publish {
     pub retain: bool,
     pub topic: String,
     pub pkid: u16,
-    #[cfg(v5)]
     pub properties: Option<PublishProperties>,
     pub payload: Bytes,
 }
@@ -25,7 +24,6 @@ impl Publish {
             retain: false,
             pkid: 0,
             topic: topic.into(),
-            #[cfg(v5)]
             properties: None,
             payload: Bytes::from(payload.into()),
         }
@@ -38,7 +36,6 @@ impl Publish {
             retain: false,
             pkid: 0,
             topic: topic.into(),
-            #[cfg(v5)]
             properties: None,
             payload,
         }
@@ -50,7 +47,6 @@ impl Publish {
             len += 2;
         }
 
-        #[cfg(v5)]
         match &self.properties {
             Some(properties) => {
                 let properties_len = properties.len();
@@ -92,7 +88,6 @@ impl Publish {
             qos,
             pkid,
             topic,
-            #[cfg(v5)]
             properties: PublishProperties::extract(&mut bytes)?,
             payload: bytes,
         };
@@ -120,7 +115,6 @@ impl Publish {
             buffer.put_u16(pkid);
         }
 
-        #[cfg(v5)]
         match &self.properties {
             Some(properties) => properties.write(buffer)?,
             None => {
@@ -135,7 +129,6 @@ impl Publish {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublishProperties {
     pub payload_format_indicator: Option<u8>,
@@ -148,7 +141,6 @@ pub struct PublishProperties {
     pub content_type: Option<String>,
 }
 
-#[cfg(v5)]
 impl PublishProperties {
     fn len(&self) -> usize {
         let mut len = 0;
@@ -336,158 +328,6 @@ mod test {
     use bytes::{Bytes, BytesMut};
     use pretty_assertions::assert_eq;
 
-    #[test]
-    fn v4_qos1_publish_parsing_works() {
-        let stream = &[
-            0b0011_0010,
-            11, // packet type, flags and remaining len
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'b', // variable header. topic name = 'a/b'
-            0x00,
-            0x0a, // variable header. pkid = 10
-            0xF1,
-            0xF2,
-            0xF3,
-            0xF4, // publish payload
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-
-        let mut stream = BytesMut::from(&stream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let publish_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let packet = Publish::read(fixed_header, publish_bytes).unwrap();
-
-        let payload = &[0xF1, 0xF2, 0xF3, 0xF4];
-        assert_eq!(
-            packet,
-            Publish {
-                dup: false,
-                qos: QoS::AtLeastOnce,
-                retain: false,
-                topic: "a/b".to_owned(),
-                pkid: 10,
-                payload: Bytes::from(&payload[..]),
-            }
-        );
-    }
-
-    #[test]
-    fn v4_qos0_publish_parsing_works() {
-        let stream = &[
-            0b0011_0000,
-            7, // packet type, flags and remaining len
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'b', // variable header. topic name = 'a/b'
-            0x01,
-            0x02, // payload
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-
-        let mut stream = BytesMut::from(&stream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let publish_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let packet = Publish::read(fixed_header, publish_bytes).unwrap();
-
-        assert_eq!(
-            packet,
-            Publish {
-                dup: false,
-                qos: QoS::AtMostOnce,
-                retain: false,
-                topic: "a/b".to_owned(),
-                pkid: 0,
-                payload: Bytes::from(&[0x01, 0x02][..]),
-            }
-        );
-    }
-
-    #[test]
-    fn v4_qos1_publish_encoding_works() {
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtLeastOnce,
-            retain: false,
-            topic: "a/b".to_owned(),
-            pkid: 10,
-            payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
-        };
-
-        let mut buf = BytesMut::new();
-        publish.write(&mut buf).unwrap();
-
-        assert_eq!(
-            buf,
-            vec![
-                0b0011_0010,
-                11,
-                0x00,
-                0x03,
-                b'a',
-                b'/',
-                b'b',
-                0x00,
-                0x0a,
-                0xF1,
-                0xF2,
-                0xF3,
-                0xF4
-            ]
-        );
-    }
-
-    #[test]
-    fn v4_qos0_publish_encoding_works() {
-        let publish = Publish {
-            dup: false,
-            qos: QoS::AtMostOnce,
-            retain: false,
-            topic: "a/b".to_owned(),
-            pkid: 0,
-            payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
-        };
-
-        let mut buf = BytesMut::new();
-        publish.write(&mut buf).unwrap();
-
-        assert_eq!(
-            buf,
-            vec![
-                0b0011_0000,
-                9,
-                0x00,
-                0x03,
-                b'a',
-                b'/',
-                b'b',
-                0xE1,
-                0xE2,
-                0xE3,
-                0xE4
-            ]
-        );
-    }
-}
-
-#[cfg(v5)]
-#[cfg(test)]
-mod test {
-    use super::*;
-    use alloc::vec;
-    use bytes::{Bytes, BytesMut};
-    use pretty_assertions::assert_eq;
-
     fn sample_v5() -> Publish {
         let publish_properties = PublishProperties {
             payload_format_indicator: Some(1),
@@ -511,7 +351,7 @@ mod test {
         }
     }
 
-    fn sample_v5_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x34, // payload type
             0x3e, // remaining len
@@ -533,23 +373,23 @@ mod test {
     }
 
     #[test]
-    fn v5_publish_parsing_works() {
+    fn publish_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &sample_v5_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let publish_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let publish = Publish::read(fixed_header, publish_bytes, Protocol::V5).unwrap();
+        let publish = Publish::read(fixed_header, publish_bytes).unwrap();
         assert_eq!(publish, sample_v5());
     }
 
     #[test]
-    fn v5_publish_encoding_works() {
+    fn publish_encoding_works() {
         let publish = sample_v5();
         let mut buf = BytesMut::new();
-        publish.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], sample_v5_bytes());
+        publish.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
     }
 
     #[test]
