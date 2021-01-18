@@ -3,6 +3,7 @@
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender, TrySendError};
+use bytes::Bytes;
 use mqttbytes::*;
 use std::mem;
 use tokio::runtime;
@@ -70,6 +71,18 @@ impl AsyncClient {
         publish.retain = retain;
         let publish = Request::Publish(publish);
         self.request_tx.try_send(publish)?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Publish to the eventloop
+    pub async fn publish_bytes<S>(&self, topic: S, qos: QoS, retain: bool, payload: Bytes) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+    {
+        let mut publish = Publish::from_bytes(topic, qos, payload);
+        publish.retain = retain;
+        let publish = Request::Publish(publish);
+        self.request_tx.send(publish).await?;
         Ok(())
     }
 

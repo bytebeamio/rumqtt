@@ -31,7 +31,7 @@ pub enum Error {
     SubscriptionIdZero,
     PayloadSizeIncorrect,
     PayloadTooLong,
-    PayloadSizeLimitExceeded,
+    PayloadSizeLimitExceeded(usize),
     PayloadRequired,
     TopicNotUtf8,
     BoundaryCrossed(usize),
@@ -155,7 +155,7 @@ pub fn check(stream: Iter<u8>, max_packet_size: usize) -> Result<FixedHeader, Er
     // Don't let rogue connections attack with huge payloads.
     // Disconnect them before reading all that data
     if fixed_header.remaining_len > max_packet_size {
-        return Err(Error::PayloadSizeLimitExceeded);
+        return Err(Error::PayloadSizeLimitExceeded(fixed_header.remaining_len));
     }
 
     // If the current call fails due to insufficient bytes in the stream,

@@ -171,7 +171,7 @@ impl RemoteLink {
         self.network.flush(self.state.write_mut()).await?;
 
         if !data.is_empty() {
-            trace!(
+            debug!(
                 "{:11} {:14} Id = {}, Count = {}",
                 "data",
                 "remote",
