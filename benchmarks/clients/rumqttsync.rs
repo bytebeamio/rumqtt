@@ -20,7 +20,6 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
     let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
     mqttoptions.set_keep_alive(20);
     mqttoptions.set_inflight(100);
-    mqttoptions.set_max_request_batch(10);
 
     let (mut client, mut connection) = Client::new(mqttoptions, 10);
     thread::spawn(move || {
