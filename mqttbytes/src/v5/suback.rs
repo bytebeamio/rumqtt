@@ -43,6 +43,7 @@ impl SubAck {
         bytes.advance(variable_header_index);
 
         let pkid = read_u16(&mut bytes)?;
+        let properties = SubAckProperties::extract(&mut bytes)?;
 
         if !bytes.has_remaining() {
             return Err(Error::MalformedPacket);
@@ -57,7 +58,7 @@ impl SubAck {
         let suback = SubAck {
             pkid,
             return_codes,
-            properties: SubAckProperties::extract(&mut bytes)?,
+            properties
         };
 
         Ok(suback)

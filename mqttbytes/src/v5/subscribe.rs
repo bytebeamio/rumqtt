@@ -83,6 +83,7 @@ impl Subscribe {
         bytes.advance(variable_header_index);
 
         let pkid = read_u16(&mut bytes)?;
+        let properties = SubscribeProperties::extract(&mut bytes)?;
 
         // variable header size = 2 (packet identifier)
         let mut filters = Vec::new();
@@ -118,7 +119,7 @@ impl Subscribe {
         let subscribe = Subscribe {
             pkid,
             filters,
-            properties: SubscribeProperties::extract(&mut bytes)?,
+            properties,
         };
 
         Ok(subscribe)

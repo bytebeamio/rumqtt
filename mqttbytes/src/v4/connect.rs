@@ -844,8 +844,8 @@ mod test {
         let mut buf = BytesMut::new();
         connect.write(&mut buf).unwrap();
 
-        println!("{:?}", &buf[..]);
-        println!("{:?}", sample_bytes());
+        // println!("{:?}", &buf[..]);
+        // println!("{:?}", sample_bytes());
 
         assert_eq!(buf, sample_bytes());
     }
