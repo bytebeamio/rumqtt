@@ -7,7 +7,7 @@ use bytes::{Buf, Bytes};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Connect {
     /// Mqtt protocol version
-    pub protocol: Protocol,
+    protocol: Protocol,
     /// Mqtt keep alive time
     pub keep_alive: u16,
     /// Client Id
@@ -25,7 +25,7 @@ pub struct Connect {
 impl Connect {
     pub fn new<S: Into<String>>(id: S) -> Connect {
         Connect {
-            protocol: Protocol::V4,
+            protocol: Protocol::V5,
             keep_alive: 10,
             properties: None,
             client_id: id.into(),
@@ -51,17 +51,15 @@ impl Connect {
                               + 1            // connect flags
                               + 2; // keep alive
 
-        if self.protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => {
-                    let properties_len = properties.len();
-                    let properties_len_len = len_len(properties_len);
-                    len += properties_len_len + properties_len;
-                }
-                None => {
-                    // just 1 byte representing 0 len
-                    len += 1;
-                }
+        match &self.properties {
+            Some(properties) => {
+                let properties_len = properties.len();
+                let properties_len_len = len_len(properties_len);
+                len += properties_len_len + properties_len;
+            }
+            None => {
+                // just 1 byte representing 0 len
+                len += 1;
             }
         }
 
@@ -69,7 +67,7 @@ impl Connect {
 
         // last will len
         if let Some(last_will) = &self.last_will {
-            len += last_will.len(self.protocol);
+            len += last_will.len();
         }
 
         // username and password len
@@ -145,19 +143,17 @@ impl Connect {
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
 
-        if self.protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => properties.write(buffer)?,
-                None => {
-                    write_remaining_length(buffer, 0)?;
-                }
-            };
-        }
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         write_mqtt_string(buffer, &self.client_id);
 
         if let Some(last_will) = &self.last_will {
-            connect_flags |= last_will.write(buffer, self.protocol)?;
+            connect_flags |= last_will.write(buffer)?;
         }
 
         if let Some(login) = &self.login {
@@ -196,22 +192,20 @@ impl LastWill {
         }
     }
 
-    fn len(&self, protocol: Protocol) -> usize {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => {
-                    let properties_len = properties.len();
-                    let properties_len_len = len_len(properties_len);
-                    len += properties_len_len + properties_len;
-                }
-                None => {
-                    // just 1 byte representing 0 len
-                    len += 1;
-                }
-            };
-        }
+        match &self.properties {
+            Some(properties) => {
+                let properties_len = properties.len();
+                let properties_len_len = len_len(properties_len);
+                len += properties_len_len + properties_len;
+            }
+            None => {
+                // just 1 byte representing 0 len
+                len += 1;
+            }
+        };
 
         len += 2 + self.topic.len() + 2 + self.message.len();
         len
@@ -250,7 +244,7 @@ impl LastWill {
         Ok(last_will)
     }
 
-    fn write(&self, buffer: &mut BytesMut, protocol: Protocol) -> Result<u8, Error> {
+    fn write(&self, buffer: &mut BytesMut) -> Result<u8, Error> {
         let mut connect_flags = 0;
 
         connect_flags |= 0x04 | (self.qos as u8) << 3;
@@ -258,14 +252,12 @@ impl LastWill {
             connect_flags |= 0x20;
         }
 
-        if protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => properties.write(buffer)?,
-                None => {
-                    write_remaining_length(buffer, 0)?;
-                }
-            };
-        }
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         write_mqtt_string(buffer, &self.topic);
         write_mqtt_bytes(buffer, &self.message);
