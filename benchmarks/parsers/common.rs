@@ -21,6 +21,8 @@ pub(crate) struct Print {
     pub(crate) messages: usize,
     pub(crate) payload_size: usize,
     pub(crate) total_size_gb: f32,
-    pub(crate) write_throughput_gpbs: f32,
-    pub(crate) read_throughput_gpbs: f32,
+    pub(crate) v4_write_throughput_gpbs: f32,
+    pub(crate) v4_read_throughput_gpbs: f32,
+    pub(crate) v5_write_throughput_gpbs: f32,
+    pub(crate) v5_read_throughput_gpbs: f32,
 }
