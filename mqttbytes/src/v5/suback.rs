@@ -58,7 +58,7 @@ impl SubAck {
         let suback = SubAck {
             pkid,
             return_codes,
-            properties
+            properties,
         };
 
         Ok(suback)
