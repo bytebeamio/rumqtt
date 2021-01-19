@@ -1,3 +1,24 @@
+### R5
+----------------
+mqttbytes v0.2.0
+-----------
+- **feature** Complete mqtt 5 implementation
+- **fix** Split mqtt 4 and 5 into modules [**breaking**] 
+
+rumqttc v0.5.0
+-----------
+- **changed** Update to mqttbytes 0.2 [**breaking**]
+
+rumqttd v0.4.0
+-----------
+- **changed** Update to mqttbytes 0.2 [**breaking**]
+
+misc
+----------
+- Add mqtt 4 and 5 parsers to benchmarking suite for comparsion
+
+
+
 ### R4
 ----------------
 mqttbytes v0.1.0

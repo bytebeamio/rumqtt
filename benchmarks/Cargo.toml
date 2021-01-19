@@ -1,6 +1,6 @@
 [package]
 name = "benchmarks"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 
