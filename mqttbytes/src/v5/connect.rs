@@ -106,7 +106,7 @@ impl Connect {
         };
 
         let client_id = read_mqtt_string(&mut bytes)?;
-        let last_will = LastWill::read(connect_flags, &mut bytes, protocol)?;
+        let last_will = LastWill::read(connect_flags, &mut bytes)?;
         let login = Login::read(connect_flags, &mut bytes)?;
 
         let connect = Connect {
@@ -211,11 +211,7 @@ impl LastWill {
         len
     }
 
-    fn read(
-        connect_flags: u8,
-        mut bytes: &mut Bytes,
-        protocol: Protocol,
-    ) -> Result<Option<LastWill>, Error> {
+    fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
         let last_will = match connect_flags & 0b100 {
             0 if (connect_flags & 0b0011_1000) != 0 => {
                 return Err(Error::IncorrectPacketFormat);
@@ -223,10 +219,7 @@ impl LastWill {
             0 => None,
             _ => {
                 // Properties in variable header
-                let properties = match protocol {
-                    Protocol::V5 => WillProperties::read(&mut bytes)?,
-                    Protocol::V4 => None,
-                };
+                let properties = WillProperties::read(&mut bytes)?;
 
                 let will_topic = read_mqtt_string(&mut bytes)?;
                 let will_message = read_mqtt_bytes(&mut bytes)?;
