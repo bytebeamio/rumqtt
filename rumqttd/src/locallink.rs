@@ -17,17 +17,17 @@ pub enum LinkError {
 }
 
 pub struct LinkTx {
-    id: usize,
+    id: Id,
     router_tx: Sender<(Id, Event)>,
     client_id: String,
 }
 
 impl LinkTx {
-    pub(crate) fn new(client_id: &str, router_tx: Sender<(Id, Event)>) -> LinkTx {
-        LinkTx {
+    pub(crate) fn new(client_id: impl Into<String>, router_tx: Sender<(Id, Event)>) -> Self {
+        Self {
             id: 0,
             router_tx,
-            client_id: client_id.to_owned(),
+            client_id: client_id.into(),
         }
     }
 
@@ -61,7 +61,7 @@ impl LinkTx {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+        let mut publish = Publish::new(topic, QoS::AtMostOnce, payload);
         publish.retain = retain;
         let message = Event::Data(vec![Packet::Publish(publish)]);
         self.router_tx.send((self.id, message))?;
@@ -79,18 +79,18 @@ impl LinkTx {
 }
 
 pub struct LinkRx {
-    id: usize,
+    id: Id,
     router_tx: Sender<(Id, Event)>,
     link_rx: Receiver<Notification>,
 }
 
 impl LinkRx {
     pub(crate) fn new(
-        id: usize,
+        id: Id,
         router_tx: Sender<(Id, Event)>,
         link_rx: Receiver<Notification>,
-    ) -> LinkRx {
-        LinkRx {
+    ) -> Self {
+        Self {
             id,
             router_tx,
             link_rx,

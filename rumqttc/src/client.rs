@@ -2,7 +2,8 @@
 //! async eventloop.
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
-use async_channel::{SendError, Sender};
+use async_channel::{SendError, Sender, TrySendError};
+use bytes::Bytes;
 use mqttbytes::*;
 use std::mem;
 use tokio::runtime;
@@ -15,6 +16,8 @@ pub enum ClientError {
     Cancel(#[from] SendError<()>),
     #[error("Failed to send mqtt requests to eventloop")]
     Request(#[from] SendError<Request>),
+    #[error("Failed to send mqtt requests to eventloop")]
+    TryRequest(#[from] TrySendError<Request>),
     #[error("Serialization error")]
     Mqtt4(mqttbytes::Error),
 }
@@ -34,10 +37,7 @@ impl AsyncClient {
         let request_tx = eventloop.handle();
         let cancel_tx = eventloop.cancel_handle();
 
-        let client = AsyncClient {
-            request_tx,
-            cancel_tx,
-        };
+        let client = AsyncClient { request_tx, cancel_tx };
 
         (client, eventloop)
     }
@@ -45,25 +45,41 @@ impl AsyncClient {
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
     pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
-        AsyncClient {
-            request_tx,
-            cancel_tx,
-        }
+        AsyncClient { request_tx, cancel_tx }
     }
 
     /// Sends a MQTT Publish to the eventloop
-    pub async fn publish<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), ClientError>
+    pub async fn publish<S, V>(&self, topic: S, qos: QoS, retain: bool, payload: V) -> Result<(), ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
         let mut publish = Publish::new(topic, qos, payload);
+        publish.retain = retain;
+        let publish = Request::Publish(publish);
+        self.request_tx.send(publish).await?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Publish to the eventloop
+    pub fn try_publish<S, V>(&self, topic: S, qos: QoS, retain: bool, payload: V) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
+    {
+        let mut publish = Publish::new(topic, qos, payload);
+        publish.retain = retain;
+        let publish = Request::Publish(publish);
+        self.request_tx.try_send(publish)?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Publish to the eventloop
+    pub async fn publish_bytes<S>(&self, topic: S, qos: QoS, retain: bool, payload: Bytes) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+    {
+        let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
         self.request_tx.send(publish).await?;
@@ -125,23 +141,14 @@ impl Client {
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
-        let runtime = runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         let connection = Connection::new(eventloop, runtime);
         (client, connection)
     }
 
     /// Sends a MQTT Publish to the eventloop
-    pub fn publish<S, V>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), ClientError>
+    pub fn publish<S, V>(&mut self, topic: S, qos: QoS, retain: bool, payload: V) -> Result<(), ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -191,10 +198,7 @@ pub struct Connection {
 
 impl Connection {
     fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
-        Connection {
-            eventloop,
-            runtime: Some(runtime),
-        }
+        Connection { eventloop, runtime: Some(runtime) }
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
@@ -204,10 +208,7 @@ impl Connection {
     #[must_use = "Connection should be iterated over a loop to make progress"]
     pub fn iter(&mut self) -> Iter {
         let runtime = self.runtime.take().unwrap();
-        Iter {
-            connection: self,
-            runtime,
-        }
+        Iter { connection: self, runtime }
     }
 }
 
