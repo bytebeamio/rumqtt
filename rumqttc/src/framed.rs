@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use mqttbytes::v4::*;
 use mqttbytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 

@@ -1,4 +1,4 @@
-use mqttbytes::*;
+use mqttbytes::v4::*;
 use std::mem;
 
 /// Watermarks for a given topic

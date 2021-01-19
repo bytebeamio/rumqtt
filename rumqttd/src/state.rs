@@ -1,4 +1,5 @@
-use mqttbytes::{Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, QoS};
+use mqttbytes::v4::*;
+use mqttbytes::*;
 use rumqttlog::{Message, Notification};
 
 use bytes::{Bytes, BytesMut};

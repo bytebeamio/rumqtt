@@ -1,5 +1,6 @@
 use bytes::{Buf, BytesMut};
-use mqttbytes::{read, Publish, QoS};
+use mqttbytes::v4::{read, Publish};
+use mqttbytes::QoS;
 use std::time::Instant;
 
 mod common;

@@ -1,4 +1,5 @@
 use mqttbytes::*;
+use mqttbytes::v4::*;
 use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;

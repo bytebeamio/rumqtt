@@ -4,6 +4,7 @@ use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
+use mqttbytes::v4::*;
 use mqttbytes::*;
 use std::mem;
 use tokio::runtime;

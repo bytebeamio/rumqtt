@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use jackiechan::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use mqttbytes::{Packet, Publish, Subscribe, SubscribeReasonCode, Unsubscribe};
+use mqttbytes::v4::{Packet, Publish, Subscribe, SubscribeReasonCode, Unsubscribe};
 use thiserror::Error;
 
 use super::connection::ConnectionType;
@@ -760,7 +760,7 @@ fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notificat
 #[cfg(test)]
 mod test {
     use super::*;
-    use mqttbytes::{Publish, QoS, Subscribe};
+    use mqttbytes::*;
 
     #[test]
     fn topics_notifications_does_not_create_infinite_loops() {

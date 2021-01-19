@@ -1,6 +1,7 @@
 use crate::router::{AcksRequest, Request, TopicsRequest};
 use crate::DataRequest;
-use mqttbytes::{has_wildcards, matches, SubscribeFilter};
+use mqttbytes::v4::*;
+use mqttbytes::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -228,7 +229,6 @@ impl Tracker {
 #[cfg(test)]
 mod test {
     use super::*;
-    use mqttbytes::*;
 
     #[test]
     fn unsubscribe_removes_requests_from_queue() {

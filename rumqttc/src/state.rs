@@ -1,6 +1,7 @@
 use crate::{Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
+use mqttbytes::v4::*;
 use mqttbytes::*;
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
@@ -481,6 +482,7 @@ mod test {
     use super::{MqttState, StateError};
     use crate::{Incoming, MqttOptions, Request};
     use mqttbytes::*;
+    use mqttbytes::v4::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
