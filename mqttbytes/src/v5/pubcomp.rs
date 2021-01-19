@@ -29,8 +29,8 @@ impl PubComp {
     fn len(&self) -> usize {
         let mut len = 2 + 1; // pkid + reason
 
-        // TODO: Verify
-        if self.reason == PubCompReason::Success {
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubCompReason::Success && self.properties.is_none() {
             return 2;
         }
 
@@ -79,8 +79,9 @@ impl PubComp {
         buffer.put_u8(0x70);
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
-        // TODO: Verify
-        if self.reason == PubCompReason::Success {
+
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubCompReason::Success && self.properties.is_none() {
             return Ok(4);
         }
 

@@ -36,9 +36,8 @@ impl PubAck {
     fn len(&self) -> usize {
         let mut len = 2 + 1; // pkid + reason
 
-        // TODO: Verify modified code
-        // if self.reason == PubAckReason::Success && self.properties.is_none() {
-        if self.reason == PubAckReason::Success {
+        // If there are no properties, sending reason code is optional
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
             return 2;
         }
 
@@ -94,14 +93,12 @@ impl PubAck {
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
 
-        // TODO: Verify modified code
-        // if self.reason == PubAckReason::Success && self.properties.is_none() {
-        if self.reason == PubAckReason::Success {
+        // Reason code is optional with success if there are no properties
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
             return Ok(4);
         }
 
         buffer.put_u8(self.reason as u8);
-
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
