@@ -23,7 +23,9 @@ impl Unsubscribe {
     }
 
     pub fn len(&self) -> usize {
-        let mut len = 2 + self.filters.iter().fold(0, |s, t| 2 + s + t.len()); // pkid + length of filters
+        // Packet id + length of filters (unlike subscribe, this just a string.
+        // Hence 2 is prefixed for len per filter)
+        let mut len = 2 + self.filters.iter().fold(0, |s, t| 2 + s + t.len());
 
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
@@ -159,7 +161,7 @@ mod test {
 
         Unsubscribe {
             pkid: 10,
-            filters: vec!["hello".to_owned()],
+            filters: vec!["hello".to_owned(), "world".to_owned()],
             properties: Some(properties),
         }
     }
@@ -167,12 +169,13 @@ mod test {
     fn sample_bytes() -> Vec<u8> {
         vec![
             0xa2, // packet type
-            0x17, // remaining len
+            0x1e, // remaining len
             0x00, 0x0a, // pkid
-            0x0d, // properties length
+            0x0d, // properties len
             0x26, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x04, 0x74, 0x65, 0x73,
             0x74, // user properties
-            0x00, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, // filters
+            0x00, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, // filter 1
+            0x00, 0x05, 0x77, 0x6f, 0x72, 0x6c, 0x64, // filter 2
         ]
     }
 

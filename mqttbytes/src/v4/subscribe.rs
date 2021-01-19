@@ -23,10 +23,7 @@ impl Subscribe {
 
         let mut filters = Vec::new();
         filters.push(filter);
-        Subscribe {
-            pkid: 0,
-            filters,
-        }
+        Subscribe { pkid: 0, filters }
     }
 
     pub fn new_many<T>(topics: T) -> Subscribe
@@ -60,7 +57,7 @@ impl Subscribe {
     }
 
     pub fn len(&self) -> usize {
-        let len = 2 + self.filters.iter().fold(0, |s, t| s + t.len());
+        let len = 2 + self.filters.iter().fold(0, |s, t| s + t.len()); // len of pkid + vec![subscribe filter len]
         len
     }
 
@@ -101,10 +98,7 @@ impl Subscribe {
             });
         }
 
-        let subscribe = Subscribe {
-            pkid,
-            filters,
-        };
+        let subscribe = Subscribe { pkid, filters };
 
         Ok(subscribe)
     }
@@ -128,7 +122,6 @@ impl Subscribe {
         Ok(1 + remaining_len_bytes + remaining_len)
     }
 }
-
 
 ///  Subscription filter
 #[derive(Clone, PartialEq)]
@@ -318,4 +311,3 @@ mod test {
         );
     }
 }
-
