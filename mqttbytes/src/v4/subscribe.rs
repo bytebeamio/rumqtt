@@ -229,7 +229,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn v4_subscribe_parsing_works() {
+    fn subscribe_parsing_works() {
         let stream = &[
             0b1000_0010,
             20, // packet type, flags and remaining len
@@ -277,7 +277,7 @@ mod test {
     }
 
     #[test]
-    fn v4_subscribe_encoding_works() {
+    fn subscribe_encoding_works() {
         let subscribe = Subscribe {
             pkid: 260,
             filters: vec![

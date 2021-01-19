@@ -109,7 +109,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn v4_suback_parsing_works() {
+    fn suback_parsing_works() {
         let stream = vec![
             0x90, 4, // packet type, flags and remaining len
             0x00, 0x0F, // variable header. pkid = 15

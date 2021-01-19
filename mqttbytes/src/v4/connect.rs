@@ -714,7 +714,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn v4_connect_parsing_works() {
+    fn connect_parsing_works() {
         let mut stream = bytes::BytesMut::new();
         let packetstream = &[
             0x10,
@@ -783,7 +783,7 @@ mod test {
         );
     }
 
-    fn v4_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x10,
             39,
@@ -830,7 +830,7 @@ mod test {
     }
 
     #[test]
-    fn v4_connect_encoding_works() {
+    fn connect_encoding_works() {
         let connect = Connect {
             protocol: Protocol::V4,
             keep_alive: 10,
@@ -845,8 +845,8 @@ mod test {
         connect.write(&mut buf).unwrap();
 
         println!("{:?}", &buf[..]);
-        println!("{:?}", v4_sample_bytes());
+        println!("{:?}", sample_bytes());
 
-        assert_eq!(buf, v4_sample_bytes());
+        assert_eq!(buf, sample_bytes());
     }
 }

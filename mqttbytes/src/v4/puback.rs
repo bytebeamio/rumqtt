@@ -120,7 +120,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn v4_puback_encoding_works() {
+    fn puback_encoding_works() {
         let stream = &[
             0b0100_0000,
             0x02, // packet type, flags and remaining len

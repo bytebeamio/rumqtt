@@ -129,7 +129,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn v4_qos1_publish_parsing_works() {
+    fn qos1_publish_parsing_works() {
         let stream = &[
             0b0011_0010,
             11, // packet type, flags and remaining len
@@ -170,7 +170,7 @@ mod test {
     }
 
     #[test]
-    fn v4_qos0_publish_parsing_works() {
+    fn qos0_publish_parsing_works() {
         let stream = &[
             0b0011_0000,
             7, // packet type, flags and remaining len
@@ -206,7 +206,7 @@ mod test {
     }
 
     #[test]
-    fn v4_qos1_publish_encoding_works() {
+    fn qos1_publish_encoding_works() {
         let publish = Publish {
             dup: false,
             qos: QoS::AtLeastOnce,
@@ -240,7 +240,7 @@ mod test {
     }
 
     #[test]
-    fn v4_qos0_publish_encoding_works() {
+    fn qos0_publish_encoding_works() {
         let publish = Publish {
             dup: false,
             qos: QoS::AtMostOnce,
