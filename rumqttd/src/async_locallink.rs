@@ -5,7 +5,8 @@ use crate::{
     Config, Id, Server,
 };
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use mqttbytes::{Packet, Publish, QoS, RetainForwardRule, Subscribe, SubscribeFilter};
+use mqttbytes::v4::*;
+use mqttbytes::*;
 use rumqttlog::{
     Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, Router, SendError,
     Sender,

@@ -4,12 +4,10 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core::fmt::{self, Display, Formatter};
 use std::slice::Iter;
 
-mod packets;
-mod read;
+pub mod v4;
+pub mod v5;
 mod topic;
 
-pub use packets::*;
-pub use read::*;
 pub use topic::*;
 
 /// Error during serialization and deserialization

@@ -8,7 +8,6 @@ use std::convert::{TryFrom, TryInto};
 pub struct SubAck {
     pub pkid: u16,
     pub return_codes: Vec<SubscribeReasonCode>,
-    #[cfg(v5)]
     pub properties: Option<SubAckProperties>,
 }
 
@@ -17,15 +16,13 @@ impl SubAck {
         SubAck {
             pkid,
             return_codes,
-            #[cfg(v5)]
             properties: None,
         }
     }
 
     pub fn len(&self) -> usize {
-        let len = 2 + self.return_codes.len();
+        let mut len = 2 + self.return_codes.len();
 
-        #[cfg(v5)]
         match &self.properties {
             Some(properties) => {
                 let properties_len = properties.len();
@@ -46,6 +43,7 @@ impl SubAck {
         bytes.advance(variable_header_index);
 
         let pkid = read_u16(&mut bytes)?;
+        let properties = SubAckProperties::extract(&mut bytes)?;
 
         if !bytes.has_remaining() {
             return Err(Error::MalformedPacket);
@@ -60,8 +58,7 @@ impl SubAck {
         let suback = SubAck {
             pkid,
             return_codes,
-            #[cfg(v5)]
-            properties: SubAckProperties::extract(&mut bytes)?,
+            properties,
         };
 
         Ok(suback)
@@ -74,7 +71,6 @@ impl SubAck {
 
         buffer.put_u16(self.pkid);
 
-        #[cfg(v5)]
         match &self.properties {
             Some(properties) => properties.write(buffer)?,
             None => {
@@ -88,14 +84,12 @@ impl SubAck {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
 }
 
-#[cfg(v5)]
 impl SubAckProperties {
     pub fn len(&self) -> usize {
         let mut len = 0;
@@ -216,39 +210,7 @@ mod test {
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
-    #[test]
-    fn v4_suback_parsing_works() {
-        let stream = vec![
-            0x90, 4, // packet type, flags and remaining len
-            0x00, 0x0F, // variable header. pkid = 15
-            0x01, 0x80, // payload. return codes [success qos1, failure]
-            0xDE, 0xAD, 0xBE, 0xEF, // extra packets in the stream
-        ];
-
-        let mut stream = BytesMut::from(&stream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let ack_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let packet = SubAck::read(fixed_header, ack_bytes).unwrap();
-
-        assert_eq!(
-            packet,
-            SubAck {
-                pkid: 15,
-                return_codes: vec![SubscribeReasonCode::QoS1, SubscribeReasonCode::Unspecified,],
-            }
-        );
-    }
-}
-
-#[cfg(v5)]
-#[cfg(test)]
-mod test {
-    use super::*;
-    use alloc::vec;
-    use bytes::BytesMut;
-    use pretty_assertions::assert_eq;
-
-    fn v5_sample() -> SubAck {
+    fn sample() -> SubAck {
         let properties = SubAckProperties {
             reason_string: Some("test".to_owned()),
             user_properties: vec![("test".to_owned(), "test".to_owned())],
@@ -266,7 +228,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x90, // packet type
             0x1b, // remaining len
@@ -279,25 +241,25 @@ mod test {
     }
 
     #[test]
-    fn v5_suback_parsing_works() {
+    fn suback_parsing_works() {
         let mut stream = BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
 
         stream.extend_from_slice(&packetstream[..]);
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let suback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let suback = SubAck::read(fixed_header, suback_bytes, Protocol::V5).unwrap();
-        assert_eq!(suback, v5_sample());
+        let suback = SubAck::read(fixed_header, suback_bytes).unwrap();
+        assert_eq!(suback, sample());
     }
 
     #[test]
-    fn v5_suback_encoding_works() {
-        let publish = v5_sample();
+    fn suback_encoding_works() {
+        let publish = sample();
         let mut buf = BytesMut::new();
-        publish.write(&mut buf, Protocol::V5).unwrap();
+        publish.write(&mut buf).unwrap();
 
         // println!("{:X?}", buf);
         // println!("{:#04X?}", &buf[..]);
-        assert_eq!(&buf[..], v5_sample_bytes());
+        assert_eq!(&buf[..], sample_bytes());
     }
 }

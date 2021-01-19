@@ -14,7 +14,6 @@ pub enum PubCompReason {
 pub struct PubComp {
     pub pkid: u16,
     pub reason: PubCompReason,
-    #[cfg(v5)]
     pub properties: Option<PubCompProperties>,
 }
 
@@ -23,20 +22,18 @@ impl PubComp {
         PubComp {
             pkid,
             reason: PubCompReason::Success,
-            #[cfg(v5)]
             properties: None,
         }
     }
 
     fn len(&self) -> usize {
-        let len = 2 + 1; // pkid + reason
+        let mut len = 2 + 1; // pkid + reason
 
-        // TODO: Verify
-        if self.reason == PubCompReason::Success {
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubCompReason::Success && self.properties.is_none() {
             return 2;
         }
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
@@ -55,7 +52,6 @@ impl PubComp {
             return Ok(PubComp {
                 pkid,
                 reason: PubCompReason::Success,
-                #[cfg(v5)]
                 properties: None,
             });
         }
@@ -65,7 +61,6 @@ impl PubComp {
             return Ok(PubComp {
                 pkid,
                 reason: reason(ack_reason)?,
-                #[cfg(v5)]
                 properties: None,
             });
         }
@@ -73,7 +68,6 @@ impl PubComp {
         let puback = PubComp {
             pkid,
             reason: reason(ack_reason)?,
-            #[cfg(v5)]
             properties: PubCompProperties::extract(&mut bytes)?,
         };
 
@@ -85,14 +79,14 @@ impl PubComp {
         buffer.put_u8(0x70);
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
-        // TODO: Verify
-        if self.reason == PubCompReason::Success {
+
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubCompReason::Success && self.properties.is_none() {
             return Ok(4);
         }
 
         buffer.put_u8(self.reason as u8);
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
@@ -101,14 +95,12 @@ impl PubComp {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubCompProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
 }
 
-#[cfg(v5)]
 impl PubCompProperties {
     pub fn len(&self) -> usize {
         let mut len = 0;
@@ -191,7 +183,6 @@ fn reason(num: u8) -> Result<PubCompReason, Error> {
     Ok(code)
 }
 
-#[cfg(v5)]
 #[cfg(test)]
 mod test {
     use super::*;
@@ -199,7 +190,7 @@ mod test {
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
-    fn v5_sample() -> PubComp {
+    fn sample() -> PubComp {
         let properties = PubCompProperties {
             reason_string: Some("test".to_owned()),
             user_properties: vec![("test".to_owned(), "test".to_owned())],
@@ -212,7 +203,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x70, // payload type
             0x18, // remaining length
@@ -226,22 +217,22 @@ mod test {
     }
 
     #[test]
-    fn v5_pubcomp_parsing_works_correctly() {
+    fn pubcomp_parsing_works_correctly() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let pubcomp_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let pubcomp = PubComp::read(fixed_header, pubcomp_bytes, Protocol::V5).unwrap();
-        assert_eq!(pubcomp, v5_sample());
+        let pubcomp = PubComp::read(fixed_header, pubcomp_bytes).unwrap();
+        assert_eq!(pubcomp, sample());
     }
 
     #[test]
-    fn v5_pubcomp_encoding_works_correctly() {
-        let pubcomp = v5_sample();
+    fn pubcomp_encoding_works_correctly() {
+        let pubcomp = sample();
         let mut buf = BytesMut::new();
-        pubcomp.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
+        pubcomp.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
     }
 }

@@ -9,7 +9,6 @@ use core::fmt;
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<SubscribeFilter>,
-    #[cfg(v5)]
     pub properties: Option<SubscribeProperties>,
 }
 
@@ -28,7 +27,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters,
-            #[cfg(v5)]
             properties: None,
         }
     }
@@ -40,7 +38,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters: topics.into_iter().collect(),
-            #[cfg(v5)]
             properties: None,
         }
     }
@@ -49,7 +46,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters: Vec::new(),
-            #[cfg(v5)]
             properties: None,
         }
     }
@@ -68,9 +64,8 @@ impl Subscribe {
     }
 
     pub fn len(&self) -> usize {
-        let len = 2 + self.filters.iter().fold(0, |s, t| s + t.len());
+        let mut len = 2 + self.filters.iter().fold(0, |s, t| s + t.len());
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
@@ -88,6 +83,7 @@ impl Subscribe {
         bytes.advance(variable_header_index);
 
         let pkid = read_u16(&mut bytes)?;
+        let properties = SubscribeProperties::extract(&mut bytes)?;
 
         // variable header size = 2 (packet identifier)
         let mut filters = Vec::new();
@@ -123,8 +119,7 @@ impl Subscribe {
         let subscribe = Subscribe {
             pkid,
             filters,
-            #[cfg(v5)]
-            properties: SubscribeProperties::extract(&mut bytes)?,
+            properties,
         };
 
         Ok(subscribe)
@@ -141,7 +136,6 @@ impl Subscribe {
         // write packet id
         buffer.put_u16(self.pkid);
 
-        #[cfg(v5)]
         match &self.properties {
             Some(properties) => properties.write(buffer)?,
             None => {
@@ -158,14 +152,12 @@ impl Subscribe {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubscribeProperties {
     pub id: Option<usize>,
     pub user_properties: Vec<(String, String)>,
 }
 
-#[cfg(v5)]
 impl SubscribeProperties {
     pub fn len(&self) -> usize {
         let mut len = 0;
@@ -339,106 +331,7 @@ mod test {
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
-    #[test]
-    fn v4_subscribe_parsing_works() {
-        let stream = &[
-            0b1000_0010,
-            20, // packet type, flags and remaining len
-            0x01,
-            0x04, // variable header. pkid = 260
-            0x00,
-            0x03,
-            b'a',
-            b'/',
-            b'+', // payload. topic filter = 'a/+'
-            0x00, // payload. qos = 0
-            0x00,
-            0x01,
-            b'#', // payload. topic filter = '#'
-            0x01, // payload. qos = 1
-            0x00,
-            0x05,
-            b'a',
-            b'/',
-            b'b',
-            b'/',
-            b'c', // payload. topic filter = 'a/b/c'
-            0x02, // payload. qos = 2
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-        let mut stream = BytesMut::from(&stream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let subscribe_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let packet = Subscribe::read(fixed_header, subscribe_bytes).unwrap();
-
-        assert_eq!(
-            packet,
-            Subscribe {
-                pkid: 260,
-                filters: vec![
-                    SubscribeFilter::new("a/+".to_owned(), QoS::AtMostOnce),
-                    SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
-                    SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce)
-                ],
-            }
-        );
-    }
-
-    #[test]
-    fn v4_subscribe_encoding_works() {
-        let subscribe = Subscribe {
-            pkid: 260,
-            filters: vec![
-                SubscribeFilter::new("a/+".to_owned(), QoS::AtMostOnce),
-                SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
-                SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce),
-            ],
-        };
-
-        let mut buf = BytesMut::new();
-        subscribe.write(&mut buf).unwrap();
-        assert_eq!(
-            buf,
-            vec![
-                0b1000_0010,
-                20,
-                0x01,
-                0x04, // pkid = 260
-                0x00,
-                0x03,
-                b'a',
-                b'/',
-                b'+', // topic filter = 'a/+'
-                0x00, // qos = 0
-                0x00,
-                0x01,
-                b'#', // topic filter = '#'
-                0x01, // qos = 1
-                0x00,
-                0x05,
-                b'a',
-                b'/',
-                b'b',
-                b'/',
-                b'c', // topic filter = 'a/b/c'
-                0x02  // qos = 2
-            ]
-        );
-    }
-}
-
-#[cfg(v5)]
-#[cfg(test)]
-mod test {
-    use super::*;
-    use alloc::vec;
-    use bytes::BytesMut;
-    use pretty_assertions::assert_eq;
-
-    fn v5_sample() -> Subscribe {
+    fn sample() -> Subscribe {
         let subscribe_properties = SubscribeProperties {
             id: Some(100),
             user_properties: vec![("test".to_owned(), "test".to_owned())],
@@ -457,7 +350,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x82, // packet type
             0x1a, // remaining length
@@ -472,30 +365,30 @@ mod test {
     }
 
     #[test]
-    fn v5_subscribe_parsing_works() {
+    fn subscribe_parsing_works() {
         let mut stream = BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
 
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let subscribe_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let subscribe = Subscribe::read(fixed_header, subscribe_bytes, Protocol::V5).unwrap();
-        assert_eq!(subscribe, v5_sample());
+        let subscribe = Subscribe::read(fixed_header, subscribe_bytes).unwrap();
+        assert_eq!(subscribe, sample());
     }
 
     #[test]
-    fn v5_subscribe_encoding_works() {
-        let publish = v5_sample();
+    fn subscribe_encoding_works() {
+        let publish = sample();
         let mut buf = BytesMut::new();
-        publish.write(&mut buf, Protocol::V5).unwrap();
+        publish.write(&mut buf).unwrap();
 
         // println!("{:X?}", buf);
         // println!("{:#04X?}", &buf[..]);
-        assert_eq!(&buf[..], v5_sample_bytes());
+        assert_eq!(&buf[..], sample_bytes());
     }
 
-    fn v5_sample2() -> Subscribe {
+    fn sample2() -> Subscribe {
         let filter = SubscribeFilter::new("hello/world".to_owned(), QoS::AtLeastOnce);
         Subscribe {
             pkid: 42,
@@ -504,7 +397,7 @@ mod test {
         }
     }
 
-    fn v5_sample2_bytes() -> Vec<u8> {
+    fn sample2_bytes() -> Vec<u8> {
         vec![
             0x82, 0x11, 0x00, 0x2a, 0x00, 0x00, 0x0b, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x2f, 0x77,
             0x6f, 0x72, 0x6c, 0x64, 0x01,
@@ -512,26 +405,26 @@ mod test {
     }
 
     #[test]
-    fn v5_subscribe2_parsing_works() {
+    fn subscribe2_parsing_works() {
         let mut stream = BytesMut::new();
-        let packetstream = &v5_sample2_bytes();
+        let packetstream = &sample2_bytes();
 
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let subscribe_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let subscribe = Subscribe::read(fixed_header, subscribe_bytes, Protocol::V5).unwrap();
-        assert_eq!(subscribe, v5_sample2());
+        let subscribe = Subscribe::read(fixed_header, subscribe_bytes).unwrap();
+        assert_eq!(subscribe, sample2());
     }
 
     #[test]
-    fn v5_subscribe2_encoding_works() {
-        let publish = v5_sample2();
+    fn subscribe2_encoding_works() {
+        let publish = sample2();
         let mut buf = BytesMut::new();
-        publish.write(&mut buf, Protocol::V5).unwrap();
+        publish.write(&mut buf).unwrap();
 
         // println!("{:X?}", buf);
         // println!("{:#04X?}", &buf[..]);
-        assert_eq!(&buf[..], v5_sample2_bytes());
+        assert_eq!(&buf[..], sample2_bytes());
     }
 }

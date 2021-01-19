@@ -1,7 +1,8 @@
 use crate::network::Network;
 use crate::state::{self, State};
 use crate::{network, ConnectionSettings, Id};
-use mqttbytes::{qos, ConnAck, Connect, ConnectReturnCode};
+use mqttbytes::v4::*;
+use mqttbytes::*;
 use rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };

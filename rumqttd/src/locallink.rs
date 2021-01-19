@@ -1,5 +1,6 @@
 use crate::Id;
-use mqttbytes::{Packet, Publish, QoS, Subscribe};
+use mqttbytes::v4::*;
+use mqttbytes::*;
 use rumqttlog::{
     Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, SendError, Sender,
 };

@@ -21,7 +21,6 @@ pub enum PubRecReason {
 pub struct PubRec {
     pub pkid: u16,
     pub reason: PubRecReason,
-    #[cfg(v5)]
     pub properties: Option<PubRecProperties>,
 }
 
@@ -30,21 +29,18 @@ impl PubRec {
         PubRec {
             pkid,
             reason: PubRecReason::Success,
-            #[cfg(v5)]
             properties: None,
         }
     }
 
     fn len(&self) -> usize {
-        let len = 2 + 1; // pkid + reason
+        let mut len = 2 + 1; // pkid + reason
 
-        // TODO: Verify
-        // if self.reason == PubRecReason::Success && self.properties.is_none() {
-        if self.reason == PubRecReason::Success {
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubRecReason::Success && self.properties.is_none() {
             return 2;
         }
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
@@ -64,7 +60,6 @@ impl PubRec {
             return Ok(PubRec {
                 pkid,
                 reason: PubRecReason::Success,
-                #[cfg(v5)]
                 properties: None,
             });
         }
@@ -74,7 +69,6 @@ impl PubRec {
             return Ok(PubRec {
                 pkid,
                 reason: reason(ack_reason)?,
-                #[cfg(v5)]
                 properties: None,
             });
         }
@@ -82,7 +76,6 @@ impl PubRec {
         let puback = PubRec {
             pkid,
             reason: reason(ack_reason)?,
-            #[cfg(v5)]
             properties: PubRecProperties::extract(&mut bytes)?,
         };
 
@@ -95,15 +88,13 @@ impl PubRec {
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
 
-        // TODO: Verify
-        // if self.reason == PubRecReason::Success && self.properties.is_none() {
-        if self.reason == PubRecReason::Success {
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubRecReason::Success && self.properties.is_none() {
             return Ok(4);
         }
 
         buffer.put_u8(self.reason as u8);
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
@@ -112,14 +103,12 @@ impl PubRec {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubRecProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
 }
 
-#[cfg(v5)]
 impl PubRecProperties {
     pub fn len(&self) -> usize {
         let mut len = 0;
@@ -210,17 +199,13 @@ fn reason(num: u8) -> Result<PubRecReason, Error> {
 }
 
 #[cfg(test)]
-mod test {}
-
-#[cfg(v5)]
-#[cfg(test)]
 mod test {
     use super::*;
     use alloc::vec;
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
-    fn v5_sample() -> PubRec {
+    fn sample() -> PubRec {
         let properties = PubRecProperties {
             reason_string: Some("test".to_owned()),
             user_properties: vec![("test".to_owned(), "test".to_owned())],
@@ -233,7 +218,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x50, // payload type
             0x18, // remaining length
@@ -247,22 +232,22 @@ mod test {
     }
 
     #[test]
-    fn v5_pubrec_parsing_works() {
+    fn pubrec_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let pubrec_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let pubrec = PubRec::read(fixed_header, pubrec_bytes, Protocol::V5).unwrap();
-        assert_eq!(pubrec, v5_sample());
+        let pubrec = PubRec::read(fixed_header, pubrec_bytes).unwrap();
+        assert_eq!(pubrec, sample());
     }
 
     #[test]
-    fn v5_pubrec_encoding_works() {
-        let pubrec = v5_sample();
+    fn pubrec_encoding_works() {
+        let pubrec = sample();
         let mut buf = BytesMut::new();
-        pubrec.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
+        pubrec.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
     }
 }

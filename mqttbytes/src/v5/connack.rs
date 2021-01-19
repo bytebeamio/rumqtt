@@ -1,7 +1,5 @@
 use super::*;
-#[cfg(v5)]
 use alloc::string::String;
-#[cfg(v5)]
 use alloc::vec::Vec;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
@@ -38,7 +36,6 @@ pub enum ConnectReturnCode {
 pub struct ConnAck {
     pub session_present: bool,
     pub code: ConnectReturnCode,
-    #[cfg(v5)]
     pub properties: Option<ConnAckProperties>,
 }
 
@@ -47,16 +44,14 @@ impl ConnAck {
         ConnAck {
             code,
             session_present,
-            #[cfg(v5)]
             properties: None,
         }
     }
 
     fn len(&self) -> usize {
-        let len = 1  // sesssion present
+        let mut len = 1  // sesssion present
                         + 1; // code
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
@@ -78,7 +73,6 @@ impl ConnAck {
         let connack = ConnAck {
             session_present,
             code,
-            #[cfg(v5)]
             properties: ConnAckProperties::extract(&mut bytes)?,
         };
 
@@ -93,7 +87,6 @@ impl ConnAck {
         buffer.put_u8(self.session_present as u8);
         buffer.put_u8(self.code as u8);
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
@@ -102,7 +95,6 @@ impl ConnAck {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnAckProperties {
     pub session_expiry_interval: Option<u32>,
@@ -124,7 +116,6 @@ pub struct ConnAckProperties {
     pub authentication_data: Option<Bytes>,
 }
 
-#[cfg(v5)]
 impl ConnAckProperties {
     pub fn new() -> ConnAckProperties {
         ConnAckProperties {
@@ -484,59 +475,10 @@ fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
 mod test {
     use super::*;
     use alloc::vec;
-    use bytes::BytesMut;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn v4_connack_parsing_works() {
-        let mut stream = bytes::BytesMut::new();
-        let packetstream = &[
-            0b0010_0000,
-            0x02, // packet type, flags and remaining len
-            0x01,
-            0x00, // variable header. connack flags, connect return code
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-
-        stream.extend_from_slice(&packetstream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let connack_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let connack = ConnAck::read(fixed_header, connack_bytes).unwrap();
-
-        assert_eq!(
-            connack,
-            ConnAck {
-                session_present: true,
-                code: ConnectReturnCode::Success,
-            }
-        );
-    }
-
-    #[test]
-    fn v4_connack_encoding_works() {
-        let connack = ConnAck {
-            session_present: true,
-            code: ConnectReturnCode::Success,
-        };
-
-        let mut buf = BytesMut::new();
-        connack.write(&mut buf).unwrap();
-        assert_eq!(buf, vec![0b0010_0000, 0x02, 0x01, 0x00]);
-    }
-}
-
-#[cfg(v5)]
-#[cfg(test)]
-mod test {
-    use super::*;
-    use alloc::vec;
     use bytes::{Bytes, BytesMut};
     use pretty_assertions::assert_eq;
 
-    fn v5_sample() -> ConnAck {
+    fn sample() -> ConnAck {
         let properties = ConnAckProperties {
             session_expiry_interval: Some(1234),
             receive_max: Some(432),
@@ -564,7 +506,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x20, // Packet type
             0x57, // Remaining length
@@ -592,23 +534,23 @@ mod test {
     }
 
     #[test]
-    fn v5_connack_parsing_works() {
+    fn connack_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let connack_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let connack = ConnAck::read(fixed_header, connack_bytes, Protocol::V5).unwrap();
+        let connack = ConnAck::read(fixed_header, connack_bytes).unwrap();
 
-        assert_eq!(connack, v5_sample());
+        assert_eq!(connack, sample());
     }
 
     #[test]
-    fn v5_connack_encoding_works() {
-        let connack = v5_sample();
+    fn connack_encoding_works() {
+        let connack = sample();
         let mut buf = BytesMut::new();
-        connack.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
+        connack.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
     }
 }

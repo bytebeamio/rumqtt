@@ -7,7 +7,7 @@ use bytes::{Buf, Bytes};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Connect {
     /// Mqtt protocol version
-    pub protocol: Protocol,
+    protocol: Protocol,
     /// Mqtt keep alive time
     pub keep_alive: u16,
     /// Client Id
@@ -25,7 +25,7 @@ pub struct Connect {
 impl Connect {
     pub fn new<S: Into<String>>(id: S) -> Connect {
         Connect {
-            protocol: Protocol::V4,
+            protocol: Protocol::V5,
             keep_alive: 10,
             properties: None,
             client_id: id.into(),
@@ -51,17 +51,15 @@ impl Connect {
                               + 1            // connect flags
                               + 2; // keep alive
 
-        if self.protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => {
-                    let properties_len = properties.len();
-                    let properties_len_len = len_len(properties_len);
-                    len += properties_len_len + properties_len;
-                }
-                None => {
-                    // just 1 byte representing 0 len
-                    len += 1;
-                }
+        match &self.properties {
+            Some(properties) => {
+                let properties_len = properties.len();
+                let properties_len_len = len_len(properties_len);
+                len += properties_len_len + properties_len;
+            }
+            None => {
+                // just 1 byte representing 0 len
+                len += 1;
             }
         }
 
@@ -69,7 +67,7 @@ impl Connect {
 
         // last will len
         if let Some(last_will) = &self.last_will {
-            len += last_will.len(self.protocol);
+            len += last_will.len();
         }
 
         // username and password len
@@ -108,7 +106,7 @@ impl Connect {
         };
 
         let client_id = read_mqtt_string(&mut bytes)?;
-        let last_will = LastWill::read(connect_flags, &mut bytes, protocol)?;
+        let last_will = LastWill::read(connect_flags, &mut bytes)?;
         let login = Login::read(connect_flags, &mut bytes)?;
 
         let connect = Connect {
@@ -145,19 +143,17 @@ impl Connect {
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
 
-        if self.protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => properties.write(buffer)?,
-                None => {
-                    write_remaining_length(buffer, 0)?;
-                }
-            };
-        }
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         write_mqtt_string(buffer, &self.client_id);
 
         if let Some(last_will) = &self.last_will {
-            connect_flags |= last_will.write(buffer, self.protocol)?;
+            connect_flags |= last_will.write(buffer)?;
         }
 
         if let Some(login) = &self.login {
@@ -196,32 +192,26 @@ impl LastWill {
         }
     }
 
-    fn len(&self, protocol: Protocol) -> usize {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => {
-                    let properties_len = properties.len();
-                    let properties_len_len = len_len(properties_len);
-                    len += properties_len_len + properties_len;
-                }
-                None => {
-                    // just 1 byte representing 0 len
-                    len += 1;
-                }
-            };
-        }
+        match &self.properties {
+            Some(properties) => {
+                let properties_len = properties.len();
+                let properties_len_len = len_len(properties_len);
+                len += properties_len_len + properties_len;
+            }
+            None => {
+                // just 1 byte representing 0 len
+                len += 1;
+            }
+        };
 
         len += 2 + self.topic.len() + 2 + self.message.len();
         len
     }
 
-    fn read(
-        connect_flags: u8,
-        mut bytes: &mut Bytes,
-        protocol: Protocol,
-    ) -> Result<Option<LastWill>, Error> {
+    fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
         let last_will = match connect_flags & 0b100 {
             0 if (connect_flags & 0b0011_1000) != 0 => {
                 return Err(Error::IncorrectPacketFormat);
@@ -229,10 +219,7 @@ impl LastWill {
             0 => None,
             _ => {
                 // Properties in variable header
-                let properties = match protocol {
-                    Protocol::V5 => WillProperties::read(&mut bytes)?,
-                    Protocol::V4 => None,
-                };
+                let properties = WillProperties::read(&mut bytes)?;
 
                 let will_topic = read_mqtt_string(&mut bytes)?;
                 let will_message = read_mqtt_bytes(&mut bytes)?;
@@ -250,7 +237,7 @@ impl LastWill {
         Ok(last_will)
     }
 
-    fn write(&self, buffer: &mut BytesMut, protocol: Protocol) -> Result<u8, Error> {
+    fn write(&self, buffer: &mut BytesMut) -> Result<u8, Error> {
         let mut connect_flags = 0;
 
         connect_flags |= 0x04 | (self.qos as u8) << 3;
@@ -258,14 +245,12 @@ impl LastWill {
             connect_flags |= 0x20;
         }
 
-        if protocol == Protocol::V5 {
-            match &self.properties {
-                Some(properties) => properties.write(buffer)?,
-                None => {
-                    write_remaining_length(buffer, 0)?;
-                }
-            };
-        }
+        match &self.properties {
+            Some(properties) => properties.write(buffer)?,
+            None => {
+                write_remaining_length(buffer, 0)?;
+            }
+        };
 
         write_mqtt_string(buffer, &self.topic);
         write_mqtt_bytes(buffer, &self.message);
@@ -709,148 +694,8 @@ impl ConnectProperties {
 #[cfg(test)]
 mod test {
     use super::*;
-    use alloc::vec;
-    use bytes::{Bytes, BytesMut};
-    use pretty_assertions::assert_eq;
 
-    #[test]
-    fn v4_connect_parsing_works() {
-        let mut stream = bytes::BytesMut::new();
-        let packetstream = &[
-            0x10,
-            39, // packet type, flags and remaining len
-            0x00,
-            0x04,
-            b'M',
-            b'Q',
-            b'T',
-            b'T',
-            0x04,        // variable header
-            0b1100_1110, // variable header. +username, +password, -will retain, will qos=1, +last_will, +clean_session
-            0x00,
-            0x0a, // variable header. keep alive = 10 sec
-            0x00,
-            0x04,
-            b't',
-            b'e',
-            b's',
-            b't', // payload. client_id
-            0x00,
-            0x02,
-            b'/',
-            b'a', // payload. will topic = '/a'
-            0x00,
-            0x07,
-            b'o',
-            b'f',
-            b'f',
-            b'l',
-            b'i',
-            b'n',
-            b'e', // payload. variable header. will msg = 'offline'
-            0x00,
-            0x04,
-            b'r',
-            b'u',
-            b'm',
-            b'q', // payload. username = 'rumq'
-            0x00,
-            0x02,
-            b'm',
-            b'q', // payload. password = 'mq'
-            0xDE,
-            0xAD,
-            0xBE,
-            0xEF, // extra packets in the stream
-        ];
-
-        stream.extend_from_slice(&packetstream[..]);
-        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let connect_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let packet = Connect::read(fixed_header, connect_bytes).unwrap();
-
-        assert_eq!(
-            packet,
-            Connect {
-                protocol: Protocol::V4,
-                keep_alive: 10,
-                client_id: "test".to_owned(),
-                clean_session: true,
-                last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
-                login: Some(Login::new("rumq", "mq")),
-                properties: None
-            }
-        );
-    }
-
-    fn v4_sample_bytes() -> Vec<u8> {
-        vec![
-            0x10,
-            39,
-            0x00,
-            0x04,
-            b'M',
-            b'Q',
-            b'T',
-            b'T',
-            0x04,
-            0b1100_1110, // +username, +password, -will retain, will qos=1, +last_will, +clean_session
-            0x00,
-            0x0a, // 10 sec
-            0x00,
-            0x04,
-            b't',
-            b'e',
-            b's',
-            b't', // client_id
-            0x00,
-            0x02,
-            b'/',
-            b'a', // will topic = '/a'
-            0x00,
-            0x07,
-            b'o',
-            b'f',
-            b'f',
-            b'l',
-            b'i',
-            b'n',
-            b'e', // will msg = 'offline'
-            0x00,
-            0x04,
-            b'r',
-            b'u',
-            b's',
-            b't', // username = 'rust'
-            0x00,
-            0x02,
-            b'm',
-            b'q', // password = 'mq'
-        ]
-    }
-
-    #[test]
-    fn v4_connect_encoding_works() {
-        let connect = Connect {
-            protocol: Protocol::V4,
-            keep_alive: 10,
-            client_id: "test".to_owned(),
-            clean_session: true,
-            last_will: Some(LastWill::new("/a", "offline", QoS::AtLeastOnce, false)),
-            login: Some(Login::new("rust", "mq")),
-            properties: None,
-        };
-
-        let mut buf = BytesMut::new();
-        connect.write(&mut buf).unwrap();
-
-        println!("{:?}", &buf[..]);
-        println!("{:?}", v4_sample_bytes());
-
-        assert_eq!(buf, v4_sample_bytes());
-    }
-
-    fn v5_sample() -> Connect {
+    fn sample() -> Connect {
         let connect_properties = ConnectProperties {
             session_expiry_interval: Some(1234),
             receive_maximum: Some(432),
@@ -897,7 +742,7 @@ mod test {
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
             0x10, // packet type
             0x9d, // remaining len
@@ -942,24 +787,24 @@ mod test {
     #[test]
     fn connect1_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let connect_bytes = stream.split_to(fixed_header.frame_length()).freeze();
         let connect = Connect::read(fixed_header, connect_bytes).unwrap();
-        assert_eq!(connect, v5_sample());
+        assert_eq!(connect, sample());
     }
 
     #[test]
     fn connect1_encoding_works() {
-        let connect = v5_sample();
+        let connect = sample();
         let mut buf = BytesMut::new();
         connect.write(&mut buf).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
+        assert_eq!(&buf[..], sample_bytes());
     }
 
-    fn v5_sample2() -> Connect {
+    fn sample2() -> Connect {
         Connect {
             protocol: Protocol::V5,
             keep_alive: 10,
@@ -971,7 +816,7 @@ mod test {
         }
     }
 
-    fn v5_sample2_bytes() -> Vec<u8> {
+    fn sample2_bytes() -> Vec<u8> {
         vec![
             0x10, // packet type
             0x1f, 0x00, // remaining len
@@ -989,22 +834,22 @@ mod test {
     #[test]
     fn connect2_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample2_bytes();
+        let packetstream = &sample2_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
         let connect_bytes = stream.split_to(fixed_header.frame_length()).freeze();
         let connect = Connect::read(fixed_header, connect_bytes).unwrap();
-        assert_eq!(connect, v5_sample2());
+        assert_eq!(connect, sample2());
     }
 
     #[test]
     fn connect2_encoding_works() {
-        let connect = v5_sample2();
+        let connect = sample2();
         let mut buf = BytesMut::new();
         connect.write(&mut buf).unwrap();
 
-        let expected = v5_sample2_bytes();
+        let expected = sample2_bytes();
         assert_eq!(&buf[..], &expected[0..(expected.len() - 3)]);
     }
 
@@ -1045,7 +890,7 @@ mod test {
         }
     }
 
-    fn v5_sample3_bytes() -> Vec<u8> {
+    fn sample3_bytes() -> Vec<u8> {
         vec![
             0x10, 0x6e, 0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x05, 0xc6, 0x00, 0x00, 0x2f, 0x11,
             0x00, 0x00, 0x04, 0xd2, 0x21, 0x01, 0xb0, 0x27, 0x00, 0x00, 0x00, 0x64, 0x22, 0x01,
@@ -1061,7 +906,7 @@ mod test {
     #[test]
     fn connect3_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample3_bytes();
+        let packetstream = &sample3_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
@@ -1076,7 +921,7 @@ mod test {
         let mut buf = BytesMut::new();
         connect.write(&mut buf).unwrap();
 
-        let expected = v5_sample3_bytes();
+        let expected = sample3_bytes();
         assert_eq!(&buf[..], &expected[0..(expected.len())]);
     }
 

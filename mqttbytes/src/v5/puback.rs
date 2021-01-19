@@ -4,44 +4,51 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 /// Return code in connack
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
-pub enum PubRelReason {
+pub enum PubAckReason {
     Success = 0,
-    PacketIdentifierNotFound = 146,
+    NoMatchingSubscribers = 16,
+    UnspecifiedError = 128,
+    ImplementationSpecificError = 131,
+    NotAuthorized = 135,
+    TopicNameInvalid = 144,
+    PacketIdentifierInUse = 145,
+    QuotaExceeded = 151,
+    PayloadFormatInvalid = 153,
 }
 
 /// Acknowledgement to QoS1 publish
 #[derive(Debug, Clone, PartialEq)]
-pub struct PubRel {
+pub struct PubAck {
     pub pkid: u16,
-    pub reason: PubRelReason,
-    #[cfg(v5)]
-    pub properties: Option<PubRelProperties>,
+    pub reason: PubAckReason,
+    pub properties: Option<PubAckProperties>,
 }
 
-impl PubRel {
-    pub fn new(pkid: u16) -> PubRel {
-        PubRel {
+impl PubAck {
+    pub fn new(pkid: u16) -> PubAck {
+        PubAck {
             pkid,
-            reason: PubRelReason::Success,
-            #[cfg(v5)]
+            reason: PubAckReason::Success,
             properties: None,
         }
     }
 
     fn len(&self) -> usize {
-        let len = 2 + 1; // pkid + reason
+        let mut len = 2 + 1; // pkid + reason
 
-        // TODO: Verify
-        if self.reason == PubRelReason::Success {
+        // If there are no properties, sending reason code is optional
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
             return 2;
         }
 
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
             len += properties_len_len + properties_len;
         }
+
+        // Unlike other packets, property length can be ignored if there are
+        // no properties in acks
 
         len
     }
@@ -50,30 +57,30 @@ impl PubRel {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
         let pkid = read_u16(&mut bytes)?;
+
+        // No reason code or properties if remaining length == 2
         if fixed_header.remaining_len == 2 {
-            return Ok(PubRel {
+            return Ok(PubAck {
                 pkid,
-                reason: PubRelReason::Success,
-                #[cfg(v5)]
+                reason: PubAckReason::Success,
                 properties: None,
             });
         }
 
+        // No properties len or properties if remaining len > 2 but < 4
         let ack_reason = read_u8(&mut bytes)?;
         if fixed_header.remaining_len < 4 {
-            return Ok(PubRel {
+            return Ok(PubAck {
                 pkid,
                 reason: reason(ack_reason)?,
-                #[cfg(v5)]
                 properties: None,
             });
         }
 
-        let puback = PubRel {
+        let puback = PubAck {
             pkid,
             reason: reason(ack_reason)?,
-            #[cfg(v5)]
-            properties: PubRelProperties::extract(&mut bytes)?,
+            properties: PubAckProperties::extract(&mut bytes)?,
         };
 
         Ok(puback)
@@ -81,17 +88,17 @@ impl PubRel {
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
         let len = self.len();
-        buffer.put_u8(0x62);
+        buffer.put_u8(0x40);
+
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
-        // TODO: Verify
-        if self.reason == PubRelReason::Success {
+
+        // Reason code is optional with success if there are no properties
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
             return Ok(4);
         }
 
         buffer.put_u8(self.reason as u8);
-
-        #[cfg(v5)]
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
         }
@@ -100,15 +107,13 @@ impl PubRel {
     }
 }
 
-#[cfg(v5)]
 #[derive(Debug, Clone, PartialEq)]
-pub struct PubRelProperties {
+pub struct PubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
 }
 
-#[cfg(v5)]
-impl PubRelProperties {
+impl PubAckProperties {
     pub fn len(&self) -> usize {
         let mut len = 0;
 
@@ -123,7 +128,7 @@ impl PubRelProperties {
         len
     }
 
-    pub fn extract(mut bytes: &mut Bytes) -> Result<Option<PubRelProperties>, Error> {
+    pub fn extract(mut bytes: &mut Bytes) -> Result<Option<PubAckProperties>, Error> {
         let mut reason_string = None;
         let mut user_properties = Vec::new();
 
@@ -155,7 +160,7 @@ impl PubRelProperties {
             }
         }
 
-        Ok(Some(PubRelProperties {
+        Ok(Some(PubAckProperties {
             reason_string,
             user_properties,
         }))
@@ -180,10 +185,17 @@ impl PubRelProperties {
     }
 }
 /// Connection return code type
-fn reason(num: u8) -> Result<PubRelReason, Error> {
+fn reason(num: u8) -> Result<PubAckReason, Error> {
     let code = match num {
-        0 => PubRelReason::Success,
-        146 => PubRelReason::PacketIdentifierNotFound,
+        0 => PubAckReason::Success,
+        16 => PubAckReason::NoMatchingSubscribers,
+        128 => PubAckReason::UnspecifiedError,
+        131 => PubAckReason::ImplementationSpecificError,
+        135 => PubAckReason::NotAuthorized,
+        144 => PubAckReason::TopicNameInvalid,
+        145 => PubAckReason::PacketIdentifierInUse,
+        151 => PubAckReason::QuotaExceeded,
+        153 => PubAckReason::PayloadFormatInvalid,
         num => return Err(Error::InvalidConnectReturnCode(num)),
     };
 
@@ -198,25 +210,25 @@ mod test {
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
-    fn v5_sample() -> PubRel {
-        let properties = PubRelProperties {
+    fn sample() -> PubAck {
+        let properties = PubAckProperties {
             reason_string: Some("test".to_owned()),
             user_properties: vec![("test".to_owned(), "test".to_owned())],
         };
 
-        PubRel {
+        PubAck {
             pkid: 42,
-            reason: PubRelReason::PacketIdentifierNotFound,
+            reason: PubAckReason::NoMatchingSubscribers,
             properties: Some(properties),
         }
     }
 
-    fn v5_sample_bytes() -> Vec<u8> {
+    fn sample_bytes() -> Vec<u8> {
         vec![
-            0x62, // payload type
+            0x40, // payload type
             0x18, // remaining length
             0x00, 0x2a, // packet id
-            0x92, // reason
+            0x10, // reason
             0x14, // properties len
             0x1f, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, // reason_string
             0x26, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x04, 0x74, 0x65, 0x73,
@@ -225,22 +237,88 @@ mod test {
     }
 
     #[test]
-    fn v5_pubrel_parsing_works() {
+    fn puback_parsing_works() {
         let mut stream = bytes::BytesMut::new();
-        let packetstream = &v5_sample_bytes();
+        let packetstream = &sample_bytes();
         stream.extend_from_slice(&packetstream[..]);
 
         let fixed_header = parse_fixed_header(stream.iter()).unwrap();
-        let pubrel_bytes = stream.split_to(fixed_header.frame_length()).freeze();
-        let pubrel = PubRel::read(fixed_header, pubrel_bytes, Protocol::V5).unwrap();
-        assert_eq!(pubrel, v5_sample());
+        let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
+        let puback = PubAck::read(fixed_header, puback_bytes).unwrap();
+        assert_eq!(puback, sample());
     }
 
     #[test]
-    fn v5_pubrel_encoding_works() {
-        let pubrel = v5_sample();
+    fn puback_encoding_works() {
+        let puback = sample();
         let mut buf = BytesMut::new();
-        pubrel.write(&mut buf, Protocol::V5).unwrap();
-        assert_eq!(&buf[..], v5_sample_bytes());
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample_bytes());
+    }
+
+    fn sample2() -> PubAck {
+        PubAck {
+            pkid: 42,
+            reason: PubAckReason::NoMatchingSubscribers,
+            properties: None,
+        }
+    }
+
+    fn sample2_bytes() -> Vec<u8> {
+        vec![0x40, 0x03, 0x00, 0x2a, 0x10]
+    }
+
+    #[test]
+    fn puback2_parsing_works() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample2_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+
+        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
+        let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
+        let puback = PubAck::read(fixed_header, puback_bytes).unwrap();
+        assert_eq!(puback, sample2());
+    }
+
+    #[test]
+    fn puback2_encoding_works() {
+        let puback = sample2();
+        let mut buf = BytesMut::new();
+
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample2_bytes());
+    }
+
+    fn sample3() -> PubAck {
+        PubAck {
+            pkid: 42,
+            reason: PubAckReason::Success,
+            properties: None,
+        }
+    }
+
+    fn sample3_bytes() -> Vec<u8> {
+        vec![0x40, 0x02, 0x00, 0x2a]
+    }
+
+    #[test]
+    fn puback3_parsing_works() {
+        let mut stream = bytes::BytesMut::new();
+        let packetstream = &sample3_bytes();
+        stream.extend_from_slice(&packetstream[..]);
+
+        let fixed_header = parse_fixed_header(stream.iter()).unwrap();
+        let puback_bytes = stream.split_to(fixed_header.frame_length()).freeze();
+        let puback = PubAck::read(fixed_header, puback_bytes).unwrap();
+        assert_eq!(puback, sample3());
+    }
+
+    #[test]
+    fn puback3_encoding_works() {
+        let puback = sample3();
+        let mut buf = BytesMut::new();
+
+        puback.write(&mut buf).unwrap();
+        assert_eq!(&buf[..], sample3_bytes());
     }
 }
