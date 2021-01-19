@@ -1,48 +1,19 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-/// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
-pub enum PubAckReason {
-    Success = 0,
-    NoMatchingSubscribers = 16,
-    UnspecifiedError = 128,
-    ImplementationSpecificError = 131,
-    NotAuthorized = 135,
-    TopicNameInvalid = 144,
-    PacketIdentifierInUse = 145,
-    QuotaExceeded = 151,
-    PayloadFormatInvalid = 153,
-}
-
 /// Acknowledgement to QoS1 publish
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubAck {
     pub pkid: u16,
-    pub reason: PubAckReason,
 }
 
 impl PubAck {
     pub fn new(pkid: u16) -> PubAck {
-        PubAck {
-            pkid,
-            reason: PubAckReason::Success,
-        }
+        PubAck { pkid }
     }
 
     fn len(&self) -> usize {
-        let len = 2 + 1; // pkid + reason
-
-        // TODO: Verify modified code
-        // if self.reason == PubAckReason::Success && self.properties.is_none() {
-        if self.reason == PubAckReason::Success {
-            return 2;
-        }
-
-        // Unlike other packets, property length can be ignored if there are
-        // no properties in acks
-
+        let len = 2; // pkid
         len
     }
 
@@ -53,25 +24,15 @@ impl PubAck {
 
         // No reason code or properties if remaining length == 2
         if fixed_header.remaining_len == 2 {
-            return Ok(PubAck {
-                pkid,
-                reason: PubAckReason::Success,
-            });
+            return Ok(PubAck { pkid });
         }
 
         // No properties len or properties if remaining len > 2 but < 4
-        let ack_reason = read_u8(&mut bytes)?;
         if fixed_header.remaining_len < 4 {
-            return Ok(PubAck {
-                pkid,
-                reason: reason(ack_reason)?,
-            });
+            return Ok(PubAck { pkid });
         }
 
-        let puback = PubAck {
-            pkid,
-            reason: reason(ack_reason)?,
-        };
+        let puback = PubAck { pkid };
 
         Ok(puback)
     }
@@ -79,38 +40,10 @@ impl PubAck {
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
         let len = self.len();
         buffer.put_u8(0x40);
-
         let count = write_remaining_length(buffer, len)?;
         buffer.put_u16(self.pkid);
-
-        // TODO: Verify modified code
-        // if self.reason == PubAckReason::Success && self.properties.is_none() {
-        if self.reason == PubAckReason::Success {
-            return Ok(4);
-        }
-
-        buffer.put_u8(self.reason as u8);
         Ok(1 + count + len)
     }
-}
-
-
-/// Connection return code type
-fn reason(num: u8) -> Result<PubAckReason, Error> {
-    let code = match num {
-        0 => PubAckReason::Success,
-        16 => PubAckReason::NoMatchingSubscribers,
-        128 => PubAckReason::UnspecifiedError,
-        131 => PubAckReason::ImplementationSpecificError,
-        135 => PubAckReason::NotAuthorized,
-        144 => PubAckReason::TopicNameInvalid,
-        145 => PubAckReason::PacketIdentifierInUse,
-        151 => PubAckReason::QuotaExceeded,
-        153 => PubAckReason::PayloadFormatInvalid,
-        num => return Err(Error::InvalidConnectReturnCode(num)),
-    };
-
-    Ok(code)
 }
 
 #[cfg(test)]
@@ -136,13 +69,6 @@ mod test {
         let ack_bytes = stream.split_to(fixed_header.frame_length()).freeze();
         let packet = PubAck::read(fixed_header, ack_bytes).unwrap();
 
-        assert_eq!(
-            packet,
-            PubAck {
-                pkid: 10,
-                reason: PubAckReason::Success,
-            }
-        );
+        assert_eq!(packet, PubAck { pkid: 10 });
     }
 }
-
