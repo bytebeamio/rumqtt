@@ -16,13 +16,11 @@ pub fn profile(name: &str, guard: ProfilerGuard) {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct Print {
-    pub(crate) id: String,
-    pub(crate) messages: usize,
-    pub(crate) payload_size: usize,
-    pub(crate) total_size_gb: f32,
-    pub(crate) v4_write_throughput_gpbs: f32,
-    pub(crate) v4_read_throughput_gpbs: f32,
-    pub(crate) v5_write_throughput_gpbs: f32,
-    pub(crate) v5_read_throughput_gpbs: f32,
+pub struct Print {
+    pub id: String,
+    pub messages: usize,
+    pub payload_size: usize,
+    pub total_size_gb: f32,
+    pub write_throughput_gpbs: f32,
+    pub read_throughput_gpbs: f32,
 }
