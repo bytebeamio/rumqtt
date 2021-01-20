@@ -1,0 +1,24 @@
+{
+  "id": "mqttv4parser",
+  "messages": 1048576,
+  "payload_size": 1024,
+  "total_size_gb": 1.0175781,
+  "write_throughput_gpbs": 0.69907767,
+  "read_throughput_gpbs": 3.7395837
+}
+{
+  "id": "mqttv5parser",
+  "messages": 1048576,
+  "payload_size": 1024,
+  "total_size_gb": 1.0185547,
+  "write_throughput_gpbs": 0.7265592,
+  "read_throughput_gpbs": 2.9614055
+}
+{
+  "id": "natsparser",
+  "messages": 1048576,
+  "payload_size": 1024,
+  "total_size_gb": 1.0234375,
+  "write_throughput_gpbs": 2.2953565,
+  "read_throughput_gpbs": 0.58006984
+}

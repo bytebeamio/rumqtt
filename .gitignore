@@ -16,5 +16,4 @@ Cargo.lock
 perf.data*
 node_modules
 cachegrind.out
-*.txt
 plot

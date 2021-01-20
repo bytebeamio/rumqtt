@@ -1,0 +1,18 @@
+{
+  "id": "rumqtt-async",
+  "messages": 1000000,
+  "payload_size": 100,
+  "throughput": 317000
+}
+{
+  "id": "rumqtt-sync",
+  "messages": 1000000,
+  "payload_size": 100,
+  "throughput": 185644
+}
+{
+    "id": "paho-go",
+    "messages": 100000,
+    "payload_size": 100,
+    "throughput": 17000
+}
