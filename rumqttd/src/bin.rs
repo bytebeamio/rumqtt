@@ -3,10 +3,6 @@ use std::path::PathBuf;
 use std::thread;
 
 use librumqttd::{Broker, Config};
-use pprof::ProfilerGuard;
-use prost::Message;
-use std::fs::File;
-use std::io::Write;
 use std::process::exit;
 
 #[cfg(not(target_env = "msvc"))]
@@ -30,9 +26,13 @@ fn main() {
     let commandline: CommandLine = argh::from_env();
     let config: Config = confy::load_path(commandline.config).unwrap();
 
-    let _guard = pprof::ProfilerGuard::new(100).unwrap();
+    #[cfg(not(target_env = "msvc"))]
+    let guard = pprof::ProfilerGuard::new(100).unwrap();
+
     ctrlc::set_handler(move || {
-        // profile("rumqttd.pb", &guard);
+        #[cfg(not(target_env = "msvc"))]
+        profile("rumqttd.pb", &guard);
+
         exit(0);
     })
     .expect("Error setting Ctrl-C handler");
@@ -43,7 +43,11 @@ fn main() {
     println!("{:?}", thread.join());
 }
 
-fn _profile(name: &str, guard: &ProfilerGuard) {
+#[cfg(not(target_env = "msvc"))]
+fn profile(name: &str, guard: &pprof::ProfilerGuard) {
+    use prost::Message;
+    use std::{fs::File, io::Write as _};
+
     if let Ok(report) = guard.report().build() {
         let mut file = File::create(name).unwrap();
         let profile = report.pprof().unwrap();
