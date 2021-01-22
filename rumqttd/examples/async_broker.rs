@@ -1,3 +1,4 @@
+/*
 use librumqttd::{async_locallink::construct_broker, Config};
 use std::thread;
 
@@ -51,3 +52,5 @@ fn main() {
         sub_task.await.unwrap();
     });
 }
+ */
+fn main() {}

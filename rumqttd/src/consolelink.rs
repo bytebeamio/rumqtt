@@ -36,7 +36,6 @@ impl ConsoleLink {
     }
 }
 
-#[tokio::main(worker_threads = 1)]
 pub async fn start(console: Arc<ConsoleLink>) {
     let config_console = console.clone();
     let port = config_console

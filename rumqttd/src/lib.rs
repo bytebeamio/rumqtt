@@ -14,15 +14,14 @@ use crate::remotelink::RemoteLink;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::task;
-use tokio::time;
+use tokio::{signal, task, time};
 use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::{
     AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig, TLSError,
 };
 use tokio_rustls::TlsAcceptor;
 
-pub mod async_locallink;
+// pub mod async_locallink;
 mod consolelink;
 mod locallink;
 mod network;
@@ -32,6 +31,7 @@ mod state;
 use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
+use crate::Error::ServerKeyNotFound;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -51,16 +51,22 @@ pub enum Error {
     Send(#[from] SendError<(Id, Event)>),
     #[error("TLS error {0}")]
     Tls(#[from] TLSError),
-    #[error("No server cert")]
-    NoServerCert,
-    #[error("No server private key")]
-    NoServerKey,
-    #[error("No ca file")]
-    NoCAFile,
-    #[error("No server cert file")]
-    NoServerCertFile,
-    #[error("No server key file")]
-    NoServerKeyFile,
+    #[error("Server cert not provided")]
+    ServerCertRequired,
+    #[error("Server private key not provided")]
+    ServerKeyRequired,
+    #[error("CA file {0} no found")]
+    CaFileNotFound(String),
+    #[error("Server cert file {0} not found")]
+    ServerCertNotFound(String),
+    #[error("Server private key file {0} not found")]
+    ServerKeyNotFound(String),
+    #[error("Invalid CA cert file {0}")]
+    InvalidCACert(String),
+    #[error("Invalid server cert file {0}")]
+    InvalidServerCert(String),
+    #[error("Invalid server key file {0}")]
+    InvalidServerKey(String),
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet),
@@ -181,12 +187,21 @@ impl Broker {
             })?;
         }
 
+        let mut runtime = tokio::runtime::Builder::new_current_thread();
+        let runtime = runtime.enable_all().build().unwrap();
+
         // Run console in current thread, if it is configured.
         if self.config.console.is_some() {
             let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
             let console = Arc::new(console);
-            consolelink::start(console);
+            runtime.spawn(async {
+                consolelink::start(console).await;
+            });
         }
+
+        runtime.block_on(async {
+            signal::ctrl_c().await.unwrap();
+        });
 
         Ok(())
     }
@@ -207,29 +222,37 @@ impl Server {
         }
     }
 
-    async fn tls(&self) -> Result<Option<TlsAcceptor>, Error> {
-        let (certs, mut keys) = match &self.config.cert_path {
-            Some(cert_path) => {
-                let mut cert_file = BufReader::new(File::open(&cert_path)?);
-                let key_path = self.config.key_path.as_ref().ok_or(Error::NoServerKey)?;
-                let mut key_file = BufReader::new(File::open(&key_path)?);
-                let certs = certs(&mut cert_file).map_err(|_| Error::NoServerCertFile)?;
-                let keys = rsa_private_keys(&mut key_file).map_err(|_| Error::NoServerKeyFile)?;
+    fn tls(&self) -> Result<Option<TlsAcceptor>, Error> {
+        let (certs, mut keys) = match self.config.cert_path.clone() {
+            Some(cert) => {
+                // Get certificates
+                let cert_file = File::open(&cert);
+                let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert.clone()))?;
+                let certs = certs(&mut BufReader::new(cert_file));
+                let certs = certs.map_err(|_| Error::InvalidServerCert(cert))?;
+
+                // Get private key
+                let key = self.config.key_path.as_ref();
+                let key = key.ok_or(Error::ServerKeyRequired)?.clone();
+                let key_file = File::open(&key);
+                let key_file = key_file.map_err(|_| ServerKeyNotFound(key.clone()))?;
+                let keys = rsa_private_keys(&mut BufReader::new(key_file));
+                let keys = keys.map_err(|_| Error::InvalidServerKey(key))?;
                 (certs, keys)
             }
             None => return Ok(None),
         };
 
         // client authentication with a CA. CA isn't required otherwise
-        let mut server_config = match &self.config.ca_path {
-            Some(ca_path) => {
-                let mut ca_store = RootCertStore::empty();
-                let mut ca_file = BufReader::new(File::open(ca_path)?);
-                ca_store
-                    .add_pem_file(&mut ca_file)
-                    .map_err(|_| Error::NoCAFile)?;
-
-                ServerConfig::new(AllowAnyAuthenticatedClient::new(ca_store))
+        let mut server_config = match self.config.ca_path.clone() {
+            Some(ca) => {
+                let ca_file = File::open(&ca);
+                let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca.clone()))?;
+                let ca_file = &mut BufReader::new(ca_file);
+                let mut store = RootCertStore::empty();
+                let o = store.add_pem_file(ca_file);
+                o.map_err(|_| Error::InvalidCACert(ca))?;
+                ServerConfig::new(AllowAnyAuthenticatedClient::new(store))
             }
             None => ServerConfig::new(NoClientAuth::new()),
         };
@@ -247,7 +270,7 @@ impl Server {
         let mut count = 0;
 
         let config = Arc::new(self.config.connections.clone());
-        let acceptor = self.tls().await?;
+        let acceptor = self.tls()?;
         let max_incoming_size = config.max_payload_size;
 
         info!("Waiting for connections on {}. Server = {}", addr, self.id);
@@ -304,22 +327,22 @@ impl Connector {
         let (execute_will, pending) = match link.start().await {
             // Connection get close. This shouldn't usually happen
             Ok(_) => {
-                error!("Link stopped!! Id = {}, Client Id = {}", id, client_id);
+                error!("Stopped!! Id = {} ({})", client_id, id);
                 (true, link.state.clean())
             }
             // We are representing clean close as Abort in `Network`
             Err(remotelink::Error::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => {
-                info!("Link closed!! Id = {}, Client Id = {}", id, client_id);
+                info!("Closed!! Id = {} ({})", client_id, id);
                 (true, link.state.clean())
             }
             // Client requested disconnection.
             Err(remotelink::Error::Disconnect) => {
-                info!("Disconnected!! Id = {}, Client Id = {}", id, client_id);
+                info!("Disconnected!! Id = {} ({})", client_id, id);
                 (false, link.state.clean())
             }
             // Any other error
             Err(e) => {
-                error!("Stopped!! Id = {}, Client Id = {}, {}", id, client_id, e.to_string());
+                error!("Error!! Id = {} ({}), {}", client_id, id, e.to_string());
                 (true, link.state.clean())
             }
         };
