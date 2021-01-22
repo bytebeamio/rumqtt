@@ -1,9 +1,6 @@
 use argh::FromArgs;
-use std::path::PathBuf;
-use std::thread;
-
 use librumqttd::{Broker, Config};
-use std::process::exit;
+use std::path::PathBuf;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -19,33 +16,35 @@ struct CommandLine {
         default = "PathBuf::from(\"config/rumqttd.conf\")"
     )]
     config: PathBuf,
+    /// enable profiling
+    #[argh(switch, short = 'p')]
+    profile: bool,
 }
 
 fn main() {
     pretty_env_logger::init();
     let commandline: CommandLine = argh::from_env();
-    let config: Config = confy::load_path(commandline.config).unwrap();
+    let config: Config = confy::load_path(&commandline.config).unwrap();
 
     #[cfg(not(target_env = "msvc"))]
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    let guard = if commandline.profile {
+        Some(pprof::ProfilerGuard::new(100).unwrap())
+    } else {
+        None
+    };
 
-    ctrlc::set_handler(move || {
-        #[cfg(not(target_env = "msvc"))]
-        profile("rumqttd.pb", &guard);
+    let o = Broker::new(config).start();
+    println!("Stopping broker!! Error = {:?}", o);
 
-        exit(0);
-    })
-    .expect("Error setting Ctrl-C handler");
-
-    let thread = thread::Builder::new().name("rumqttd-main".to_owned());
-    let thread = thread.spawn(move || Broker::new(config).start()).unwrap();
-
-    println!("{:?}", thread.join());
+    #[cfg(not(target_env = "msvc"))]
+    if commandline.profile {
+        profile("rumqttd.pb", &guard.unwrap());
+    }
 }
 
 #[cfg(not(target_env = "msvc"))]
 fn profile(name: &str, guard: &pprof::ProfilerGuard) {
-    use prost::Message;
+    use pprof::protos::Message;
     use std::{fs::File, io::Write as _};
 
     if let Ok(report) = guard.report().build() {
