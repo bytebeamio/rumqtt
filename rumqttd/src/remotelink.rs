@@ -28,7 +28,7 @@ pub struct RemoteLink {
 pub enum Error {
     #[error("I/O")]
     Io(#[from] io::Error),
-    #[error("Network error {0}")]
+    #[error("Network {0}")]
     Network(#[from] network::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),

@@ -289,7 +289,7 @@ impl Router {
 
                             // This connection might not be able to process next request. Don't schedule
                             if pause {
-                                info!("Connection busy/closed. Unschedule. Id = {}", id);
+                                info!("Connection busy. Unschedule. Id = {}", id);
                                 tracker.set_busy_unschedule(true);
                                 return;
                             }

@@ -33,6 +33,7 @@ struct Pending {
     topic: String,
     qos: QoS,
     payload: IntoIter<Bytes>,
+    collision: Option<Publish>
 }
 
 impl Pending {
@@ -41,6 +42,7 @@ impl Pending {
             topic: "".to_string(),
             qos: QoS::AtMostOnce,
             payload: vec![].into_iter(),
+            collision: None
         }
     }
 
@@ -49,11 +51,13 @@ impl Pending {
             topic,
             qos,
             payload,
+            collision: None
         }
     }
 
     pub fn len(&self) -> usize {
-        self.payload.len()
+        let len = self.collision.as_ref().map_or(0, |_| 1);
+        len + self.payload.len()
     }
 
     pub fn next(&mut self) -> Option<Bytes> {
@@ -83,8 +87,6 @@ pub struct State {
     incoming_pub: Vec<Option<u16>>,
     /// Pending publishes due to collision
     pending: Pending,
-    /// Last collision due to broker not acking in order
-    collision: Option<Publish>,
     /// Collected incoming packets
     pub incoming: Vec<Packet>,
     /// Write buffer
@@ -105,7 +107,6 @@ impl State {
             outgoing_rel: vec![None; max_inflight as usize + 1],
             incoming_pub: vec![None; std::u16::MAX as usize + 1],
             pending: Pending::empty(),
-            collision: None,
             incoming: Vec::with_capacity(10),
             write: BytesMut::with_capacity(10 * 1024),
         }
@@ -180,8 +181,8 @@ impl State {
             // that client hasn't sent ack packet yet.
             match self.outgoing_pub.get(pkid).unwrap() {
                 Some(_) => {
-                    warn!("Collision on packet id = {:?}", publish.pkid);
-                    self.collision = Some(publish);
+                    info!("Collision on packet id = {:?}. Inflight = {}", publish.pkid, self.inflight);
+                    self.pending.collision = Some(publish);
                     return Ok(());
                 }
                 None => {
@@ -275,20 +276,15 @@ impl State {
 
     pub fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), Error> {
         match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
-            Some(_) => {
-                self.inflight -= 1;
-            }
+            Some(_) => self.inflight -= 1,
             None => {
                 error!("Unsolicited puback packet: {:?}", puback.pkid);
                 return Err(Error::Unsolicited(puback.pkid));
             }
         }
 
-        // Check if there is a collision on this packet id before
-        // and write it
-        if let Some(publish) = self.check_collision(puback.pkid) {
-            publish.write(&mut self.write)?;
-        }
+        // Check if there is a collision on this packet id before and write it
+        self.check_and_resolve_collision(puback.pkid)?;
 
         // Try writing all the previous pending packets because of collision
         self.write_pending()?;
@@ -335,11 +331,8 @@ impl State {
             }
         }
 
-        // Check if there is a collision on this packet id before
-        // and write it
-        if let Some(publish) = self.check_collision(pubcomp.pkid) {
-            publish.write(&mut self.write)?;
-        }
+        // Check if there is a collision on this packet id before and write it
+        self.check_and_resolve_collision(pubcomp.pkid)?;
 
         // Try writing all the previous pending packets because of collision
         self.write_pending()?;
@@ -351,17 +344,18 @@ impl State {
         Ok(())
     }
 
-    fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
-        if let Some(publish) = &self.collision {
-            // remove acked, previously collided packet from the state
+    fn check_and_resolve_collision(&mut self, pkid: u16) -> Result<(), Error>  {
+        if let Some(publish) = &self.pending.collision {
             if publish.pkid == pkid {
-                self.collision.take().unwrap();
-                let publish = self.outgoing_pub[pkid as usize].clone().take();
-                return publish;
+                let publish = self.pending.collision.take().unwrap();
+                publish.write(&mut self.write)?;
+                self.outgoing_pub[pkid as usize] = Some(publish);
+                self.inflight += 1;
+                info!("Resolving collision on packet id = {:?}. Inflight = {}", pkid, self.inflight);
             }
         }
 
-        None
+        Ok(())
     }
 
     fn next_pkid(&mut self) -> u16 {

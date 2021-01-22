@@ -4,7 +4,6 @@ use rumqttlog::{
     Connection, ConnectionAck, Event, MetricsReply, MetricsRequest, Notification, Receiver, Sender,
 };
 use std::sync::Arc;
-use tokio_compat_02::FutureExt;
 use warp::Filter;
 
 pub struct ConsoleLink {
@@ -46,6 +45,7 @@ pub async fn start(console: Arc<ConsoleLink>) {
         .as_ref()
         .expect("Console should only be started if it is configured")
         .port;
+
     let config = warp::path!("node" / "config").map(move || {
         let config = config_console.config.clone();
         warp::reply::json(&config)
@@ -80,8 +80,5 @@ pub async fn start(console: Arc<ConsoleLink>) {
     });
 
     let routes = warp::get().and(config.or(router).or(connection));
-    warp::serve(routes)
-        .run(([127, 0, 0, 1], port))
-        .compat()
-        .await;
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 }
