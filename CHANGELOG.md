@@ -1,3 +1,22 @@
+### R6
+----------------
+mqttbytes v0.2.1
+-----------
+- **changed** Update README
+
+rumqttd v0.5.0
+-----------
+- **changed** Improve error reporting
+- **changed** Update to warp 0.3 and remove tokio compat
+- **changed** Disable async link for this release due to compilaiton error [**breaking**]
+- **fix** Fix windows compilation due to pprof
+- **fix** Fix collision retransmission logic
+
+benchmarks
+-----------
+- **feature** Adds NATS to compare parser throughput benchmarks
+
+
 ### R5
 ----------------
 mqttbytes v0.2.0
