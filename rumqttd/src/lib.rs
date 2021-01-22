@@ -319,7 +319,7 @@ impl Connector {
             }
             // Any other error
             Err(e) => {
-                error!("Stopped!! Id = {}, Client Id = {}, {:?}", id, client_id, e);
+                error!("Stopped!! Id = {}, Client Id = {}, {}", id, client_id, e.to_string());
                 (true, link.state.clean())
             }
         };
