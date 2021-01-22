@@ -52,5 +52,5 @@ fn main() {
         sub_task.await.unwrap();
     });
 }
-
  */
+fn main() {}
