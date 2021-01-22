@@ -37,3 +37,4 @@ futures-util = "0.3.8"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"
+pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }

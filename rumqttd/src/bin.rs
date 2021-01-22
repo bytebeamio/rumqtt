@@ -26,7 +26,13 @@ fn main() {
     let commandline: CommandLine = argh::from_env();
     let config: Config = confy::load_path(commandline.config).unwrap();
 
+    #[cfg(not(target_env = "msvc"))]
+    let guard = pprof::ProfilerGuard::new(100).unwrap();
+
     ctrlc::set_handler(move || {
+        #[cfg(not(target_env = "msvc"))]
+        profile("rumqttd.pb", &guard);
+
         exit(0);
     })
     .expect("Error setting Ctrl-C handler");
@@ -35,4 +41,19 @@ fn main() {
     let thread = thread.spawn(move || Broker::new(config).start()).unwrap();
 
     println!("{:?}", thread.join());
+}
+
+#[cfg(not(target_env = "msvc"))]
+fn profile(name: &str, guard: &pprof::ProfilerGuard) {
+    use prost::Message;
+    use std::{fs::File, io::Write as _};
+
+    if let Ok(report) = guard.report().build() {
+        let mut file = File::create(name).unwrap();
+        let profile = report.pprof().unwrap();
+
+        let mut content = Vec::new();
+        profile.encode(&mut content).unwrap();
+        file.write_all(&content).unwrap();
+    };
 }
