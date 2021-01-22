@@ -1,3 +1,13 @@
+### R6
+----------------
+rumqttd v0.5.0
+-----------
+- **changed** Improve error reporting
+- **fix** Fix windows compilation due to pprof
+- **fix** Fix collision retransmission logic
+- **changed** Disable async link for this release due to compilaiton error [**breaking**]
+
+
 ### R5
 ----------------
 mqttbytes v0.2.0
