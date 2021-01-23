@@ -1,4 +1,3 @@
-/*
 use librumqttd::{async_locallink::construct_broker, Config};
 use std::thread;
 
@@ -11,7 +10,6 @@ fn main() {
     thread::spawn(move || {
         router.start().unwrap();
     });
-    thread::spawn(console);
 
     // connect to get a receiver
     // TODO: Connect with a function which return tx and rx to prevent
@@ -26,6 +24,8 @@ fn main() {
     rt.build().unwrap().block_on(async {
         let (mut tx, mut rx) = builder.connect("localclient", 200).await.unwrap();
         tx.subscribe(std::iter::once("#")).await.unwrap();
+
+        let console_task = tokio::spawn(console);
 
         // subscribe and publish in a separate thread
         let pub_task = tokio::spawn(async move {
@@ -50,7 +50,6 @@ fn main() {
         servers.await;
         pub_task.await.unwrap();
         sub_task.await.unwrap();
+        console_task.await.unwrap();
     });
 }
- */
-fn main() {}

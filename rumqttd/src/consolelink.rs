@@ -14,6 +14,7 @@ pub struct ConsoleLink {
 }
 
 impl ConsoleLink {
+    /// Requires the corresponding Router to be running to complete
     pub fn new(config: Arc<Config>, router_tx: Sender<(ConnectionId, Event)>) -> ConsoleLink {
         let (connection, link_rx) = Connection::new_remote("console", true, 10);
         let message = (0, Event::Connect(connection));
