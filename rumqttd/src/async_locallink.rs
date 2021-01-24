@@ -160,12 +160,12 @@ impl LinkBuilder {
         Ok((tx, rx))
     }
 }
-
+/// Returns a Router struct to run router on a thread, console server async task, mqtt servers async task, and a LinkBuilder to make local links
 pub fn construct_broker(
     config: Config,
 ) -> (
     Router,
-    impl FnOnce(),
+    impl std::future::Future<Output = ()>,
     impl std::future::Future<Output = ()>,
     LinkBuilder,
 ) {
@@ -174,8 +174,11 @@ pub fn construct_broker(
     let console = {
         let config = config.clone().into();
         let router_tx = router_tx.clone();
-        // `ConsoleLink::new` won't terminate until router is running
-        || consolelink::start(ConsoleLink::new(config, router_tx).into())
+        async {
+            // `ConsoleLink::new` won't terminate until router is running
+            let console = ConsoleLink::new(config, router_tx).into();
+            consolelink::start(console).await
+        }
     };
 
     let server = config
