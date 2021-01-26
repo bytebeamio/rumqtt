@@ -43,8 +43,7 @@ impl OutgoingPublishBucketList {
     pub fn insert(&mut self, value: Publish) -> Result<Option<Publish>, OutOfBounds> {
         let index = value.pkid as usize;
         if let Some(elem) = self.vec.get_mut(index) {
-            let old = elem.take();
-            *elem = Some(value);
+            let old = elem.replace(value);
             if old.is_none() {
                 self.len += 1;
             }
