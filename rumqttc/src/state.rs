@@ -205,20 +205,25 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
-        if let Some(publish) = self.check_collision(puback.pkid) {
-            publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+        let pkid = puback.pkid;
+
+        if let Some(publish) = self.remove_collision(pkid) {
+            debug_assert_eq!(publish.pkid, pkid);
+            let err = publish.write(&mut self.write);
+            let _ = self.outgoing_pub.insert(publish);
+            err?; // Throw error after reinserting the `publish` into the `outgoing_pub`.
+            let event = Event::Outgoing(Outgoing::Publish(pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
 
-        match self.outgoing_pub.remove(puback.pkid)? {
+        match self.outgoing_pub.remove(pkid)? {
             Some(_) => {
                 Ok(())
             }
             None => {
-                error!("Unsolicited puback packet: {:?}", puback.pkid);
-                Err(StateError::Unsolicited(puback.pkid))
+                error!("Unsolicited puback packet: {:?}", pkid);
+                Err(StateError::Unsolicited(pkid))
             }
         }
     }
@@ -242,33 +247,39 @@ impl MqttState {
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
-        let had_pkid = self.incoming_pub.remove(pubrel.pkid)?;
+        let pkid = pubrel.pkid;
+        let had_pkid = self.incoming_pub.remove(pkid)?;
         if had_pkid {
-            PubComp::new(pubrel.pkid).write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+            PubComp::new(pkid).write(&mut self.write)?;
+            let event = Event::Outgoing(Outgoing::PubComp(pkid));
             self.events.push_back(event);
             Ok(())
         }
         else {
-            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-            Err(StateError::Unsolicited(pubrel.pkid))
+            error!("Unsolicited pubrel packet: {:?}", pkid);
+            Err(StateError::Unsolicited(pkid))
         }
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
-        if let Some(publish) = self.check_collision(pubcomp.pkid) {
-            publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+        let pkid = pubcomp.pkid;
+
+        if let Some(publish) = self.remove_collision(pkid) {
+            debug_assert_eq!(publish.pkid, pkid);
+            let err = publish.write(&mut self.write);
+            let _ = self.outgoing_pub.insert(publish);
+            err?; // Throw error after reinserting the `publish` into the `outgoing_pub`.
+            let event = Event::Outgoing(Outgoing::Publish(pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
 
-        let had_pkid = self.outgoing_rel.remove(pubcomp.pkid)?;
+        let had_pkid = self.outgoing_rel.remove(pkid)?;
         if had_pkid {
             Ok(())
         } else {
-            error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
-            Err(StateError::Unsolicited(pubcomp.pkid))
+            error!("Unsolicited pubcomp packet: {:?}", pkid);
+            Err(StateError::Unsolicited(pkid))
         }
     }
 
@@ -407,13 +418,14 @@ impl MqttState {
         Ok(())
     }
 
-    fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
+    /// If there was a collision with `pkid`, remove it both from `self.collision` and from
+    /// `outgoing_pub`.
+    fn remove_collision(&mut self, pkid: u16) -> Option<Publish> {
         if let Some(publish) = &self.collision {
             // remove acked, previously collided packet from the state
             if publish.pkid == pkid {
                 self.collision.take().unwrap();
-                let publish = self.outgoing_pub.get(pkid).unwrap_or(None).cloned();
-                return publish;
+                return self.outgoing_pub.remove(pkid).unwrap_or(None);
             }
         }
 
