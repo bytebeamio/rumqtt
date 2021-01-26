@@ -290,7 +290,8 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+        self.assign_pkid(&mut publish);
         let publish = match publish.qos {
             QoS::AtMostOnce => publish,
             QoS::AtLeastOnce | QoS::ExactlyOnce => self.save_publish(publish)?,
@@ -421,18 +422,27 @@ impl MqttState {
         Ok(pubrel)
     }
 
+    /// Ensures the `publish` has a valid `pkid` set.
+    ///
+    /// NOTE: The spec requires `pkid` to be `0` in case of `QoS::AtMostOnce` and non-zero in all
+    /// other cases.
+    fn assign_pkid(&mut self, publish: &mut Publish) {
+        match publish.qos {
+            QoS::AtMostOnce => {
+                publish.pkid = 0;
+            }
+            QoS::AtLeastOnce | QoS::ExactlyOnce => {
+                // consider PacketIdentifier(0) as uninitialized packets
+                if publish.pkid == 0 {
+                    publish.pkid = self.next_pkid();
+                }
+            }
+        }
+    }
+
     /// Add publish packet to the state and return the packet. This method clones the
     /// publish packet to save it to the state.
-    fn save_publish(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
-        let publish = match publish.pkid {
-            // consider PacketIdentifier(0) as uninitialized packets
-            0 => {
-                publish.pkid = self.next_pkid();
-                publish
-            }
-            _ => publish,
-        };
-
+    fn save_publish(&mut self, publish: Publish) -> Result<Publish, StateError> {
         // If there is an existing publish at this pkid, this implies that client
         // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
         // after a count of 'inflight' messages. This error is possible only when
