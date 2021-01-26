@@ -723,4 +723,32 @@ mod test {
         // should ping
         mqtt.outgoing_ping().unwrap();
     }
+
+    #[test]
+    fn incoming_puback_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(max_inflight + 1)));
+    }
+
+    #[test]
+    fn incoming_pubrec_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubRec(PubRec::new(max_inflight + 1)));
+    }
+
+    #[test]
+    fn incoming_pubrel_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubRel(PubRel::new(max_inflight + 1)));
+    }
+
+    #[test]
+    fn incoming_pubcomp_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubComp(PubComp::new(max_inflight + 1)));
+    }
 }
