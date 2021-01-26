@@ -70,8 +70,6 @@ pub struct MqttState {
     last_outgoing: Instant,
     /// Packet id of the last outgoing packet
     pub(crate) last_pkid: u16,
-    /// Number of outgoing inflight publishes
-    pub(crate) inflight: u16,
     /// Maximum number of allowed inflight
     pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
@@ -99,7 +97,6 @@ impl MqttState {
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: 0,
-            inflight: 0,
             max_inflight,
             outgoing_pub: OutgoingPublishBucketList::with_limit(max_inflight),
             outgoing_rel: PkidSet::with_limit(max_inflight),
@@ -109,6 +106,11 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
         }
+    }
+
+    /// Number of outgoing inflight publishes
+    pub fn inflight(&self) -> usize {
+        self.outgoing_pub.len() + self.outgoing_rel.len()
     }
 
     /// Returns inflight outgoing packets and clears internal queues
@@ -126,12 +128,7 @@ impl MqttState {
 
         self.await_pingresp = false;
         self.collision_ping_count = 0;
-        self.inflight = 0;
         pending
-    }
-
-    pub fn inflight(&self) -> u16 {
-        self.inflight
     }
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
@@ -217,7 +214,6 @@ impl MqttState {
 
         match self.outgoing_pub.remove(puback.pkid)? {
             Some(_) => {
-                self.inflight -= 1;
                 Ok(())
             }
             None => {
@@ -269,7 +265,6 @@ impl MqttState {
 
         let had_pkid = self.outgoing_rel.remove(pubcomp.pkid)?;
         if had_pkid {
-            self.inflight -= 1;
             Ok(())
         } else {
             error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
@@ -316,7 +311,6 @@ impl MqttState {
                         // packet yet. This error is possible only when broker isn't acking sequentially
                         let err = publish.write(&mut self.write);
                         let _ = self.outgoing_pub.insert(publish);
-                        self.inflight += 1;
                         err?;
                     }
                 }
@@ -534,7 +528,7 @@ mod test {
         // QoS 0 publish shouldn't be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 0);
-        assert_eq!(mqtt.inflight, 0);
+        assert_eq!(mqtt.inflight(), 0);
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
@@ -542,12 +536,12 @@ mod test {
         // Packet id should be set and publish should be saved in queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
         assert_eq!(mqtt.last_pkid, 1);
-        assert_eq!(mqtt.inflight, 1);
+        assert_eq!(mqtt.inflight(), 1);
 
         // Packet id should be incremented and publish should be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 2);
-        assert_eq!(mqtt.inflight, 2);
+        assert_eq!(mqtt.inflight(), 2);
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
@@ -555,12 +549,12 @@ mod test {
         // Packet id should be set and publish should be saved in queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
         assert_eq!(mqtt.last_pkid, 3);
-        assert_eq!(mqtt.inflight, 3);
+        assert_eq!(mqtt.inflight(), 3);
 
         // Packet id should be incremented and publish should be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 4);
-        assert_eq!(mqtt.inflight, 4);
+        assert_eq!(mqtt.inflight(), 4);
     }
 
     #[test]
@@ -621,13 +615,13 @@ mod test {
 
         mqtt.outgoing_publish(publish1).unwrap();
         mqtt.outgoing_publish(publish2).unwrap();
-        assert_eq!(mqtt.inflight, 2);
+        assert_eq!(mqtt.inflight(), 2);
 
         mqtt.handle_incoming_puback(&PubAck::new(1)).unwrap();
-        assert_eq!(mqtt.inflight, 1);
+        assert_eq!(mqtt.inflight(), 1);
 
         mqtt.handle_incoming_puback(&PubAck::new(2)).unwrap();
-        assert_eq!(mqtt.inflight, 0);
+        assert_eq!(mqtt.inflight(), 0);
 
         assert!(mqtt.outgoing_pub.get(1).unwrap().is_none());
         assert!(mqtt.outgoing_pub.get(2).unwrap().is_none());
@@ -644,7 +638,7 @@ mod test {
         let _publish_out = mqtt.outgoing_publish(publish2);
 
         mqtt.handle_incoming_pubrec(&PubRec::new(2)).unwrap();
-        assert_eq!(mqtt.inflight, 2);
+        assert_eq!(mqtt.inflight(), 2);
 
         // check if the remaining element's pkid is 1
         let backup = mqtt.outgoing_pub.get(1).unwrap().clone();
@@ -703,7 +697,7 @@ mod test {
         mqtt.handle_incoming_pubrec(&PubRec::new(1)).unwrap();
 
         mqtt.handle_incoming_pubcomp(&PubComp::new(1)).unwrap();
-        assert_eq!(mqtt.inflight, 0);
+        assert_eq!(mqtt.inflight(), 0);
     }
 
     #[test]
