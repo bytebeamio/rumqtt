@@ -292,10 +292,6 @@ impl MqttState {
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
         self.assign_pkid(&mut publish);
-        let publish = match publish.qos {
-            QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.save_publish(publish)?,
-        };
 
         debug!(
             "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
@@ -304,8 +300,33 @@ impl MqttState {
             publish.payload.len()
         );
 
-        publish.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+        let pkid = publish.pkid;
+
+        match publish.qos {
+            QoS::AtMostOnce => {
+                publish.write(&mut self.write)?;
+            }
+            QoS::AtLeastOnce | QoS::ExactlyOnce => {
+                // if there is an existing publish at this pkid, this implies that client
+                // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
+                // after a count of 'inflight' messages. this error is possible only when
+                // client isn't acking sequentially
+                if self.outgoing_pub.get(pkid as usize).unwrap().is_some() {
+                    warn!("collision on packet id = {:?}", pkid);
+                    self.collision = Some(publish);
+                    return Err(StateError::Collision(pkid));
+                } else {
+                    // if there is an existing publish at this pkid, this implies that broker hasn't acked this
+                    // packet yet. This error is possible only when broker isn't acking sequentially
+                    let err = publish.write(&mut self.write);
+                    self.outgoing_pub[pkid as usize] = Some(publish);
+                    self.inflight += 1;
+                    err?;
+                }
+            }
+        };
+
+        let event = Event::Outgoing(Outgoing::Publish(pkid));
         self.events.push_back(event);
         Ok(())
     }
@@ -438,32 +459,6 @@ impl MqttState {
                 }
             }
         }
-    }
-
-    /// Add publish packet to the state and return the packet. This method clones the
-    /// publish packet to save it to the state.
-    fn save_publish(&mut self, publish: Publish) -> Result<Publish, StateError> {
-        // If there is an existing publish at this pkid, this implies that client
-        // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
-        // after a count of 'inflight' messages. This error is possible only when
-        // client isn't acking sequentially
-        let pkid = publish.pkid;
-        if self
-            .outgoing_pub
-            .get(publish.pkid as usize)
-            .unwrap()
-            .is_some()
-        {
-            warn!("Collision on packet id = {:?}", publish.pkid);
-            self.collision = Some(publish);
-            return Err(StateError::Collision(pkid));
-        }
-
-        // if there is an existing publish at this pkid, this implies that broker hasn't acked this
-        // packet yet. This error is possible only when broker isn't acking sequentially
-        self.outgoing_pub[pkid as usize] = Some(publish.clone());
-        self.inflight += 1;
-        Ok(publish)
     }
 
     /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
