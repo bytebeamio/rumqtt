@@ -562,6 +562,25 @@ mod test {
     }
 
     #[test]
+    fn outgoing_publish_should_zero_pkid_in_case_of_qos0() {
+        let mut mqtt = build_mqttstate();
+
+        // QoS0 Publish with pkid `42`
+        let mut publish = build_outgoing_publish(QoS::AtMostOnce);
+        publish.pkid = 42;
+
+        // QoS 0 publish shouldn't be saved in queue
+        mqtt.outgoing_publish(publish).unwrap();
+        assert_eq!(mqtt.last_pkid, 0);
+
+        if let Some(super::Event::Outgoing(super::Outgoing::Publish(pkid))) = mqtt.events.pop_back() {
+            assert_eq!(pkid, 0);
+        } else {
+            assert!(false);
+        }
+    }
+
+    #[test]
     fn incoming_publish_should_be_added_to_queue_correctly() {
         let mut mqtt = build_mqttstate();
 
