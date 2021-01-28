@@ -66,11 +66,18 @@ pub async fn tls_connector(tls_config: &TlsConfiguration) -> Result<TlsConnector
                     Key::RSA(k) => rsa_private_keys(&mut BufReader::new(Cursor::new(k.clone()))),
                     Key::ECC(k) => pkcs8_private_keys(&mut BufReader::new(Cursor::new(k.clone()))),
                 };
-                let mut keys = match read_keys {
+                let keys = match read_keys {
                     Ok(v) => v,
                     Err(_e) => return Err(Error::NoValidCertInChain),
                 };
-                config.set_single_client_cert(certs, keys.remove(0))?;
+
+                // Get the first key. Error if it's not valid
+                let key = match keys.first() {
+                    Some(k) => k.clone(),
+                    None => return Err(Error::NoValidCertInChain),
+                };
+
+                config.set_single_client_cert(certs, key)?;
             }
 
             // Set ALPN

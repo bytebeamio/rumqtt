@@ -223,7 +223,7 @@ impl Server {
     }
 
     fn tls(&self) -> Result<Option<TlsAcceptor>, Error> {
-        let (certs, mut keys) = match self.config.cert_path.clone() {
+        let (certs, key) = match self.config.cert_path.clone() {
             Some(cert) => {
                 // Get certificates
                 let cert_file = File::open(&cert);
@@ -237,8 +237,15 @@ impl Server {
                 let key_file = File::open(&key);
                 let key_file = key_file.map_err(|_| ServerKeyNotFound(key.clone()))?;
                 let keys = rsa_private_keys(&mut BufReader::new(key_file));
-                let keys = keys.map_err(|_| Error::InvalidServerKey(key))?;
-                (certs, keys)
+                let keys = keys.map_err(|_| Error::InvalidServerKey(key.clone()))?;
+
+                // Get the first key
+                let key = match keys.first() {
+                    Some(k) => k.clone(),
+                    None => return Err(Error::InvalidServerKey(key.clone())),
+                };
+
+                (certs, key)
             }
             None => return Ok(None),
         };
@@ -257,7 +264,7 @@ impl Server {
             None => ServerConfig::new(NoClientAuth::new()),
         };
 
-        server_config.set_single_cert(certs, keys.remove(0))?;
+        server_config.set_single_cert(certs, key)?;
         let acceptor = TlsAcceptor::from(Arc::new(server_config));
         Ok(Some(acceptor))
     }
