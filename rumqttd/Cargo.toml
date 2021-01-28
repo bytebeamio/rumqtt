@@ -17,6 +17,9 @@ path = "src/lib.rs"
 name = "rumqttd"
 path = "src/bin.rs"
 
+[features]
+prof = ["pprof"]
+
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.5"}
 mqttbytes = { path = "../mqttbytes", version = "0.2" }
@@ -31,7 +34,7 @@ pretty_env_logger = "0.4"
 bytes = "1.0"
 warp = "0.3"
 futures-util = "0.3.8"
+pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"
-pprof = { version = "0.4", features = ["flamegraph", "protobuf"] }
