@@ -52,6 +52,8 @@ pub struct Router {
     /// replicators. Each connection will have a tx handle which they use
     /// to send data and requests to router
     router_rx: Receiver<(ConnectionId, Event)>,
+    /// Channel sender for the above reciever
+    router_tx: Sender<(ConnectionId, Event)>,
     /// Aggregates for all connections
     metrics: RouterMetrics,
 }
@@ -91,10 +93,21 @@ impl Router {
             data_waiters,
             topics_waiters,
             router_rx,
+            router_tx: router_tx.clone(),
             metrics,
         };
 
         (router, router_tx)
+    }
+
+    /// Waits on incoming events when the readyqueue.
+    pub async fn async_run(&mut self) -> Result<(), RouterError> {
+        loop {
+            match self.router_rx.async_recv().await {
+                Ok((id, data)) => self.route(id, data),
+                Err(RecvError) => return Err(RouterError::Disconnected),
+            }
+        }
     }
 
     /// Waits on incoming events when ready queue is empty.
@@ -139,6 +152,7 @@ impl Router {
             Event::Disconnect(request) => self.handle_disconnection(id, request),
             Event::Ready => self.connection_ready(id, 100),
             Event::Metrics(metrics) => self.retrieve_metrics(id, metrics),
+            Event::ConnectionReady => self.handle_ready(),
         }
     }
 
@@ -164,6 +178,14 @@ impl Router {
         };
 
         notify(&mut self.connections, id, message);
+    }
+
+    /// If thre are connections ready in the queue, process them.
+    fn handle_ready(&mut self) {
+        match self.readyqueue.pop_front() {
+            Some(id) => self.connection_ready(id, 100),
+            None => (),
+        }
     }
 
     fn handle_new_connection(&mut self, connection: Connection) {
@@ -203,6 +225,7 @@ impl Router {
 
         self.watermarks.insert_at(Acks::new(), id);
         self.readyqueue.push_back(id);
+        self.router_tx.send((id, Event::ConnectionReady)).unwrap();
 
         let message = Notification::ConnectionAck(ack);
         notify(&mut self.connections, id, message);
@@ -345,6 +368,7 @@ impl Router {
         // to ready queue.
         trace!("{:11} {:14} Id = {}", "requests", "pause", id,);
         self.readyqueue.push_back(id);
+        self.router_tx.send((id, Event::ConnectionReady)).unwrap();
     }
 
     /// Handles new incoming data on a topic
@@ -411,6 +435,7 @@ impl Router {
                     // connection back to ready queue
                     if tracker.empty_unschedule() {
                         self.readyqueue.push_back(id);
+                        self.router_tx.send((id, Event::ConnectionReady)).unwrap();
                         tracker.set_empty_unschedule(false);
                     }
                 }
@@ -429,6 +454,7 @@ impl Router {
                     // connection back to ready queue
                     if tracker.empty_unschedule() {
                         self.readyqueue.push_back(id);
+                        self.router_tx.send((id, Event::ConnectionReady)).unwrap();
                         tracker.set_empty_unschedule(false);
                     }
                 }
@@ -444,6 +470,7 @@ impl Router {
                     // connection back to ready queue
                     if tracker.empty_unschedule() {
                         self.readyqueue.push_back(id);
+                        self.router_tx.send((id, Event::ConnectionReady)).unwrap();
                         tracker.set_empty_unschedule(false);
                     }
                 }
@@ -573,6 +600,9 @@ impl Router {
             // connection back to ready queue
             if tracker.empty_unschedule() {
                 self.readyqueue.push_back(link_id);
+                self.router_tx
+                    .send((link_id, Event::ConnectionReady))
+                    .unwrap();
                 tracker.set_empty_unschedule(false);
             }
         }
@@ -605,6 +635,9 @@ impl Router {
             // connection back to ready queue
             if tracker.empty_unschedule() {
                 self.readyqueue.push_back(link_id);
+                self.router_tx
+                    .send((link_id, Event::ConnectionReady))
+                    .unwrap();
                 tracker.set_empty_unschedule(false);
             }
         }

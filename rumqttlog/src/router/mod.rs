@@ -30,6 +30,8 @@ pub enum Event {
     Disconnect(Disconnection),
     /// Get metrics of a connection or all connections
     Metrics(MetricsRequest),
+    /// Gets fired off when the connect is ready for more processing
+    ConnectionReady,
 }
 
 /// Requests for pull operations
