@@ -2,8 +2,10 @@ use crate::Id;
 use mqttbytes::v4::*;
 use mqttbytes::*;
 use rumqttlog::{
-    Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, SendError, Sender,
+    Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, RecvTimeoutError,
+    SendError, Sender,
 };
+use std::time::Instant;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -15,6 +17,8 @@ pub enum LinkError {
     Send(#[from] SendError<(Id, Event)>),
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
+    #[error("Channel timeout recv error")]
+    RecvTimeout(#[from] RecvTimeoutError),
 }
 
 pub struct LinkTx {
@@ -100,6 +104,12 @@ impl LinkRx {
 
     pub fn recv(&mut self) -> Result<Option<Data>, LinkError> {
         let message = self.link_rx.recv()?;
+        let message = self.handle_router_response(message)?;
+        Ok(message)
+    }
+
+    pub fn recv_deadline(&mut self, deadline: Instant) -> Result<Option<Data>, LinkError> {
+        let message = self.link_rx.recv_deadline(deadline)?;
         let message = self.handle_router_response(message)?;
         Ok(message)
     }

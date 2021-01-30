@@ -17,7 +17,7 @@ segments = "0.1"
 thiserror = "1"
 log = "0.4"
 fnv = "1"
-jackiechan = "0.0.2"
+jackiechan = "0.0.4"
 
 [dev-dependencies]
 argh = "0.1"
