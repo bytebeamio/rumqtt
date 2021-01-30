@@ -14,7 +14,7 @@ use crate::remotelink::RemoteLink;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::{signal, task, time};
+use tokio::{task, time};
 use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
 use tokio_rustls::rustls::{
     AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig, TLSError,
@@ -81,7 +81,7 @@ pub struct Config {
     pub servers: HashMap<String, ServerSettings>,
     pub cluster: Option<HashMap<String, MeshSettings>>,
     pub replicator: Option<ConnectionSettings>,
-    pub console: Option<ConsoleSettings>,
+    pub console: ConsoleSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -191,16 +191,10 @@ impl Broker {
         let runtime = runtime.enable_all().build().unwrap();
 
         // Run console in current thread, if it is configured.
-        if self.config.console.is_some() {
-            let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
-            let console = Arc::new(console);
-            runtime.spawn(async {
-                consolelink::start(console).await;
-            });
-        }
-
+        let console = ConsoleLink::new(self.config.clone(), self.router_tx.clone());
+        let console = Arc::new(console);
         runtime.block_on(async {
-            signal::ctrl_c().await.unwrap();
+            consolelink::start(console).await;
         });
 
         Ok(())
