@@ -1,8 +1,23 @@
+#[cfg(feature = "tokio-runtime")]
 use tokio::net::TcpStream;
+#[cfg(feature = "tokio-runtime")]
 use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
+#[cfg(feature = "tokio-runtime")]
 use tokio_rustls::rustls::{ClientConfig, TLSError};
+#[cfg(feature = "tokio-runtime")]
 use tokio_rustls::webpki::{self, DNSNameRef, InvalidDNSNameError};
+#[cfg(feature = "tokio-runtime")]
 use tokio_rustls::{client::TlsStream, TlsConnector};
+#[cfg(feature = "async-std-runtime")]
+use async_std::net::TcpStream;
+#[cfg(feature = "async-std-runtime")]
+use rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
+#[cfg(feature = "async-std-runtime")]
+use rustls::{ClientConfig, TLSError};
+#[cfg(feature = "async-std-runtime")]
+use webpki::{self, InvalidDNSNameError};
+#[cfg(feature = "async-std-runtime")]
+use async_tls::{client::TlsStream, TlsConnector};
 
 use crate::{Key, MqttOptions, TlsConfiguration};
 
@@ -100,7 +115,10 @@ pub async fn tls_connect(
     let addr = options.broker_addr.as_str();
     let port = options.port;
     let connector = tls_connector(tls_config).await?;
+    #[cfg(feature = "tokio-runtime")]
     let domain = DNSNameRef::try_from_ascii_str(&options.broker_addr)?;
+    #[cfg(feature = "async-std-runtime")]
+    let domain = &options.broker_addr;
     let tcp = TcpStream::connect((addr, port)).await?;
     let tls = connector.connect(domain, tcp).await?;
     Ok(tls)

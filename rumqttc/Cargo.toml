@@ -14,21 +14,32 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-websocket = ["async-tungstenite", "ws_stream_tungstenite"]
+default = ["tokio-runtime"]
+websocket = ["websocket-tokio-runtime"]
+websocket-tokio-runtime = ["async-tungstenite", "async-tungstenite/tokio-rustls", "ws_stream_tungstenite", "ws_stream_tungstenite/tokio_io"]
+websocket-async-std-runtime = ["async-tungstenite", "async-tungstenite/async-tls", "async-tungstenite/async-std-runtime", "ws_stream_tungstenite"]
+tokio-runtime = ["tokio", "tokio-rustls"]
+async-std-runtime = ["async-std", "async-io", "futures", "async-tls", "rustls"]
 
 [dependencies]
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["full"], optional = true }
+async-std = { version = "1.6", optional = true }
+async-io = { version = "1", optional = true }
+futures = { version = "0.3", optional = true }
 bytes = "1.0"
 webpki = "0.21"
-tokio-rustls = "0.22"
-async-tungstenite = { version = "0.11.0", default-features = false, features = ["tokio-rustls"], optional = true }
-ws_stream_tungstenite = { version = "0.4.0", default-features = false, features = ["tokio_io"], optional = true }
+tokio-rustls = { version = "0.22", optional = true }
+async-tungstenite = { version = "0.11.0", default-features = false, features = [], optional = true }
+ws_stream_tungstenite = { version = "0.4.0", default-features = false, features = [], optional = true }
+async-tls = { version = "0.11", optional = true }
+rustls = {version = "0.19", optional = true }
 mqttbytes = { path = "../mqttbytes", version = "0.2" }
 pollster = "0.2"
 async-channel = "1.5"
 log = "0.4"
 thiserror = "1.0.21"
 http = "^0.2"
+pin-project = "1"
 
 [dev-dependencies]
 pretty_env_logger = "0.4"

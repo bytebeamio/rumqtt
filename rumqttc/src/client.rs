@@ -6,8 +6,11 @@ use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
 use mqttbytes::v4::*;
 use mqttbytes::*;
+#[cfg(feature = "tokio-runtime")]
 use std::mem;
+#[cfg(feature = "tokio-runtime")]
 use tokio::runtime;
+#[cfg(feature = "tokio-runtime")]
 use tokio::runtime::Runtime;
 
 /// Client Error
@@ -142,9 +145,8 @@ impl Client {
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
-        let runtime = runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
-        let connection = Connection::new(eventloop, runtime);
+        let connection = Connection::new(eventloop);
         (client, connection)
     }
 
@@ -194,12 +196,19 @@ impl Client {
 ///  MQTT connection. Maintains all the necessary state
 pub struct Connection {
     pub eventloop: EventLoop,
+    #[cfg(feature = "tokio-runtime")]
     runtime: Option<Runtime>,
 }
 
 impl Connection {
-    fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
+    #[cfg(feature = "tokio-runtime")]
+    fn new(eventloop: EventLoop) -> Connection {
+        let runtime = runtime::Builder::new_current_thread().enable_all().build().unwrap();
         Connection { eventloop, runtime: Some(runtime) }
+    }
+    #[cfg(feature = "async-std-runtime")]
+    fn new(eventloop: EventLoop) -> Connection {
+        Connection { eventloop }
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
@@ -207,24 +216,48 @@ impl Connection {
     /// Just continuing to loop will reconnect
     /// **NOTE** Don't block this while iterating
     #[must_use = "Connection should be iterated over a loop to make progress"]
+    #[cfg(feature = "tokio-runtime")]
     pub fn iter(&mut self) -> Iter {
         let runtime = self.runtime.take().unwrap();
         Iter { connection: self, runtime }
+    }
+
+    /// Returns an iterator over this connection. Iterating over this is all that's
+    /// necessary to make connection progress and maintain a robust connection.
+    /// Just continuing to loop will reconnect
+    /// **NOTE** Don't block this while iterating
+    #[must_use = "Connection should be iterated over a loop to make progress"]
+    #[cfg(feature = "async-std-runtime")]
+    pub fn iter(&mut self) -> Iter {
+        Iter { connection: self }
     }
 }
 
 /// Iterator which polls the eventloop for connection progress
 pub struct Iter<'a> {
     connection: &'a mut Connection,
+    #[cfg(feature = "tokio-runtime")]
     runtime: runtime::Runtime,
+}
+
+#[cfg(feature = "tokio-runtime")]
+impl<'a> Iter<'a> {
+    fn poll_blocking(&mut self) -> Result<Event, ConnectionError> {
+        self.runtime.block_on(self.connection.eventloop.poll())
+    }
+}
+#[cfg(feature = "async-std-runtime")]
+impl<'a> Iter<'a> {
+    fn poll_blocking(&mut self) -> Result<Event, ConnectionError> {
+        async_std::task::block_on(self.connection.eventloop.poll())
+    }
 }
 
 impl<'a> Iterator for Iter<'a> {
     type Item = Result<Event, ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let f = self.connection.eventloop.poll();
-        match self.runtime.block_on(f) {
+        match self.poll_blocking() {
             Ok(v) => Some(Ok(v)),
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
@@ -240,6 +273,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+#[cfg(feature = "tokio-runtime")]
 impl<'a> Drop for Iter<'a> {
     fn drop(&mut self) {
         // TODO: Don't create new runtime in drop

@@ -108,6 +108,7 @@ mod eventloop;
 mod framed;
 mod state;
 mod tls;
+mod helpers;
 
 pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
@@ -115,8 +116,14 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
+#[cfg(feature = "tokio-runtime")]
 pub use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
+#[cfg(feature = "tokio-runtime")]
 pub use tokio_rustls::rustls::ClientConfig;
+#[cfg(feature = "async-std-runtime")]
+pub use rustls::internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
+#[cfg(feature = "async-std-runtime")]
+pub use rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
@@ -192,11 +199,11 @@ impl From<Unsubscribe> for Request {
 pub enum Transport {
     Tcp,
     Tls(TlsConfiguration),
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))))]
     Ws,
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))))]
     Wss(TlsConfiguration),
 }
 
@@ -232,15 +239,15 @@ impl Transport {
     }
 
     /// Use websockets as transport
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))))]
     pub fn ws() -> Self {
         Self::Ws
     }
 
     /// Use secure websockets with tls as transport
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))))]
     pub fn wss(
         ca: Vec<u8>,
         client_auth: Option<(Vec<u8>, Key)>,
@@ -255,8 +262,8 @@ impl Transport {
         Self::wss_with_config(config)
     }
 
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))))]
     pub fn wss_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Wss(tls_config)
     }
@@ -527,7 +534,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "websocket")]
+    #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
     fn no_scheme() {
         let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
 

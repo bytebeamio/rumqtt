@@ -3,19 +3,32 @@ use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
-#[cfg(feature = "websocket")]
+#[cfg(feature = "websocket-tokio-runtime")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
+#[cfg(feature = "websocket-async-std-runtime")]
+use async_tungstenite::async_std::{connect_async, connect_async_with_tls_connector};
 use mqttbytes::v4::*;
+#[cfg(feature = "tokio-runtime")]
 use tokio::net::TcpStream;
+#[cfg(feature = "async-std-runtime")]
+use async_std::net::TcpStream;
+#[cfg(feature = "tokio-runtime")]
 use tokio::select;
+#[cfg(feature = "async-std-runtime")]
+use futures::select;
+#[cfg(feature = "tokio-runtime")]
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
-#[cfg(feature = "websocket")]
+#[cfg(feature = "async-std-runtime")]
+use crate::helpers::time::{self,error::Elapsed, Instant, Sleep};
+#[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
 use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
+use crate::helpers::cond_fut;
+use crate::helpers::fuse;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -162,7 +175,7 @@ impl EventLoop {
         // instead of returning a None event, we try again.
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state) => {
+            o = fuse(network.readb(&mut self.state)) => {
                 o?;
                 // flush all the acks and return first incoming packet
                 network.flush(&mut self.state.write).await?;
@@ -192,7 +205,7 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.recv(), if !inflight_full && !pending && !collision => match o {
+            o = fuse(cond_fut(self.requests_rx.recv(), !inflight_full && !pending && !collision)) => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
@@ -202,10 +215,14 @@ impl EventLoop {
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
-            Some(request) = next_pending(throttle, &mut self.pending), if pending => {
-                self.state.handle_outgoing_packet(request)?;
-                network.flush(&mut self.state.write).await?;
-                Ok(self.state.events.pop_front().unwrap())
+            request = fuse(cond_fut(next_pending(throttle, &mut self.pending), pending)) => {
+                if let Some(request) = request {
+                    self.state.handle_outgoing_packet(request)?;
+                    network.flush(&mut self.state.write).await?;
+                    Ok(self.state.events.pop_front().unwrap())
+                } else {
+                    unreachable!()
+                }
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
@@ -218,7 +235,7 @@ impl EventLoop {
                 Ok(self.state.events.pop_front().unwrap())
             }
             // cancellation requests to stop the polling
-            _ = self.cancel_rx.recv() => {
+            _ = fuse(self.cancel_rx.recv()) => {
                 Err(ConnectionError::Cancel)
             }
         }
@@ -229,8 +246,8 @@ async fn connect_or_cancel(options: &MqttOptions, cancel_rx: &Receiver<()>) -> R
     // select here prevents cancel request from being blocked until connection request is
     // resolved. Returns with an error if connections fail continuously
     select! {
-        o = connect(options) => o,
-        _ = cancel_rx.recv() => {
+        o = fuse(connect(options)) => o,
+        _ = fuse(cancel_rx.recv()) => {
             Err(ConnectionError::Cancel)
         }
     }
@@ -276,7 +293,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = tls::tls_connect(&options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
-        #[cfg(feature = "websocket")]
+        #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
         Transport::Ws => {
             let request = http::Request::builder()
                 .method(http::Method::GET)
@@ -289,7 +306,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
-        #[cfg(feature = "websocket")]
+        #[cfg(any(feature = "websocket-tokio-runtime", feature = "websocket-async-std-runtime"))]
         Transport::Wss(tls_config) => {
             let request = http::Request::builder()
                 .method(http::Method::GET)
