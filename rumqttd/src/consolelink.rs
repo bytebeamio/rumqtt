@@ -39,7 +39,10 @@ impl ConsoleLink {
 
 pub async fn start(console: Arc<ConsoleLink>) {
     let config_console = console.clone();
-    let port = config_console.config.console.port;
+    let address = config_console
+        .config
+        .console
+        .listen;
 
     let config = warp::path!("node" / "config").map(move || {
         let config = config_console.config.clone();
@@ -75,5 +78,5 @@ pub async fn start(console: Arc<ConsoleLink>) {
     });
 
     let routes = warp::get().and(config.or(router).or(connection));
-    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+    warp::serve(routes).run(address).await;
 }
