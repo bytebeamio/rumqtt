@@ -11,7 +11,8 @@ name: features
 jobs:
   test:
     name: Rumqtt build and test
-    runs-on: [self-hosted, linux, X64, rumqtt]
+    # runs-on: [self-hosted, linux, X64, rumqtt]
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
