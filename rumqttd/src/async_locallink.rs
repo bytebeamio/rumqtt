@@ -58,9 +58,6 @@ impl AsyncLinkTx {
             .map(|topic_path| SubscribeFilter {
                 path: topic_path.into(),
                 qos: QoS::AtMostOnce,
-                nolocal: false,
-                preserve_retain: false,
-                retain_forward_rule: RetainForwardRule::OnEverySubscribe,
             })
             .collect();
         let subscribe = Subscribe { pkid: 0, filters };
