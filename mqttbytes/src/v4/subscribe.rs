@@ -16,9 +16,6 @@ impl Subscribe {
         let filter = SubscribeFilter {
             path: path.into(),
             qos,
-            nolocal: false,
-            preserve_retain: false,
-            retain_forward_rule: RetainForwardRule::OnEverySubscribe,
         };
 
         let mut filters = Vec::new();
@@ -44,13 +41,7 @@ impl Subscribe {
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
-        let filter = SubscribeFilter {
-            path,
-            qos,
-            nolocal: false,
-            preserve_retain: false,
-            retain_forward_rule: RetainForwardRule::OnEverySubscribe,
-        };
+        let filter = SubscribeFilter { path, qos };
 
         self.filters.push(filter);
         self
@@ -75,26 +66,9 @@ impl Subscribe {
             let options = read_u8(&mut bytes)?;
             let requested_qos = options & 0b0000_0011;
 
-            let nolocal = options >> 2 & 0b0000_0001;
-            let nolocal = if nolocal == 0 { false } else { true };
-
-            let preserve_retain = options >> 3 & 0b0000_0001;
-            let preserve_retain = if preserve_retain == 0 { false } else { true };
-
-            let retain_forward_rule = (options >> 4) & 0b0000_0011;
-            let retain_forward_rule = match retain_forward_rule {
-                0 => RetainForwardRule::OnEverySubscribe,
-                1 => RetainForwardRule::OnNewSubscribe,
-                2 => RetainForwardRule::Never,
-                r => return Err(Error::InvalidRetainForwardRule(r)),
-            };
-
             filters.push(SubscribeFilter {
                 path,
                 qos: qos(requested_qos)?,
-                nolocal,
-                preserve_retain,
-                retain_forward_rule,
             });
         }
 
@@ -128,35 +102,11 @@ impl Subscribe {
 pub struct SubscribeFilter {
     pub path: String,
     pub qos: QoS,
-    pub nolocal: bool,
-    pub preserve_retain: bool,
-    pub retain_forward_rule: RetainForwardRule,
 }
 
 impl SubscribeFilter {
     pub fn new(path: String, qos: QoS) -> SubscribeFilter {
-        SubscribeFilter {
-            path,
-            qos,
-            nolocal: false,
-            preserve_retain: false,
-            retain_forward_rule: RetainForwardRule::OnEverySubscribe,
-        }
-    }
-
-    pub fn set_nolocal(&mut self, flag: bool) -> &mut Self {
-        self.nolocal = flag;
-        self
-    }
-
-    pub fn set_preserve_retain(&mut self, flag: bool) -> &mut Self {
-        self.preserve_retain = flag;
-        self
-    }
-
-    pub fn set_retain_forward_rule(&mut self, rule: RetainForwardRule) -> &mut Self {
-        self.retain_forward_rule = rule;
-        self
+        SubscribeFilter { path, qos }
     }
 
     pub fn len(&self) -> usize {
@@ -167,20 +117,6 @@ impl SubscribeFilter {
     fn write(&self, buffer: &mut BytesMut) {
         let mut options = 0;
         options |= self.qos as u8;
-
-        if self.nolocal {
-            options |= 1 << 2;
-        }
-
-        if self.preserve_retain {
-            options |= 1 << 3;
-        }
-
-        match self.retain_forward_rule {
-            RetainForwardRule::OnEverySubscribe => options |= 0 << 4,
-            RetainForwardRule::OnNewSubscribe => options |= 1 << 4,
-            RetainForwardRule::Never => options |= 2 << 4,
-        }
 
         write_mqtt_string(buffer, self.path.as_str());
         buffer.put_u8(options);
@@ -206,11 +142,7 @@ impl fmt::Debug for Subscribe {
 
 impl fmt::Debug for SubscribeFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Filter = {}, Qos = {:?}, Nolocal = {}, Preserve retain = {}, Forward rule = {:?}",
-            self.path, self.qos, self.nolocal, self.preserve_retain, self.retain_forward_rule
-        )
+        write!(f, "Filter = {}, Qos = {:?}", self.path, self.qos)
     }
 }
 
