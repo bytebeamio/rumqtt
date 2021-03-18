@@ -5,11 +5,11 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum ConnectReturnCode {
-    Accepted = 0,
+    Success = 0,
     RefusedProtocolVersion,
     BadClientId,
     ServiceUnavailable,
-    BadUsernamePassword,
+    BadUserNamePassword,
     NotAuthorized,
 }
 
@@ -66,11 +66,11 @@ impl ConnAck {
 /// Connection return code type
 fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
     match num {
-        0 => Ok(ConnectReturnCode::Accepted),
+        0 => Ok(ConnectReturnCode::Success),
         1 => Ok(ConnectReturnCode::RefusedProtocolVersion),
         2 => Ok(ConnectReturnCode::BadClientId),
         3 => Ok(ConnectReturnCode::ServiceUnavailable),
-        4 => Ok(ConnectReturnCode::BadUsernamePassword),
+        4 => Ok(ConnectReturnCode::BadUserNamePassword),
         5 => Ok(ConnectReturnCode::NotAuthorized),
         num => Err(Error::InvalidConnectReturnCode(num)),
     }
@@ -106,7 +106,7 @@ mod test {
             connack,
             ConnAck {
                 session_present: true,
-                code: ConnectReturnCode::Accepted,
+                code: ConnectReturnCode::Success,
             }
         );
     }
@@ -115,7 +115,7 @@ mod test {
     fn connack_encoding_works() {
         let connack = ConnAck {
             session_present: true,
-            code: ConnectReturnCode::Accepted,
+            code: ConnectReturnCode::Success,
         };
 
         let mut buf = BytesMut::new();
