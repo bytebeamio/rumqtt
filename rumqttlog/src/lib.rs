@@ -9,11 +9,11 @@ use std::path::PathBuf;
 
 pub use router::connection::Connection;
 pub use router::{
-    ConnectionAck, Data, DataRequest, Disconnection, Event, Message, MetricsReply,
-    MetricsRequest, Notification, Router,
+    ConnectionAck, Data, DataRequest, Disconnection, Event, Message, MetricsReply, MetricsRequest,
+    Notification, Router,
 };
 
-pub use jackiechan::{bounded, Receiver, RecvError, SendError, Sender};
+pub use jackiechan::{bounded, Receiver, RecvError, RecvTimeoutError, SendError, Sender};
 use serde::{Deserialize, Serialize};
 
 pub type ConnectionId = usize;
@@ -41,4 +41,3 @@ impl Default for Config {
         }
     }
 }
-

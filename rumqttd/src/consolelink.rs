@@ -39,12 +39,7 @@ impl ConsoleLink {
 
 pub async fn start(console: Arc<ConsoleLink>) {
     let config_console = console.clone();
-    let port = config_console
-        .config
-        .console
-        .as_ref()
-        .expect("Console should only be started if it is configured")
-        .port;
+    let port = config_console.config.console.port;
 
     let config = warp::path!("node" / "config").map(move || {
         let config = config_console.config.clone();

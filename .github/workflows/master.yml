@@ -13,7 +13,8 @@ env:
 jobs:
   test:
     name: Source test
-    runs-on: [self-hosted, linux, X64, rumqtt]
+    # runs-on: [self-hosted, linux, X64, rumqtt]
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -44,12 +45,12 @@ jobs:
         args: --release --all-features
 
     # Setup gcloud CLI
-    - name: Gcloud commandline setup
-      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
-      with:
-        version: '290.0.1'
-        service_account_key: ${{ secrets.GCE_SA_KEY }}
-        project_id: ${{ secrets.GCE_PROJECT }}
+    # - name: Gcloud commandline setup
+    #   uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+    #   with:
+    #     version: '290.0.1'
+    #     service_account_key: ${{ secrets.GCE_SA_KEY }}
+    #     project_id: ${{ secrets.GCE_PROJECT }}
 
     # Configure Docker to use the gcloud command-line tool as a credential
     # helper for authentication
@@ -75,8 +76,8 @@ jobs:
         docker push "asia.gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA"
 
     # Deploy the container
-    - name: Deploy to google cloud
-      run: |-
-        gcloud compute instances update-container "$GCE_INSTANCE" \
-          --zone "$GCE_INSTANCE_ZONE" \
-          --container-image "asia.gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA"
+    # - name: Deploy to google cloud
+    #   run: |-
+    #     gcloud compute instances update-container "$GCE_INSTANCE" \
+    #       --zone "$GCE_INSTANCE_ZONE" \
+    #       --container-image "asia.gcr.io/$PROJECT_ID/$GCE_INSTANCE-image:$GITHUB_SHA"
