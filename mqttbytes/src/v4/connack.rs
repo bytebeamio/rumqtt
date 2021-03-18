@@ -6,27 +6,11 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 #[repr(u8)]
 pub enum ConnectReturnCode {
     Success = 0,
-    UnspecifiedError = 128,
-    MalformedPacket = 129,
-    ProtocolError = 130,
-    ImplementationSpecificError = 131,
-    UnsupportedProtocolVersion = 132,
-    ClientIdentifierNotValid = 133,
-    BadUserNamePassword = 134,
-    NotAuthorized = 135,
-    ServerUnavailable = 136,
-    ServerBusy = 137,
-    Banned = 138,
-    BadAuthenticationMethod = 140,
-    TopicNameInvalid = 144,
-    PacketTooLarge = 149,
-    QuotaExceeded = 151,
-    PayloadFormatInvalid = 153,
-    RetainNotSupported = 154,
-    QoSNotSupported = 155,
-    UseAnotherServer = 156,
-    ServerMoved = 157,
-    ConnectionRateExceeded = 159,
+    RefusedProtocolVersion,
+    BadClientId,
+    ServiceUnavailable,
+    BadUserNamePassword,
+    NotAuthorized,
 }
 
 /// Acknowledgement to connect packet
@@ -45,8 +29,8 @@ impl ConnAck {
     }
 
     fn len(&self) -> usize {
-        let len = 1  // sesssion present
-                        + 1; // code
+        // sesssion present + code
+        let len = 1 + 1;
         len
     }
 
@@ -81,33 +65,15 @@ impl ConnAck {
 
 /// Connection return code type
 fn connect_return(num: u8) -> Result<ConnectReturnCode, Error> {
-    let code = match num {
-        0 => ConnectReturnCode::Success,
-        128 => ConnectReturnCode::UnspecifiedError,
-        129 => ConnectReturnCode::MalformedPacket,
-        130 => ConnectReturnCode::ProtocolError,
-        131 => ConnectReturnCode::ImplementationSpecificError,
-        132 => ConnectReturnCode::UnsupportedProtocolVersion,
-        133 => ConnectReturnCode::ClientIdentifierNotValid,
-        134 => ConnectReturnCode::BadUserNamePassword,
-        135 => ConnectReturnCode::NotAuthorized,
-        136 => ConnectReturnCode::ServerUnavailable,
-        137 => ConnectReturnCode::ServerBusy,
-        138 => ConnectReturnCode::Banned,
-        140 => ConnectReturnCode::BadAuthenticationMethod,
-        144 => ConnectReturnCode::TopicNameInvalid,
-        149 => ConnectReturnCode::PacketTooLarge,
-        151 => ConnectReturnCode::QuotaExceeded,
-        153 => ConnectReturnCode::PayloadFormatInvalid,
-        154 => ConnectReturnCode::RetainNotSupported,
-        155 => ConnectReturnCode::QoSNotSupported,
-        156 => ConnectReturnCode::UseAnotherServer,
-        157 => ConnectReturnCode::ServerMoved,
-        159 => ConnectReturnCode::ConnectionRateExceeded,
-        num => return Err(Error::InvalidConnectReturnCode(num)),
-    };
-
-    Ok(code)
+    match num {
+        0 => Ok(ConnectReturnCode::Success),
+        1 => Ok(ConnectReturnCode::RefusedProtocolVersion),
+        2 => Ok(ConnectReturnCode::BadClientId),
+        3 => Ok(ConnectReturnCode::ServiceUnavailable),
+        4 => Ok(ConnectReturnCode::BadUserNamePassword),
+        5 => Ok(ConnectReturnCode::NotAuthorized),
+        num => Err(Error::InvalidConnectReturnCode(num)),
+    }
 }
 
 #[cfg(test)]
@@ -157,4 +123,3 @@ mod test {
         assert_eq!(buf, vec![0b0010_0000, 0x02, 0x01, 0x00]);
     }
 }
-
