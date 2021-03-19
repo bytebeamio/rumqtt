@@ -2,7 +2,7 @@
 extern crate log;
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use std::time::Duration;
 use std::{io, thread};
 
@@ -86,7 +86,7 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
-    pub port: u16,
+    pub listen: SocketAddr,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
@@ -108,13 +108,12 @@ pub struct ConnectionSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeshSettings {
-    pub host: String,
-    pub port: u16,
+    pub address: SocketAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsoleSettings {
-    pub port: u16,
+    pub listen: SocketAddr,
 }
 
 impl Default for ServerSettings {
@@ -264,9 +263,7 @@ impl Server {
     }
 
     async fn start(&self) -> Result<(), Error> {
-        let addr = format!("0.0.0.0:{}", self.config.port);
-
-        let listener = TcpListener::bind(&addr).await?;
+        let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count = 0;
 
@@ -274,7 +271,7 @@ impl Server {
         let acceptor = self.tls()?;
         let max_incoming_size = config.max_payload_size;
 
-        info!("Waiting for connections on {}. Server = {}", addr, self.id);
+        info!("Waiting for connections on {}. Server = {}", self.config.listen, self.id);
         loop {
             let (stream, addr) = listener.accept().await?;
             let network = match &acceptor {
