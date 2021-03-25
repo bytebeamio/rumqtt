@@ -2,9 +2,9 @@
 extern crate log;
 
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc};
 use std::time::Duration;
 use std::{io, thread};
+use std::{net::SocketAddr, sync::Arc};
 
 use mqttbytes::v4::Packet;
 use rumqttlog::*;
@@ -180,7 +180,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
                 runtime.block_on(async {
                     if let Err(e) = server.start().await {
-                        error!("Accept loop error: {:?}", e.to_string());
+                        error!("Stopping server. Accept loop error: {:?}", e.to_string());
                     }
                 });
             })?;
@@ -271,13 +271,24 @@ impl Server {
         let acceptor = self.tls()?;
         let max_incoming_size = config.max_payload_size;
 
-        info!("Waiting for connections on {}. Server = {}", self.config.listen, self.id);
+        info!(
+            "Waiting for connections on {}. Server = {}",
+            self.config.listen, self.id
+        );
         loop {
             let (stream, addr) = listener.accept().await?;
             let network = match &acceptor {
                 Some(acceptor) => {
                     info!("{}. Accepting TLS connection from: {}", count, addr);
-                    Network::new(acceptor.accept(stream).await?, max_incoming_size)
+                    let stream = match acceptor.accept(stream).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!("Failed to accept TLS connection. Error = {:?}", e);
+                            continue;
+                        }
+                    };
+
+                    Network::new(stream, max_incoming_size)
                 }
                 None => {
                     info!("{}. Accepting TCP connection from: {}", count, addr);
