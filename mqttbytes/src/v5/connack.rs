@@ -49,7 +49,7 @@ impl ConnAck {
     }
 
     fn len(&self) -> usize {
-        let mut len = 1  // sesssion present
+        let mut len = 1  // session present
                         + 1; // code
 
         if let Some(properties) = &self.properties {
