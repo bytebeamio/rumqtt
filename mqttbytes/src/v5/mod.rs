@@ -44,7 +44,7 @@ pub enum Packet {
     UnsubAck(UnsubAck),
     PingReq,
     PingResp,
-    Disconnect,
+    Disconnect(Disconnect),
 }
 
 #[repr(u8)]
@@ -127,7 +127,6 @@ pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
         return match packet_type {
             PacketType::PingReq => Ok(Packet::PingReq),
             PacketType::PingResp => Ok(Packet::PingResp),
-            PacketType::Disconnect => Ok(Packet::Disconnect),
             _ => Err(Error::PayloadRequired),
         };
     }
@@ -147,7 +146,7 @@ pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
         PacketType::UnsubAck => Packet::UnsubAck(UnsubAck::read(fixed_header, packet)?),
         PacketType::PingReq => Packet::PingReq,
         PacketType::PingResp => Packet::PingResp,
-        PacketType::Disconnect => Packet::Disconnect,
+        PacketType::Disconnect => Packet::Disconnect(Disconnect::read(fixed_header, packet)?),
     };
 
     Ok(packet)
