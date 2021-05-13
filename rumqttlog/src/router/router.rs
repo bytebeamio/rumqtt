@@ -7,8 +7,8 @@ use thiserror::Error;
 use super::connection::ConnectionType;
 use super::readyqueue::ReadyQueue;
 use super::slab::Slab;
-use crate::logs::acks::Acks;
 use super::*;
+use crate::logs::acks::Acks;
 
 use crate::logs::{ConnectionsLog, DataLog, TopicsLog};
 use crate::router::metrics::RouterMetrics;
@@ -388,10 +388,9 @@ impl Router {
         let mut return_codes = Vec::new();
         for filter in subscribe.filters.iter() {
             if filter.path.starts_with("test") || filter.path.starts_with("$") {
-                return_codes.push(SubscribeReasonCode::TopicFilterInvalid);
+                return_codes.push(SubscribeReasonCode::Failure);
             } else {
-                // TODO: Fix subscribe return code
-                return_codes.push(SubscribeReasonCode::QoS0);
+                return_codes.push(SubscribeReasonCode::Success(filter.qos));
             }
         }
 
@@ -792,7 +791,9 @@ mod test {
             let client_id = &format!("{}", i);
             add_new_remote_connection(&mut router, client_id);
             add_new_subscription(&mut router, i, "hello/world");
-            router.data_waiters.register(i, DataRequest::new("hello/world".to_owned(), 1));
+            router
+                .data_waiters
+                .register(i, DataRequest::new("hello/world".to_owned(), 1));
         }
 
         let payload = Bytes::from(vec![1, 2, 3]);
