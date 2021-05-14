@@ -2,7 +2,7 @@
 name = "rumqttd"
 description = "Distributed, embeddable mqtt broker library"
 license = "Apache-2.0"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
@@ -21,8 +21,8 @@ path = "src/bin.rs"
 prof = ["pprof"]
 
 [dependencies]
-rumqttlog = { path = "../rumqttlog", version = "0.5"}
-mqttbytes = { path = "../mqttbytes", version = "0.2" }
+rumqttlog = { path = "../rumqttlog", version = "0.6"}
+mqttbytes = { path = "../mqttbytes", version = "0.3" }
 tokio = { version = "1.0", features = ["full"] }
 tokio-rustls = "0.22"
 serde = { version = "1", features = ["derive"] }
