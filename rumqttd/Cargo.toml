@@ -18,13 +18,15 @@ name = "rumqttd"
 path = "src/bin.rs"
 
 [features]
+default = ["use-rustls"]
 prof = ["pprof"]
+use-rustls = ["tokio-rustls"]
+use-native-tls = ["tokio-native-tls"]
 
 [dependencies]
 rumqttlog = { path = "../rumqttlog", version = "0.6"}
 mqttbytes = { path = "../mqttbytes", version = "0.3" }
 tokio = { version = "1.0", features = ["full"] }
-tokio-rustls = "0.22"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 thiserror = "1"
@@ -35,6 +37,10 @@ bytes = "1.0"
 warp = "0.3"
 futures-util = "0.3.8"
 pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
+
+# Optional
+tokio-rustls = { version = "0.22", optional = true }
+tokio-native-tls = { version = "0.3", optional = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"

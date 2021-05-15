@@ -15,12 +15,22 @@ use crate::remotelink::RemoteLink;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::{task, time};
-use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
-use tokio_rustls::rustls::{
-    AllowAnyAuthenticatedClient, NoClientAuth, RootCertStore, ServerConfig, TLSError,
-};
-use tokio_rustls::TlsAcceptor;
 
+// All requirements for `rustls`
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::{
+    AllowAnyAuthenticatedClient, RootCertStore, ServerConfig, TLSError as RustlsError,
+};
+
+// All requirements for `native-tls`
+#[cfg(feature = "use-native-tls")]
+use std::io::Read;
+#[cfg(feature = "use-native-tls")]
+use tokio_native_tls::native_tls;
+#[cfg(feature = "use-native-tls")]
+use tokio_native_tls::native_tls::Error as NativeTlsError;
 pub mod async_locallink;
 mod consolelink;
 mod locallink;
@@ -31,9 +41,13 @@ mod state;
 use crate::consolelink::ConsoleLink;
 pub use crate::locallink::{LinkError, LinkRx, LinkTx};
 use crate::network::Network;
+#[cfg(feature = "use-rustls")]
 use crate::Error::ServerKeyNotFound;
 use std::collections::HashMap;
+
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use std::fs::File;
+#[cfg(feature = "use-rustls")]
 use std::io::BufReader;
 
 #[derive(Debug, thiserror::Error)]
@@ -49,8 +63,12 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),
-    #[error("TLS error {0}")]
-    Tls(#[from] TLSError),
+    #[cfg(feature = "use-native-tls")]
+    #[error("Native TLS error {0}")]
+    NativeTls(#[from] NativeTlsError),
+    #[cfg(feature = "use-rustls")]
+    #[error("Rustls error {0}")]
+    Rustls(#[from] RustlsError),
     #[error("Server cert not provided")]
     ServerCertRequired,
     #[error("Server private key not provided")]
@@ -67,6 +85,8 @@ pub enum Error {
     InvalidServerCert(String),
     #[error("Invalid server key file {0}")]
     InvalidServerKey(String),
+    RustlsNotEnabled,
+    NativeTlsNotEnabled,
     Disconnected,
     NetworkClosed,
     WrongPacket(Packet),
@@ -84,12 +104,34 @@ pub struct Config {
     pub console: ConsoleSettings,
 }
 
+#[allow(dead_code)]
+enum ServerTLSAcceptor {
+    #[cfg(feature = "use-rustls")]
+    RustlsAcceptor { acceptor: tokio_rustls::TlsAcceptor },
+    #[cfg(feature = "use-native-tls")]
+    NativeTLSAcceptor {
+        acceptor: tokio_native_tls::TlsAcceptor,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum ServerCert {
+    RustlsCert {
+        ca_path: String,
+        cert_path: String,
+        key_path: String,
+    },
+    NativeTlsCert {
+        pkcs12_path: String,
+        pkcs12_pass: String,
+    },
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
     pub listen: SocketAddr,
-    pub ca_path: Option<String>,
-    pub cert_path: Option<String>,
-    pub key_path: Option<String>,
+    pub cert: Option<ServerCert>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
 }
@@ -215,51 +257,99 @@ impl Server {
         }
     }
 
-    fn tls(&self) -> Result<Option<TlsAcceptor>, Error> {
-        let (certs, key) = match self.config.cert_path.clone() {
-            Some(cert) => {
-                // Get certificates
-                let cert_file = File::open(&cert);
-                let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert.clone()))?;
-                let certs = certs(&mut BufReader::new(cert_file));
-                let certs = certs.map_err(|_| Error::InvalidServerCert(cert))?;
+    #[cfg(feature = "use-native-tls")]
+    fn tls_native_tls(
+        &self,
+        pkcs12_path: &String,
+        pkcs12_pass: &String,
+    ) -> Result<Option<ServerTLSAcceptor>, Error> {
+        // Get certificates
+        let cert_file = File::open(&pkcs12_path);
+        let mut cert_file =
+            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.clone()))?;
 
-                // Get private key
-                let key = self.config.key_path.as_ref();
-                let key = key.ok_or(Error::ServerKeyRequired)?.clone();
-                let key_file = File::open(&key);
-                let key_file = key_file.map_err(|_| ServerKeyNotFound(key.clone()))?;
-                let keys = rsa_private_keys(&mut BufReader::new(key_file));
-                let keys = keys.map_err(|_| Error::InvalidServerKey(key.clone()))?;
+        // Read cert into memory
+        let mut buf = Vec::new();
+        cert_file
+            .read_to_end(&mut buf)
+            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
 
-                // Get the first key
-                let key = match keys.first() {
-                    Some(k) => k.clone(),
-                    None => return Err(Error::InvalidServerKey(key.clone())),
-                };
+        // Get the identity
+        let identity = native_tls::Identity::from_pkcs12(&buf, &pkcs12_pass)
+            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
 
-                (certs, key)
-            }
-            None => return Ok(None),
+        // Builder
+        let builder = native_tls::TlsAcceptor::builder(identity).build()?;
+
+        // Create acceptor
+        let acceptor = tokio_native_tls::TlsAcceptor::from(builder);
+        Ok(Some(ServerTLSAcceptor::NativeTLSAcceptor { acceptor }))
+    }
+
+    #[allow(dead_code)]
+    #[cfg(not(feature = "use-native-tls"))]
+    fn tls_native_tls(
+        &self,
+        _pkcs12_path: &String,
+        _pkcs12_pass: &String,
+    ) -> Result<Option<ServerTLSAcceptor>, Error> {
+        Err(Error::NativeTlsNotEnabled)
+    }
+
+    #[cfg(feature = "use-rustls")]
+    fn tls_rustls(
+        &self,
+        cert_path: &String,
+        key_path: &String,
+        ca_path: &String,
+    ) -> Result<Option<ServerTLSAcceptor>, Error> {
+        let (certs, key) = {
+            // Get certificates
+            let cert_file = File::open(&cert_path);
+            let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert_path.clone()))?;
+            let certs = certs(&mut BufReader::new(cert_file));
+            let certs = certs.map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
+
+            // Get private key
+            let key_file = File::open(&key_path);
+            let key_file = key_file.map_err(|_| ServerKeyNotFound(key_path.clone()))?;
+            let keys = rsa_private_keys(&mut BufReader::new(key_file));
+            let keys = keys.map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
+
+            // Get the first key
+            let key = match keys.first() {
+                Some(k) => k.clone(),
+                None => return Err(Error::InvalidServerKey(key_path.clone())),
+            };
+
+            (certs, key)
         };
 
         // client authentication with a CA. CA isn't required otherwise
-        let mut server_config = match self.config.ca_path.clone() {
-            Some(ca) => {
-                let ca_file = File::open(&ca);
-                let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca.clone()))?;
-                let ca_file = &mut BufReader::new(ca_file);
-                let mut store = RootCertStore::empty();
-                let o = store.add_pem_file(ca_file);
-                o.map_err(|_| Error::InvalidCACert(ca))?;
-                ServerConfig::new(AllowAnyAuthenticatedClient::new(store))
-            }
-            None => ServerConfig::new(NoClientAuth::new()),
+        let mut server_config = {
+            let ca_file = File::open(ca_path);
+            let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
+            let ca_file = &mut BufReader::new(ca_file);
+            let mut store = RootCertStore::empty();
+            let o = store.add_pem_file(ca_file);
+            o.map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
+            ServerConfig::new(AllowAnyAuthenticatedClient::new(store))
         };
 
         server_config.set_single_cert(certs, key)?;
-        let acceptor = TlsAcceptor::from(Arc::new(server_config));
-        Ok(Some(acceptor))
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+        Ok(Some(ServerTLSAcceptor::RustlsAcceptor { acceptor }))
+    }
+
+    #[allow(dead_code)]
+    #[cfg(not(feature = "use-rustls"))]
+    fn tls_rustls(
+        &self,
+        _cert_path: &String,
+        _key_path: &String,
+        _ca_path: &String,
+    ) -> Result<Option<ServerTLSAcceptor>, Error> {
+        Err(Error::RustlsNotEnabled)
     }
 
     async fn start(&self) -> Result<(), Error> {
@@ -268,7 +358,24 @@ impl Server {
         let mut count = 0;
 
         let config = Arc::new(self.config.connections.clone());
-        let acceptor = self.tls()?;
+
+        // Get the ServerTLSAcceptor which allow us to use either Rustls or Native TLS
+        #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+        let acceptor = match &self.config.cert {
+            Some(c) => match c {
+                ServerCert::RustlsCert {
+                    ca_path,
+                    cert_path,
+                    key_path,
+                } => self.tls_rustls(cert_path, key_path, ca_path)?,
+                ServerCert::NativeTlsCert {
+                    pkcs12_path,
+                    pkcs12_pass,
+                } => self.tls_native_tls(pkcs12_path, pkcs12_pass)?,
+            },
+            None => None,
+        };
+
         let max_incoming_size = config.max_payload_size;
 
         info!(
@@ -276,30 +383,66 @@ impl Server {
             self.config.listen, self.id
         );
         loop {
-            let (stream, addr) = listener.accept().await?;
-            let network = match &acceptor {
-                Some(acceptor) => {
-                    info!("{}. Accepting TLS connection from: {}", count, addr);
-                    let stream = match acceptor.accept(stream).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!("Failed to accept TLS connection. Error = {:?}", e);
-                            continue;
-                        }
-                    };
+            // Await new network connection.
+            let (stream, addr) = match listener.accept().await {
+                Ok((s, r)) => (s, r),
+                Err(_e) => {
+                    error!("Unable to accept socket.");
+                    continue;
+                }
+            };
 
-                    Network::new(stream, max_incoming_size)
+            // Depending on TLS or not create a new Network
+            #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+            let network = match &acceptor {
+                Some(a) => {
+                    info!("{}. Accepting TLS connection from: {}", count, addr);
+
+                    // Depending on which acceptor we're using address accordingly..
+                    match a {
+                        #[cfg(feature = "use-rustls")]
+                        ServerTLSAcceptor::RustlsAcceptor { acceptor } => {
+                            let stream = match acceptor.accept(stream).await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    error!("Failed to accept TLS connection using Rustls. Error = {:?}", e);
+                                    continue;
+                                }
+                            };
+
+                            Network::new(stream, max_incoming_size)
+                        }
+                        #[cfg(feature = "use-native-tls")]
+                        ServerTLSAcceptor::NativeTLSAcceptor { acceptor } => {
+                            let stream = match acceptor.accept(stream).await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    error!("Failed to accept TLS connection using Native TLS. Error = {:?}", e);
+                                    continue;
+                                }
+                            };
+
+                            Network::new(stream, max_incoming_size)
+                        }
+                    }
                 }
                 None => {
                     info!("{}. Accepting TCP connection from: {}", count, addr);
                     Network::new(stream, max_incoming_size)
                 }
             };
+            #[cfg(not(any(feature = "use-rustls", feature = "use-native-tls")))]
+            let network = {
+                info!("{}. Accepting TCP connection from: {}", count, addr);
+                Network::new(stream, max_incoming_size)
+            };
 
             count += 1;
 
             let config = config.clone();
             let router_tx = self.router_tx.clone();
+
+            // Spawn a new thread to handle this connection.
             task::spawn(async {
                 let connector = Connector::new(config, router_tx);
                 if let Err(e) = connector.new_connection(network).await {

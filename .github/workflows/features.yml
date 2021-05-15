@@ -21,6 +21,18 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --release --no-default-features
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --features use-rustls
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --no-default-features --features use-native-tls
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
           args: --release --all-features
 
 
