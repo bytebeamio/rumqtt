@@ -48,6 +48,8 @@ pub enum Error {
     TooManyPayloads(usize),
     #[error("Persistent session requires valid client id")]
     InvalidClientId,
+    #[error("Invalid username or password provided")]
+    InvalidUsernameOrPassword,
     #[error("Disconnect request")]
     Disconnect,
 }
@@ -64,6 +66,32 @@ impl RemoteLink {
         let timeout = Duration::from_millis(config.connection_timeout_ms.into());
         let mut connect = time::timeout(timeout, async {
             let connect = network.read_connect().await?;
+
+            // Validate credentials if they exist
+            if let Some(credentials) = &config.login_credentials {
+                let validated = match &connect.login {
+                    Some(l) => {
+                        let mut validated = false;
+
+                        // Iterate through all the potential credentials
+                        for entry in credentials {
+                            if l.validate(&entry.username, &entry.password) {
+                                validated = true;
+                                break;
+                            }
+                        }
+
+                        validated
+                    }
+                    None => false,
+                };
+
+                // Return error if the username/password werenot found
+                if validated == false {
+                    return Err(Error::InvalidUsernameOrPassword);
+                }
+            }
+
             Ok::<_, Error>(connect)
         })
         .await??;
