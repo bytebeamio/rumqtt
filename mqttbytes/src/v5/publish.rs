@@ -41,7 +41,7 @@ impl Publish {
         }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let mut len = 2 + self.topic.len();
         if self.qos != QoS::AtMostOnce && self.pkid != 0 {
             len += 2;

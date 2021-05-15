@@ -38,7 +38,7 @@ impl Publish {
         }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let mut len = 2 + self.topic.len();
         if self.qos != QoS::AtMostOnce && self.pkid != 0 {
             len += 2;
@@ -105,7 +105,6 @@ impl Publish {
         Ok(1 + count + len)
     }
 }
-
 
 impl fmt::Debug for Publish {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -271,4 +270,3 @@ mod test {
         );
     }
 }
-
