@@ -83,6 +83,8 @@ pub enum Error {
     InvalidCACert(String),
     #[error("Invalid server cert file {0}")]
     InvalidServerCert(String),
+    #[error("Invalid server pass")]
+    InvalidServerPass(),
     #[error("Invalid server key file {0}")]
     InvalidServerKey(String),
     RustlsNotEnabled,
@@ -276,7 +278,7 @@ impl Server {
 
         // Get the identity
         let identity = native_tls::Identity::from_pkcs12(&buf, &pkcs12_pass)
-            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
+            .map_err(|_| Error::InvalidServerPass())?;
 
         // Builder
         let builder = native_tls::TlsAcceptor::builder(identity).build()?;
