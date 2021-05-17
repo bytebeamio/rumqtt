@@ -7,7 +7,7 @@ use std::time::Duration;
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
-    color_backtrace::install();
+    // color_backtrace::install();
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions.set_keep_alive(5);
@@ -19,19 +19,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     loop {
-        match eventloop.poll().await {
-            Ok(Event::Incoming(Incoming::Publish(p))) => {
-                println!("Topic: {}, Payload: {:?}", p.topic, p.payload)
-            }
-            Ok(Event::Incoming(i)) => {
-                println!("Incoming = {:?}", i);
-            }
-            Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
-            Err(e) => {
-                println!("Error = {:?}", e);
-                continue;
-            }
-        }
+        let event = eventloop.poll().await;
+        println!("{:?}", event.unwrap());
     }
 }
 
@@ -43,7 +32,7 @@ async fn requests(client: AsyncClient) {
 
     for i in 1..=10 {
         client
-            .publish("hello/world", QoS::ExactlyOnce, false, vec![i; 1000 * 1024])
+            .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
             .await
             .unwrap();
 

@@ -33,12 +33,12 @@ pub enum StateError {
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
-    Serialization(mqttbytes::Error),
+    Deserialization(mqttbytes::Error),
 }
 
 impl From<mqttbytes::Error> for StateError {
     fn from(e: mqttbytes::Error) -> StateError {
-        StateError::Serialization(e)
+        StateError::Deserialization(e)
     }
 }
 
@@ -481,8 +481,8 @@ impl MqttState {
 mod test {
     use super::{MqttState, StateError};
     use crate::{Incoming, MqttOptions, Request};
-    use mqttbytes::*;
     use mqttbytes::v4::*;
+    use mqttbytes::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

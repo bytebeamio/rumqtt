@@ -225,7 +225,10 @@ impl EventLoop {
     }
 }
 
-async fn connect_or_cancel(options: &MqttOptions, cancel_rx: &Receiver<()>) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect_or_cancel(
+    options: &MqttOptions,
+    cancel_rx: &Receiver<()>,
+) -> Result<(Network, Incoming), ConnectionError> {
     // select here prevents cancel request from being blocked until connection request is
     // resolved. Returns with an error if connections fail continuously
     select! {
@@ -285,7 +288,9 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .body(())
                 .unwrap();
 
-            let (socket, _) = connect_async(request).await.map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+            let (socket, _) = connect_async(request)
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -311,7 +316,10 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     Ok(network)
 }
 
-async fn mqtt_connect(options: &MqttOptions, network: &mut Network) -> Result<Incoming, ConnectionError> {
+async fn mqtt_connect(
+    options: &MqttOptions,
+    network: &mut Network,
+) -> Result<Incoming, ConnectionError> {
     let keep_alive = options.keep_alive().as_secs() as u16;
     let clean_session = options.clean_session();
     let last_will = options.last_will();
@@ -336,7 +344,9 @@ async fn mqtt_connect(options: &MqttOptions, network: &mut Network) -> Result<In
     // wait for 'timeout' time to validate connack
     let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
         let packet = match network.read().await? {
-            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => Packet::ConnAck(connack),
+            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+                Packet::ConnAck(connack)
+            }
             Incoming::ConnAck(connack) => {
                 let error = format!("Broker rejected. Reason = {:?}", connack.code);
                 return Err(io::Error::new(io::ErrorKind::InvalidData, error));
@@ -356,7 +366,10 @@ async fn mqtt_connect(options: &MqttOptions, network: &mut Network) -> Result<In
 
 /// Returns the next pending packet asynchronously to be used in select!
 /// This is a synchronous function but made async to make it fit in select!
-pub(crate) async fn next_pending(delay: Duration, pending: &mut IntoIter<Request>) -> Option<Request> {
+pub(crate) async fn next_pending(
+    delay: Duration,
+    pending: &mut IntoIter<Request>,
+) -> Option<Request> {
     // return next packet with a delay
     time::sleep(delay).await;
     pending.next()

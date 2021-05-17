@@ -91,7 +91,7 @@ impl Network {
                 Err(Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
-                Err(e) => return Err(StateError::Serialization(e)),
+                Err(e) => return Err(StateError::Deserialization(e)),
             };
         }
     }

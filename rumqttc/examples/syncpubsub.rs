@@ -13,11 +13,7 @@ fn main() {
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {
-        println!("Notification = {:?}", notification);
-
-        if i == 10 {
-            break;
-        }
+        println!("{}. Notification = {:?}", i, notification);
     }
 
     println!("Done with the stream!!");
