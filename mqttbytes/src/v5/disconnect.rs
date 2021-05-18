@@ -103,7 +103,7 @@ impl TryFrom<u8> for DisconnectReasonCode {
             0xA0 => Self::MaximumConnectTime,
             0xA1 => Self::SubscriptionIdentifiersNotSupported,
             0xA2 => Self::WildcardSubscriptionsNotSupported,
-            other => return Err(Error::InvalidConnectReturnCode(other)),
+            other => return Err(Error::InvalidReason(other)),
         };
 
         Ok(rc)
