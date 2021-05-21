@@ -199,6 +199,8 @@ impl MqttState {
             QoS::AtLeastOnce => {
                 let pkid = publish.pkid;
                 PubAck::new(pkid).write(&mut self.write)?;
+                let event = Event::Outgoing(Outgoing::PubAck(pkid));
+                self.events.push_back(event);
 
                 Ok(())
             }
@@ -206,6 +208,8 @@ impl MqttState {
                 let pkid = publish.pkid;
                 PubRec::new(pkid).write(&mut self.write)?;
                 self.incoming_pub[pkid as usize] = Some(pkid);
+                let event = Event::Outgoing(Outgoing::PubRec(pkid));
+                self.events.push_back(event);
                 Ok(())
             }
         }
