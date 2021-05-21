@@ -123,12 +123,21 @@ pub type Incoming = Packet;
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Outgoing {
-    /// Publish packet with packet identifier. 0 implies QoS 0
-    Publish(u16),
-    /// Subscribe packet with packet identifier
-    Subscribe(u16),
-    /// Unsubscribe packet with packet identifier
-    Unsubscribe(u16),
+    /// Publish packet with packet identifier and topic. 0 implies QoS 0
+    Publish {
+        pkid: u16,
+        topic: String,
+    },
+    /// Subscribe packet with packet identifier and topics
+    Subscribe {
+        pkid: u16,
+        topics: Vec<String>,
+    },
+    /// Unsubscribe packet with packet identifier and topics
+    Unsubscribe {
+        pkid: u16,
+        topics: Vec<String>,
+    },
     /// PubAck packet
     PubAck(u16),
     /// PubRec packet

@@ -356,7 +356,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
         println!("Poll = {:?}", event);
 
         match event {
-            Ok(Event::Outgoing(Outgoing::Publish(ack))) => {
+            Ok(Event::Outgoing(Outgoing::Publish { pkid: ack, topic: _ })) => {
                 if ack == 1 {
                     assert_eq!(start.elapsed().as_secs(), 5)
                 }
