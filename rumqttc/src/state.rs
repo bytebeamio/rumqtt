@@ -19,7 +19,7 @@ pub enum StateError {
     #[error("Invalid state for a given operation")]
     InvalidState,
     /// Received a packet (ack) which isn't asked for
-    #[error("Received a packet (ack) which isn't asked for")]
+    #[error("Received unsolicited ack pkid {0}")]
     Unsolicited(u16),
     /// Last pingreq isn't acked
     #[error("Last pingreq isn't acked")]
@@ -27,9 +27,6 @@ pub enum StateError {
     /// Received a wrong packet while waiting for another packet
     #[error("Received a wrong packet while waiting for another packet")]
     WrongPacket,
-    /// Collision due to broker not acking in sequence
-    #[error("Broker not acking in order. Packet id collision")]
-    Collision(u16),
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
@@ -216,14 +213,7 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
-        if let Some(publish) = self.check_collision(puback.pkid) {
-            publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.events.push_back(event);
-            self.collision_ping_count = 0;
-        }
-
-        match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
+        let v = match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
             Some(_) => {
                 self.inflight -= 1;
                 Ok(())
@@ -232,7 +222,19 @@ impl MqttState {
                 error!("Unsolicited puback packet: {:?}", puback.pkid);
                 Err(StateError::Unsolicited(puback.pkid))
             }
+        };
+
+        if let Some(publish) = self.check_collision(puback.pkid) {
+            self.outgoing_pub[publish.pkid as usize] = Some(publish.clone());
+            self.inflight += 1;
+
+            publish.write(&mut self.write)?;
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
+            self.collision_ping_count = 0;
         }
+
+        v
     }
 
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), StateError> {
@@ -295,10 +297,30 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
-        let publish = match publish.qos {
-            QoS::AtMostOnce => publish,
-            QoS::AtLeastOnce | QoS::ExactlyOnce => self.save_publish(publish)?,
+    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+        if publish.qos != QoS::AtMostOnce {
+            if publish.pkid == 0 {
+                publish.pkid = self.next_pkid();
+            }
+
+            let pkid = publish.pkid;
+            if self
+                .outgoing_pub
+                .get(publish.pkid as usize)
+                .unwrap()
+                .is_some()
+            {
+                info!("Collision on packet id = {:?}", publish.pkid);
+                self.collision = Some(publish);
+                let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
+                self.events.push_back(event);
+                return Ok(());
+            }
+
+            // if there is an existing publish at this pkid, this implies that broker hasn't acked this
+            // packet yet. This error is possible only when broker isn't acking sequentially
+            self.outgoing_pub[pkid as usize] = Some(publish.clone());
+            self.inflight += 1;
         };
 
         debug!(
@@ -401,11 +423,8 @@ impl MqttState {
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
         if let Some(publish) = &self.collision {
-            // remove acked, previously collided packet from the state
             if publish.pkid == pkid {
-                self.collision.take().unwrap();
-                let publish = self.outgoing_pub[pkid as usize].clone().take();
-                return publish;
+                return self.collision.take();
             }
         }
 
@@ -424,41 +443,6 @@ impl MqttState {
 
         self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
         Ok(pubrel)
-    }
-
-    /// Add publish packet to the state and return the packet. This method clones the
-    /// publish packet to save it to the state.
-    fn save_publish(&mut self, mut publish: Publish) -> Result<Publish, StateError> {
-        let publish = match publish.pkid {
-            // consider PacketIdentifier(0) as uninitialized packets
-            0 => {
-                publish.pkid = self.next_pkid();
-                publish
-            }
-            _ => publish,
-        };
-
-        // If there is an existing publish at this pkid, this implies that client
-        // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
-        // after a count of 'inflight' messages. This error is possible only when
-        // client isn't acking sequentially
-        let pkid = publish.pkid;
-        if self
-            .outgoing_pub
-            .get(publish.pkid as usize)
-            .unwrap()
-            .is_some()
-        {
-            warn!("Collision on packet id = {:?}", publish.pkid);
-            self.collision = Some(publish);
-            return Err(StateError::Collision(pkid));
-        }
-
-        // if there is an existing publish at this pkid, this implies that broker hasn't acked this
-        // packet yet. This error is possible only when broker isn't acking sequentially
-        self.outgoing_pub[pkid as usize] = Some(publish.clone());
-        self.inflight += 1;
-        Ok(publish)
     }
 
     /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation

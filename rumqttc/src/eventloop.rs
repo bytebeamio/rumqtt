@@ -132,12 +132,6 @@ impl EventLoop {
         match self.select().await {
             Ok(v) => Ok(v),
             Err(e) => {
-                // don't disconnect the network in case collision safety is enabled
-                if let ConnectionError::MqttState(StateError::Collision(pkid)) = e {
-                    if self.options.collision_safety() {
-                        return Err(ConnectionError::MqttState(StateError::Collision(pkid)));
-                    }
-                }
                 self.clean();
                 Err(e)
             }

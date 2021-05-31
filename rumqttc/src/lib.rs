@@ -143,6 +143,8 @@ pub enum Outgoing {
     PingResp,
     /// Disconnect packet
     Disconnect,
+    /// Await for an ack for more outgoing progress
+    AwaitAck(u16),
 }
 
 /// Requests by the client to mqtt event loop. Request are
@@ -320,8 +322,7 @@ pub struct MqttOptions {
     inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
-    /// Enabling will wait for incoming packets to avoid collisions
-    collision_safety: bool,
+    /// Connection timeout
     conn_timeout: u64,
 }
 
@@ -348,7 +349,6 @@ impl MqttOptions {
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
-            collision_safety: false,
             conn_timeout: 5,
         }
     }
@@ -471,15 +471,6 @@ impl MqttOptions {
     /// Number of concurrent in flight messages
     pub fn inflight(&self) -> u16 {
         self.inflight
-    }
-
-    pub fn set_collision_safety(&mut self, c: bool) -> &mut Self {
-        self.collision_safety = c;
-        self
-    }
-
-    pub fn collision_safety(&self) -> bool {
-        self.collision_safety
     }
 
     /// set connection timeout in secs
