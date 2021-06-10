@@ -7,6 +7,7 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
 categories = ["network-programming"]
+repository = "https://github.com/bytebeamio/rumqtt/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
