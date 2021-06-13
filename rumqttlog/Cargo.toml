@@ -6,6 +6,7 @@ edition = "2018"
 license = "Apache-2.0"
 keywords = ["mqtt", "iot", "kafka", "nats", "distributed"]
 description = "kafka inspired rumqtt's mqtt commitlog"
+repository = "https://github.com/bytebeamio/rumqtt/"
 
 [dependencies]
 byteorder = "1"

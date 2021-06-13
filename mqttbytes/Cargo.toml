@@ -8,6 +8,7 @@ license = "Apache-2.0"
 description = "MQTT 4/5 serialization and deserialization"
 keywords = ["mqtt"]
 categories = ["network-programming", "no-std"]
+repository = "https://github.com/bytebeamio/rumqtt/"
 
 [lib]
 bench = false
