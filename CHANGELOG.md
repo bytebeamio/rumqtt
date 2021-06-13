@@ -1,3 +1,44 @@
+### R8
+----------------
+
+mqttbytes v0.4.0
+-----------
+* Make publish `len` public
+
+rumqttc v0.6.0
+-----------
+- **changed** Update to mqttbytes 0.4
+- **fix** Fix packet collisions and always enable collision protection [**breaking**] 
+- **fix** Fix wrong error name
+
+rumqttd v0.7.0
+-----------
+- **changed** Update to mqttbytes 0.4
+- **changed** Native tls support
+
+### R7
+----------------
+
+mqttbytes v0.3.0
+-----------
+- **fix** Connack and suback packet mixup during mqtt 5 implementation [**breaking**] 
+
+rumqttc v0.5.0
+-----------
+- **changed** Update to mqttbytes 0.3 [**breaking**]
+
+rumqttd v0.4.0
+-----------
+- **changed** Update to mqttbytes 0.2 [**breaking**]
+-**changed** Make profiler a feature, not target.cfg (#243)
+- **changed** Handling error cases if the key is parsed but is not valid. (#241)
+-**changed** Replace hard coded 0.0.0.0 bind with configuration option (#262)
+
+misc
+----------
+- update CI
+
+
 ### R6
 ----------------
 mqttbytes v0.2.1
