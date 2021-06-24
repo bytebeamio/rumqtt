@@ -83,6 +83,8 @@ pub enum Error {
     InvalidCACert(String),
     #[error("Invalid server cert file {0}")]
     InvalidServerCert(String),
+    #[error("Invalid server pass")]
+    InvalidServerPass(),
     #[error("Invalid server key file {0}")]
     InvalidServerKey(String),
     RustlsNotEnabled,
@@ -137,6 +139,12 @@ pub struct ServerSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConnectionLoginCredentials {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
     pub max_client_id_len: usize,
@@ -144,8 +152,7 @@ pub struct ConnectionSettings {
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
     pub max_inflight_size: usize,
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub login_credentials: Option<Vec<ConnectionLoginCredentials>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,7 +283,7 @@ impl Server {
 
         // Get the identity
         let identity = native_tls::Identity::from_pkcs12(&buf, &pkcs12_pass)
-            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
+            .map_err(|_| Error::InvalidServerPass())?;
 
         // Builder
         let builder = native_tls::TlsAcceptor::builder(identity).build()?;
