@@ -209,8 +209,8 @@ impl LastWill {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Login {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
 }
 
 impl Login {
