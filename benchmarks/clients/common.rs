@@ -1,5 +1,4 @@
-use pprof::ProfilerGuard;
-use prost::Message;
+use pprof::{protos::Message, ProfilerGuard};
 use rumqttlog::router::ConnectionAck;
 use rumqttlog::{Connection, Event, Notification, Receiver, Sender};
 use serde::{Deserialize, Serialize};
