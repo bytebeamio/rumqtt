@@ -139,14 +139,23 @@ impl EventLoop {
             if let Some(until_ts) = self.next_reconnection_attempt.filter(|ts| ts.gt(&Instant::now())) {
                 tokio::time::sleep_until(until_ts).await;
             }
-            let (network, connack) = connect_or_cancel(&self.options, &self.cancel_rx).await?;
-            self.network = Some(network);
+            return match connect_or_cancel(&self.options, &self.cancel_rx).await {
+                Ok((network, connack)) => {
+                    self.network = Some(network);
 
-            if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
+                    if self.keepalive_timeout.is_none() {
+                        self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
+                    }
+
+                    Ok(Event::Incoming(connack))
+                },
+                Err(err) => {
+                    let (attempts, next_ts) = self.compute_next_reconnection_attempt_ts();
+                    self.next_reconnection_attempt = Some(next_ts);
+                    self.reconnection_attempts_count = attempts;
+                    Err(err)
+                }
             }
-
-            return Ok(Event::Incoming(connack));
         }
 
         match self.select().await {
