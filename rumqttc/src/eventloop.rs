@@ -137,7 +137,7 @@ impl EventLoop {
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             if let Some(until_ts) = self.next_reconnection_attempt.filter(|ts| ts.gt(&Instant::now())) {
-                tokio::time::sleep_until(until_ts).await;
+                sleep_or_cancel(until_ts, &self.cancel_rx).await?;
             }
             return match connect_or_cancel(&self.options, &self.cancel_rx).await {
                 Ok((network, connack)) => {
@@ -276,6 +276,18 @@ impl EventLoop {
             _ = self.cancel_rx.recv() => {
                 Err(ConnectionError::Cancel)
             }
+        }
+    }
+}
+
+async fn sleep_or_cancel(
+    until: Instant,
+    cancel_rx: &Receiver<()>,
+) -> Result<(), ConnectionError> {
+    select! {
+        _ = tokio::time::sleep_until(until) => Ok(()),
+        _ = cancel_rx.recv() => {
+            Err(ConnectionError::Cancel)
         }
     }
 }
