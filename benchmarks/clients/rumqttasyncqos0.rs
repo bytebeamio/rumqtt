@@ -24,7 +24,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     mqttoptions.set_keep_alive(20);
     mqttoptions.set_inflight(100);
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10, ReconnectionStrategy::Instant);
     task::spawn(async move {
         for _i in 0..count {
             let payload = vec![0; payload_size];
