@@ -9,7 +9,6 @@ use mqttbytes::*;
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
-use crate::eventloop::ReconnectionStrategy;
 
 /// Client Error
 #[derive(Debug, thiserror::Error)]
@@ -34,8 +33,8 @@ pub struct AsyncClient {
 
 impl AsyncClient {
     /// Create a new `AsyncClient`
-    pub fn new(options: MqttOptions, cap: usize, reconnection_strategy: ReconnectionStrategy) -> (AsyncClient, EventLoop) {
-        let mut eventloop = EventLoop::new(options, cap, reconnection_strategy);
+    pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
+        let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
         let cancel_tx = eventloop.cancel_handle();
 
@@ -198,8 +197,8 @@ pub struct Client {
 
 impl Client {
     /// Create a new `Client`
-    pub fn new(options: MqttOptions, cap: usize, reconnection_strategy: ReconnectionStrategy) -> (Client, Connection) {
-        let (client, eventloop) = AsyncClient::new(options, cap, reconnection_strategy);
+    pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
+        let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
         let runtime = runtime::Builder::new_current_thread()
             .enable_all()

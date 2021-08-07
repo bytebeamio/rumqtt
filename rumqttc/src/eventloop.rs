@@ -16,8 +16,7 @@ use std::io;
 use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
-use std::ops::Add;
-use rand::Rng;
+use crate::reconnection_strategy::ReconnectionStrategy;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -61,11 +60,7 @@ pub struct EventLoop {
     /// Handle to send cancellation requests (and drops)
     pub(crate) cancel_tx: Sender<()>,
     /// Reconnection strategy
-    pub(crate) reconnection_strategy: ReconnectionStrategy,
-
-    reconnection_attempts_count: u32,
-    last_successful_connection: Option<Instant>,
-    next_reconnection_attempt: Option<Instant>,
+    reconnection_strategy: Option<Box<dyn ReconnectionStrategy>>,
 }
 
 /// Events which can be yielded by the event loop
@@ -75,17 +70,12 @@ pub enum Event {
     Outgoing(Outgoing),
 }
 
-pub enum ReconnectionStrategy {
-    Instant,
-    TruncatedExponentialBackoff,
-}
-
 impl EventLoop {
     /// New MQTT `EventLoop`
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(options: MqttOptions, cap: usize, reconnection_strategy: ReconnectionStrategy) -> EventLoop {
+    pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
         let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
@@ -102,11 +92,12 @@ impl EventLoop {
             keepalive_timeout: None,
             cancel_rx,
             cancel_tx,
-            reconnection_strategy,
-            reconnection_attempts_count: 0,
-            last_successful_connection: None,
-            next_reconnection_attempt: None
+            reconnection_strategy: None,
         }
+    }
+
+    pub fn set_reconnection_strategy(&mut self, reconnection_strategy: Box<dyn ReconnectionStrategy>) {
+        self.reconnection_strategy = Some(reconnection_strategy);
     }
 
     /// Returns a handle to communicate with this eventloop
@@ -136,9 +127,7 @@ impl EventLoop {
     #[must_use = "Eventloop should be iterated over a loop to make progress"]
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
-            if let Some(until_ts) = self.next_reconnection_attempt.filter(|ts| ts.gt(&Instant::now())) {
-                sleep_or_cancel(until_ts, &self.cancel_rx).await?;
-            }
+            self.wait_next_attempt_ts().await?;
             return match connect_or_cancel(&self.options, &self.cancel_rx).await {
                 Ok((network, connack)) => {
                     self.network = Some(network);
@@ -147,12 +136,11 @@ impl EventLoop {
                         self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
                     }
 
+                    self.on_connection_established();
                     Ok(Event::Incoming(connack))
                 },
                 Err(err) => {
-                    let (attempts, next_ts) = self.compute_next_reconnection_attempt_ts();
-                    self.next_reconnection_attempt = Some(next_ts);
-                    self.reconnection_attempts_count = attempts;
+                    self.on_connection_failed();
                     Err(err)
                 }
             }
@@ -162,41 +150,34 @@ impl EventLoop {
             Ok(v) => Ok(v),
             Err(e) => {
                 self.clean();
-                let (attempts, next_ts) = self.compute_next_reconnection_attempt_ts();
-                self.next_reconnection_attempt = Some(next_ts);
-                self.reconnection_attempts_count = attempts;
+                self.on_connection_failed();
                 Err(e)
             }
         }
     }
 
-    fn compute_next_reconnection_attempt_ts(&self) -> (u32, Instant) {
-        match self.reconnection_strategy {
-            ReconnectionStrategy::Instant => (0, Instant::now()),
-            ReconnectionStrategy::TruncatedExponentialBackoff => {
-                let was_connection_stable = self.last_successful_connection
-                    .filter(|ts| ts.add(Duration::from_secs(60 * 10)).lt(&Instant::now()))
-                    .is_some();
-
-                let attempts = if was_connection_stable {
-                    0
-                } else {
-                    self.reconnection_attempts_count + 1
-                };
-
-                let delta_millis = if attempts > 0 {
-                    std::cmp::min(
-                        2_u64.pow(attempts - 1) * 1000 + rand::thread_rng().gen_range(0..1000),
-                        64_000,
-                    )
-                } else {
-                    0u64
-                };
-
-                debug!("reconnection attempt: {} - delay {} millis", &attempts, &delta_millis);
-                (attempts, Instant::now().add(Duration::from_millis(delta_millis)))
-            }
+    fn on_connection_established(&mut self) {
+        if let Some(rs) = &mut self.reconnection_strategy {
+            rs.on_connection_established();
         }
+    }
+
+    fn on_connection_failed(&mut self) {
+        if let Some(rs) = &mut self.reconnection_strategy {
+            rs.on_connection_failed();
+        }
+    }
+
+    async fn wait_next_attempt_ts(&self) -> Result<(), ConnectionError> {
+        let next_attempt_opt = self.reconnection_strategy
+            .as_ref()
+            .map(|rs| rs.next_attempt())
+            .filter(|ts| ts.gt(&Instant::now()));
+
+        if let Some(next_attempt_ts) = next_attempt_opt {
+            sleep_or_cancel(next_attempt_ts, &self.cancel_rx).await?;
+        }
+        Ok(())
     }
 
     /// Select on network and requests and generate keepalive pings when necessary

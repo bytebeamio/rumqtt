@@ -1,4 +1,4 @@
-use rumqttc::{self, Client, Event, Incoming, MqttOptions, QoS, ReconnectionStrategy};
+use rumqttc::{self, Client, Event, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
     mqttoptions.set_keep_alive(20);
     mqttoptions.set_inflight(100);
 
-    let (mut client, mut connection) = Client::new(mqttoptions, 10, ReconnectionStrategy::Instant);
+    let (mut client, mut connection) = Client::new(mqttoptions, 10);
     thread::spawn(move || {
         for _i in 0..count {
             let payload = vec![0; payload_size];

@@ -108,10 +108,12 @@ mod eventloop;
 mod framed;
 mod state;
 mod tls;
+mod reconnection_strategy;
 
 pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
-pub use eventloop::{ConnectionError, Event, EventLoop, ReconnectionStrategy};
+pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use reconnection_strategy::{ReconnectionStrategy, TruncatedExponentialBackoffReconnectionStrategy};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
