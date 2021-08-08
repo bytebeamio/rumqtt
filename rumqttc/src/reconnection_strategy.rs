@@ -4,12 +4,21 @@ use std::time::Duration;
 use rand::Rng;
 use tokio::time::{error::Elapsed, Instant};
 
+/// Mqtt reconnection strategy
 pub trait ReconnectionStrategy {
+    /// Callback function invoked after the connection is correcly established
+    /// and connack is received
     fn on_connection_established(&mut self) {}
+
+    /// Callback function invoked when a connection error happens and therefore connection is lost
     fn on_connection_failed(&mut self) {}
+
+    /// Compute and return the instant when a new connection attempt could be performed
     fn next_attempt(&self) -> Instant;
 }
 
+/// Truncated exponential backoff reconnection strategy
+/// Delay increases exponentially with a random delay ([0, 1] secs) to avoid synchronizations
 pub struct TruncatedExponentialBackoffReconnectionStrategy {
     connection_stable_threshold: Duration,
     maximum_backoff: Duration,
@@ -19,6 +28,11 @@ pub struct TruncatedExponentialBackoffReconnectionStrategy {
 }
 
 impl TruncatedExponentialBackoffReconnectionStrategy {
+    /// New `TruncatedExponentialBackoffReconnectionStrategy`
+    ///
+    /// * `connection_stable_threshold` - If connection is lost before this duration is elapsed,
+    ///    backoff algorithm won't be resetted
+    /// * `maximum_backoff` - Maximum delay allowed
     pub fn new(
         connection_stable_threshold: Duration,
         maximum_backoff: Duration,
