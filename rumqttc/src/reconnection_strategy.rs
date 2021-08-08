@@ -27,6 +27,8 @@ pub struct TruncatedExponentialBackoffReconnectionStrategy {
     attempts: u32,
 }
 
+const EXPONENTIAL_BACKOFF_MAX_ATTEMPTS: u32 = 40;
+
 impl TruncatedExponentialBackoffReconnectionStrategy {
     /// New `TruncatedExponentialBackoffReconnectionStrategy`
     ///
@@ -37,6 +39,9 @@ impl TruncatedExponentialBackoffReconnectionStrategy {
         connection_stable_threshold: Duration,
         maximum_backoff: Duration,
     ) -> Self {
+        if maximum_backoff.gt(&Duration::from_secs(2_u64.pow(EXPONENTIAL_BACKOFF_MAX_ATTEMPTS - 1) + 1)) {
+            warn!("Maximum backoff will never be reached. Attempts are capped to {}", EXPONENTIAL_BACKOFF_MAX_ATTEMPTS);
+        }
         Self {
             connection_stable_threshold,
             maximum_backoff,
@@ -61,7 +66,7 @@ impl ReconnectionStrategy for TruncatedExponentialBackoffReconnectionStrategy {
     fn on_connection_failed(&mut self) {
         if self.is_connection_stable() {
             self.attempts = 0;
-        } else {
+        } else if self.attempts < EXPONENTIAL_BACKOFF_MAX_ATTEMPTS { // cap max attempts
             self.attempts += 1;
         }
 
