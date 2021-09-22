@@ -6,13 +6,14 @@ use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
 use mqttbytes::v4::*;
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream,UnixStream};
 use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
+use std::path::Path;
 use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
@@ -271,6 +272,11 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         }
         Transport::Tls(tls_config) => {
             let socket = tls::tls_connect(&options, &tls_config).await?;
+            Network::new(socket, options.max_incoming_packet_size)
+        }
+        Transport::Unix => {
+            let file = options.broker_addr.as_str();
+            let socket = UnixStream::connect(Path::new(file)).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(feature = "websocket")]

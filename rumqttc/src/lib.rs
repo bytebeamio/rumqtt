@@ -194,6 +194,7 @@ impl From<Unsubscribe> for Request {
 pub enum Transport {
     Tcp,
     Tls(TlsConfiguration),
+    Unix,
     #[cfg(feature = "websocket")]
     #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
     Ws,
@@ -231,6 +232,10 @@ impl Transport {
 
     pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Tls(tls_config)
+    }
+
+    pub fn unix() -> Self {
+        Self::Unix
     }
 
     /// Use websockets as transport
