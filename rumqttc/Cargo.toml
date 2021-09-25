@@ -17,7 +17,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 websocket = ["async-tungstenite", "ws_stream_tungstenite"]
 
 [dependencies]
-tokio = { version = "1.0", features = ["net", "time"] }
+tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
 webpki = "0.21"
 tokio-rustls = "0.22"
