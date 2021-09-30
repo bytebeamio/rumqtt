@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     color_backtrace::install();
 
     let mut mqtt_options = MqttOptions::new("test-1", "localhost", 8883);
-    mqtt_options.set_keep_alive(5);
+    mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
 
     let ca = include_bytes!("/home/tekjar/tlsfiles/ca.cert.pem");
     let client_cert = include_bytes!("/home/tekjar/tlsfiles/device-1.cert.pem");
