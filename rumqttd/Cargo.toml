@@ -25,7 +25,7 @@ use-rustls = ["tokio-rustls"]
 use-native-tls = ["tokio-native-tls"]
 
 [dependencies]
-rumqttlog = { path = "../rumqttlog", version = "0.7"}
+rumqttlog = { path = "../rumqttlog", version = "0.8"}
 mqttbytes = { path = "../mqttbytes", version = "0.5" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
