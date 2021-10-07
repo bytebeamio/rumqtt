@@ -1,6 +1,6 @@
 //! Example of how to configure rumqttd to connect to a server using TLS and authentication.
 
-use rumqttc::{self, AsyncClient, Event, Incoming, Key, MqttOptions, TlsConfiguration, Transport};
+use rumqttc::{self, AsyncClient, Key, MqttOptions, TlsConfiguration, Transport};
 use std::error::Error;
 
 #[tokio::main]
@@ -11,16 +11,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut mqtt_options = MqttOptions::new("test-1", "localhost", 8883);
     mqtt_options.set_keep_alive(5);
 
-    let ca = include_bytes!("/home/tekjar/tlsfiles/ca.cert.pem");
-    let client_cert = include_bytes!("/home/tekjar/tlsfiles/device-1.cert.pem");
-    let client_key = include_bytes!("/home/tekjar/tlsfiles/device-1.key.pem");
+    // Dummies to prevent compilation error in CI
+    let ca = vec![1, 2, 3];
+    let client_cert = vec![1, 2, 3];
+    let client_key= vec![1, 2, 3];
+    //     let ca = include_bytes!("/home/tekjar/tlsfiles/ca.cert.pem");
+    //     let client_cert = include_bytes!("/home/tekjar/tlsfiles/device-1.cert.pem");
+    //     let client_key = include_bytes!("/home/tekjar/tlsfiles/device-1.key.pem");
 
     let transport = Transport::Tls(TlsConfiguration::Simple {
         ca: ca.to_vec(),
         alpn: None,
         client_auth: Some((client_cert.to_vec(), Key::RSA(client_key.to_vec()))),
     });
-     
+
     mqtt_options.set_transport(transport);
 
     let (_client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
@@ -32,7 +36,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             Err(e) => {
                 println!("Error = {:?}", e);
-                break
+                break;
             }
         }
     }
