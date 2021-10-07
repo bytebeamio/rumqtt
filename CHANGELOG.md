@@ -1,3 +1,20 @@
+### R9
+----------------
+
+mqttbytes v0.5.0
+-----------
+* Make username and password public in connect packet
+* Make protocol field in v5 public
+
+rumqttc v0.7.0
+-----------
+- Add unix sockets support
+
+rumqttd v0.8.0
+-----------
+- Add server side password check
+
+
 ### R8
 ----------------
 
