@@ -7,7 +7,7 @@ use async_channel::{bounded, Receiver, Sender};
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
 use mqttbytes::v4::*;
 use tokio::net::TcpStream;
-#[cfg(feature = "unix")]
+#[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
@@ -15,7 +15,7 @@ use tokio::time::{self, error::Elapsed, Instant, Sleep};
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
-#[cfg(feature = "unix")]
+#[cfg(unix)]
 use std::path::Path;
 use std::pin::Pin;
 use std::time::Duration;
@@ -277,7 +277,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = tls::tls_connect(&options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
-        #[cfg(feature = "unix")]
+        #[cfg(unix)]
         Transport::Unix => {
             let file = options.broker_addr.as_str();
             let socket = UnixStream::connect(Path::new(file)).await?;
