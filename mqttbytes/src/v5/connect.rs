@@ -260,13 +260,13 @@ impl LastWill {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WillProperties {
-    delay_interval: Option<u32>,
-    payload_format_indicator: Option<u8>,
-    message_expiry_interval: Option<u32>,
-    content_type: Option<String>,
-    response_topic: Option<String>,
-    correlation_data: Option<Bytes>,
-    user_properties: Vec<(String, String)>,
+    pub delay_interval: Option<u32>,
+    pub payload_format_indicator: Option<u8>,
+    pub message_expiry_interval: Option<u32>,
+    pub content_type: Option<String>,
+    pub response_topic: Option<String>,
+    pub correlation_data: Option<Bytes>,
+    pub user_properties: Vec<(String, String)>,
 }
 
 impl WillProperties {

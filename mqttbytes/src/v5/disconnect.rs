@@ -128,10 +128,10 @@ pub struct DisconnectProperties {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Disconnect {
     /// Disconnect Reason Code
-    reason_code: DisconnectReasonCode,
+    pub reason_code: DisconnectReasonCode,
 
     /// Disconnect Properties
-    properties: Option<DisconnectProperties>,
+    pub properties: Option<DisconnectProperties>,
 }
 
 impl DisconnectProperties {
