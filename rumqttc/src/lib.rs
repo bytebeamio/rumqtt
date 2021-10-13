@@ -490,6 +490,174 @@ impl MqttOptions {
     }
 }
 
+#[cfg(feature = "url")]
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum OptionError {
+    #[error("Unsupported URL scheme.")]
+    Scheme,
+
+    #[error("Missing client ID.")]
+    ClientId,
+
+    #[error("Invalid keep-alive value.")]
+    KeepAlive,
+
+    #[error("Invalid clean-session value.")]
+    CleanSession,
+
+    #[error("Invalid max-incoming-packet-size value.")]
+    MaxIncomingPacketSize,
+
+    #[error("Invalid max-outgoing-packet-size value.")]
+    MaxOutgoingPacketSize,
+
+    #[error("Invalid request-channel-capacity value.")]
+    RequestChannelCapacity,
+
+    #[error("Invalid max-request-batch value.")]
+    MaxRequestBatch,
+
+    #[error("Invalid pending-throttle value.")]
+    PendingThrottle,
+
+    #[error("Invalid inflight value.")]
+    Inflight,
+
+    #[error("Invalid conn-timeout value.")]
+    ConnTimeout,
+
+    #[error("Unknown option: {0}")]
+    Unknown(String),
+}
+
+#[cfg(feature = "url")]
+impl std::convert::TryFrom<url::Url> for MqttOptions {
+    type Error = OptionError;
+
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        use std::collections::HashMap;
+
+        let broker_addr = url.host_str().unwrap_or_default().to_owned();
+
+        let (transport, default_port) = match url.scheme() {
+            // Encrypted connections are supported, but require explicit TLS configuration. We fall
+            // back to the unencrypted transport layer, so that `set_transport` can be used to
+            // configure the encrypted transport layer with the provided TLS configuration.
+            "mqtts" | "ssl" => (Transport::Tcp, 8883),
+            "mqtt" | "tcp" => (Transport::Tcp, 1883),
+            _ => return Err(OptionError::Scheme),
+        };
+
+        let port = url.port().unwrap_or(default_port);
+
+        let mut queries = url.query_pairs().collect::<HashMap<_, _>>();
+
+        let keep_alive = Duration::from_secs(
+            queries
+                .get("keep_alive_secs")
+                .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
+                .transpose()?
+                .unwrap_or(60),
+        );
+
+        let client_id = queries
+            .remove("client_id")
+            .ok_or(OptionError::ClientId)?
+            .into_owned();
+
+        let clean_session = queries
+            .remove("clean_session")
+            .map(|v| v.parse::<bool>().map_err(|_| OptionError::CleanSession))
+            .transpose()?
+            .unwrap_or(true);
+
+        let credentials = {
+            match url.username() {
+                "" => None,
+                username => Some((
+                    username.to_owned(),
+                    url.password().unwrap_or_default().to_owned(),
+                )),
+            }
+        };
+
+        let max_incoming_packet_size = queries
+            .remove("max_incoming_packet_size_bytes")
+            .map(|v| {
+                v.parse::<usize>()
+                    .map_err(|_| OptionError::MaxIncomingPacketSize)
+            })
+            .transpose()?
+            .unwrap_or(10 * 1024);
+
+        let max_outgoing_packet_size = queries
+            .remove("max_outgoing_packet_size_bytes")
+            .map(|v| {
+                v.parse::<usize>()
+                    .map_err(|_| OptionError::MaxOutgoingPacketSize)
+            })
+            .transpose()?
+            .unwrap_or(10 * 1024);
+
+        let request_channel_capacity = queries
+            .remove("request_channel_capacity_num")
+            .map(|v| {
+                v.parse::<usize>()
+                    .map_err(|_| OptionError::RequestChannelCapacity)
+            })
+            .transpose()?
+            .unwrap_or(10);
+
+        let max_request_batch = queries
+            .remove("max_request_batch_num")
+            .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxRequestBatch))
+            .transpose()?
+            .unwrap_or(0);
+
+        let pending_throttle = Duration::from_micros(
+            queries
+                .remove("pending_throttle_usecs")
+                .map(|v| v.parse::<u64>().map_err(|_| OptionError::PendingThrottle))
+                .transpose()?
+                .unwrap_or(0),
+        );
+
+        let inflight = queries
+            .remove("inflight_num")
+            .map(|v| v.parse::<u16>().map_err(|_| OptionError::Inflight))
+            .transpose()?
+            .unwrap_or(100);
+
+        let conn_timeout = queries
+            .remove("conn_timeout_secs")
+            .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
+            .transpose()?
+            .unwrap_or(5);
+
+        if let Some((opt, _)) = queries.into_iter().next() {
+            return Err(OptionError::Unknown(opt.into_owned()));
+        }
+
+        Ok(Self {
+            broker_addr,
+            port,
+            transport,
+            keep_alive,
+            clean_session,
+            client_id,
+            credentials,
+            max_incoming_packet_size,
+            max_outgoing_packet_size,
+            request_channel_capacity,
+            max_request_batch,
+            pending_throttle,
+            inflight,
+            last_will: None,
+            conn_timeout,
+        })
+    }
+}
+
 // Implement Debug manually because ClientConfig doesn't implement it, so derive(Debug) doesn't
 // work.
 impl Debug for MqttOptions {
@@ -543,6 +711,70 @@ mod test {
         }
 
         assert_eq!(_mqtt_opts.broker_addr, "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
+    }
+
+    #[test]
+    #[cfg(feature = "url")]
+    fn from_url() {
+        use std::convert::TryInto;
+        use std::str::FromStr;
+
+        fn opt(s: &str) -> Result<MqttOptions, OptionError> {
+            url::Url::from_str(s).expect("valid url").try_into()
+        }
+        fn ok(s: &str) -> MqttOptions {
+            opt(s).expect("valid options")
+        }
+        fn err(s: &str) -> OptionError {
+            opt(s).expect_err("invalid options")
+        }
+
+        let v = ok("mqtt://host:42?client_id=foo");
+        assert_eq!(v.broker_address(), ("host".to_owned(), 42));
+        assert_eq!(v.client_id(), "foo".to_owned());
+
+        assert_eq!(err("mqtt://host:42"), OptionError::ClientId);
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&foo=bar"),
+            OptionError::Unknown("foo".to_owned())
+        );
+        assert_eq!(err("mqt://host:42?client_id=foo"), OptionError::Scheme);
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&keep_alive_secs=foo"),
+            OptionError::KeepAlive
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&clean_session=foo"),
+            OptionError::CleanSession
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&max_incoming_packet_size_bytes=foo"),
+            OptionError::MaxIncomingPacketSize
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&max_outgoing_packet_size_bytes=foo"),
+            OptionError::MaxOutgoingPacketSize
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&request_channel_capacity_num=foo"),
+            OptionError::RequestChannelCapacity
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&max_request_batch_num=foo"),
+            OptionError::MaxRequestBatch
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&pending_throttle_usecs=foo"),
+            OptionError::PendingThrottle
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&inflight_num=foo"),
+            OptionError::Inflight
+        );
+        assert_eq!(
+            err("mqtt://host:42?client_id=foo&conn_timeout_secs=foo"),
+            OptionError::ConnTimeout
+        );
     }
 
     #[test]
