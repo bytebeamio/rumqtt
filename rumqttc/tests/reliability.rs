@@ -83,7 +83,7 @@ async fn idle_connection_triggers_pings_on_time() {
     let keep_alive = 5;
 
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-    options.set_keep_alive(keep_alive);
+    options.set_keep_alive(Duration::from_secs(keep_alive));
 
     // Create client eventloop and poll
     task::spawn(async move {
@@ -119,7 +119,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
     let keep_alive = 5;
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
 
-    options.set_keep_alive(keep_alive);
+    options.set_keep_alive(Duration::from_secs(keep_alive));
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
@@ -164,7 +164,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     let keep_alive = 5;
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
 
-    options.set_keep_alive(keep_alive);
+    options.set_keep_alive(Duration::from_secs(keep_alive));
 
     task::spawn(async move {
         let mut eventloop = EventLoop::new(options, 5);
@@ -201,7 +201,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
 #[tokio::test]
 async fn detects_halfopen_connections_in_the_second_ping_request() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
-    options.set_keep_alive(5);
+    options.set_keep_alive(Duration::from_secs(5));
 
     // A broker which consumes packets but doesn't reply
     task::spawn(async move {
@@ -441,7 +441,7 @@ async fn next_poll_after_connect_failure_reconnects() {
 #[tokio::test]
 async fn reconnection_resumes_from_the_previous_state() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3001);
-    options.set_keep_alive(5);
+    options.set_keep_alive(Duration::from_secs(5));
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
     let mut eventloop = EventLoop::new(options, 5);
@@ -482,7 +482,7 @@ async fn reconnection_resumes_from_the_previous_state() {
 #[tokio::test]
 async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
-    options.set_keep_alive(5);
+    options.set_keep_alive(Duration::from_secs(5));
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity

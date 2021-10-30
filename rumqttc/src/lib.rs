@@ -385,12 +385,12 @@ impl MqttOptions {
 
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
-        if secs < 5 {
+    pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
+        if duration.as_secs() < 5 {
             panic!("Keep alives should be >= 5  secs");
         }
 
-        self.keep_alive = Duration::from_secs(u64::from(secs));
+        self.keep_alive = duration;
         self
     }
 
