@@ -1,3 +1,23 @@
+### R10
+----------------
+
+mqttbytes v0.6.0
+-----------
+* More public fields in v5
+
+rumqttc v0.10.0
+-----------
+- Feature flag unix sockets
+- From<Url> for MqttOptions
+- Change keepalive api from u16 to Duration
+
+rumqttd v0.9.0
+-----------
+- Use updated mqttbytes
+
+
+
+
 ### R9
 ----------------
 
@@ -6,7 +26,7 @@ mqttbytes v0.5.0
 * Make username and password public in connect packet
 * Make protocol field in v5 public
 
-rumqttc v0.7.0
+rumqttc v0.9.0
 -----------
 - Add unix sockets support
 
