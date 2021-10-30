@@ -194,6 +194,7 @@ impl From<Unsubscribe> for Request {
 pub enum Transport {
     Tcp,
     Tls(TlsConfiguration),
+    #[cfg(unix)]
     Unix,
     #[cfg(feature = "websocket")]
     #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
@@ -234,6 +235,7 @@ impl Transport {
         Self::Tls(tls_config)
     }
 
+    #[cfg(unix)]
     pub fn unix() -> Self {
         Self::Unix
     }
@@ -383,12 +385,12 @@ impl MqttOptions {
 
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(&mut self, secs: u16) -> &mut Self {
-        if secs < 5 {
+    pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
+        if duration.as_secs() < 5 {
             panic!("Keep alives should be >= 5  secs");
         }
 
-        self.keep_alive = Duration::from_secs(u64::from(secs));
+        self.keep_alive = duration;
         self
     }
 

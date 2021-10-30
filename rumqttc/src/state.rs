@@ -681,7 +681,7 @@ mod test {
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
         let mut opts = MqttOptions::new("test", "localhost", 1883);
-        opts.set_keep_alive(10);
+        opts.set_keep_alive(std::time::Duration::from_secs(10));
         mqtt.outgoing_ping().unwrap();
 
         // network activity other than pingresp
@@ -704,7 +704,7 @@ mod test {
         let mut mqtt = build_mqttstate();
 
         let mut opts = MqttOptions::new("test", "localhost", 1883);
-        opts.set_keep_alive(10);
+        opts.set_keep_alive(std::time::Duration::from_secs(10));
 
         // should ping
         mqtt.outgoing_ping().unwrap();
