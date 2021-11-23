@@ -556,7 +556,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
 
         let keep_alive = Duration::from_secs(
             queries
-                .get("keep_alive_secs")
+                .remove("keep_alive_secs")
                 .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
                 .transpose()?
                 .unwrap_or(60),
@@ -734,6 +734,9 @@ mod test {
         let v = ok("mqtt://host:42?client_id=foo");
         assert_eq!(v.broker_address(), ("host".to_owned(), 42));
         assert_eq!(v.client_id(), "foo".to_owned());
+
+        let v = ok("mqtt://host:42?client_id=foo&keep_alive_secs=5");
+        assert_eq!(v.keep_alive, Duration::from_secs(5));
 
         assert_eq!(err("mqtt://host:42"), OptionError::ClientId);
         assert_eq!(
