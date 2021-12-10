@@ -16,7 +16,7 @@ use std::time::Duration;
 use std::thread;
 
 let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
-mqttoptions.set_keep_alive(5);
+mqttoptions.set_keep_alive(Duration::from_secs(5));
 
 let (mut client, mut connection) = Client::new(mqttoptions, 10);
 client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
@@ -41,7 +41,7 @@ use std::time::Duration;
 use std::error::Error;
 
 let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-mqttoptions.set_keep_alive(5);
+mqttoptions.set_keep_alive(Duration::from_secs(5));
 
 let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
