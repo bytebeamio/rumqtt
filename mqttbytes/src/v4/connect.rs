@@ -32,7 +32,7 @@ impl Connect {
         }
     }
 
-    pub fn set_login<S: Into<String>>(&mut self, u: S, p: S) -> &mut Connect {
+    pub fn set_login<U: Into<String>, P: Into<String>>(&mut self, u: U, p: P) -> &mut Connect {
         let login = Login {
             username: u.into(),
             password: p.into(),
@@ -214,7 +214,7 @@ pub struct Login {
 }
 
 impl Login {
-    pub fn new<S: Into<String>>(u: S, p: S) -> Login {
+    pub fn new<U: Into<String>, P: Into<String>>(u: U, p: P) -> Login {
         Login {
             username: u.into(),
             password: p.into(),

@@ -434,7 +434,7 @@ impl MqttOptions {
     }
 
     /// Username and password
-    pub fn set_credentials<S: Into<String>>(&mut self, username: S, password: S) -> &mut Self {
+    pub fn set_credentials<U: Into<String>, P: Into<String>>(&mut self, username: U, password: P) -> &mut Self {
         self.credentials = Some((username.into(), password.into()));
         self
     }
