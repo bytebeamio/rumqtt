@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.10.0"
+version = "0.11.0"
 description = "An efficient and robust mqtt client for your connected devices"
 license = "Apache-2.0"
 repository = "https://github.com/bytebeamio/rumqtt"
@@ -19,10 +19,11 @@ websocket = ["async-tungstenite", "ws_stream_tungstenite"]
 [dependencies]
 tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
-webpki = "0.21"
-tokio-rustls = "0.22"
-async-tungstenite = { version = "0.13.1", default-features = false, features = ["tokio-rustls"], optional = true }
-ws_stream_tungstenite = { version = "0.6.1", default-features = false, features = ["tokio_io"], optional = true }
+webpki = "0.22.0"
+tokio-rustls = "0.23.2"
+rustls-pemfile = "0.2.1"
+async-tungstenite = { version = "0.16.1", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
+ws_stream_tungstenite = { version = "0.7.0", default-features = false, features = ["tokio_io"], optional = true }
 mqttbytes = { path = "../mqttbytes", version = "0.6" }
 pollster = "0.2"
 async-channel = "1.5"
@@ -40,5 +41,5 @@ envy = "0.4"
 jsonwebtoken = "7"
 tokio = { version = "1.0", features = ["full", "macros"] }
 matches = "0.1.8"
-rustls = "0.19"
-rustls-native-certs = "0.5.0"
+rustls = "0.20.2"
+rustls-native-certs = "0.6.1"
