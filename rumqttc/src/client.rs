@@ -93,6 +93,33 @@ impl AsyncClient {
         Ok(())
     }
 
+    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    pub async fn ack(
+        &self,
+        publish: &Publish
+    ) -> Result<(), ClientError>
+    {
+        let ack = get_ack_req(publish);
+
+        if let Some(ack) = ack {
+            self.request_tx.send(ack).await?;
+        }
+        Ok(())
+    }
+
+    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    pub fn try_ack(
+        &self,
+        publish: &Publish
+    ) -> Result<(), ClientError>
+    {
+        let ack = get_ack_req(publish);
+        if let Some(ack) = ack {
+            self.request_tx.try_send(ack)?;
+        }
+        Ok(())
+    }
+
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish_bytes<S>(
         &self,
@@ -186,6 +213,15 @@ impl AsyncClient {
     }
 }
 
+fn get_ack_req(publish: &Publish) -> Option<Request> {
+    let ack = match publish.qos {
+        QoS::AtMostOnce => return None,
+        QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid)),
+        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid))
+    };
+    Some(ack)
+}
+
 /// `Client` to communicate with MQTT eventloop `Connection`.
 ///
 /// Client is cloneable and can be used to synchronously Publish, Subscribe.
@@ -239,6 +275,27 @@ impl Client {
         self.client.try_publish(topic, qos, retain, payload)?;
         Ok(())
     }
+
+    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    pub async fn ack(
+        &self,
+        publish: &Publish
+    ) -> Result<(), ClientError>
+    {
+        pollster::block_on(self.client.ack(publish))?;
+        Ok(())
+    }
+
+    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    pub fn try_ack(
+        &self,
+        publish: &Publish
+    ) -> Result<(), ClientError>
+    {
+        self.client.try_ack(publish)?;
+        Ok(())
+    }
+
 
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {

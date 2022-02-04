@@ -332,6 +332,8 @@ pub struct MqttOptions {
     last_will: Option<LastWill>,
     /// Connection timeout
     conn_timeout: u64,
+    /// If set to `true`, then MQTT acknowledgements are not sent automatically.
+    manual_acks: bool,
 }
 
 impl MqttOptions {
@@ -358,6 +360,7 @@ impl MqttOptions {
             inflight: 100,
             last_will: None,
             conn_timeout: 5,
+            manual_acks: false,
         }
     }
 
@@ -490,6 +493,17 @@ impl MqttOptions {
     /// get timeout in secs
     pub fn connection_timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// set manual acknowledgements
+    pub fn set_manual_acks(&mut self, manual_acks: bool) -> &mut Self {
+        self.manual_acks = manual_acks;
+        self
+    }
+
+    /// get manual acknowledgements
+    pub fn manual_acks(&self) -> bool {
+        self.manual_acks
     }
 }
 
@@ -657,6 +671,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             inflight,
             last_will: None,
             conn_timeout,
+            manual_acks: false
         })
     }
 }
@@ -679,6 +694,7 @@ impl Debug for MqttOptions {
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
             .field("conn_timeout", &self.conn_timeout)
+            .field("manual_acks", &self.manual_acks)
             .finish()
     }
 }
