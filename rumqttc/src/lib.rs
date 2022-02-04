@@ -332,7 +332,8 @@ pub struct MqttOptions {
     last_will: Option<LastWill>,
     /// Connection timeout
     conn_timeout: u64,
-    /// If set to `true`, then MQTT acknowledgements are not sent automatically.
+    /// If set to `true` MQTT acknowledgements are not sent automatically.
+    /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
 }
 
