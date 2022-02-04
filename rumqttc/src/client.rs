@@ -277,7 +277,7 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(
+    pub fn ack(
         &self,
         publish: &Publish
     ) -> Result<(), ClientError>
