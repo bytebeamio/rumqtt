@@ -35,6 +35,10 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
 
     let mut acks_count = 0;
     let start = Instant::now();
+
+    // flatten isn't shorter because the if let is needed anyways, and
+    // flattening a result is not an entirely obvious operation either.
+    #[allow(clippy::manual_flatten)]
     for event in connection.iter() {
         if let Ok(Event::Incoming(Incoming::PubAck(_))) = event {
             acks_count += 1;
@@ -45,7 +49,7 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
     }
 
     let elapsed_micros = start.elapsed().as_micros();
-    let throughput = (acks_count * 1000_000) / elapsed_micros as usize;
+    let throughput = (acks_count * 1_000_000) / elapsed_micros as usize;
 
     // --------------------------- results ---------------------------------------
 
