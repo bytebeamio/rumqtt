@@ -64,9 +64,6 @@ pub struct EventLoop {
     pub(crate) cancel_tx: Sender<()>,
 }
 
-#[must_use = "Eventloop should be iterated over a loop to make progress"]
-pub type PollResult = Result<Event, ConnectionError>;
-
 /// Events which can be yielded by the event loop
 #[derive(Debug, PartialEq, Clone)]
 pub enum Event {
@@ -123,7 +120,7 @@ impl EventLoop {
     /// the broker. Continuing to poll will reconnect to the broker if there is
     /// a disconnection.
     /// **NOTE** Don't block this while iterating
-    pub async fn poll(&mut self) -> PollResult {
+    pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let (network, connack) = connect_or_cancel(&self.options, &self.cancel_rx).await?;
             self.network = Some(network);
