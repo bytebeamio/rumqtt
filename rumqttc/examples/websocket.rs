@@ -8,9 +8,17 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
-    // port parameter is ignored when scheme is ws  
-    let mut mqttoptions = MqttOptions::new("clientId-aSziq39Bp3", "ws://broker.mqttdashboard.com:8000/mqtt", 8000);
+    // port parameter is ignored when scheme is websocket
+    let mut mqttoptions = MqttOptions::new(
+        "clientId-aSziq39Bp3",
+        "ws://broker.mqttdashboard.com:8000/mqtt",
+        8000,
+    );
+    #[cfg(feature = "websocket")]
     mqttoptions.set_transport(Transport::Ws);
+    #[cfg(not(feature = "websocket"))]
+    panic!("Enable websocket feature with `--features=websocket`");
+
     mqttoptions.set_keep_alive(Duration::from_secs(60));
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -23,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let event = eventloop.poll().await;
         match event {
             Ok(ev) => println!("{:?}", ev),
-            Err(err) => println!("{:?}", err)
+            Err(err) => println!("{:?}", err),
         }
     }
 }
