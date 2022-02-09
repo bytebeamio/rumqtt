@@ -82,10 +82,11 @@ impl EventLoop {
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = options.inflight;
+        let manual_acks = options.manual_acks;
 
         EventLoop {
             options,
-            state: MqttState::new(max_inflight),
+            state: MqttState::new(max_inflight, manual_acks),
             requests_tx,
             requests_rx,
             pending,

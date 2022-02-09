@@ -75,13 +75,15 @@ pub struct MqttState {
     pub events: VecDeque<Event>,
     /// Write buffer
     pub write: BytesMut,
+    /// Indicates if acknowledgements should be send immediately
+    pub manual_acks: bool,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -98,6 +100,7 @@ impl MqttState {
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
+            manual_acks
         }
     }
 
@@ -145,6 +148,8 @@ impl MqttState {
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
             Request::Disconnect => self.outgoing_disconnect()?,
+            Request::PubAck(puback) => self.outgoing_puback(puback)?,
+            Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec)?,
             _ => unimplemented!(),
         };
 
@@ -194,19 +199,19 @@ impl MqttState {
         match qos {
             QoS::AtMostOnce => Ok(()),
             QoS::AtLeastOnce => {
-                let pkid = publish.pkid;
-                PubAck::new(pkid).write(&mut self.write)?;
-                let event = Event::Outgoing(Outgoing::PubAck(pkid));
-                self.events.push_back(event);
-
+                if !self.manual_acks {
+                    let puback = PubAck::new(publish.pkid);
+                    self.outgoing_puback(puback)?
+                }
                 Ok(())
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
-                PubRec::new(pkid).write(&mut self.write)?;
                 self.incoming_pub[pkid as usize] = Some(pkid);
-                let event = Event::Outgoing(Outgoing::PubRec(pkid));
-                self.events.push_back(event);
+                if !self.manual_acks {
+                    let pubrec = PubRec::new(pkid);
+                    self.outgoing_pubrec(pubrec)?;
+                }
                 Ok(())
             }
         }
@@ -347,6 +352,20 @@ impl MqttState {
         Ok(())
     }
 
+    fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
+        puback.write(&mut self.write)?;
+        let event = Event::Outgoing(Outgoing::PubAck(puback.pkid));
+        self.events.push_back(event);
+        Ok(())
+    }
+
+    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
+        pubrec.write(&mut self.write)?;
+        let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
+        self.events.push_back(event);
+        Ok(())
+    }
+
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
@@ -468,7 +487,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::{Incoming, MqttOptions, Request};
+    use crate::{Event, Incoming, MqttOptions, Outgoing, Request};
     use mqttbytes::v4::*;
     use mqttbytes::*;
 
@@ -492,7 +511,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(100)
+        MqttState::new(100, false)
     }
 
     #[test]
@@ -568,6 +587,52 @@ mod test {
 
         // only qos2 publish should be add to queue
         assert_eq!(pkid, 3);
+    }
+
+    #[test]
+    fn incoming_publish_should_be_acked() {
+        let mut mqtt = build_mqttstate();
+
+        // QoS0, 1, 2 Publishes
+        let publish1 = build_incoming_publish(QoS::AtMostOnce, 1);
+        let publish2 = build_incoming_publish(QoS::AtLeastOnce, 2);
+        let publish3 = build_incoming_publish(QoS::ExactlyOnce, 3);
+
+        mqtt.handle_incoming_publish(&publish1).unwrap();
+        mqtt.handle_incoming_publish(&publish2).unwrap();
+        mqtt.handle_incoming_publish(&publish3).unwrap();
+
+        if let Event::Outgoing(Outgoing::PubAck(pkid)) = mqtt.events[0] {
+            assert_eq!(pkid, 2);
+        } else {
+            panic!("missing puback")
+        }
+
+        if let Event::Outgoing(Outgoing::PubRec(pkid)) = mqtt.events[1] {
+            assert_eq!(pkid, 3);
+        } else {
+            panic!("missing PubRec")
+        }
+    }
+
+    #[test]
+    fn incoming_publish_should_not_be_acked_with_manual_acks() {
+        let mut mqtt = build_mqttstate();
+        mqtt.manual_acks = true;
+
+        // QoS0, 1, 2 Publishes
+        let publish1 = build_incoming_publish(QoS::AtMostOnce, 1);
+        let publish2 = build_incoming_publish(QoS::AtLeastOnce, 2);
+        let publish3 = build_incoming_publish(QoS::ExactlyOnce, 3);
+
+        mqtt.handle_incoming_publish(&publish1).unwrap();
+        mqtt.handle_incoming_publish(&publish2).unwrap();
+        mqtt.handle_incoming_publish(&publish3).unwrap();
+
+        let pkid = mqtt.incoming_pub[3].unwrap();
+        assert_eq!(pkid, 3);
+
+        assert!(mqtt.events.is_empty());
     }
 
     #[test]
