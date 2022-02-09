@@ -120,7 +120,6 @@ impl EventLoop {
     /// the broker. Continuing to poll will reconnect to the broker if there is
     /// a disconnection.
     /// **NOTE** Don't block this while iterating
-    #[must_use = "Eventloop should be iterated over a loop to make progress"]
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let (network, connack) = connect_or_cancel(&self.options, &self.cancel_rx).await?;
