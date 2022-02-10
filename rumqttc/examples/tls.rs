@@ -13,11 +13,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
     mqtt_options.set_credentials("username", "password");
 
-    // To customise TLS configuration we create a rustls ClientConfig and set it up how we want.
-    let mut client_config = ClientConfig::new();
     // Use rustls-native-certs to load root certificates from the operating system.
-    client_config.root_store =
-        rustls_native_certs::load_native_certs().expect("Failed to load platform certificates.");
+    let mut root_cert_store = rustls::RootCertStore::empty();
+    for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs") {
+        root_cert_store.add(&rustls::Certificate(cert.0))?;
+    }
+
+    let client_config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
+
     mqtt_options.set_transport(Transport::tls_with_config(client_config.into()));
 
     let (_client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
