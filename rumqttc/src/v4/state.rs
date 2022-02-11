@@ -1,4 +1,4 @@
-use crate::{Event, Incoming, Outgoing, Request};
+use crate::v4::{Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
 use mqttbytes::v4::*;
@@ -487,7 +487,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::{Event, Incoming, MqttOptions, Outgoing, Request};
+    use crate::v4::{Event, Incoming, MqttOptions, Outgoing, Request};
     use mqttbytes::v4::*;
     use mqttbytes::*;
 
