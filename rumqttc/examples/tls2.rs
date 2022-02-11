@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Dummies to prevent compilation error in CI
     let ca = vec![1, 2, 3];
     let client_cert = vec![1, 2, 3];
-    let client_key= vec![1, 2, 3];
+    let client_key = vec![1, 2, 3];
     //     let ca = include_bytes!("/home/tekjar/tlsfiles/ca.cert.pem");
     //     let client_cert = include_bytes!("/home/tekjar/tlsfiles/device-1.cert.pem");
     //     let client_key = include_bytes!("/home/tekjar/tlsfiles/device-1.key.pem");

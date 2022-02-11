@@ -1,6 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 
-use bytes::{BufMut, BytesMut, Bytes};
+use bytes::{BufMut, Bytes, BytesMut};
 
 use super::*;
 

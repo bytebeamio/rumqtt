@@ -14,8 +14,8 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
-pub use tokio_rustls::rustls::ClientConfig;
 pub use tls::Error;
+pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
@@ -336,7 +336,11 @@ impl MqttOptions {
     }
 
     /// Username and password
-    pub fn set_credentials<U: Into<String>, P: Into<String>>(&mut self, username: U, password: P) -> &mut Self {
+    pub fn set_credentials<U: Into<String>, P: Into<String>>(
+        &mut self,
+        username: U,
+        password: P,
+    ) -> &mut Self {
         self.credentials = Some((username.into(), password.into()));
         self
     }
@@ -570,7 +574,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             inflight,
             last_will: None,
             conn_timeout,
-            manual_acks: false
+            manual_acks: false,
         })
     }
 }
@@ -613,9 +617,9 @@ mod test {
     fn no_scheme() {
         let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
 
-        _mqtt_opts.set_transport(crate::Transport::wss(Vec::from("Test CA"), None, None));
+        _mqtt_opts.set_transport(crate::v4::Transport::wss(Vec::from("Test CA"), None, None));
 
-        if let crate::Transport::Wss(TlsConfiguration::Simple {
+        if let crate::v4::Transport::Wss(TlsConfiguration::Simple {
             ca,
             client_auth,
             alpn,

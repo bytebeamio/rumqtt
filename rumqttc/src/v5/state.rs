@@ -1,4 +1,4 @@
-use super::{Event, Incoming, Outgoing, Request, packet::*};
+use super::{packet::*, Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
 use std::collections::VecDeque;
@@ -98,7 +98,7 @@ impl MqttState {
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
-            manual_acks
+            manual_acks,
         }
     }
 
@@ -485,9 +485,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::v5::{Event, Incoming, MqttOptions, Outgoing, Request};
-    use mqttbytes::v5::*;
-    use mqttbytes::*;
+    use crate::v5::{packet::*, Event, Incoming, MqttOptions, Outgoing, Request};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

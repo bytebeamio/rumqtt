@@ -100,7 +100,7 @@ impl MqttState {
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
-            manual_acks
+            manual_acks,
         }
     }
 
