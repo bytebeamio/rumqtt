@@ -7,7 +7,7 @@ use tokio_rustls::rustls::{
 use tokio_rustls::webpki;
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
-use crate::v4::{Key, MqttOptions, TlsConfiguration};
+use crate::v5::{Key, MqttOptions, TlsConfiguration};
 
 use std::convert::TryFrom;
 use std::io;

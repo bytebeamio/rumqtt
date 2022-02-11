@@ -1,7 +1,7 @@
-use crate::v4::{Event, Incoming, Outgoing, Request};
+use super::{Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
-use mqttbytes::v4::*;
+use mqttbytes::v5::*;
 use mqttbytes::*;
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
@@ -422,7 +422,7 @@ impl MqttState {
 
         debug!(
             "Unsubscribe. Topics = {:?}, Pkid = {:?}",
-            unsub.topics, unsub.pkid
+            unsub.filters, unsub.pkid
         );
 
         unsub.write(&mut self.write)?;
@@ -434,7 +434,7 @@ impl MqttState {
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
 
-        Disconnect.write(&mut self.write)?;
+        Disconnect::new().write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
         Ok(())
@@ -487,8 +487,8 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::v4::{Event, Incoming, MqttOptions, Outgoing, Request};
-    use mqttbytes::v4::*;
+    use crate::v5::{Event, Incoming, MqttOptions, Outgoing, Request};
+    use mqttbytes::v5::*;
     use mqttbytes::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {

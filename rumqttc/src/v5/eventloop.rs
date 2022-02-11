@@ -1,11 +1,11 @@
-use crate::v4::{framed::Network, Transport};
-use crate::v4::{tls, Incoming, MqttState, Packet, Request, StateError};
-use crate::v4::{MqttOptions, Outgoing};
+use crate::v5::{framed::Network, Transport};
+use crate::v5::{tls, Incoming, MqttState, Packet, Request, StateError};
+use crate::v5::{MqttOptions, Outgoing};
 
 use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
-use mqttbytes::v4::*;
+use mqttbytes::v5::*;
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
