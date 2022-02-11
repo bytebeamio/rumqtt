@@ -16,7 +16,7 @@ pub enum PubRecReason {
     PayloadFormatInvalid = 153,
 }
 
-/// Acknowledgement to QoS1 publish
+/// Acknowledgement to QoS2 publish
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubRec {
     pub pkid: u16,
