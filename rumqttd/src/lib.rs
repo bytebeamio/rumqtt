@@ -18,10 +18,10 @@ use tokio::{task, time};
 
 // All requirements for `rustls`
 #[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls::internal::pemfile::{certs, rsa_private_keys};
+use rustls_pemfile::{certs, rsa_private_keys};
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{
-    AllowAnyAuthenticatedClient, RootCertStore, ServerConfig, TLSError as RustlsError,
+    server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
 };
 
 // All requirements for `native-tls`
@@ -310,6 +310,8 @@ impl Server {
         key_path: &str,
         ca_path: &str,
     ) -> Result<Option<ServerTLSAcceptor>, Error> {
+        use tokio_rustls::rustls::{RootCertStore, ServerConfig};
+
         let (certs, key) = {
             // Get certificates
             let cert_file = File::open(&cert_path);
@@ -317,6 +319,10 @@ impl Server {
                 cert_file.map_err(|_| Error::ServerCertNotFound(cert_path.to_owned()))?;
             let certs = certs(&mut BufReader::new(cert_file));
             let certs = certs.map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
+            let certs = certs
+                .iter()
+                .map(|cert| Certificate(cert.to_owned()))
+                .collect();
 
             // Get private key
             let key_file = File::open(&key_path);
@@ -330,21 +336,29 @@ impl Server {
                 None => return Err(Error::InvalidServerKey(key_path.to_owned())),
             };
 
-            (certs, key)
+            (certs, PrivateKey(key))
         };
 
         // client authentication with a CA. CA isn't required otherwise
-        let mut server_config = {
+        let server_config = {
             let ca_file = File::open(ca_path);
             let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.to_owned()))?;
             let ca_file = &mut BufReader::new(ca_file);
+            let ca_certs = rustls_pemfile::certs(ca_file)?;
+            let ca_cert = ca_certs
+                .first()
+                .map(|c| Certificate(c.to_owned()))
+                .ok_or(Error::InvalidCACert(ca_path.to_string()))?;
             let mut store = RootCertStore::empty();
-            let o = store.add_pem_file(ca_file);
-            o.map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
-            ServerConfig::new(AllowAnyAuthenticatedClient::new(store))
+            store
+                .add(&ca_cert)
+                .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
+            ServerConfig::builder()
+                .with_safe_defaults()
+                .with_client_cert_verifier(AllowAnyAuthenticatedClient::new(store))
+                .with_single_cert(certs, key)?
         };
 
-        server_config.set_single_cert(certs, key)?;
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
         Ok(Some(ServerTLSAcceptor::RustlsAcceptor { acceptor }))
     }
