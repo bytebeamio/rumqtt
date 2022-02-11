@@ -1,9 +1,7 @@
 use bytes::BytesMut;
-use mqttbytes::v5::*;
-use mqttbytes::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::v5::{Incoming, MqttState, StateError};
+use crate::v5::{packet::*, Incoming, MqttState, StateError};
 use std::io;
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -61,7 +59,7 @@ impl Network {
         loop {
             let required = match read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => return Ok(packet),
-                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
+                Err(Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
             };
 

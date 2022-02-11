@@ -1,8 +1,6 @@
-use super::{Event, Incoming, Outgoing, Request};
+use super::{Event, Incoming, Outgoing, Request, packet::*};
 
 use bytes::BytesMut;
-use mqttbytes::v5::*;
-use mqttbytes::*;
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
 
@@ -30,11 +28,11 @@ pub enum StateError {
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
-    Deserialization(mqttbytes::Error),
+    Deserialization(Error),
 }
 
-impl From<mqttbytes::Error> for StateError {
-    fn from(e: mqttbytes::Error) -> StateError {
+impl From<Error> for StateError {
+    fn from(e: Error) -> StateError {
         StateError::Deserialization(e)
     }
 }
