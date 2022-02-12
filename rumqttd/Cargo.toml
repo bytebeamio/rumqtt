@@ -38,9 +38,10 @@ bytes = "1.0"
 warp = "0.3"
 futures-util = "0.3.8"
 pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
+rustls-pemfile = "0.3.0"
 
 # Optional
-tokio-rustls = { version = "0.22", optional = true }
+tokio-rustls = { version = "0.23.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
