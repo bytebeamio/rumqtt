@@ -1,6 +1,6 @@
 //! Example of how to configure rumqttd to connect to a server using TLS and authentication.
 
-use rumqttc::v4::{self, AsyncClient, Event, Incoming, MqttOptions, Transport};
+use rumqttc::v4::{AsyncClient, Event, Incoming, MqttOptions, Transport};
 use rustls::ClientConfig;
 use std::error::Error;
 
