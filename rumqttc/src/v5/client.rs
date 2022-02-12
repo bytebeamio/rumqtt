@@ -16,10 +16,10 @@ use tokio::runtime::{self, Runtime};
 pub enum ClientError {
     #[error("Failed to send cancel request to eventloop")]
     Cancel(SendError<()>),
-    #[error("Failed to send mqtt requests to eventloop")]
-    Request(#[from] SendError<()>),
-    #[error("Failed to send mqtt requests to eventloop")]
-    TryRequest(#[from] TrySendError<()>),
+    #[error("Failed to send mqtt request to eventloop, the evenloop has been closed")]
+    EventloopClosed,
+    #[error("Failed to send mqtt request to evenloop, to requests buffer is full right now")]
+    RequestsFull,
     #[error("Serialization error")]
     Mqtt4(mqttbytes::Error),
 }
@@ -29,6 +29,7 @@ pub enum ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_buf: Arc<Mutex<VecDeque<Request>>>,
+    request_buf_capacity: usize,
     request_tx: Sender<()>,
     cancel_tx: Sender<()>,
 }
@@ -43,6 +44,7 @@ impl AsyncClient {
 
         let client = AsyncClient {
             request_buf,
+            request_buf_capacity: cap,
             request_tx,
             cancel_tx,
         };
@@ -56,9 +58,11 @@ impl AsyncClient {
         request_buf: Arc<Mutex<VecDeque<Request>>>,
         request_tx: Sender<()>,
         cancel_tx: Sender<()>,
+        cap: usize,
     ) -> AsyncClient {
         AsyncClient {
             request_buf,
+            request_buf_capacity: cap,
             request_tx,
             cancel_tx,
         }
@@ -79,9 +83,7 @@ impl AsyncClient {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let pkid = publish.pkid;
-        let publish = Request::Publish(publish);
-        self.request_buf.lock().unwrap().push_back(publish);
-        self.request_tx.send(()).await?;
+        self.send_and_notify(Request::Publish(publish)).await?;
         Ok(pkid)
     }
 
@@ -100,9 +102,7 @@ impl AsyncClient {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let pkid = publish.pkid;
-        let publish = Request::Publish(publish);
-        self.request_buf.lock().unwrap().push_back(publish);
-        self.request_tx.try_send(())?;
+        self.try_send_and_notify(Request::Publish(publish))?;
         Ok(pkid)
     }
 
@@ -111,8 +111,7 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_buf.lock().unwrap().push_back(ack);
-            self.request_tx.send(()).await?;
+            self.send_and_notify(ack).await?;
         }
         Ok(())
     }
@@ -121,8 +120,7 @@ impl AsyncClient {
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
         if let Some(ack) = ack {
-            self.request_buf.lock().unwrap().push_back(ack);
-            self.request_tx.try_send(())?;
+            self.try_send_and_notify(ack)?;
         }
         Ok(())
     }
@@ -140,28 +138,19 @@ impl AsyncClient {
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
-        self.request_buf.lock().unwrap().push_back(publish);
-        self.request_tx.send(()).await?;
-        Ok(())
+        self.send_and_notify(Request::Publish(publish)).await
     }
 
     /// Sends a MQTT Subscribe to the eventloop
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        let request = Request::Subscribe(subscribe);
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.send(()).await?;
-        Ok(())
+        self.send_and_notify(Request::Subscribe(subscribe)).await
     }
 
     /// Sends a MQTT Subscribe to the eventloop
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        let request = Request::Subscribe(subscribe);
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.try_send(())?;
-        Ok(())
+        self.try_send_and_notify(Request::Subscribe(subscribe))
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
@@ -170,10 +159,7 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let request = Request::Subscribe(subscribe);
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.send(()).await?;
-        Ok(())
+        self.send_and_notify(Request::Subscribe(subscribe)).await
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
@@ -182,44 +168,30 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let request = Request::Subscribe(subscribe);
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.try_send(())?;
-        Ok(())
+        self.try_send_and_notify(Request::Subscribe(subscribe))
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
-        let request = Request::Unsubscribe(unsubscribe);
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.send(()).await?;
-        Ok(())
+        self.send_and_notify(Request::Unsubscribe(unsubscribe))
+            .await
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
     pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
-        let request = Request::Unsubscribe(unsubscribe);
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.try_send(())?;
-        Ok(())
+        self.try_send_and_notify(Request::Unsubscribe(unsubscribe))
     }
 
     /// Sends a MQTT disconnect to the eventloop
     pub async fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.send(()).await?;
-        Ok(())
+        self.send_and_notify(Request::Disconnect).await
     }
 
     /// Sends a MQTT disconnect to the eventloop
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.try_send(())?;
-        Ok(())
+        self.try_send_and_notify(Request::Disconnect)
     }
 
     /// Stops the eventloop right away
@@ -227,16 +199,28 @@ impl AsyncClient {
         self.cancel_tx.send(()).await.map_err(ClientError::Cancel)
     }
 
-    #[inline]
-    async fn send_and_notify(&self, request: Request) -> Result<(), async_channel::SendError<()>> {
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.send(()).await
+    async fn send_and_notify(&self, request: Request) -> Result<(), ClientError> {
+        let mut request_buf = self.request_buf.lock().unwrap();
+        if request_buf.len() == self.request_buf_capacity {
+            return Err(ClientError::RequestsFull);
+        }
+        request_buf.push_back(request);
+        if let Err(SendError(_)) = self.request_tx.send(()).await {
+            return Err(ClientError::EventloopClosed);
+        };
+        Ok(())
     }
 
-    #[inline]
-    fn try_send_and_notify(&self, request: Request) -> Result<(), async_channel::TrySendError<()>> {
-        self.request_buf.lock().unwrap().push_back(request);
-        self.request_tx.try_send(())
+    fn try_send_and_notify(&self, request: Request) -> Result<(), ClientError> {
+        let mut request_buf = self.request_buf.lock().unwrap();
+        if request_buf.len() == self.request_buf_capacity {
+            return Err(ClientError::RequestsFull);
+        }
+        request_buf.push_back(request);
+        if let Err(TrySendError::Closed(_)) = self.request_tx.try_send(()) {
+            return Err(ClientError::EventloopClosed);
+        }
+        Ok(())
     }
 }
 
