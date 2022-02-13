@@ -9,9 +9,9 @@ mod packet;
 mod state;
 mod tls;
 
-pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use flume::{SendError, Sender, TrySendError};
 pub use packet::*;
 pub use state::{MqttState, StateError};
 pub use tls::Error;

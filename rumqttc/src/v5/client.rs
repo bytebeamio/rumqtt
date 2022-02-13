@@ -2,8 +2,8 @@
 //! async eventloop.
 use crate::v5::{packet::*, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
-use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
+use flume::{SendError, Sender, TrySendError};
 use std::{
     collections::VecDeque,
     mem,
@@ -83,7 +83,8 @@ impl AsyncClient {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let pkid = publish.pkid;
-        self.send_and_notify(Request::Publish(publish)).await?;
+        self.send_async_and_notify(Request::Publish(publish))
+            .await?;
         Ok(pkid)
     }
 
@@ -108,18 +109,15 @@ impl AsyncClient {
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
     pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        let ack = get_ack_req(publish);
-
-        if let Some(ack) = ack {
-            self.send_and_notify(ack).await?;
+        if let Some(ack) = get_ack_req(publish) {
+            self.send_async_and_notify(ack).await?;
         }
         Ok(())
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        let ack = get_ack_req(publish);
-        if let Some(ack) = ack {
+        if let Some(ack) = get_ack_req(publish) {
             self.try_send_and_notify(ack)?;
         }
         Ok(())
@@ -138,13 +136,14 @@ impl AsyncClient {
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        self.send_and_notify(Request::Publish(publish)).await
+        self.send_async_and_notify(Request::Publish(publish)).await
     }
 
     /// Sends a MQTT Subscribe to the eventloop
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        self.send_and_notify(Request::Subscribe(subscribe)).await
+        self.send_async_and_notify(Request::Subscribe(subscribe))
+            .await
     }
 
     /// Sends a MQTT Subscribe to the eventloop
@@ -159,7 +158,8 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        self.send_and_notify(Request::Subscribe(subscribe)).await
+        self.send_async_and_notify(Request::Subscribe(subscribe))
+            .await
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
@@ -174,7 +174,7 @@ impl AsyncClient {
     /// Sends a MQTT Unsubscribe to the eventloop
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
-        self.send_and_notify(Request::Unsubscribe(unsubscribe))
+        self.send_async_and_notify(Request::Unsubscribe(unsubscribe))
             .await
     }
 
@@ -186,7 +186,7 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the eventloop
     pub async fn disconnect(&self) -> Result<(), ClientError> {
-        self.send_and_notify(Request::Disconnect).await
+        self.send_async_and_notify(Request::Disconnect).await
     }
 
     /// Sends a MQTT disconnect to the eventloop
@@ -196,16 +196,31 @@ impl AsyncClient {
 
     /// Stops the eventloop right away
     pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx.send(()).await.map_err(ClientError::Cancel)
+        self.cancel_tx
+            .send_async(())
+            .await
+            .map_err(ClientError::Cancel)
     }
 
-    async fn send_and_notify(&self, request: Request) -> Result<(), ClientError> {
+    async fn send_async_and_notify(&self, request: Request) -> Result<(), ClientError> {
         let mut request_buf = self.request_buf.lock().unwrap();
         if request_buf.len() == self.request_buf_capacity {
             return Err(ClientError::RequestsFull);
         }
         request_buf.push_back(request);
-        if let Err(SendError(_)) = self.request_tx.send(()).await {
+        if let Err(SendError(_)) = self.request_tx.send_async(()).await {
+            return Err(ClientError::EventloopClosed);
+        };
+        Ok(())
+    }
+
+    pub(crate) fn send_and_notify(&self, request: Request) -> Result<(), ClientError> {
+        let mut request_buf = self.request_buf.lock().unwrap();
+        if request_buf.len() == self.request_buf_capacity {
+            return Err(ClientError::RequestsFull);
+        }
+        request_buf.push_back(request);
+        if let Err(SendError(_)) = self.request_tx.send(()) {
             return Err(ClientError::EventloopClosed);
         };
         Ok(())
@@ -217,7 +232,7 @@ impl AsyncClient {
             return Err(ClientError::RequestsFull);
         }
         request_buf.push_back(request);
-        if let Err(TrySendError::Closed(_)) = self.request_tx.try_send(()) {
+        if let Err(TrySendError::Disconnected(_)) = self.request_tx.try_send(()) {
             return Err(ClientError::EventloopClosed);
         }
         Ok(())
@@ -268,7 +283,11 @@ impl Client {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        pollster::block_on(self.client.publish(topic, qos, retain, payload))
+        let mut publish = Publish::new(topic, qos, payload);
+        publish.retain = retain;
+        let pkid = publish.pkid;
+        self.client.send_and_notify(Request::Publish(publish))?;
+        Ok(pkid)
     }
 
     pub fn try_publish<S, V>(
@@ -287,7 +306,10 @@ impl Client {
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        pollster::block_on(self.client.ack(publish))
+        if let Some(ack) = get_ack_req(publish) {
+            self.client.send_and_notify(ack)?;
+        }
+        Ok(())
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
@@ -297,7 +319,8 @@ impl Client {
 
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        pollster::block_on(self.client.subscribe(topic, qos))
+        let subscribe = Subscribe::new(topic.into(), qos);
+        self.client.send_and_notify(Request::Subscribe(subscribe))
     }
 
     /// Sends a MQTT Subscribe to the eventloop
@@ -314,7 +337,8 @@ impl Client {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        pollster::block_on(self.client.subscribe_many(topics))
+        let subscribe = Subscribe::new_many(topics);
+        self.client.send_and_notify(Request::Subscribe(subscribe))
     }
 
     pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
@@ -326,7 +350,9 @@ impl Client {
 
     /// Sends a MQTT Unsubscribe to the eventloop
     pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
-        pollster::block_on(self.client.unsubscribe(topic))
+        let unsubscribe = Unsubscribe::new(topic.into());
+        self.client
+            .send_and_notify(Request::Unsubscribe(unsubscribe))
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
@@ -336,7 +362,7 @@ impl Client {
 
     /// Sends a MQTT disconnect to the eventloop
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.disconnect())
+        self.client.send_and_notify(Request::Disconnect)
     }
 
     /// Sends a MQTT disconnect to the eventloop
@@ -346,7 +372,7 @@ impl Client {
 
     /// Stops the eventloop right away
     pub fn cancel(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.cancel())
+        self.client.cancel_tx.send(()).map_err(ClientError::Cancel)
     }
 }
 
