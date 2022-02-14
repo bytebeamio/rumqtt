@@ -1,7 +1,7 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-/// Acknowledgement to QoS1 publish
+/// QoS2 Assured publish complete, in response to PUBREL packet
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubComp {
     pub pkid: u16,
