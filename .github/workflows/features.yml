@@ -10,29 +10,39 @@ name: features
 
 jobs:
   test:
-    name: Rumqtt build and test
+    name: Test ${{ matrix.os }} ${{ matrix.features }}
     # runs-on: [self-hosted, linux, X64, rumqtt]
-    runs-on: ubuntu-18.04
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macOS-latest
+          - windows-latest
+        features:
+          - --no-default-features
+          - --features use-rustls
+          - --no-default-features --features use-native-tls
+          - --all-features
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
+          components: clippy
+          override: true
+          profile: minimal
           toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --no-default-features
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --features use-rustls
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --no-default-features --features use-native-tls
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --all-features
 
+      - name: Run check
+        uses: actions-rs/cargo@v1
+        with:
+          # TODO: migrate from check to clippy when many hints are applied
+          command: check
+          args: --verbose --all-targets ${{ matrix.features }}
 
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --release ${{ matrix.features }}
