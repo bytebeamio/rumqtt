@@ -9,7 +9,7 @@ pub enum PubRelReason {
     PacketIdentifierNotFound = 146,
 }
 
-/// Acknowledgement to QoS1 publish
+/// QoS2 Publish release, in response to PUBREC packet
 #[derive(Debug, Clone, PartialEq)]
 pub struct PubRel {
     pub pkid: u16,
