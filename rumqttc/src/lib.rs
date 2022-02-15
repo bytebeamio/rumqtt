@@ -61,7 +61,7 @@
 //! ```
 //!
 //! Quick overview of features
-//! - Eventloop orchestrates outgoing/incoming packets concurrently and hadles the state
+//! - Eventloop orchestrates outgoing/incoming packets concurrently and handles the state
 //! - Pings the broker when necessary and detects client side half open connections as well
 //! - Throttling of outgoing packets (todo)
 //! - Queue size based flow control on outgoing packets
