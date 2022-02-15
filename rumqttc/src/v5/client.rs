@@ -203,11 +203,13 @@ impl AsyncClient {
     }
 
     async fn send_async_and_notify(&self, request: Request) -> Result<(), ClientError> {
-        let mut request_buf = self.request_buf.lock().unwrap();
-        if request_buf.len() == self.request_buf_capacity {
-            return Err(ClientError::RequestsFull);
+        {
+            let mut request_buf = self.request_buf.lock().unwrap();
+            if request_buf.len() == self.request_buf_capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            request_buf.push_back(request);
         }
-        request_buf.push_back(request);
         if let Err(SendError(_)) = self.request_tx.send_async(()).await {
             return Err(ClientError::EventloopClosed);
         };
