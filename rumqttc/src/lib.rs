@@ -106,6 +106,7 @@ use std::time::Duration;
 mod client;
 mod eventloop;
 mod framed;
+mod new;
 mod state;
 mod tls;
 
@@ -114,6 +115,7 @@ pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
+pub use new::{ReqHandler, Publisher, Subscriber};
 pub use state::{MqttState, StateError};
 pub use tokio_rustls::rustls::ClientConfig;
 pub use tls::Error;
