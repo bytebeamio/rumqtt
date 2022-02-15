@@ -1,6 +1,8 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, MqttOptions, QoS, Transport};
+use rumqttc::v4::{AsyncClient, MqttOptions, QoS};
+#[cfg(feature = "websocket")]
+use rumqttc::v4::Transport;
 use std::error::Error;
 use std::time::Duration;
 
