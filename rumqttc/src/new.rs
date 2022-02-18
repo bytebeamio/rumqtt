@@ -126,7 +126,7 @@ impl SubHandler {
                     let topic = u?;
                     self.subscribers.remove(&topic);
                     let req = Request::Unsubscribe(Unsubscribe::new(topic));
-                    self.eventloop.handle().send(req).await?;
+                    self.eventloop.requests_tx.send(req).await?;
                 }
 
                 _ = self.shutdown_rx.recv() => {
