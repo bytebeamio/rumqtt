@@ -20,7 +20,7 @@ pub fn valid_topic(topic: &str) -> bool {
 
 /// Checks if the filter is valid
 ///
-/// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
 pub fn valid_filter(filter: &str) -> bool {
     if filter.is_empty() {
         return false;

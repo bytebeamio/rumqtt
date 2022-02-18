@@ -1,3 +1,4 @@
+#[doc = include_str!("../README.md")]
 extern crate alloc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
