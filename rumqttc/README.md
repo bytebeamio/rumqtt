@@ -3,12 +3,9 @@
 [![crates.io page](https://img.shields.io/crates/v/rumqttc.svg)](https://crates.io/crates/rumqttc)
 [![docs.rs page](https://docs.rs/rumqttc/badge.svg)](https://docs.rs/rumqttc)
 
-A pure rust MQTT client which strives to be robust, efficient and easy to use.
-This library is backed by an async (tokio) eventloop which handles all the
-robustness and and efficiency parts of MQTT but naturally fits into both sync
-and async worlds as we'll see
+A pure rust MQTT client which strives to be robust, efficient and easy to use. This library is backed by an async(using tokio) eventloop which enables users to send and receive MQTT messages in correspondence with a broker.
 
-Let's jump into examples right away
+## Examples
 
 A simple synchronous publish and subscribe
 ----------------------------
@@ -56,8 +53,7 @@ task::spawn(async move {
     }
 });
 
-loop {
-    let notification = eventloop.poll().await.unwrap();
+while let Ok(notification) = eventloop.poll().await {
     println!("Received = {:?}", notification);
 }
 ```
@@ -89,12 +85,12 @@ out side the library and `Eventloop` is accessible, users can
   connection progress.
 
 ### FAQ
-```rust
-Connecting to a broker using raw ip doesn't work
-```
+<details open>
+<summary>Connecting to a broker using raw ip doesn't work</summary>
 
 You cannot create a TLS connection to a bare IP address with a self-signed
 certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
 One workaround, which only works under *nix/BSD-like systems, is to add an
 entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
 address and use that name in your code.
+</details>
