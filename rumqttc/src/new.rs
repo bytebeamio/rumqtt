@@ -138,7 +138,7 @@ impl SubHandler {
     }
 
     async fn disconnect(&mut self) -> Result<(), Error> {
-        self.eventloop.handle().send(Request::Disconnect).await?;
+        self.eventloop.requests_tx.send(Request::Disconnect).await?;
 
         loop {
             if let Event::Outgoing(Outgoing::Disconnect) = self.eventloop.poll().await? {
@@ -162,6 +162,12 @@ impl Subscriber {
     pub async fn unsubscribe(&mut self) -> Result<(), Error> {
         self.unsub_tx.send(self.topic.clone()).await?;
         Ok(())
+    }
+}
+
+impl Drop for Subscriber {
+    fn drop(&mut self) {
+        pollster::block_on(async { self.unsubscribe().await.unwrap() })
     }
 }
 
