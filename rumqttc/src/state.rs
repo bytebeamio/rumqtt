@@ -1,8 +1,8 @@
 use crate::{Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
-use mqttbytes::v4::*;
-use mqttbytes::*;
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::{self, *};
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
 
@@ -30,11 +30,11 @@ pub enum StateError {
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
-    Deserialization(mqttbytes::Error),
+    Deserialization(mqttbytes::MqttError),
 }
 
-impl From<mqttbytes::Error> for StateError {
-    fn from(e: mqttbytes::Error) -> StateError {
+impl From<mqttbytes::MqttError> for StateError {
+    fn from(e: mqttbytes::MqttError) -> StateError {
         StateError::Deserialization(e)
     }
 }
@@ -488,8 +488,8 @@ impl MqttState {
 mod test {
     use super::{MqttState, StateError};
     use crate::{Event, Incoming, MqttOptions, Outgoing, Request};
-    use mqttbytes::v4::*;
-    use mqttbytes::*;
+    use crate::mqttbytes::v4::*;
+    use crate::mqttbytes::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

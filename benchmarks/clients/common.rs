@@ -1,6 +1,6 @@
 use pprof::{protos::Message, ProfilerGuard};
-use rumqttlog::router::ConnectionAck;
-use rumqttlog::{Connection, Event, Notification, Receiver, Sender};
+use librumqttd::rumqttlog::router::ConnectionAck;
+use librumqttd::rumqttlog::{Connection, Event, Notification, Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;

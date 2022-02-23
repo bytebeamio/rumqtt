@@ -1,5 +1,5 @@
-use mqttbytes::v4::*;
-use mqttbytes::*;
+use rumqttc::mqttbytes::v4::*;
+use rumqttc::mqttbytes::*;
 use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
@@ -239,9 +239,9 @@ impl Network {
                     }
                 }
                 // If some packets are already framed, return those
-                Err(Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                Err(MqttError::InsufficientBytes(_)) if count > 0 => return Ok(()),
                 // Wait for more bytes until a frame can be created
-                Err(Error::InsufficientBytes(required)) => {
+                Err(MqttError::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
@@ -250,7 +250,7 @@ impl Network {
     }
 
     #[inline]
-    async fn write(&mut self, packet: Packet) -> Result<Outgoing, Error> {
+    async fn write(&mut self, packet: Packet) -> Result<Outgoing, MqttError> {
         let outgoing = outgoing(&packet);
         match packet {
             Packet::Publish(packet) => packet.write(&mut self.write)?,

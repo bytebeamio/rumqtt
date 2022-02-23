@@ -4,8 +4,8 @@ use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
-use mqttbytes::v4::*;
-use mqttbytes::*;
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::{self, *};
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
@@ -20,7 +20,7 @@ pub enum ClientError {
     #[error("Failed to send mqtt requests to eventloop")]
     TryRequest(#[from] TrySendError<Request>),
     #[error("Serialization error")]
-    Mqtt4(mqttbytes::Error),
+    Mqtt4(mqttbytes::MqttError),
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`

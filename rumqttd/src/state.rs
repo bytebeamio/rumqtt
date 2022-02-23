@@ -1,8 +1,9 @@
-use mqttbytes::v4::*;
-use mqttbytes::*;
-use rumqttlog::{Message, Notification};
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::{self, *};
+use crate::rumqttlog::{Message, Notification};
 
 use bytes::{Bytes, BytesMut};
+use log::{debug, error, info};
 use std::mem;
 use std::vec::IntoIter;
 
@@ -11,7 +12,7 @@ pub enum Error {
     #[error("Received unsolicited ack from the device. {0}")]
     Unsolicited(u16),
     #[error("Collision with an unacked packet")]
-    Serialization(mqttbytes::Error),
+    Serialization(mqttbytes::MqttError),
     #[error("Collision with an unacked packet")]
     Collision,
     #[error("Duplicate connect")]
@@ -22,8 +23,8 @@ pub enum Error {
     Disconnect,
 }
 
-impl From<mqttbytes::Error> for Error {
-    fn from(e: mqttbytes::Error) -> Error {
+impl From<mqttbytes::MqttError> for Error {
+    fn from(e: mqttbytes::MqttError) -> Error {
         Error::Serialization(e)
     }
 }

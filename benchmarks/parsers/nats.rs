@@ -203,7 +203,6 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
     }
 
     // Convert into a UTF8 string for simpler parsing.
-    String::from_utf8_lossy(&line);
     let line = String::from_utf8(line).map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
     let line_uppercase = line.trim();
     // .to_uppercase();

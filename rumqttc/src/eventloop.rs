@@ -5,7 +5,8 @@ use crate::{MqttOptions, Outgoing};
 use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
-use mqttbytes::v4::*;
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes;
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -29,7 +30,7 @@ pub enum ConnectionError {
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("Packet parsing error: {0}")]
-    Mqtt4Bytes(mqttbytes::Error),
+    Mqtt4Bytes(mqttbytes::MqttError),
     #[error("Network: {0}")]
     Network(#[from] tls::Error),
     #[error("I/O: {0}")]
