@@ -93,6 +93,8 @@ impl DataLog {
         }
     }
 
+    // TODO: remove once type complexity is dealt with, added to silence clippy
+    #[allow(clippy::type_complexity)]
     pub fn readv(
         &mut self,
         topic: &str,

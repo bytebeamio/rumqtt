@@ -30,7 +30,7 @@ impl DataLog {
     /// only pull logs from connections.
     /// Data from replicator and data from connection are separated for this reason
     pub fn append(&mut self, topic: &str, bytes: Bytes) -> Option<(bool, (u64, u64))> {
-        match self.commitlog.append(&topic, bytes) {
+        match self.commitlog.append(topic, bytes) {
             Ok(v) => Some(v),
             Err(e) => {
                 error!("Commitlog append failed. Error = {:?}", e);
@@ -41,7 +41,7 @@ impl DataLog {
 
     pub fn retain(&mut self, topic: &str, bytes: Bytes) -> Option<bool> {
         // id 0-10 are reserved for replications which are linked to other routers in the mesh
-        match self.commitlog.retain(&topic, bytes) {
+        match self.commitlog.retain(topic, bytes) {
             Ok(v) => Some(v),
             Err(e) => {
                 error!("Commitlog append failed. Error = {:?}", e);

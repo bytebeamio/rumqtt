@@ -16,8 +16,8 @@ impl SubAck {
     }
 
     pub fn len(&self) -> usize {
-        let len = 2 + self.return_codes.len();
-        len
+        
+        2 + self.return_codes.len()
     }
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {

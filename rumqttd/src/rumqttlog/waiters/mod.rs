@@ -43,6 +43,12 @@ impl DataWaiters {
     }
 }
 
+impl Default for DataWaiters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type TopicsWaiters = Waiters<TopicsRequest>;
 
 /// TopicsWaiters are connections which are waiting to be notified

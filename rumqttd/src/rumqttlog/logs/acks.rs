@@ -59,3 +59,9 @@ impl Acks {
         mem::take(&mut self.acks)
     }
 }
+
+impl Default for Acks {
+    fn default() -> Self {
+        Self::new()
+    }
+}

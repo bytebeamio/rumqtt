@@ -38,14 +38,12 @@ impl Publish {
         }
     }
 
-    pub fn len(&self) -> usize {
-        let mut len = 2 + self.topic.len();
-        if self.qos != QoS::AtMostOnce && self.pkid != 0 {
-            len += 2;
+    fn len(&self) -> usize {
+        let len = 2 + self.topic.len() + self.payload.len();
+        match self.qos != QoS::AtMostOnce && self.pkid != 0 {
+            true => len + 2,
+            _ => len,
         }
-
-        len += self.payload.len();
-        len
     }
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {

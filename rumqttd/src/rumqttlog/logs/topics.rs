@@ -38,3 +38,9 @@ impl TopicsLog {
         self.topics.push(topic.to_owned());
     }
 }
+
+impl Default for TopicsLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}

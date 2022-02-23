@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::rumqttlog::{ConnectionId, router::Tracker, Notification};
+use crate::rumqttlog::{router::Tracker, ConnectionId, Notification};
 
 struct SavedState {
     id: ConnectionId,
@@ -58,5 +58,11 @@ impl ConnectionsLog {
             graveyard.tracker = Some(tracker);
             graveyard.pending = Some(pending);
         }
+    }
+}
+
+impl Default for ConnectionsLog {
+    fn default() -> Self {
+        Self::new()
     }
 }

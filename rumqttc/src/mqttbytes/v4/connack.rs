@@ -30,8 +30,8 @@ impl ConnAck {
 
     fn len(&self) -> usize {
         // sesssion present + code
-        let len = 1 + 1;
-        len
+        
+        1 + 1
     }
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {

@@ -38,7 +38,7 @@ impl Connection {
         id: &str,
         clean: bool,
         capacity: usize,
-    ) -> (Connection, Receiver<Notification>) {
+    ) -> (Box<Connection>, Receiver<Notification>) {
         let (this_tx, this_rx) = bounded(capacity);
 
         let connection = Connection {
@@ -51,7 +51,7 @@ impl Connection {
             remaining_space: capacity,
         };
 
-        (connection, this_rx)
+        (Box::new(connection), this_rx)
     }
 
     pub fn new_replica(

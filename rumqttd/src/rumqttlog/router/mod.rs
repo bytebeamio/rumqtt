@@ -3,6 +3,8 @@ extern crate bytes;
 pub(crate) mod connection;
 mod metrics;
 mod readyqueue;
+// TODO: remove clippy once renamed, added to silence clippy
+#[allow(clippy::module_inception)]
 mod router;
 mod slab;
 mod tracker;
@@ -12,8 +14,8 @@ pub use router::Router;
 pub use tracker::Tracker;
 
 use self::bytes::Bytes;
-pub use metrics::{ConnectionMetrics, MetricsReply, MetricsRequest};
 use crate::mqttbytes::v4::Packet;
+pub use metrics::{ConnectionMetrics, MetricsReply, MetricsRequest};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -21,7 +23,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum Event {
     /// Client id and connection handle
-    Connect(Connection),
+    Connect(Box<Connection>),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog
@@ -215,6 +217,12 @@ impl TopicsRequest {
     }
 }
 
+impl Default for TopicsRequest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Topics<'a> {
     offset: usize,
     topics: &'a [String],
@@ -232,6 +240,12 @@ pub struct AcksRequest;
 impl AcksRequest {
     pub fn new() -> AcksRequest {
         AcksRequest
+    }
+}
+
+impl Default for AcksRequest {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

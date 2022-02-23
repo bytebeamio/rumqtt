@@ -13,8 +13,8 @@ impl PubRec {
     }
 
     fn len(&self) -> usize {
-        let len = 2; // pkid
-        len
+         // pkid
+        2
     }
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {

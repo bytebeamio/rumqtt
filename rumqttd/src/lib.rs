@@ -350,7 +350,7 @@ impl Server {
             let ca_cert = ca_certs
                 .first()
                 .map(|c| Certificate(c.to_owned()))
-                .ok_or(Error::InvalidCACert(ca_path.to_string()))?;
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
             let mut store = RootCertStore::empty();
             store
                 .add(&ca_cert)

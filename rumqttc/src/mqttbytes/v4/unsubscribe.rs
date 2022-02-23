@@ -40,7 +40,7 @@ impl Unsubscribe {
         let remaining_len = 2 + self
             .topics
             .iter()
-            .fold(0, |s, ref topic| s + topic.len() + 2);
+            .fold(0, |s, topic| s + topic.len() + 2);
 
         payload.put_u8(0xA2);
         let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;

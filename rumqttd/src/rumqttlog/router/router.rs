@@ -36,7 +36,7 @@ pub struct Router {
     /// Topic log
     topicslog: TopicsLog,
     /// Pre-allocated list of connections
-    connections: Slab<Connection>,
+    connections: Slab<Box<Connection>>,
     /// Subscriptions and matching topics maintained per connection
     trackers: Slab<Tracker>,
     /// Watermarks of a connection
@@ -166,7 +166,7 @@ impl Router {
         notify(&mut self.connections, id, message);
     }
 
-    fn handle_new_connection(&mut self, connection: Connection) {
+    fn handle_new_connection(&mut self, connection: Box<Connection>) {
         let clean = connection.clean();
 
         let (id, mut tracker, mut pending) = match connection.conn.clone() {
@@ -744,7 +744,7 @@ fn handle_acks_request(id: ConnectionId, acks: &mut Acks) -> Option<Vec<Packet>>
 }
 
 /// Notifies and returns unschedule status if the connection is busy
-fn notify(connections: &mut Slab<Connection>, id: ConnectionId, reply: Notification) -> bool {
+fn notify(connections: &mut Slab<Box<Connection>>, id: ConnectionId, reply: Notification) -> bool {
     let connection = match connections.get_mut(id) {
         Some(c) => c,
         None => {

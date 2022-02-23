@@ -138,7 +138,7 @@ impl Tracker {
                     continue;
                 }
 
-                if matches(&topic, &filter.path) {
+                if matches(topic, &filter.path) {
                     self.topics_index.insert(topic.clone());
                     let qos = filter.qos as u8;
                     self.matched.push_back((topic.clone(), qos, (0, 0)));
@@ -169,7 +169,7 @@ impl Tracker {
 
         // Wildcard subscription match. We return after first match
         for (filter, qos) in self.wild_subscriptions.iter() {
-            if matches(&topic, filter) {
+            if matches(topic, filter) {
                 self.topics_index.insert(topic.to_owned());
                 let request = DataRequest::offsets(topic.to_owned(), *qos, (0, 0), 0);
                 return Some(request);
@@ -222,6 +222,12 @@ impl Tracker {
         }
 
         pending
+    }
+}
+
+impl Default for Tracker {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

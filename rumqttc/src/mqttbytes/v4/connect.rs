@@ -42,7 +42,7 @@ impl Connect {
         self
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         let mut len = 2 + "MQTT".len() // protocol name
                               + 1            // protocol version
                               + 1            // connect flags
@@ -166,15 +166,15 @@ impl LastWill {
         len
     }
 
-    fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, MqttError> {
+    fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<LastWill>, MqttError> {
         let last_will = match connect_flags & 0b100 {
             0 if (connect_flags & 0b0011_1000) != 0 => {
                 return Err(MqttError::IncorrectPacketFormat);
             }
             0 => None,
             _ => {
-                let will_topic = read_mqtt_string(&mut bytes)?;
-                let will_message = read_mqtt_bytes(&mut bytes)?;
+                let will_topic = read_mqtt_string(bytes)?;
+                let will_message = read_mqtt_bytes(bytes)?;
                 let will_qos = qos((connect_flags & 0b11000) >> 3)?;
                 Some(LastWill {
                     topic: will_topic,
@@ -216,15 +216,15 @@ impl Login {
         }
     }
 
-    fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<Login>, MqttError> {
+    fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<Login>, MqttError> {
         let username = match connect_flags & 0b1000_0000 {
             0 => String::new(),
-            _ => read_mqtt_string(&mut bytes)?,
+            _ => read_mqtt_string(bytes)?,
         };
 
         let password = match connect_flags & 0b0100_0000 {
             0 => String::new(),
-            _ => read_mqtt_string(&mut bytes)?,
+            _ => read_mqtt_string(bytes)?,
         };
 
         if username.is_empty() && password.is_empty() {
@@ -263,7 +263,7 @@ impl Login {
         connect_flags
     }
 
-    pub fn validate(&self, username: &String, password: &String ) -> bool {
+    pub fn validate(&self, username: &str, password: &str) -> bool {
         (self.username == *username) && (self.password == *password)
     }
 }

@@ -88,7 +88,7 @@ impl RemoteLink {
                 };
 
                 // Return error if the username/password werenot found
-                if validated == false {
+                if !validated {
                     return Err(Error::InvalidUsernameOrPassword);
                 }
             }

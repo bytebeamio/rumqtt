@@ -48,9 +48,9 @@ impl Subscribe {
         self
     }
 
-    pub fn len(&self) -> usize {
-        let len = 2 + self.filters.iter().fold(0, |s, t| s + t.len()); // len of pkid + vec![subscribe filter len]
-        len
+    fn len(&self) -> usize {
+        // len of pkid + vec![subscribe filter len]
+        2 + self.filters.iter().fold(0, |s, t| s + t.len())
     }
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {
@@ -110,7 +110,7 @@ impl SubscribeFilter {
         SubscribeFilter { path, qos }
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         // filter len + filter + options
         2 + self.path.len() + 1
     }

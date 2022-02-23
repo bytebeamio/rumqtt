@@ -100,8 +100,8 @@ impl Broker {
         .await
         .unwrap();
 
-        let packet = self.incoming.pop_front().unwrap();
-        packet
+        
+        self.incoming.pop_front().unwrap()
     }
 
     /// Reads next packet from the stream
