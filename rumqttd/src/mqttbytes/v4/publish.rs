@@ -1,8 +1,5 @@
 use super::*;
-use alloc::string::String;
-use alloc::vec::Vec;
 use bytes::{Buf, Bytes};
-use core::fmt;
 
 /// Publish packet
 #[derive(Clone, PartialEq)]
@@ -123,7 +120,6 @@ impl fmt::Debug for Publish {
 #[cfg(test)]
 mod test {
     use super::*;
-    use alloc::vec;
     use bytes::{Bytes, BytesMut};
     use pretty_assertions::assert_eq;
 

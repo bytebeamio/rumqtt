@@ -1,5 +1,4 @@
 use super::*;
-use alloc::vec::Vec;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::{TryFrom, TryInto};
 
@@ -83,7 +82,6 @@ impl TryFrom<u8> for SubscribeReasonCode {
 #[cfg(test)]
 mod test {
     use super::*;
-    use alloc::vec;
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 

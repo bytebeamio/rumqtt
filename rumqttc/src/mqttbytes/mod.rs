@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core::fmt::{self, Display, Formatter};
 use std::slice::Iter;

@@ -1,11 +1,10 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
+use crate::mqttbytes::{self, v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
-use crate::mqttbytes::v4::*;
-use crate::mqttbytes::{self, *};
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
@@ -94,11 +93,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(
-        &self,
-        publish: &Publish
-    ) -> Result<(), ClientError>
-    {
+    pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
@@ -108,11 +103,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(
-        &self,
-        publish: &Publish
-    ) -> Result<(), ClientError>
-    {
+    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
         if let Some(ack) = ack {
             self.request_tx.try_send(ack)?;
@@ -217,7 +208,7 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
     let ack = match publish.qos {
         QoS::AtMostOnce => return None,
         QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid)),
-        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid))
+        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid)),
     };
     Some(ack)
 }
@@ -277,25 +268,16 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub fn ack(
-        &self,
-        publish: &Publish
-    ) -> Result<(), ClientError>
-    {
+    pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         pollster::block_on(self.client.ack(publish))?;
         Ok(())
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(
-        &self,
-        publish: &Publish
-    ) -> Result<(), ClientError>
-    {
+    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         self.client.try_ack(publish)?;
         Ok(())
     }
-
 
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {

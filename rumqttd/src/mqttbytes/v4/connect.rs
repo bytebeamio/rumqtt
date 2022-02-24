@@ -1,6 +1,4 @@
 use super::*;
-use alloc::string::String;
-use alloc::vec::Vec;
 use bytes::{Buf, Bytes};
 
 /// Connection packet initiated by the client
@@ -263,7 +261,7 @@ impl Login {
         connect_flags
     }
 
-    pub fn validate(&self, username: &str, password: &str ) -> bool {
+    pub fn validate(&self, username: &str, password: &str) -> bool {
         (self.username == *username) && (self.password == *password)
     }
 }
@@ -271,7 +269,6 @@ impl Login {
 #[cfg(test)]
 mod test {
     use super::*;
-    use alloc::vec;
     use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 

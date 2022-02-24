@@ -1,6 +1,4 @@
 use super::*;
-use alloc::string::String;
-use alloc::vec::Vec;
 use bytes::{Buf, Bytes};
 
 /// Unsubscribe packet
