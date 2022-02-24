@@ -9,14 +9,9 @@ keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
 categories = ["network-programming"]
 repository = "https://github.com/bytebeamio/rumqtt/"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "librumqttd"
 path = "src/lib.rs"
-
-[[bin]]
-name = "rumqttd"
-path = "src/bin.rs"
 
 [features]
 default = ["use-rustls"]
@@ -25,8 +20,6 @@ use-rustls = ["tokio-rustls"]
 use-native-tls = ["tokio-native-tls"]
 
 [dependencies]
-rumqttlog = { path = "../rumqttlog", version = "0.9"}
-mqttbytes = { path = "../mqttbytes", version = "0.6" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
@@ -39,10 +32,15 @@ warp = "0.3"
 futures-util = "0.3.8"
 pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
 rustls-pemfile = "0.3.0"
+jackiechan = "0.0.4"
+segments = "0.1"
 
 # Optional
 tokio-rustls = { version = "0.23.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "0.6.1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"

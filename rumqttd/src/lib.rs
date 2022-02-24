@@ -1,13 +1,15 @@
-#[macro_use]
-extern crate log;
-
+use jackiechan::Sender;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{io, thread};
 use std::{net::SocketAddr, sync::Arc};
 
+mod mqttbytes;
+pub mod rumqttlog;
+
 use mqttbytes::v4::Packet;
-use rumqttlog::*;
+use rumqttlog::{Disconnection, Event, RecvError, Router, SendError};
 use tokio::time::error::Elapsed;
 
 use crate::remotelink::RemoteLink;
@@ -348,7 +350,7 @@ impl Server {
             let ca_cert = ca_certs
                 .first()
                 .map(|c| Certificate(c.to_owned()))
-                .ok_or(Error::InvalidCACert(ca_path.to_string()))?;
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
             let mut store = RootCertStore::empty();
             store
                 .add(&ca_cert)
