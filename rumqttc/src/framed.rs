@@ -1,8 +1,7 @@
 use bytes::BytesMut;
-use crate::mqttbytes::v4::*;
-use crate::mqttbytes::{self, *};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::mqttbytes::{self, v4::*};
 use crate::{Incoming, MqttState, StateError};
 use std::io;
 
@@ -61,7 +60,7 @@ impl Network {
         loop {
             let required = match read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => return Ok(packet),
-                Err(mqttbytes::MqttError::InsufficientBytes(required)) => required,
+                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
             };
 
@@ -86,9 +85,9 @@ impl Network {
                     }
                 }
                 // If some packets are already framed, return those
-                Err(MqttError::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
                 // Wait for more bytes until a frame can be created
-                Err(MqttError::InsufficientBytes(required)) => {
+                Err(mqttbytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
                 Err(e) => return Err(StateError::Deserialization(e)),

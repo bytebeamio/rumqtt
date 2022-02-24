@@ -20,13 +20,13 @@ impl SubAck {
         2 + self.return_codes.len()
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
         let pkid = read_u16(&mut bytes)?;
 
         if !bytes.has_remaining() {
-            return Err(MqttError::MalformedPacket);
+            return Err(Error::MalformedPacket);
         }
 
         let mut return_codes = Vec::new();
@@ -39,7 +39,7 @@ impl SubAck {
         Ok(suback)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, MqttError> {
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
         buffer.put_u8(0x90);
         let remaining_len = self.len();
         let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
@@ -65,7 +65,7 @@ pub enum SubscribeReasonCode {
 }
 
 impl TryFrom<u8> for SubscribeReasonCode {
-    type Error = super::MqttError;
+    type Error = super::Error;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         let v = match value {
@@ -73,7 +73,7 @@ impl TryFrom<u8> for SubscribeReasonCode {
             1 => SubscribeReasonCode::Success(QoS::AtLeastOnce),
             2 => SubscribeReasonCode::Success(QoS::ExactlyOnce),
             128 => SubscribeReasonCode::Failure,
-            v => return Err(super::MqttError::InvalidSubscribeReasonCode(v)),
+            v => return Err(super::Error::InvalidSubscribeReasonCode(v)),
         };
 
         Ok(v)

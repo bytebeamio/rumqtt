@@ -17,7 +17,7 @@ impl PubRec {
         2
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
         let pkid = read_u16(&mut bytes)?;
@@ -34,7 +34,7 @@ impl PubRec {
         Ok(puback)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, MqttError> {
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
         let len = self.len();
         buffer.put_u8(0x50);
         let count = write_remaining_length(buffer, len)?;

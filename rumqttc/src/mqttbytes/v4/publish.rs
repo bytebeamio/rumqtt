@@ -46,7 +46,7 @@ impl Publish {
         }
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let qos = qos((fixed_header.byte1 & 0b0110) >> 1)?;
         let dup = (fixed_header.byte1 & 0b1000) != 0;
         let retain = (fixed_header.byte1 & 0b0001) != 0;
@@ -62,7 +62,7 @@ impl Publish {
         };
 
         if qos != QoS::AtMostOnce && pkid == 0 {
-            return Err(MqttError::PacketIdZero);
+            return Err(Error::PacketIdZero);
         }
 
         let publish = Publish {
@@ -77,7 +77,7 @@ impl Publish {
         Ok(publish)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, MqttError> {
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
         let len = self.len();
 
         let dup = self.dup as u8;
@@ -91,7 +91,7 @@ impl Publish {
         if self.qos != QoS::AtMostOnce {
             let pkid = self.pkid;
             if pkid == 0 {
-                return Err(MqttError::PacketIdZero);
+                return Err(Error::PacketIdZero);
             }
 
             buffer.put_u16(pkid);

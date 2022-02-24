@@ -30,11 +30,11 @@ pub enum StateError {
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
-    Deserialization(mqttbytes::MqttError),
+    Deserialization(mqttbytes::Error),
 }
 
-impl From<mqttbytes::MqttError> for StateError {
-    fn from(e: mqttbytes::MqttError) -> StateError {
+impl From<mqttbytes::Error> for StateError {
+    fn from(e: mqttbytes::Error) -> StateError {
         StateError::Deserialization(e)
     }
 }

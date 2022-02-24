@@ -18,7 +18,7 @@ impl Unsubscribe {
         }
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
 
@@ -36,7 +36,7 @@ impl Unsubscribe {
         Ok(unsubscribe)
     }
 
-    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, MqttError> {
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
         let remaining_len = 2 + self
             .topics
             .iter()

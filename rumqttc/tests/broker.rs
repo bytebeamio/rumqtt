@@ -239,9 +239,9 @@ impl Network {
                     }
                 }
                 // If some packets are already framed, return those
-                Err(MqttError::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                Err(Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
                 // Wait for more bytes until a frame can be created
-                Err(MqttError::InsufficientBytes(required)) => {
+                Err(Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
@@ -250,7 +250,7 @@ impl Network {
     }
 
     #[inline]
-    async fn write(&mut self, packet: Packet) -> Result<Outgoing, MqttError> {
+    async fn write(&mut self, packet: Packet) -> Result<Outgoing, Error> {
         let outgoing = outgoing(&packet);
         match packet {
             Packet::Publish(packet) => packet.write(&mut self.write)?,

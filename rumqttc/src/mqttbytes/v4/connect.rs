@@ -63,7 +63,7 @@ impl Connect {
         len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, MqttError> {
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
 
@@ -71,13 +71,13 @@ impl Connect {
         let protocol_name = read_mqtt_string(&mut bytes)?;
         let protocol_level = read_u8(&mut bytes)?;
         if protocol_name != "MQTT" {
-            return Err(MqttError::InvalidProtocol);
+            return Err(Error::InvalidProtocol);
         }
 
         let protocol = match protocol_level {
             4 => Protocol::V4,
             5 => Protocol::V5,
-            num => return Err(MqttError::InvalidProtocolLevel(num)),
+            num => return Err(Error::InvalidProtocolLevel(num)),
         };
 
         let connect_flags = read_u8(&mut bytes)?;
@@ -100,7 +100,7 @@ impl Connect {
         Ok(connect)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, MqttError> {
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
         let len = self.len();
         buffer.put_u8(0b0001_0000);
         let count = write_remaining_length(buffer, len)?;
@@ -166,10 +166,10 @@ impl LastWill {
         len
     }
 
-    fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<LastWill>, MqttError> {
+    fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
         let last_will = match connect_flags & 0b100 {
             0 if (connect_flags & 0b0011_1000) != 0 => {
-                return Err(MqttError::IncorrectPacketFormat);
+                return Err(Error::IncorrectPacketFormat);
             }
             0 => None,
             _ => {
@@ -188,7 +188,7 @@ impl LastWill {
         Ok(last_will)
     }
 
-    fn write(&self, buffer: &mut BytesMut) -> Result<u8, MqttError> {
+    fn write(&self, buffer: &mut BytesMut) -> Result<u8, Error> {
         let mut connect_flags = 0;
 
         connect_flags |= 0x04 | (self.qos as u8) << 3;
@@ -216,7 +216,7 @@ impl Login {
         }
     }
 
-    fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<Login>, MqttError> {
+    fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<Login>, Error> {
         let username = match connect_flags & 0b1000_0000 {
             0 => String::new(),
             _ => read_mqtt_string(bytes)?,

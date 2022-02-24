@@ -48,7 +48,7 @@ pub enum Packet {
 }
 
 /// Reads a stream of bytes and extracts next MQTT packet out of it
-pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, MqttError> {
+pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
     let fixed_header = check(stream.iter(), max_size)?;
 
     // Test with a stream with exactly the size to check border panics
@@ -61,7 +61,7 @@ pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, MqttError>
             PacketType::PingReq => Ok(Packet::PingReq),
             PacketType::PingResp => Ok(Packet::PingResp),
             PacketType::Disconnect => Ok(Packet::Disconnect),
-            _ => Err(MqttError::PayloadRequired),
+            _ => Err(Error::PayloadRequired),
         };
     }
 

@@ -12,7 +12,7 @@ pub enum Error {
     #[error("Received unsolicited ack from the device. {0}")]
     Unsolicited(u16),
     #[error("Collision with an unacked packet")]
-    Serialization(mqttbytes::MqttError),
+    Serialization(mqttbytes::Error),
     #[error("Collision with an unacked packet")]
     Collision,
     #[error("Duplicate connect")]
@@ -23,8 +23,8 @@ pub enum Error {
     Disconnect,
 }
 
-impl From<mqttbytes::MqttError> for Error {
-    fn from(e: mqttbytes::MqttError) -> Error {
+impl From<mqttbytes::Error> for Error {
+    fn from(e: mqttbytes::Error) -> Error {
         Error::Serialization(e)
     }
 }

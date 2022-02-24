@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::mqttbytes::{FixedHeader, MqttError, read_u16};
+use crate::mqttbytes::{FixedHeader, Error, read_u16};
 
 /// Acknowledgement to unsubscribe
 #[derive(Debug, Clone, PartialEq)]
@@ -13,9 +13,9 @@ impl UnsubAck {
         UnsubAck { pkid }
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, MqttError> {
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
-            return Err(MqttError::PayloadSizeIncorrect);
+            return Err(Error::PayloadSizeIncorrect);
         }
 
         let variable_header_index = fixed_header.fixed_header_len;
@@ -26,7 +26,7 @@ impl UnsubAck {
         Ok(unsuback)
     }
 
-    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, MqttError> {
+    pub fn write(&self, payload: &mut BytesMut) -> Result<usize, Error> {
         payload.put_slice(&[0xB0, 0x02]);
         payload.put_u16(self.pkid);
         Ok(4)

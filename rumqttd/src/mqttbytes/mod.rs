@@ -9,9 +9,9 @@ pub mod v4;
 
 pub use topic::*;
 
-/// MqttError during serialization and deserialization
+/// Error during serialization and deserialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MqttError {
+pub enum Error {
     NotConnect(PacketType),
     UnexpectedConnect,
     InvalidConnectReturnCode(u8),
@@ -112,7 +112,7 @@ impl FixedHeader {
         }
     }
 
-    pub fn packet_type(&self) -> Result<PacketType, MqttError> {
+    pub fn packet_type(&self) -> Result<PacketType, Error> {
         let num = self.byte1 >> 4;
         match num {
             1 => Ok(PacketType::Connect),
@@ -129,7 +129,7 @@ impl FixedHeader {
             12 => Ok(PacketType::PingReq),
             13 => Ok(PacketType::PingResp),
             14 => Ok(PacketType::Disconnect),
-            _ => Err(MqttError::InvalidPacketType(num)),
+            _ => Err(Error::InvalidPacketType(num)),
         }
     }
 
@@ -145,7 +145,7 @@ impl FixedHeader {
 /// The passed stream doesn't modify parent stream's cursor. If this function
 /// returned an error, next `check` on the same parent stream is forced start
 /// with cursor at 0 again (Iter is owned. Only Iter's cursor is changed internally)
-pub fn check(stream: Iter<u8>, max_packet_size: usize) -> Result<FixedHeader, MqttError> {
+pub fn check(stream: Iter<u8>, max_packet_size: usize) -> Result<FixedHeader, Error> {
     // Create fixed header if there are enough bytes in the stream
     // to frame full packet
     let stream_len = stream.len();
@@ -154,25 +154,25 @@ pub fn check(stream: Iter<u8>, max_packet_size: usize) -> Result<FixedHeader, Mq
     // Don't let rogue connections attack with huge payloads.
     // Disconnect them before reading all that data
     if fixed_header.remaining_len > max_packet_size {
-        return Err(MqttError::PayloadSizeLimitExceeded(fixed_header.remaining_len));
+        return Err(Error::PayloadSizeLimitExceeded(fixed_header.remaining_len));
     }
 
     // If the current call fails due to insufficient bytes in the stream,
     // after calculating remaining length, we extend the stream
     let frame_length = fixed_header.frame_length();
     if stream_len < frame_length {
-        return Err(MqttError::InsufficientBytes(frame_length - stream_len));
+        return Err(Error::InsufficientBytes(frame_length - stream_len));
     }
 
     Ok(fixed_header)
 }
 
 /// Parses fixed header
-fn parse_fixed_header(mut stream: Iter<u8>) -> Result<FixedHeader, MqttError> {
+fn parse_fixed_header(mut stream: Iter<u8>) -> Result<FixedHeader, Error> {
     // At least 2 bytes are necessary to frame a packet
     let stream_len = stream.len();
     if stream_len < 2 {
-        return Err(MqttError::InsufficientBytes(2 - stream_len));
+        return Err(Error::InsufficientBytes(2 - stream_len));
     }
 
     let byte1 = stream.next().unwrap();
@@ -184,7 +184,7 @@ fn parse_fixed_header(mut stream: Iter<u8>) -> Result<FixedHeader, MqttError> {
 /// Parses variable byte integer in the stream and returns the length
 /// and number of bytes that make it. Used for remaining length calculation
 /// as well as for calculating property lengths
-fn length(stream: Iter<u8>) -> Result<(usize, usize), MqttError> {
+fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     let mut len: usize = 0;
     let mut len_len = 0;
     let mut done = false;
@@ -210,21 +210,21 @@ fn length(stream: Iter<u8>) -> Result<(usize, usize), MqttError> {
         // Only a max of 4 bytes allowed for remaining length
         // more than 4 shifts (0, 7, 14, 21) implies bad length
         if shift > 21 {
-            return Err(MqttError::MalformedRemainingLength);
+            return Err(Error::MalformedRemainingLength);
         }
     }
 
     // Not enough bytes to frame remaining length. wait for
     // one more byte
     if !done {
-        return Err(MqttError::InsufficientBytes(1));
+        return Err(Error::InsufficientBytes(1));
     }
 
     Ok((len_len, len))
 }
 
 /// Reads a series of bytes with a length from a byte stream
-fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, MqttError> {
+fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
     let len = read_u16(stream)? as usize;
 
     // Prevent attacks with wrong remaining length. This method is used in
@@ -232,18 +232,18 @@ fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, MqttError> {
     // reading variable len string or bytes doesn't cross promised boundary
     // with `read_fixed_header()`
     if len > stream.len() {
-        return Err(MqttError::BoundaryCrossed(len));
+        return Err(Error::BoundaryCrossed(len));
     }
 
     Ok(stream.split_to(len))
 }
 
 /// Reads a string from bytes stream
-fn read_mqtt_string(stream: &mut Bytes) -> Result<String, MqttError> {
+fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     let s = read_mqtt_bytes(stream)?;
     match String::from_utf8(s.to_vec()) {
         Ok(v) => Ok(v),
-        Err(_e) => Err(MqttError::TopicNotUtf8),
+        Err(_e) => Err(Error::TopicNotUtf8),
     }
 }
 
@@ -259,9 +259,9 @@ fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
 }
 
 /// Writes remaining length to stream and returns number of bytes for remaining length
-fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, MqttError> {
+fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Error> {
     if len > 268_435_455 {
-        return Err(MqttError::PayloadTooLong);
+        return Err(Error::PayloadTooLong);
     }
 
     let mut done = false;
@@ -284,12 +284,12 @@ fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Mq
 }
 
 /// Maps a number to QoS
-pub fn qos(num: u8) -> Result<QoS, MqttError> {
+pub fn qos(num: u8) -> Result<QoS, Error> {
     match num {
         0 => Ok(QoS::AtMostOnce),
         1 => Ok(QoS::AtLeastOnce),
         2 => Ok(QoS::ExactlyOnce),
-        qos => Err(MqttError::InvalidQoS(qos)),
+        qos => Err(Error::InvalidQoS(qos)),
     }
 }
 
@@ -298,24 +298,24 @@ pub fn qos(num: u8) -> Result<QoS, MqttError> {
 /// packet id or qos not being present. In cases where `read_mqtt_string` or
 /// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
 /// parse qos next, these pre checks will prevent `bytes` crashes
-fn read_u16(stream: &mut Bytes) -> Result<u16, MqttError> {
+fn read_u16(stream: &mut Bytes) -> Result<u16, Error> {
     if stream.len() < 2 {
-        return Err(MqttError::MalformedPacket);
+        return Err(Error::MalformedPacket);
     }
 
     Ok(stream.get_u16())
 }
 
-fn read_u8(stream: &mut Bytes) -> Result<u8, MqttError> {
+fn read_u8(stream: &mut Bytes) -> Result<u8, Error> {
     if stream.is_empty() {
-        return Err(MqttError::MalformedPacket);
+        return Err(Error::MalformedPacket);
     }
 
     Ok(stream.get_u8())
 }
 
-impl Display for MqttError {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "MqttError = {:?}", self)
+        write!(f, "Error = {:?}", self)
     }
 }

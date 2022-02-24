@@ -13,10 +13,6 @@ repository = "https://github.com/bytebeamio/rumqtt/"
 name = "librumqttd"
 path = "src/lib.rs"
 
-[[bin]]
-name = "rumqttd"
-path = "src/bin.rs"
-
 [features]
 default = ["use-rustls"]
 prof = ["pprof"]
