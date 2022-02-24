@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::mqttbytes::{FixedHeader, Error, read_u16};
+use crate::mqttbytes::{read_u16, Error, FixedHeader};
 
 /// Acknowledgement to unsubscribe
 #[derive(Debug, Clone, PartialEq)]

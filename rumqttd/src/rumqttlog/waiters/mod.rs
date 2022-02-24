@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use super::{DataRequest, router::TopicsRequest};
+use super::{router::TopicsRequest, DataRequest};
 
 type Topic = String;
 type ConnectionId = usize;

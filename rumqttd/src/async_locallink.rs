@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
-use crate::{
-    consolelink::{self, ConsoleLink},
-    Config, Id, Server,
-};
-use futures_util::stream::{FuturesUnordered, StreamExt};
-use log::{trace, warn, error};
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::*;
 use crate::rumqttlog::{
     Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, Router, SendError,
     Sender,
 };
+use crate::{
+    consolelink::{self, ConsoleLink},
+    Config, Id, Server,
+};
+use futures_util::stream::{FuturesUnordered, StreamExt};
+use log::{error, trace, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {

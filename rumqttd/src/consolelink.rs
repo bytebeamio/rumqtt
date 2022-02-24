@@ -1,8 +1,8 @@
-use crate::Config;
 use crate::rumqttlog::ConnectionId;
 use crate::rumqttlog::{
     Connection, ConnectionAck, Event, MetricsReply, MetricsRequest, Notification, Receiver, Sender,
 };
+use crate::Config;
 use std::sync::Arc;
 use warp::Filter;
 

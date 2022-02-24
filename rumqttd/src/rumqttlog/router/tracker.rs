@@ -3,7 +3,7 @@ use crate::mqttbytes::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::{Request, AcksRequest, DataRequest, TopicsRequest};
+use super::{AcksRequest, DataRequest, Request, TopicsRequest};
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to

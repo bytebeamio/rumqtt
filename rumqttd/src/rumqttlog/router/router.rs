@@ -6,7 +6,7 @@ use crate::rumqttlog::logs::{ConnectionsLog, DataLog, TopicsLog};
 use crate::rumqttlog::waiters::{DataWaiters, TopicsWaiters};
 use crate::rumqttlog::{Config, ConnectionId, RouterId};
 use jackiechan::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use log::{info, error, trace, warn};
+use log::{error, info, trace, warn};
 use thiserror::Error;
 
 use super::connection::ConnectionType;

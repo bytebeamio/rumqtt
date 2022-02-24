@@ -158,7 +158,7 @@ use std::{
 };
 
 /// A protocol operation sent by the server.
-/// 
+///
 /// TODO: remove dead_code once contents are used, added to silence clippy
 #[derive(Debug)]
 #[allow(dead_code)]

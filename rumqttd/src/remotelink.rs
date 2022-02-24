@@ -1,15 +1,15 @@
-use crate::network::Network;
-use crate::state::{self, State};
-use crate::{network, ConnectionSettings, Id};
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::*;
+use crate::network::Network;
 use crate::rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
+use crate::state::{self, State};
+use crate::{network, ConnectionSettings, Id};
 
+use log::{debug, trace, warn};
 use std::sync::Arc;
 use std::{io, mem};
-use log::{debug, trace, warn};
 use tokio::time::{error::Elapsed, Duration};
 use tokio::{select, time};
 

@@ -1,5 +1,5 @@
-use jackiechan::{bounded, Receiver, Sender, TrySendError};
 use crate::mqttbytes::v4::LastWill;
+use jackiechan::{bounded, Receiver, Sender, TrySendError};
 use std::fmt;
 
 use super::Notification;

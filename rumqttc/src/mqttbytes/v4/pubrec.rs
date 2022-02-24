@@ -13,7 +13,7 @@ impl PubRec {
     }
 
     fn len(&self) -> usize {
-         // pkid
+        // pkid
         2
     }
 

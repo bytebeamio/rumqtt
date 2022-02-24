@@ -15,7 +15,6 @@ impl SubAck {
     }
 
     pub fn len(&self) -> usize {
-        
         2 + self.return_codes.len()
     }
 

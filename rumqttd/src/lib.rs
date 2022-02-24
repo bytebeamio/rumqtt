@@ -1,15 +1,15 @@
 use jackiechan::Sender;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{io, thread};
 use std::{net::SocketAddr, sync::Arc};
-use log::{error, info};
 
 mod mqttbytes;
 pub mod rumqttlog;
 
 use mqttbytes::v4::Packet;
-use rumqttlog::{RecvError, SendError, Event, Router, Disconnection};
+use rumqttlog::{Disconnection, Event, RecvError, Router, SendError};
 use tokio::time::error::Elapsed;
 
 use crate::remotelink::RemoteLink;

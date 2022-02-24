@@ -100,7 +100,6 @@ impl Broker {
         .await
         .unwrap();
 
-        
         self.incoming.pop_front().unwrap()
     }
 

@@ -13,7 +13,7 @@ impl PubAck {
     }
 
     fn len(&self) -> usize {
-         // pkid
+        // pkid
         2
     }
 
