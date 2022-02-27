@@ -1,6 +1,4 @@
-use tokio::task;
-
-use rumqttc::{self, MqttOptions, QoS, ReqHandler};
+use rumqttc::{self, MqttOptions, QoS, MqttHandler};
 use std::error::Error;
 use std::time::Duration;
 
@@ -12,12 +10,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new("test-sub", "localhost", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
-    let (client, mut sub_handler) = ReqHandler::new(mqttoptions, 10);
-    task::spawn(async move {
-        sub_handler.start().await.unwrap();
-    });
-
-    let mut subscriber = client.subscriber("hello/world", QoS::AtMostOnce).await?;
+    let handler = MqttHandler::new(mqttoptions, 10);
+    let mut subscriber = handler.subscriber("hello/world", QoS::AtMostOnce).await?;
 
     loop {
         let publish = subscriber.next().await?;
