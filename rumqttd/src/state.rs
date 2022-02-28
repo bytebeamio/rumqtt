@@ -167,7 +167,7 @@ impl State {
             if let QoS::AtMostOnce = publish.qos {
                 debug!("Publish. Qos 0. Payload size = {:?}", publish.payload.len());
                 publish.write(&mut self.write)?;
-                return Ok(());
+                continue;
             };
 
             // consider PacketIdentifier(0) as uninitialized packets
