@@ -32,7 +32,7 @@ impl MqttHandler {
         Self { client, eventloop }
     }
 
-    async fn disconnect(&mut self) -> Result<(), Error> {
+    pub async fn disconnect(&mut self) -> Result<(), Error> {
         self.client.disconnect().await?;
 
         loop {
@@ -110,17 +110,23 @@ pub struct Subscriber {
 impl Subscriber {
     pub async fn next(&mut self) -> Result<Publish, Error> {
         loop {
-            if let Event::Incoming(Packet::Publish(publish)) = self.handler.eventloop.poll().await?
-            {
-                return Ok(publish);
+            match self.handler.eventloop.poll().await? {
+                Event::Incoming(Packet::Publish(publish)) if publish.topic == self.topic => {
+                    return Ok(publish)
+                }
+                _ => continue,
             }
         }
     }
 
-    pub async fn unsubscribe(&self) -> Result<(), Error> {
+    pub async fn unsubscribe(&mut self) -> Result<(), Error> {
         self.handler.client.unsubscribe(&self.topic).await?;
 
-        Ok(())
+        loop {
+            if let Event::Outgoing(Outgoing::Unsubscribe(_)) = self.handler.eventloop.poll().await? {
+                return Ok(());
+            }
+        }
     }
 }
 
