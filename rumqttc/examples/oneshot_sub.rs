@@ -1,4 +1,4 @@
-use rumqttc::{self, MqttOptions, QoS, MqttHandler};
+use rumqttc::{self, MqttHandler, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -16,8 +16,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         let publish = subscriber.next().await?;
         println!("{:?}", publish);
-        if publish.topic.contains("10") {
+        if publish.payload.len() == 10 {
             subscriber.unsubscribe().await?;
+            return Ok(());
         }
     }
 }

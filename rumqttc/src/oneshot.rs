@@ -110,11 +110,11 @@ pub struct Subscriber {
 impl Subscriber {
     pub async fn next(&mut self) -> Result<Publish, Error> {
         loop {
-            match self.handler.eventloop.poll().await? {
-                Event::Incoming(Packet::Publish(publish)) if publish.topic == self.topic => {
-                    return Ok(publish)
+            if let Event::Incoming(Packet::Publish(publish)) = self.handler.eventloop.poll().await?
+            {
+                if publish.topic == self.topic {
+                    return Ok(publish);
                 }
-                _ => continue,
             }
         }
     }
@@ -123,7 +123,8 @@ impl Subscriber {
         self.handler.client.unsubscribe(&self.topic).await?;
 
         loop {
-            if let Event::Outgoing(Outgoing::Unsubscribe(_)) = self.handler.eventloop.poll().await? {
+            if let Event::Outgoing(Outgoing::Unsubscribe(_)) = self.handler.eventloop.poll().await?
+            {
                 return Ok(());
             }
         }
