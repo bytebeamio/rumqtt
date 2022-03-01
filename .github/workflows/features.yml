@@ -25,6 +25,10 @@ jobs:
           - --features use-rustls
           - --no-default-features --features use-native-tls
           - --all-features
+        components:
+          - rumqttc
+          - rumqttd
+          - benchmarks
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -36,13 +40,14 @@ jobs:
 
       - name: Run check
         uses: actions-rs/cargo@v1
+        if: ${{ matrix.os != 'windows-latest' && matrix.components != 'benchmarks' }}
         with:
-          # TODO: migrate from check to clippy when many hints are applied
-          command: check
+          command: clippy
           args: --verbose --all-targets ${{ matrix.features }}
 
-      - name: Run tests
+      - name: Run rumqttc test
         uses: actions-rs/cargo@v1
+        if: ${{ matrix.os != 'macos-latest' }}
         with:
-          command: test
+          command: test -p ${{ matrix.components }}
           args: --verbose --release ${{ matrix.features }}
