@@ -1,8 +1,8 @@
-use crate::Config;
-use rumqttlog::ConnectionId;
-use rumqttlog::{
+use crate::rumqttlog::ConnectionId;
+use crate::rumqttlog::{
     Connection, ConnectionAck, Event, MetricsReply, MetricsRequest, Notification, Receiver, Sender,
 };
+use crate::Config;
 use std::sync::Arc;
 use warp::Filter;
 
@@ -43,7 +43,7 @@ pub async fn start(console: Arc<ConsoleLink>) {
 
     let config = warp::path!("node" / "config").map(move || {
         let config = config_console.config.clone();
-        warp::reply::json(&config)
+        warp::reply::json(config.as_ref())
     });
 
     let router_console = console.clone();

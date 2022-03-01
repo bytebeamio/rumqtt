@@ -1,5 +1,5 @@
+use crate::mqttbytes::{self, v4::*};
 use bytes::BytesMut;
-use mqttbytes::v4::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::state;

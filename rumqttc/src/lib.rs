@@ -106,6 +106,7 @@ use std::time::Duration;
 mod client;
 mod eventloop;
 mod framed;
+pub mod mqttbytes;
 mod oneshot;
 mod state;
 mod tls;
