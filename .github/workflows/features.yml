@@ -10,8 +10,7 @@ name: features
 
 jobs:
   test:
-    name: Test ${{ matrix.os }} ${{ matrix.features }}
-    # runs-on: [self-hosted, linux, X64, rumqtt]
+    name: Testing ${{ matrix.components }} on ${{ matrix.os }} with ${{ matrix.features }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -38,11 +37,11 @@ jobs:
           profile: minimal
           toolchain: stable
 
-      - name: Run check
+      - name: Run check 
         uses: actions-rs/cargo@v1
         if: ${{ matrix.os != 'windows-latest' && matrix.components != 'benchmarks' }}
         with:
-          command: clippy
+          command: clippy -p ${{ matrix.components }}
           args: --verbose --all-targets ${{ matrix.features }}
 
       - name: Run rumqttc test
