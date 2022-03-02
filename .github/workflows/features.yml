@@ -39,6 +39,8 @@ jobs:
 
       - name: Run check 
         uses: actions-rs/cargo@v1
+        env:
+          RUSTFLAGS: "-D warning"
         if: ${{ matrix.os != 'windows-latest' && matrix.components != 'benchmarks' }}
         with:
           command: clippy -p ${{ matrix.components }}
