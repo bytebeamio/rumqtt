@@ -275,13 +275,13 @@ impl Server {
         // Get certificates
         let cert_file = File::open(&pkcs12_path);
         let mut cert_file =
-            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.clone()))?;
+            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.to_string()))?;
 
         // Read cert into memory
         let mut buf = Vec::new();
         cert_file
             .read_to_end(&mut buf)
-            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
+            .map_err(|_| Error::InvalidServerCert(pkcs12_path.to_string()))?;
 
         // Get the identity
         let identity = native_tls::Identity::from_pkcs12(&buf, pkcs12_pass)
