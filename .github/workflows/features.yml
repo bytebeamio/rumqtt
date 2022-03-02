@@ -10,7 +10,7 @@ name: features
 
 jobs:
   test:
-    name: Testing ${{ matrix.components }} on ${{ matrix.os }} with ${{ matrix.features }}
+    name: Test on ${{ matrix.os }} with ${{ matrix.features }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -24,10 +24,6 @@ jobs:
           - --features use-rustls
           - --no-default-features --features use-native-tls
           - --all-features
-        components:
-          - rumqttc
-          - rumqttd
-          - benchmarks
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -37,18 +33,18 @@ jobs:
           profile: minimal
           toolchain: stable
 
-      - name: Run check 
+      - name: Run check
         uses: actions-rs/cargo@v1
         env:
           RUSTFLAGS: "-D warning"
-        if: ${{ matrix.os != 'windows-latest' && matrix.components != 'benchmarks' }}
+        if: ${{ matrix.os != 'windows-latest' }}
         with:
-          command: clippy -p ${{ matrix.components }}
+          command: clippy
           args: --verbose --all-targets ${{ matrix.features }}
 
-      - name: Run rumqttc test
+      - name: Run test
         uses: actions-rs/cargo@v1
         if: ${{ matrix.os != 'macos-latest' }}
         with:
-          command: test -p ${{ matrix.components }}
+          command: test
           args: --verbose --release ${{ matrix.features }}
