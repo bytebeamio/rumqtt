@@ -68,7 +68,7 @@ impl MqttHandler {
 
 impl Drop for MqttHandler {
     fn drop(&mut self) {
-        pollster::block_on(async { self.disconnect().await.unwrap() })
+        pollster::block_on(self.disconnect()).unwrap()
     }
 }
 
@@ -93,12 +93,18 @@ impl Publisher {
         }
     }
 
-    pub fn try_publish<V: Into<Vec<u8>>>(&self, payload: V) -> Result<(), Error> {
+    pub fn try_publish<V: Into<Vec<u8>>>(&mut self, payload: V) -> Result<(), Error> {
         self.handler
             .client
             .try_publish(&self.topic, self.qos, self.retain, payload)?;
 
-        Ok(())
+        loop {
+            if let Event::Outgoing(Outgoing::Publish(_)) =
+                pollster::block_on(self.handler.eventloop.poll())?
+            {
+                return Ok(());
+            }
+        }
     }
 }
 
@@ -133,6 +139,6 @@ impl Subscriber {
 
 impl Drop for Subscriber {
     fn drop(&mut self) {
-        pollster::block_on(async { self.unsubscribe().await.unwrap() })
+        pollster::block_on(self.unsubscribe()).unwrap()
     }
 }
