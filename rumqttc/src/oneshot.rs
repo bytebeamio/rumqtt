@@ -1,12 +1,8 @@
 use async_channel::{RecvError, SendError};
-use mqttbytes::{
-    v4::{Packet, Publish},
-    QoS,
-};
 
-use crate::{
-    AsyncClient, ClientError, ConnectionError, Event, EventLoop, MqttOptions, Outgoing, Request,
-};
+use crate::mqttbytes::{v4::*, QoS};
+use crate::{AsyncClient, ClientError, ConnectionError, Event, EventLoop, MqttOptions};
+use crate::{Outgoing, Request};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
