@@ -7,7 +7,9 @@ use crate::mqttbytes;
 use crate::mqttbytes::v4::*;
 use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
-use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
+use async_tungstenite::tokio::connect_async;
+#[cfg(all(feature = "use-rustls", feature = "websocket"))]
+use async_tungstenite::tokio::connect_async_with_tls_connector;
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -302,7 +304,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
-        #[cfg(feature = "websocket")]
+        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
             let request = http::Request::builder()
                 .method(http::Method::GET)

@@ -15,7 +15,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-websocket = ["async-tungstenite", "ws_stream_tungstenite", "use-rustls"]
+websocket = ["async-tungstenite", "ws_stream_tungstenite"]
 use-rustls = ["tokio-rustls"]
 
 [dependencies]
