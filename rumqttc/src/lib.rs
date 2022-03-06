@@ -100,6 +100,7 @@
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
+#[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -108,6 +109,7 @@ mod eventloop;
 mod framed;
 pub mod mqttbytes;
 mod state;
+#[cfg(feature = "use-rustls")]
 mod tls;
 
 pub use async_channel::{SendError, Sender, TrySendError};
@@ -116,7 +118,9 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
+#[cfg(feature = "use-rustls")]
 pub use tls::Error;
+#[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
@@ -194,6 +198,7 @@ impl From<Unsubscribe> for Request {
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
+    #[cfg(feature = "use-rustls")]
     Tls(TlsConfiguration),
     #[cfg(unix)]
     Unix,
@@ -218,6 +223,7 @@ impl Transport {
     }
 
     /// Use secure tcp with tls as transport
+    #[cfg(feature = "use-rustls")]
     pub fn tls(
         ca: Vec<u8>,
         client_auth: Option<(Vec<u8>, Key)>,
@@ -232,6 +238,7 @@ impl Transport {
         Self::tls_with_config(config)
     }
 
+    #[cfg(feature = "use-rustls")]
     pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Tls(tls_config)
     }
@@ -273,6 +280,7 @@ impl Transport {
 }
 
 #[derive(Clone)]
+#[cfg(feature = "use-rustls")]
 pub enum TlsConfiguration {
     Simple {
         /// connection method
@@ -286,6 +294,7 @@ pub enum TlsConfiguration {
     Rustls(Arc<ClientConfig>),
 }
 
+#[cfg(feature = "use-rustls")]
 impl From<ClientConfig> for TlsConfiguration {
     fn from(config: ClientConfig) -> Self {
         TlsConfiguration::Rustls(Arc::new(config))
