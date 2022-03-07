@@ -30,20 +30,27 @@ jobs:
           profile: minimal
           toolchain: stable
 
-      - name: Run check
+      - name: Check benchmarks
         uses: actions-rs/cargo@v1
         env:
           RUSTFLAGS: "-D warnings"
-        # TODO: solve issue leading to the program not compiling on windows
+        # NOTE: benchmarks are limited to compiling on non windows systems only
         if: ${{ matrix.os != 'windows-latest' }}
         with:
           command: clippy
-          args: --verbose --all-targets ${{ matrix.features }}
-
-      - name: Run test
+          args: --verbose --all-targets ${{ matrix.features }} -p benchmarks
+      
+      - name: Check rumqttc and rumqttd
         uses: actions-rs/cargo@v1
-        # TODO: solve issue causing tests to fail on mac and not compile on windows
-        if: ${{ matrix.os != 'macos-latest' && matrix.os != 'windows-latest' }}
+        env:
+          RUSTFLAGS: "-D warnings"
+        with:
+          command: clippy
+          args: --verbose --all-targets ${{ matrix.features }} -p rumqttc -p rumqttd
+
+        # NOTE: Tests for rumqttc and rumqttd
+      - name: Run tests
+        uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --release ${{ matrix.features }}
+          args: --verbose --release ${{ matrix.features }} -p rumqttc -p rumqttd
