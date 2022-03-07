@@ -1,3 +1,17 @@
+### R11
+----------------
+rumqttc v0.11.0
+-----------
+- `tls::Error` is now public
+- `rustls` upgraded to 0.20
+- Manual acknowledgment of Publishes received by setting `MqttOptions.manual_acks = true` and passing received publish packet to `Client.ack()`
+
+rumqttd v0.10.0
+-----------
+- `tokio_rustls` upgraded to 0.23.2
+
+NOTE: mqttbytes moved into separate repo, dependency on the same from rumqtt client and broker crates are hence forth removed.
+
 ### R10
 ----------------
 

@@ -33,7 +33,7 @@ pub enum ConnectionError {
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
     #[error("Packet parsing error: {0}")]
-    Mqtt4Bytes(mqttbytes::Error),
+    Mqtt5Bytes(Error),
     #[error("Network: {0}")]
     Network(#[from] tls::Error),
     #[error("I/O: {0}")]

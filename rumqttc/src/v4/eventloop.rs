@@ -2,10 +2,11 @@ use crate::v4::{framed::Network, Transport};
 use crate::v4::{tls, Incoming, MqttState, Packet, Request, StateError};
 use crate::v4::{MqttOptions, Outgoing};
 
+use crate::mqttbytes;
+use crate::mqttbytes::v4::*;
 use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
-use mqttbytes::v4::*;
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -274,7 +275,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             Network::new(socket, options.max_incoming_packet_size)
         }
         Transport::Tls(tls_config) => {
-            let socket = tls::tls_connect(&options, &tls_config).await?;
+            let socket = tls::tls_connect(options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]

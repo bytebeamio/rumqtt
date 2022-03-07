@@ -1,11 +1,13 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
-use crate::v4::{ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::{
+    mqttbytes,
+    mqttbytes::v4::*,
+    v4::{ConnectionError, Event, EventLoop, MqttOptions, QoS, Request},
+};
 
 use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
-use mqttbytes::v4::*;
-use mqttbytes::*;
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;

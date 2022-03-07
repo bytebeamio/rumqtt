@@ -1,12 +1,13 @@
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::*;
 use crate::network::Network;
-use crate::state::{self, State};
-use crate::{network, ConnectionSettings, Id};
-use mqttbytes::v4::*;
-use mqttbytes::*;
-use rumqttlog::{
+use crate::rumqttlog::{
     Connection, ConnectionAck, Event, Notification, Receiver, RecvError, SendError, Sender,
 };
+use crate::state::{self, State};
+use crate::{network, ConnectionSettings, Id};
 
+use log::{debug, trace, warn};
 use std::sync::Arc;
 use std::{io, mem};
 use tokio::time::{error::Elapsed, Duration};
@@ -87,7 +88,7 @@ impl RemoteLink {
                 };
 
                 // Return error if the username/password werenot found
-                if validated == false {
+                if !validated {
                     return Err(Error::InvalidUsernameOrPassword);
                 }
             }

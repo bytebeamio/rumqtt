@@ -1,5 +1,5 @@
-use mqttbytes::v4::*;
-use mqttbytes::*;
+use rumqttc::mqttbytes::v4::*;
+use rumqttc::mqttbytes::*;
 use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
@@ -100,8 +100,7 @@ impl Broker {
         .await
         .unwrap();
 
-        let packet = self.incoming.pop_front().unwrap();
-        packet
+        self.incoming.pop_front().unwrap()
     }
 
     /// Reads next packet from the stream

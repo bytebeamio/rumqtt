@@ -21,7 +21,7 @@ pub enum ClientError {
     #[error("Failed to send mqtt request to evenloop, to requests buffer is full right now")]
     RequestsFull,
     #[error("Serialization error")]
-    Mqtt4(mqttbytes::Error),
+    Mqtt5(Error),
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`

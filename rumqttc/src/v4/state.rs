@@ -1,8 +1,8 @@
 use crate::v4::{Event, Incoming, Outgoing, Request};
 
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
-use mqttbytes::v4::*;
-use mqttbytes::*;
 use std::collections::VecDeque;
 use std::{io, mem, time::Instant};
 
@@ -487,9 +487,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::v4::{Event, Incoming, MqttOptions, Outgoing, Request};
-    use mqttbytes::v4::*;
-    use mqttbytes::*;
+    use crate::{mqttbytes::v4::read, v4::*};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

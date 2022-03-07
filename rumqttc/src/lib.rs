@@ -99,5 +99,6 @@
 #[macro_use]
 extern crate log;
 
+pub mod mqttbytes;
 pub mod v4;
 pub mod v5;

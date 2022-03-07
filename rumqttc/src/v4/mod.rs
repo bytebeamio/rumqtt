@@ -8,11 +8,11 @@ mod framed;
 mod state;
 mod tls;
 
+pub use crate::mqttbytes::v4::*;
+pub use crate::mqttbytes::*;
 pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use mqttbytes::v4::*;
-pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
 pub use tls::Error;
 pub use tokio_rustls::rustls::ClientConfig;
