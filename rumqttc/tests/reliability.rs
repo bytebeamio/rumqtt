@@ -360,7 +360,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
                 if ack == 1 {
                     let elapsed = start.elapsed().as_millis() as i64;
                     let deviation_millis: i64 = (5000 - elapsed).abs();
-                    assert!(deviation_millis < 10);
+                    assert!(deviation_millis < 100);
                     break;
                 }
             }
