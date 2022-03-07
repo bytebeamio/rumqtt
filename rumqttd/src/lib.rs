@@ -369,9 +369,9 @@ impl Server {
     #[cfg(not(feature = "use-rustls"))]
     fn tls_rustls(
         &self,
-        _cert_path: &String,
-        _key_path: &String,
-        _ca_path: &String,
+        _cert_path: &str,
+        _key_path: &str,
+        _ca_path: &str,
     ) -> Result<Option<ServerTLSAcceptor>, Error> {
         Err(Error::RustlsNotEnabled)
     }
