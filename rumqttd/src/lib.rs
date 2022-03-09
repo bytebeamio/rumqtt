@@ -269,22 +269,22 @@ impl Server {
     #[cfg(feature = "use-native-tls")]
     fn tls_native_tls(
         &self,
-        pkcs12_path: &String,
-        pkcs12_pass: &String,
+        pkcs12_path: &str,
+        pkcs12_pass: &str,
     ) -> Result<Option<ServerTLSAcceptor>, Error> {
         // Get certificates
         let cert_file = File::open(&pkcs12_path);
         let mut cert_file =
-            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.clone()))?;
+            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.to_string()))?;
 
         // Read cert into memory
         let mut buf = Vec::new();
         cert_file
             .read_to_end(&mut buf)
-            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
+            .map_err(|_| Error::InvalidServerCert(pkcs12_path.to_string()))?;
 
         // Get the identity
-        let identity = native_tls::Identity::from_pkcs12(&buf, &pkcs12_pass)
+        let identity = native_tls::Identity::from_pkcs12(&buf, pkcs12_pass)
             .map_err(|_| Error::InvalidServerPass())?;
 
         // Builder
@@ -369,9 +369,9 @@ impl Server {
     #[cfg(not(feature = "use-rustls"))]
     fn tls_rustls(
         &self,
-        _cert_path: &String,
-        _key_path: &String,
-        _ca_path: &String,
+        _cert_path: &str,
+        _key_path: &str,
+        _ca_path: &str,
     ) -> Result<Option<ServerTLSAcceptor>, Error> {
         Err(Error::RustlsNotEnabled)
     }

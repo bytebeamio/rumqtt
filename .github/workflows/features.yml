@@ -1,7 +1,4 @@
 on:
-  push:
-    branches-ignore:
-      - master
   pull_request:
     branches:
       - master
@@ -10,8 +7,7 @@ name: features
 
 jobs:
   test:
-    name: Test ${{ matrix.os }} ${{ matrix.features }}
-    # runs-on: [self-hosted, linux, X64, rumqtt]
+    name: Test on ${{ matrix.os }} with ${{ matrix.features }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,15 +30,27 @@ jobs:
           profile: minimal
           toolchain: stable
 
-      - name: Run check
+      - name: Check benchmarks
         uses: actions-rs/cargo@v1
+        env:
+          RUSTFLAGS: "-D warnings"
+        # NOTE: benchmarks are limited to compiling only on non windows systems, without any features enabled. 
+        if: ${{ matrix.os != 'windows-latest' && matrix.features == '--no-default-features' }}
         with:
-          # TODO: migrate from check to clippy when many hints are applied
-          command: check
-          args: --verbose --all-targets ${{ matrix.features }}
+          command: clippy
+          args: --verbose --all-targets -p benchmarks
+      
+      - name: Check rumqttc and rumqttd
+        uses: actions-rs/cargo@v1
+        env:
+          RUSTFLAGS: "-D warnings"
+        with:
+          command: clippy
+          args: --verbose --all-targets ${{ matrix.features }} -p rumqttc -p rumqttd
 
+        # NOTE: Tests for rumqttc and rumqttd
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --release ${{ matrix.features }}
+          args: --verbose --release ${{ matrix.features }} -p rumqttc -p rumqttd
