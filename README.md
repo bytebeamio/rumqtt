@@ -11,9 +11,9 @@
 
 rumqtt is an opensource set of libraries written in rust-lang to implement the MQTT standard while striving to be simple, robust and performant.
 
-- [**mqttbytes:**](./mqttbytes/)    MQTT 3.1.1/5 serialization and deserialization
-- [**rumqttc:**](./rumqttc/)        A high level, easy to use mqtt client
-- [**rumqttd:**](./rumqttd/)        A high performance, embeddable, clustered MQTT broker
+- [**mqttbytes:**](./mqttbytes/)    MQTT 3.1.1/5 serialization and deserialization [![crates.io page](https://img.shields.io/crates/v/mqttbytes.svg)](https://crates.io/crates/mqttbytes) [![docs.rs page](https://docs.rs/mqttbytes/badge.svg)](https://docs.rs/mqttbytes)
+- [**rumqttc:**](./rumqttc/)        A high level, easy to use mqtt client [![crates.io page](https://img.shields.io/crates/v/rumqttc.svg)](https://crates.io/crates/rumqttc) [![docs.rs page](https://docs.rs/rumqttc/badge.svg)](https://docs.rs/rumqttc)
+- [**rumqttd:**](./rumqttd/)        A high performance, embeddable, clustered MQTT broker [![crates.io page](https://img.shields.io/crates/v/rumqttd.svg)](https://crates.io/crates/rumqttd) [![docs.rs page](https://docs.rs/rumqttd/badge.svg)](https://docs.rs/rumqttd)
 
 ## Contributing
 Please follow the [code of conduct](docs/CoC.md) while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide](CONTRIBUTING.md) to get a better idea of what we'd appreciate and what we won't.
