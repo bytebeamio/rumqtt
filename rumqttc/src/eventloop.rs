@@ -35,6 +35,8 @@ pub enum ConnectionError {
     Network(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
+    #[error("Connection refused, return code: {0:?}")]
+    ConnectionRefused(ConnectReturnCode),
     #[error("Stream done")]
     StreamDone,
     #[error("Requests done")]
@@ -348,21 +350,16 @@ async fn mqtt_connect(
 
     // wait for 'timeout' time to validate connack
     let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        let packet = match network.read().await? {
+        match network.read().await? {
             Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-                Packet::ConnAck(connack)
+                Ok(Packet::ConnAck(connack))
             }
-            Incoming::ConnAck(connack) => {
-                let error = format!("Broker rejected. Reason = {:?}", connack.code);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-            }
+            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
             packet => {
                 let error = format!("Expecting connack. Received = {:?}", packet);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                Err(io::Error::new(io::ErrorKind::InvalidData, error))?
             }
-        };
-
-        io::Result::Ok(packet)
+        }
     })
     .await??;
 
