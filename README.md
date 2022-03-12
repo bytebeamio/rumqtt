@@ -3,11 +3,12 @@
     <img alt="rumqtt Logo" src="docs/rumqtt.png" width="60%" />
   </a>
 </h1>
-<h1 align="center"> rumqtt </h1>
-<br/>
 
-[![build status](https://github.com/bytebeamio/rumqtt/workflows/master/badge.svg)](https://github.com/tekjar/rumq/actions)
+<div align="center">
+[![build status](https://github.com/bytebeamio/rumqtt/workflows/features/badge.svg)](https://github.com/bytebeamio/rumqtt/actions)
 [![Discord chat](https://img.shields.io/discord/633193308033646605?style=flat)](https://discord.gg/mpkSqDg)
+</div>
+<br/>
 
 rumqtt is an opensource set of libraries written in rust-lang to implement the MQTT standard while striving to be simple, robust and performant.
 
