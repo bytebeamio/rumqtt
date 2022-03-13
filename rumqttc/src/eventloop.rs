@@ -36,7 +36,9 @@ pub enum ConnectionError {
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[error("Connection refused, return code: {0:?}")]
-    ConnectionRefused(ConnectReturnCode),
+    ConnectionRefused(ConnAck),
+    #[error("Expected ConnAck packet, received: {0:?}")]
+    NotConnAck(Packet),
     #[error("Stream done")]
     StreamDone,
     #[error("Requests done")]
@@ -354,11 +356,8 @@ async fn mqtt_connect(
             Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
                 Ok(Packet::ConnAck(connack))
             }
-            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-            packet => {
-                let error = format!("Expecting connack. Received = {:?}", packet);
-                Err(io::Error::new(io::ErrorKind::InvalidData, error))?
-            }
+            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack)),
+            packet => Err(ConnectionError::NotConnAck(packet)),
         }
     })
     .await??;
