@@ -2,7 +2,6 @@ use crate::{framed::Network, Transport};
 use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
-use crate::mqttbytes;
 use crate::mqttbytes::v4::*;
 use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
@@ -29,18 +28,17 @@ pub enum ConnectionError {
     MqttState(#[from] StateError),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
-    #[error("Packet parsing error: {0}")]
-    Mqtt4Bytes(mqttbytes::Error),
-    #[error("Network: {0}")]
-    Network(#[from] tls::Error),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket: {0}")]
+    Websocket(#[from] async_tungstenite::tungstenite::error::Error),
+    #[error("TLS: {0}")]
+    Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[error("Connection refused, return code: {0:?}")]
-    ConnectionRefused(ConnAck),
+    ConnectionRefused(ConnectReturnCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
     NotConnAck(Packet),
-    #[error("Stream done")]
-    StreamDone,
     #[error("Requests done")]
     RequestsDone,
     #[error("Cancel request by the user")]
@@ -297,9 +295,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .body(())
                 .unwrap();
 
-            let (socket, _) = connect_async(request)
-                .await
-                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+            let (socket, _) = connect_async(request).await?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -314,9 +310,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             let connector = tls::tls_connector(&tls_config).await?;
 
-            let (socket, _) = connect_async_with_tls_connector(request, Some(connector))
-                .await
-                .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e))?;
+            let (socket, _) = connect_async_with_tls_connector(request, Some(connector)).await?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -356,7 +350,7 @@ async fn mqtt_connect(
             Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
                 Ok(Packet::ConnAck(connack))
             }
-            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack)),
+            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
             packet => Err(ConnectionError::NotConnAck(packet)),
         }
     })
