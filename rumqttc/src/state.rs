@@ -45,7 +45,7 @@ impl From<mqttbytes::Error> for StateError {
 // This is done for 2 reasons
 // Bad acks or out of order acks aren't O(n) causing cpu spikes
 // Any missing acks from the broker are detected during the next recycled use of packet ids
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MqttState {
     /// Status of last ping
     pub await_pingresp: bool,
