@@ -2,6 +2,9 @@ on:
   pull_request:
     branches:
       - master
+    paths:
+      - '**.rs'
+      - '*Cargo.*'
 
 name: features
 
