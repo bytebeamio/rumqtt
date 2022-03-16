@@ -4,7 +4,7 @@ on:
       - master
     paths:
       - '**.rs'
-      - '*/Cargo.*'
+      - 'Cargo.*'
 
 name: features
 
