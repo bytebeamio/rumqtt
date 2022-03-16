@@ -44,4 +44,3 @@ pretty_assertions = "0.6.1"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"
 pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
-# This should still be interesting

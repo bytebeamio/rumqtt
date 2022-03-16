@@ -5,6 +5,7 @@ on:
     paths:
       - '**.rs'
       - 'Cargo.*'
+      - '*/Cargo.*'
 
 name: features
 
