@@ -233,6 +233,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    override_slow_subs: bool,
 }
 
 impl MqttOptions {
@@ -260,6 +261,7 @@ impl MqttOptions {
             last_will: None,
             conn_timeout: 5,
             manual_acks: false,
+            override_slow_subs: false,
         }
     }
 
@@ -407,6 +409,14 @@ impl MqttOptions {
     /// get manual acknowledgements
     pub fn manual_acks(&self) -> bool {
         self.manual_acks
+    }
+
+    pub fn set_override_slow_subs(&mut self, val: bool) {
+        self.override_slow_subs = val;
+    }
+
+    pub fn override_slow_subs(&self) -> bool {
+        self.override_slow_subs
     }
 }
 

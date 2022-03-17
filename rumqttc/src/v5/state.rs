@@ -2,7 +2,11 @@ use super::{packet::*, Event, Incoming, Outgoing, Request};
 
 use bytes::BytesMut;
 use std::collections::VecDeque;
-use std::{io, mem, time::Instant};
+use std::{
+    io, mem,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -75,13 +79,14 @@ pub struct MqttState {
     pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
+    pub(crate) sub_events_buf: Arc<Mutex<VecDeque<Publish>>>,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, cap: usize) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -99,6 +104,7 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
+            sub_events_buf: Arc::new(Mutex::new(VecDeque::with_capacity(cap))),
         }
     }
 
@@ -195,13 +201,12 @@ impl MqttState {
         let qos = publish.qos;
 
         match qos {
-            QoS::AtMostOnce => Ok(()),
+            QoS::AtMostOnce => {},
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
                     let puback = PubAck::new(publish.pkid);
                     self.outgoing_puback(puback)?
                 }
-                Ok(())
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
@@ -210,9 +215,13 @@ impl MqttState {
                     let pubrec = PubRec::new(pkid);
                     self.outgoing_pubrec(pubrec)?;
                 }
-                Ok(())
             }
         }
+
+        // TODO: maybe limit the capacity of `self.sub_events_buf`
+        self.sub_events_buf.lock().unwrap().push_back(publish.clone());
+
+        Ok(())
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
@@ -507,7 +516,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(100, false)
+        MqttState::new(100, false, 100)
     }
 
     #[test]

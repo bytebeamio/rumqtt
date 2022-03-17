@@ -93,7 +93,7 @@ impl EventLoop {
 
         EventLoop {
             options,
-            state: MqttState::new(max_inflight, manual_acks),
+            state: MqttState::new(max_inflight, manual_acks, cap),
             request_buf,
             request_buf_cache: VecDeque::with_capacity(cap),
             requests_tx,
@@ -111,8 +111,12 @@ impl EventLoop {
         self.requests_tx.clone()
     }
 
-    pub fn buf(&self) -> &Arc<Mutex<VecDeque<Request>>> {
+    pub fn request_buf(&self) -> &Arc<Mutex<VecDeque<Request>>> {
         &self.request_buf
+    }
+
+    pub fn sub_events_buf(&self) -> &Arc<Mutex<VecDeque<Publish>>> {
+        &self.state.sub_events_buf
     }
 
     /// Handle for cancelling the eventloop.
