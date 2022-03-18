@@ -1,19 +1,38 @@
 use tokio::net::TcpStream;
+
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::client::InvalidDnsNameError;
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{
     Certificate, ClientConfig, OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
 };
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::webpki;
-use tokio_rustls::{client::TlsStream, TlsConnector};
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::TlsConnector as RustlsConnector;
 
-use crate::{Key, MqttOptions, TlsConfiguration};
-
+#[cfg(feature = "use-rustls")]
+use crate::Key;
+#[cfg(feature = "use-rustls")]
 use std::convert::TryFrom;
-use std::io;
+#[cfg(feature = "use-rustls")]
 use std::io::{BufReader, Cursor};
-use std::net::AddrParseError;
+#[cfg(feature = "use-rustls")]
 use std::sync::Arc;
+
+use crate::framed::N;
+use crate::{MqttOptions, TlsConfiguration};
+
+#[cfg(feature = "use-native-tls")]
+use tokio_native_tls::TlsConnector as NativeTlsConnector;
+
+#[cfg(feature = "use-native-tls")]
+use tokio_native_tls::native_tls::Error as NativeTlsError;
+
+use std::net::AddrParseError;
+use std::io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -21,14 +40,20 @@ pub enum Error {
     Addr(#[from] AddrParseError),
     #[error("I/O")]
     Io(#[from] io::Error),
+    #[cfg(feature = "use-rustls")]
     #[error("Web Pki")]
     WebPki(#[from] webpki::Error),
+    #[cfg(feature = "use-rustls")]
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
+    #[cfg(feature = "use-rustls")]
     #[error("TLS error")]
     TLS(#[from] rustls::Error),
     #[error("No valid cert in chain")]
     NoValidCertInChain,
+    #[cfg(feature = "use-native-tls")]
+    #[error("Native TLS error {0}")]
+    NativeTls(#[from] NativeTlsError),
 }
 
 // The cert handling functions return unit right now, this is a shortcut
@@ -38,7 +63,8 @@ impl From<()> for Error {
     }
 }
 
-pub async fn tls_connector(tls_config: &TlsConfiguration) -> Result<TlsConnector, Error> {
+#[cfg(feature = "use-rustls")]
+pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsConnector, Error> {
     let config = match tls_config {
         TlsConfiguration::Simple {
             ca,
@@ -111,20 +137,35 @@ pub async fn tls_connector(tls_config: &TlsConfiguration) -> Result<TlsConnector
             Arc::new(config)
         }
         TlsConfiguration::Rustls(tls_client_config) => tls_client_config.clone(),
+        #[allow(unreachable_patterns)]
+        _ => unreachable!("This cannot be called for other TLS backends than Rustls"),
     };
 
-    Ok(TlsConnector::from(config))
+    Ok(RustlsConnector::from(config))
 }
 
 pub async fn tls_connect(
     options: &MqttOptions,
     tls_config: &TlsConfiguration,
-) -> Result<TlsStream<TcpStream>, Error> {
+) -> Result<Box<dyn N>, Error> {
     let addr = options.broker_addr.as_str();
     let port = options.port;
-    let connector = tls_connector(tls_config).await?;
-    let domain = ServerName::try_from(addr)?;
     let tcp = TcpStream::connect((addr, port)).await?;
-    let tls = connector.connect(domain, tcp).await?;
+
+    let tls: Box<dyn N> = match tls_config {
+        #[cfg(feature = "use-rustls")]
+        TlsConfiguration::Simple{ ca: _, alpn: _, client_auth: _, } | TlsConfiguration::Rustls(_) => {
+            let connector = rustls_connector(tls_config).await?;
+            let domain = ServerName::try_from(addr)?;
+            Box::new(connector.connect(domain, tcp).await?)
+        },
+        #[cfg(feature = "use-native-tls")]
+        TlsConfiguration::Native => {
+            let connector: NativeTlsConnector = native_tls::TlsConnector::new().unwrap().into();
+            Box::new(connector.connect(addr, tcp).await?)
+        }
+        #[allow(unreachable_patterns)]
+        _ => panic!("Unknown or not enabled TLS backend configuration")
+    };
     Ok(tls)
 }

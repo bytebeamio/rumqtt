@@ -100,6 +100,7 @@
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
+#[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -108,6 +109,7 @@ mod eventloop;
 mod framed;
 pub mod mqttbytes;
 mod state;
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 mod tls;
 
 pub use async_channel::{SendError, Sender, TrySendError};
@@ -116,7 +118,9 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error;
+#[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
@@ -194,6 +198,7 @@ impl From<Unsubscribe> for Request {
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     Tls(TlsConfiguration),
     #[cfg(unix)]
     Unix,
@@ -217,6 +222,7 @@ impl Transport {
         Self::Tcp
     }
 
+    #[cfg(feature = "use-rustls")]
     /// Use secure tcp with tls as transport
     pub fn tls(
         ca: Vec<u8>,
@@ -232,6 +238,7 @@ impl Transport {
         Self::tls_with_config(config)
     }
 
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Tls(tls_config)
     }
@@ -274,6 +281,7 @@ impl Transport {
 
 #[derive(Clone)]
 pub enum TlsConfiguration {
+    #[cfg(feature = "use-rustls")]
     Simple {
         /// connection method
         ca: Vec<u8>,
@@ -282,10 +290,14 @@ pub enum TlsConfiguration {
         /// tls client_authentication
         client_auth: Option<(Vec<u8>, Key)>,
     },
+    #[cfg(feature = "use-rustls")]
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     Rustls(Arc<ClientConfig>),
+    #[cfg(feature = "use-native-tls")]
+    Native,
 }
 
+#[cfg(feature = "use-rustls")]
 impl From<ClientConfig> for TlsConfiguration {
     fn from(config: ClientConfig) -> Self {
         TlsConfiguration::Rustls(Arc::new(config))

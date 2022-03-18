@@ -1,5 +1,7 @@
 use crate::{framed::Network, Transport};
-use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+use crate::tls;
+use crate::{Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use crate::mqttbytes::v4::*;
@@ -31,6 +33,7 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     #[error("TLS: {0}")]
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -276,6 +279,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = TcpStream::connect((addr, port)).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
+        #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
             let socket = tls::tls_connect(options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
