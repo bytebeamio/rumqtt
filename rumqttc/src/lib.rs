@@ -119,7 +119,7 @@ pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
-pub use tls::Error;
+pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
 
