@@ -1,9 +1,11 @@
+#[cfg(feature = "websocket")]
+use rumqttc::{self, AsyncClient, MqttOptions, QoS, Transport};
+#[cfg(feature = "websocket")]
+use std::{error::Error, time::Duration};
+#[cfg(feature = "websocket")]
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, MqttOptions, QoS, Transport};
-use std::error::Error;
-use std::time::Duration;
-
+#[cfg(feature = "websocket")]
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
@@ -14,11 +16,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "ws://broker.mqttdashboard.com:8000/mqtt",
         8000,
     );
-    #[cfg(feature = "websocket")]
     mqttoptions.set_transport(Transport::Ws);
-    #[cfg(not(feature = "websocket"))]
-    panic!("Enable websocket feature with `--features=websocket`");
-
     mqttoptions.set_keep_alive(Duration::from_secs(60));
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -36,6 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
+#[cfg(feature = "websocket")]
 async fn requests(client: AsyncClient) {
     client
         .subscribe("hello/world", QoS::AtMostOnce)
@@ -52,4 +51,9 @@ async fn requests(client: AsyncClient) {
     }
 
     time::sleep(Duration::from_secs(120)).await;
+}
+
+#[cfg(not(feature = "websocket"))]
+fn main() {
+    panic!("Enable websocket feature with `--features=websocket`");
 }
