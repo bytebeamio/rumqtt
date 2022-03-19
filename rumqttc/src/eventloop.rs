@@ -35,10 +35,13 @@ pub enum ConnectionError {
     #[error("Packet parsing error: {0}")]
     Mqtt4Bytes(mqttbytes::Error),
     #[cfg(feature = "use-rustls")]
-    #[error("Network: {0}")]
-    Network(#[from] tls::Error),
+    #[error("Tls Error: {0}")]
+    Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket Connect: {0}")]
+    WsConnect(#[from] http::Error),
     #[error("Stream done")]
     StreamDone,
     #[error("Requests done")]
@@ -295,8 +298,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .method(http::Method::GET)
                 .uri(options.broker_addr.as_str())
                 .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())
-                .unwrap();
+                .body(())?;
 
             let (socket, _) = connect_async(request)
                 .await
@@ -310,8 +312,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .method(http::Method::GET)
                 .uri(options.broker_addr.as_str())
                 .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())
-                .unwrap();
+                .body(())?;
 
             let connector = tls::tls_connector(&tls_config).await?;
 
