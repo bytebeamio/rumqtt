@@ -1,13 +1,15 @@
-#[macro_use]
-extern crate log;
-
+use jackiechan::Sender;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{io, thread};
 use std::{net::SocketAddr, sync::Arc};
 
+mod mqttbytes;
+pub mod rumqttlog;
+
 use mqttbytes::v4::Packet;
-use rumqttlog::*;
+use rumqttlog::{Disconnection, Event, RecvError, Router, SendError};
 use tokio::time::error::Elapsed;
 
 use crate::remotelink::RemoteLink;
@@ -267,22 +269,22 @@ impl Server {
     #[cfg(feature = "use-native-tls")]
     fn tls_native_tls(
         &self,
-        pkcs12_path: &String,
-        pkcs12_pass: &String,
+        pkcs12_path: &str,
+        pkcs12_pass: &str,
     ) -> Result<Option<ServerTLSAcceptor>, Error> {
         // Get certificates
         let cert_file = File::open(&pkcs12_path);
         let mut cert_file =
-            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.clone()))?;
+            cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.to_string()))?;
 
         // Read cert into memory
         let mut buf = Vec::new();
         cert_file
             .read_to_end(&mut buf)
-            .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
+            .map_err(|_| Error::InvalidServerCert(pkcs12_path.to_string()))?;
 
         // Get the identity
-        let identity = native_tls::Identity::from_pkcs12(&buf, &pkcs12_pass)
+        let identity = native_tls::Identity::from_pkcs12(&buf, pkcs12_pass)
             .map_err(|_| Error::InvalidServerPass())?;
 
         // Builder
@@ -348,7 +350,7 @@ impl Server {
             let ca_cert = ca_certs
                 .first()
                 .map(|c| Certificate(c.to_owned()))
-                .ok_or(Error::InvalidCACert(ca_path.to_string()))?;
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
             let mut store = RootCertStore::empty();
             store
                 .add(&ca_cert)
@@ -367,9 +369,9 @@ impl Server {
     #[cfg(not(feature = "use-rustls"))]
     fn tls_rustls(
         &self,
-        _cert_path: &String,
-        _key_path: &String,
-        _ca_path: &String,
+        _cert_path: &str,
+        _key_path: &str,
+        _ca_path: &str,
     ) -> Result<Option<ServerTLSAcceptor>, Error> {
         Err(Error::RustlsNotEnabled)
     }

@@ -14,7 +14,6 @@ fn create_conn() -> (AsyncClient, EventLoop) {
     AsyncClient::new(mqttoptions, 10)
 }
 
-
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
@@ -51,16 +50,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // previously published messages should be republished after reconnection.
         let event = eventloop.poll().await;
         println!("{:?}", event);
-        match event {
-            Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                // this time we will ack incoming publishes.
-                // Its important not to block eventloop as this can cause deadlock.
-                let c = client.clone();
-                tokio::spawn(async move {
-                    c.ack(&publish).await.unwrap();
-                });
-            }
-            _ => {}
+
+        if let Ok(Event::Incoming(Incoming::Publish(publish))) = event {
+            // this time we will ack incoming publishes.
+            // Its important not to block eventloop as this can cause deadlock.
+            let c = client.clone();
+            tokio::spawn(async move {
+                c.ack(&publish).await.unwrap();
+            });
         }
     }
 }

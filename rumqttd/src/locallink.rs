@@ -1,10 +1,12 @@
-use crate::Id;
-use mqttbytes::v4::*;
-use mqttbytes::*;
-use rumqttlog::{
+use log::{trace, warn};
+
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::*;
+use crate::rumqttlog::{
     Connection, ConnectionAck, Data, Event, Notification, Receiver, RecvError, RecvTimeoutError,
     SendError, Sender,
 };
+use crate::Id;
 use std::time::Instant;
 
 #[derive(Debug, thiserror::Error)]

@@ -1,10 +1,7 @@
 [workspace]
 
 members = [
-  "mqttbytes",
   "rumqttc",
-  "rumqttlog",
-  "rumqttmesh",
   "rumqttd",
   "benchmarks",
   "benchmarks/simplerouter",

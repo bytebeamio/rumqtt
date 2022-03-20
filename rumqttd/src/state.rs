@@ -1,8 +1,9 @@
-use mqttbytes::v4::*;
-use mqttbytes::*;
-use rumqttlog::{Message, Notification};
+use crate::mqttbytes::v4::*;
+use crate::mqttbytes::{self, *};
+use crate::rumqttlog::{Message, Notification};
 
 use bytes::{Bytes, BytesMut};
+use log::{debug, error, info};
 use std::mem;
 use std::vec::IntoIter;
 
@@ -166,7 +167,7 @@ impl State {
             if let QoS::AtMostOnce = publish.qos {
                 debug!("Publish. Qos 0. Payload size = {:?}", publish.payload.len());
                 publish.write(&mut self.write)?;
-                return Ok(());
+                continue;
             };
 
             // consider PacketIdentifier(0) as uninitialized packets

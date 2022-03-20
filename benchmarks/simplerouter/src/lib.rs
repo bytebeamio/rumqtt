@@ -50,7 +50,7 @@ async fn publisher_handle(mut network: Network) {
                 v4::Packet::Disconnect => {
                     info!("connection: received disconnect, exiting");
                     return;
-                },
+                }
                 v4::Packet::PingReq => {
                     if let Err(e) = network.send_data(&pingresp_bytes).await {
                         error!("unable to send pingresp, exiting : {}", e);
@@ -81,7 +81,7 @@ async fn publisher_handle(mut network: Network) {
                 v5::Packet::Disconnect => {
                     info!("connection: received disconnect, exiting");
                     return;
-                },
+                }
                 v5::Packet::PingReq => {
                     if let Err(e) = network.send_data(&pingresp_bytes).await {
                         error!("unable to send pingresp, exiting : {}", e);
