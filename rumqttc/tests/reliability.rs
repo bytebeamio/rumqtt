@@ -426,16 +426,18 @@ async fn next_poll_after_connect_failure_reconnects() {
     time::sleep(Duration::from_secs(1)).await;
     let mut eventloop = EventLoop::new(options, 5);
 
-    let event = eventloop.poll().await;
-    let error = "Broker rejected. Reason = BadUserNamePassword";
-    match event {
-        Err(ConnectionError::Io(e)) => assert_eq!(e.to_string(), error),
+    match eventloop.poll().await {
+        Err(ConnectionError::ConnectionRefused(ConnectReturnCode::BadUserNamePassword)) => (),
         v => panic!("Expected bad username password error. Found = {:?}", v),
     }
 
-    let event = eventloop.poll().await.unwrap();
-    let connack = ConnAck::new(ConnectReturnCode::Success, false);
-    assert_eq!(event, Event::Incoming(Packet::ConnAck(connack)));
+    match eventloop.poll().await {
+        Ok(Event::Incoming(Packet::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false,
+        }))) => (),
+        v => panic!("Expected ConnAck Success. Found = {:?}", v),
+    }
 }
 
 #[tokio::test]
