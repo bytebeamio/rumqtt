@@ -374,6 +374,16 @@ impl MqttOptions {
         }
     }
 
+    #[cfg(feature = "url")]
+    pub fn parse<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
+        use std::convert::TryFrom;
+
+        let url = url::Url::parse(&url.into())?;
+        let options = MqttOptions::try_from(url)?;
+
+        Ok(options)
+    }
+
     /// Broker address
     pub fn broker_address(&self) -> (String, u16) {
         (self.broker_addr.clone(), self.port)
@@ -559,6 +569,9 @@ pub enum OptionError {
 
     #[error("Unknown option: {0}")]
     Unknown(String),
+
+    #[error("Couldn't parse option from url: {0}")]
+    Parse(#[from] url::ParseError),
 }
 
 #[cfg(feature = "url")]
@@ -568,7 +581,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
         use std::collections::HashMap;
 
-        let broker_addr = url.host_str().unwrap_or_default().to_owned();
+        let host = url.host_str().unwrap_or_default().to_owned();
 
         let (transport, default_port) = match url.scheme() {
             // Encrypted connections are supported, but require explicit TLS configuration. We fall
@@ -576,6 +589,10 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             // configure the encrypted transport layer with the provided TLS configuration.
             "mqtts" | "ssl" => (Transport::Tcp, 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
+            #[cfg(feature = "websocket")]
+            "ws" => (Transport::Ws, 8000),
+            #[cfg(feature = "websocket")]
+            "wss" => (Transport::Ws, 8000),
             _ => return Err(OptionError::Scheme),
         };
 
@@ -583,26 +600,31 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
 
         let mut queries = url.query_pairs().collect::<HashMap<_, _>>();
 
-        let keep_alive = Duration::from_secs(
-            queries
-                .remove("keep_alive_secs")
-                .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
-                .transpose()?
-                .unwrap_or(60),
-        );
-
-        let client_id = queries
+        let id = queries
             .remove("client_id")
             .ok_or(OptionError::ClientId)?
             .into_owned();
 
-        let clean_session = queries
+        let mut options = MqttOptions::new(id, host, port);
+        options.set_transport(transport);
+
+        if let Some(keep_alive) = queries
+            .remove("keep_alive_secs")
+            .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
+            .transpose()?
+        {
+            options.set_keep_alive(Duration::from_secs(keep_alive));
+        }
+
+        if let Some(clean_session) = queries
             .remove("clean_session")
             .map(|v| v.parse::<bool>().map_err(|_| OptionError::CleanSession))
             .transpose()?
-            .unwrap_or(true);
+        {
+            options.set_clean_session(clean_session);
+        }
 
-        let credentials = {
+        if let Some((username, password)) = {
             match url.username() {
                 "" => None,
                 username => Some((
@@ -610,83 +632,77 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
                     url.password().unwrap_or_default().to_owned(),
                 )),
             }
-        };
+        } {
+            options.set_credentials(username, password);
+        }
 
-        let max_incoming_packet_size = queries
-            .remove("max_incoming_packet_size_bytes")
-            .map(|v| {
-                v.parse::<usize>()
-                    .map_err(|_| OptionError::MaxIncomingPacketSize)
-            })
-            .transpose()?
-            .unwrap_or(10 * 1024);
+        if let (Some(incoming), Some(outgoing)) = (
+            queries
+                .remove("max_incoming_packet_size_bytes")
+                .map(|v| {
+                    v.parse::<usize>()
+                        .map_err(|_| OptionError::MaxIncomingPacketSize)
+                })
+                .transpose()?,
+            queries
+                .remove("max_outgoing_packet_size_bytes")
+                .map(|v| {
+                    v.parse::<usize>()
+                        .map_err(|_| OptionError::MaxOutgoingPacketSize)
+                })
+                .transpose()?,
+        ) {
+            options.set_max_packet_size(incoming, outgoing);
+        }
 
-        let max_outgoing_packet_size = queries
-            .remove("max_outgoing_packet_size_bytes")
-            .map(|v| {
-                v.parse::<usize>()
-                    .map_err(|_| OptionError::MaxOutgoingPacketSize)
-            })
-            .transpose()?
-            .unwrap_or(10 * 1024);
-
-        let request_channel_capacity = queries
+        if let Some(request_channel_capacity) = queries
             .remove("request_channel_capacity_num")
             .map(|v| {
                 v.parse::<usize>()
                     .map_err(|_| OptionError::RequestChannelCapacity)
             })
             .transpose()?
-            .unwrap_or(10);
+        {
+            options.request_channel_capacity = request_channel_capacity;
+        }
 
-        let max_request_batch = queries
+        if let Some(max_request_batch) = queries
             .remove("max_request_batch_num")
             .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxRequestBatch))
             .transpose()?
-            .unwrap_or(0);
+        {
+            options.max_request_batch = max_request_batch;
+        }
 
-        let pending_throttle = Duration::from_micros(
-            queries
-                .remove("pending_throttle_usecs")
-                .map(|v| v.parse::<u64>().map_err(|_| OptionError::PendingThrottle))
-                .transpose()?
-                .unwrap_or(0),
-        );
+        if let Some(pending_throttle) = queries
+            .remove("pending_throttle_usecs")
+            .map(|v| v.parse::<u64>().map_err(|_| OptionError::PendingThrottle))
+            .transpose()?
+        {
+            options.set_pending_throttle(Duration::from_micros(pending_throttle));
+        }
 
-        let inflight = queries
+        if let Some(inflight) = queries
             .remove("inflight_num")
             .map(|v| v.parse::<u16>().map_err(|_| OptionError::Inflight))
             .transpose()?
-            .unwrap_or(100);
+        {
+            options.set_inflight(inflight);
+        }
 
-        let conn_timeout = queries
+        if let Some(conn_timeout) = queries
             .remove("conn_timeout_secs")
             .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
             .transpose()?
-            .unwrap_or(5);
+        {
+            options.set_connection_timeout(conn_timeout);
+        }
 
         if let Some((opt, _)) = queries.into_iter().next() {
             return Err(OptionError::Unknown(opt.into_owned()));
         }
 
-        Ok(Self {
-            broker_addr,
-            port,
-            transport,
-            keep_alive,
-            clean_session,
-            client_id,
-            credentials,
-            max_incoming_packet_size,
-            max_outgoing_packet_size,
-            request_channel_capacity,
-            max_request_batch,
-            pending_throttle,
-            inflight,
-            last_will: None,
-            conn_timeout,
-            manual_acks: false,
-        })
+        Ok(options)
     }
 }
 
