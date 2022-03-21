@@ -1666,7 +1666,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "url",
- "webpki",
  "ws_stream_tungstenite",
 ]
 

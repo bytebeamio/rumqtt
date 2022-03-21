@@ -100,6 +100,7 @@
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
+#[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -108,6 +109,7 @@ mod eventloop;
 mod framed;
 pub mod mqttbytes;
 mod state;
+#[cfg(feature = "use-rustls")]
 mod tls;
 
 pub use async_channel::{SendError, Sender, TrySendError};
@@ -116,7 +118,9 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
-pub use tls::Error;
+#[cfg(feature = "use-rustls")]
+pub use tls::Error as TlsError;
+#[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
@@ -194,14 +198,15 @@ impl From<Unsubscribe> for Request {
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
+    #[cfg(feature = "use-rustls")]
     Tls(TlsConfiguration),
     #[cfg(unix)]
     Unix,
     #[cfg(feature = "websocket")]
     #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
     Ws,
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     Wss(TlsConfiguration),
 }
 
@@ -218,6 +223,7 @@ impl Transport {
     }
 
     /// Use secure tcp with tls as transport
+    #[cfg(feature = "use-rustls")]
     pub fn tls(
         ca: Vec<u8>,
         client_auth: Option<(Vec<u8>, Key)>,
@@ -232,6 +238,7 @@ impl Transport {
         Self::tls_with_config(config)
     }
 
+    #[cfg(feature = "use-rustls")]
     pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Tls(tls_config)
     }
@@ -249,8 +256,8 @@ impl Transport {
     }
 
     /// Use secure websockets with tls as transport
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     pub fn wss(
         ca: Vec<u8>,
         client_auth: Option<(Vec<u8>, Key)>,
@@ -265,14 +272,15 @@ impl Transport {
         Self::wss_with_config(config)
     }
 
-    #[cfg(feature = "websocket")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     pub fn wss_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Wss(tls_config)
     }
 }
 
 #[derive(Clone)]
+#[cfg(feature = "use-rustls")]
 pub enum TlsConfiguration {
     Simple {
         /// connection method
@@ -286,6 +294,7 @@ pub enum TlsConfiguration {
     Rustls(Arc<ClientConfig>),
 }
 
+#[cfg(feature = "use-rustls")]
 impl From<ClientConfig> for TlsConfiguration {
     fn from(config: ClientConfig) -> Self {
         TlsConfiguration::Rustls(Arc::new(config))
@@ -715,7 +724,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "websocket")]
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
 
