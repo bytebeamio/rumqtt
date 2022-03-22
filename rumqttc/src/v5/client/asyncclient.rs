@@ -1,6 +1,9 @@
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use bytes::Bytes;
@@ -18,6 +21,8 @@ use crate::v5::{
 pub struct AsyncClient {
     request_buf: Arc<Mutex<VecDeque<Request>>>,
     sub_events_buf: Arc<Mutex<VecDeque<Publish>>>,
+    pkid_counter: Arc<AtomicU16>,
+    max_inflight: u16,
     sub_events_buf_cache: VecDeque<Publish>,
     request_buf_capacity: usize,
     request_tx: Sender<()>,
@@ -33,11 +38,15 @@ impl AsyncClient {
         let sub_events_buf_cache = VecDeque::with_capacity(cap);
         let request_tx = eventloop.handle();
         let cancel_tx = eventloop.cancel_handle();
+        let max_inflight = eventloop.state.max_inflight;
+        let pkid_counter = eventloop.state.pkid_counter().clone();
 
         let client = AsyncClient {
             request_buf,
             request_buf_capacity: cap,
             sub_events_buf,
+            pkid_counter,
+            max_inflight,
             sub_events_buf_cache,
             request_tx,
             cancel_tx,
@@ -51,6 +60,8 @@ impl AsyncClient {
     pub fn from_senders(
         request_buf: Arc<Mutex<VecDeque<Request>>>,
         sub_events_buf: Arc<Mutex<VecDeque<Publish>>>,
+        pkid_counter: Arc<AtomicU16>,
+        max_inflight: u16,
         request_tx: Sender<()>,
         cancel_tx: Sender<()>,
         cap: usize,
@@ -58,6 +69,8 @@ impl AsyncClient {
         AsyncClient {
             request_buf,
             request_buf_capacity: cap,
+            pkid_counter,
+            max_inflight,
             sub_events_buf,
             sub_events_buf_cache: VecDeque::with_capacity(cap),
             request_tx,
@@ -79,7 +92,8 @@ impl AsyncClient {
     {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        let pkid = publish.pkid;
+        let pkid = self.increment_pkid();
+        publish.pkid = pkid;
         self.send_async_and_notify(Request::Publish(publish))
             .await?;
         Ok(pkid)
@@ -99,7 +113,8 @@ impl AsyncClient {
     {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        let pkid = publish.pkid;
+        let pkid = self.increment_pkid();
+        publish.pkid = pkid;
         self.try_send_and_notify(Request::Publish(publish))?;
         Ok(pkid)
     }
@@ -127,13 +142,16 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        self.send_async_and_notify(Request::Publish(publish)).await
+        let pkid = self.increment_pkid();
+        publish.pkid = pkid;
+        self.send_async_and_notify(Request::Publish(publish)).await?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe to the eventloop
@@ -257,6 +275,8 @@ impl AsyncClient {
         let publisher = Publisher {
             request_buf: self.request_buf.clone(),
             request_buf_capacity: self.request_buf_capacity,
+            pkid_counter: self.pkid_counter,
+            max_inflight: self.max_inflight,
             request_tx: self.request_tx.clone(),
             cancel_tx: self.cancel_tx.clone(),
             publish_topic: publish_topic.into(),
@@ -270,5 +290,25 @@ impl AsyncClient {
             request_tx: self.request_tx,
         };
         Ok((publisher, subscriber))
+    }
+
+    fn increment_pkid(&self) -> u16 {
+        let mut cur_pkid = self.pkid_counter.load(Ordering::SeqCst);
+        loop {
+            let new_pkid = if cur_pkid > self.max_inflight {
+                1
+            } else {
+                cur_pkid + 1
+            };
+            match self.pkid_counter.compare_exchange(
+                cur_pkid,
+                new_pkid,
+                Ordering::SeqCst,
+                Ordering::Relaxed,
+            ) {
+                Ok(_prev_pkid) => break new_pkid,
+                Err(actual_pkid) => cur_pkid = actual_pkid,
+            }
+        }
     }
 }
