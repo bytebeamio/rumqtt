@@ -67,6 +67,8 @@ Quick overview of features
 - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop
 - Natural backpressure to client APIs during bad network
 - Immediate cancellation with `client.cancel()`
+- Support for WebSockets
+- Secure transport using TLS
 
 In short, everything necessary to maintain a robust connection
 

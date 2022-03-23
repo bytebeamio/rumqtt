@@ -22,8 +22,10 @@ pub enum ClientError {
     Mqtt4(mqttbytes::Error),
 }
 
-/// `AsyncClient` to communicate with MQTT `Eventloop`
-/// This is cloneable and can be used to asynchronously Publish, Subscribe.
+/// An asynchronous client, communicates with MQTT `EventLoop`.
+/// 
+/// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`) and
+/// [`subscribe`](`AsynClient::subscribe`).
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
@@ -31,7 +33,9 @@ pub struct AsyncClient {
 }
 
 impl AsyncClient {
-    /// Create a new `AsyncClient`
+    /// Create a new `AsyncClient`.
+    /// 
+    /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let mut eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
@@ -54,7 +58,7 @@ impl AsyncClient {
         }
     }
 
-    /// Sends a MQTT Publish to the eventloop
+    /// Sends a MQTT Publish to the `EventLoop`.
     pub async fn publish<S, V>(
         &self,
         topic: S,
@@ -73,7 +77,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Publish to the eventloop
+    /// Attempts to send a MQTT Publish to the `EventLoop`.
     pub fn try_publish<S, V>(
         &self,
         topic: S,
@@ -92,7 +96,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
 
@@ -102,7 +106,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    /// Attempts to send a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
         if let Some(ack) = ack {
@@ -111,7 +115,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Publish to the eventloop
+    /// Sends a MQTT Publish to the `EventLoop`
     pub async fn publish_bytes<S>(
         &self,
         topic: S,
@@ -129,7 +133,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe to the eventloop
+    /// Sends a MQTT Subscribe to the `EventLoop`
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
@@ -137,7 +141,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe to the eventloop
+    /// Attempts to send a MQTT Subscribe to the `EventLoop`
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
@@ -145,7 +149,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe for multiple topics to the eventloop
+    /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
@@ -156,7 +160,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe for multiple topics to the eventloop
+    /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
@@ -167,7 +171,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Unsubscribe to the eventloop
+    /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
@@ -175,7 +179,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT Unsubscribe to the eventloop
+    /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
     pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
@@ -183,21 +187,21 @@ impl AsyncClient {
         Ok(())
     }
 
-    /// Sends a MQTT disconnect to the eventloop
+    /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
         self.request_tx.send(request).await?;
         Ok(())
     }
 
-    /// Sends a MQTT disconnect to the eventloop
+    /// Attempts to send a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
         self.request_tx.try_send(request)?;
         Ok(())
     }
 
-    /// Stops the eventloop right away
+    /// Stops the `EventLoop` right away
     pub async fn cancel(&self) -> Result<(), ClientError> {
         self.cancel_tx.send(()).await?;
         Ok(())
@@ -213,10 +217,12 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
     Some(ack)
 }
 
-/// `Client` to communicate with MQTT eventloop `Connection`.
+/// A synchonous client, commuinicates with MQTTT `EventLoop`.
 ///
-/// Client is cloneable and can be used to synchronously Publish, Subscribe.
-/// Asynchronous channel handle can also be extracted if necessary
+/// This is cloneable and can be used to synchronously [`publish`](`Client::publish`) and
+/// [`subscribe`](`Client::subscribe`).
+/// 
+/// An asynchronous channel handle can also be extracted if necessary.
 #[derive(Clone)]
 pub struct Client {
     client: AsyncClient,
@@ -224,6 +230,8 @@ pub struct Client {
 
 impl Client {
     /// Create a new `Client`
+    /// 
+    /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
@@ -236,7 +244,7 @@ impl Client {
         (client, connection)
     }
 
-    /// Sends a MQTT Publish to the eventloop
+    /// Sends a MQTT Publish to the `EventLoop`
     pub fn publish<S, V>(
         &mut self,
         topic: S,
@@ -267,25 +275,25 @@ impl Client {
         Ok(())
     }
 
-    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         pollster::block_on(self.client.ack(publish))?;
         Ok(())
     }
 
-    /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
+    /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         self.client.try_ack(publish)?;
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe to the eventloop
+    /// Sends a MQTT Subscribe to the `EventLoop`
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         pollster::block_on(self.client.subscribe(topic, qos))?;
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe to the eventloop
+    /// Sends a MQTT Subscribe to the `EventLoop`
     pub fn try_subscribe<S: Into<String>>(
         &mut self,
         topic: S,
@@ -295,7 +303,7 @@ impl Client {
         Ok(())
     }
 
-    /// Sends a MQTT Subscribe for multiple topics to the eventloop
+    /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
@@ -310,31 +318,31 @@ impl Client {
         self.client.try_subscribe_many(topics)
     }
 
-    /// Sends a MQTT Unsubscribe to the eventloop
+    /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
         pollster::block_on(self.client.unsubscribe(topic))?;
         Ok(())
     }
 
-    /// Sends a MQTT Unsubscribe to the eventloop
+    /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
         self.client.try_unsubscribe(topic)?;
         Ok(())
     }
 
-    /// Sends a MQTT disconnect to the eventloop
+    /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
         pollster::block_on(self.client.disconnect())?;
         Ok(())
     }
 
-    /// Sends a MQTT disconnect to the eventloop
+    /// Sends a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&mut self) -> Result<(), ClientError> {
         self.client.try_disconnect()?;
         Ok(())
     }
 
-    /// Stops the eventloop right away
+    /// Stops the `EventLoop` right away
     pub fn cancel(&mut self) -> Result<(), ClientError> {
         pollster::block_on(self.client.cancel())?;
         Ok(())
@@ -369,7 +377,7 @@ impl Connection {
     }
 }
 
-/// Iterator which polls the eventloop for connection progress
+/// Iterator which polls the `EventLoop` for connection progress
 pub struct Iter<'a> {
     connection: &'a mut Connection,
     runtime: runtime::Runtime,
