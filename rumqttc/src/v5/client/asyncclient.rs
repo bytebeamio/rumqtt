@@ -10,7 +10,7 @@ use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 
 use crate::v5::{
-    client::{get_ack_req, Publisher, Subscriber},
+    client::get_ack_req,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
     ClientError, EventLoop, MqttOptions, QoS, Request,
 };
@@ -231,30 +231,6 @@ impl AsyncClient {
             &mut *self.outgoing_buf.lock().unwrap(),
         );
         self.incoming_buf_cache.pop_front()
-    }
-
-    pub async fn split(
-        self,
-        publish_topic: impl Into<String>,
-        publish_qos: QoS,
-    ) -> Result<(Publisher, Subscriber), ClientError> {
-        let publisher = Publisher {
-            incoming_buf: self.incoming_buf.clone(),
-            incoming_buf_capacity: self.incoming_buf_capacity,
-            pkid_counter: self.pkid_counter,
-            max_inflight: self.max_inflight,
-            request_tx: self.request_tx.clone(),
-            publish_topic: publish_topic.into(),
-            publish_qos,
-        };
-        let subscriber = Subscriber {
-            outgoing_buf: self.incoming_buf,
-            incoming_buf: self.outgoing_buf,
-            incoming_buf_cache: self.incoming_buf_cache,
-            request_buf_capacity: self.incoming_buf_capacity,
-            request_tx: self.request_tx,
-        };
-        Ok((publisher, subscriber))
     }
 
     fn increment_pkid(&self) -> u16 {

@@ -8,10 +8,6 @@ use tokio::runtime::{self, Runtime};
 
 mod asyncclient;
 pub use asyncclient::AsyncClient;
-mod publisher;
-pub use publisher::Publisher;
-mod subscriber;
-pub use subscriber::Subscriber;
 mod syncclient;
 pub use syncclient::Client;
 
