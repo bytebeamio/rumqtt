@@ -127,9 +127,4 @@ impl Client {
     pub fn try_disconnect(&mut self) -> Result<(), ClientError> {
         self.client.try_disconnect()
     }
-
-    /// Stops the eventloop right away
-    pub fn cancel(&mut self) -> Result<(), ClientError> {
-        self.client.cancel_tx.send(()).map_err(ClientError::Cancel)
-    }
 }

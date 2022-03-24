@@ -26,18 +26,16 @@ pub struct AsyncClient {
     sub_events_buf_cache: VecDeque<Publish>,
     request_buf_capacity: usize,
     request_tx: Sender<()>,
-    pub(crate) cancel_tx: Sender<()>,
 }
 
 impl AsyncClient {
     /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let mut eventloop = EventLoop::new(options, cap);
+        let eventloop = EventLoop::new(options, cap);
         let request_buf = eventloop.request_buf().clone();
         let sub_events_buf = eventloop.sub_events_buf().clone();
         let sub_events_buf_cache = VecDeque::with_capacity(cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.cancel_handle();
         let max_inflight = eventloop.state.max_inflight;
         let pkid_counter = eventloop.state.pkid_counter().clone();
 
@@ -49,7 +47,6 @@ impl AsyncClient {
             max_inflight,
             sub_events_buf_cache,
             request_tx,
-            cancel_tx,
         };
 
         (client, eventloop)
@@ -63,7 +60,6 @@ impl AsyncClient {
         pkid_counter: Arc<AtomicU16>,
         max_inflight: u16,
         request_tx: Sender<()>,
-        cancel_tx: Sender<()>,
         cap: usize,
     ) -> AsyncClient {
         AsyncClient {
@@ -74,7 +70,6 @@ impl AsyncClient {
             sub_events_buf,
             sub_events_buf_cache: VecDeque::with_capacity(cap),
             request_tx,
-            cancel_tx,
         }
     }
 
@@ -209,14 +204,6 @@ impl AsyncClient {
         self.try_send_and_notify(Request::Disconnect)
     }
 
-    /// Stops the eventloop right away
-    pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx
-            .send_async(())
-            .await
-            .map_err(ClientError::Cancel)
-    }
-
     async fn send_async_and_notify(&self, request: Request) -> Result<(), ClientError> {
         {
             let mut request_buf = self.request_buf.lock().unwrap();
@@ -278,7 +265,6 @@ impl AsyncClient {
             pkid_counter: self.pkid_counter,
             max_inflight: self.max_inflight,
             request_tx: self.request_tx.clone(),
-            cancel_tx: self.cancel_tx.clone(),
             publish_topic: publish_topic.into(),
             publish_qos,
         };

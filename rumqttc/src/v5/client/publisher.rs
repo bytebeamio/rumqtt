@@ -14,7 +14,6 @@ pub struct Publisher {
     pub(crate) pkid_counter: Arc<AtomicU16>,
     pub(crate) max_inflight: u16,
     pub(crate) request_tx: Sender<()>,
-    pub(crate) cancel_tx: Sender<()>,
     pub(crate) publish_topic: String,
     pub(crate) publish_qos: QoS,
 }
@@ -81,14 +80,6 @@ impl Publisher {
     /// Sends a MQTT disconnect to the eventloop
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
         self.try_send_and_notify(Request::Disconnect)
-    }
-
-    /// Stops the eventloop right away
-    pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx
-            .send_async(())
-            .await
-            .map_err(ClientError::Cancel)
     }
 
     fn try_send_and_notify(&self, request: Request) -> Result<(), ClientError> {
