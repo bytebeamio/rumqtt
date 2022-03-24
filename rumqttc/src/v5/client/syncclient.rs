@@ -44,7 +44,7 @@ impl Client {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let pkid = publish.pkid;
-        self.client.send_and_notify(Request::Publish(publish))?;
+        self.client.push_and_notify(Request::Publish(publish))?;
         Ok(pkid)
     }
 
@@ -65,7 +65,7 @@ impl Client {
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
-            self.client.send_and_notify(ack)?;
+            self.client.push_and_notify(ack)?;
         }
         Ok(())
     }
@@ -78,7 +78,7 @@ impl Client {
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        self.client.send_and_notify(Request::Subscribe(subscribe))
+        self.client.push_and_notify(Request::Subscribe(subscribe))
     }
 
     /// Sends a MQTT Subscribe to the eventloop
@@ -96,7 +96,7 @@ impl Client {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        self.client.send_and_notify(Request::Subscribe(subscribe))
+        self.client.push_and_notify(Request::Subscribe(subscribe))
     }
 
     pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
@@ -110,7 +110,7 @@ impl Client {
     pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         self.client
-            .send_and_notify(Request::Unsubscribe(unsubscribe))
+            .push_and_notify(Request::Unsubscribe(unsubscribe))
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
@@ -120,7 +120,7 @@ impl Client {
 
     /// Sends a MQTT disconnect to the eventloop
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        self.client.send_and_notify(Request::Disconnect)
+        self.client.push_and_notify(Request::Disconnect)
     }
 
     /// Sends a MQTT disconnect to the eventloop
