@@ -1,6 +1,6 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
-use crate::v5::{packet::*, ConnectionError, Event, EventLoop, Request};
+use crate::v5::{packet::*, ConnectionError, EventLoop, Request};
 
 use flume::SendError;
 use std::mem;
@@ -69,12 +69,12 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = Result<Event, ConnectionError>;
+    type Item = Result<(), ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.connection.eventloop.poll();
         match self.runtime.block_on(f) {
-            Ok(v) => Some(Ok(v)),
+            Ok(_) => Some(Ok(())),
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");

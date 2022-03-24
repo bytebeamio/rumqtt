@@ -12,7 +12,7 @@ mod state;
 mod tls;
 
 pub use client::{AsyncClient, Client, ClientError, Connection};
-pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use eventloop::{ConnectionError, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
 pub use packet::*;
 pub use state::{MqttState, StateError};
@@ -22,33 +22,6 @@ pub use tls::Error;
 pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
-
-/// Current outgoing activity on the eventloop
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Outgoing {
-    /// Publish packet with packet identifier. 0 implies QoS 0
-    Publish(u16),
-    /// Subscribe packet with packet identifier
-    Subscribe(u16),
-    /// Unsubscribe packet with packet identifier
-    Unsubscribe(u16),
-    /// PubAck packet
-    PubAck(u16),
-    /// PubRec packet
-    PubRec(u16),
-    /// PubRel packet
-    PubRel(u16),
-    /// PubComp packet
-    PubComp(u16),
-    /// Ping request packet
-    PingReq,
-    /// Ping response packet
-    PingResp,
-    /// Disconnect packet
-    Disconnect,
-    /// Await for an ack for more outgoing progress
-    AwaitAck(u16),
-}
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.

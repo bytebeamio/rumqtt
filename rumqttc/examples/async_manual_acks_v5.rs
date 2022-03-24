@@ -1,6 +1,6 @@
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
+use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -44,23 +44,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // create new broker connection
-    let (client, mut eventloop) = create_conn();
+    let (_client, mut eventloop) = create_conn();
 
     loop {
         // previously published messages should be republished after reconnection.
         let event = eventloop.poll().await;
         println!("{:?}", event);
-        match event {
-            Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                // this time we will ack incoming publishes.
-                // Its important not to block eventloop as this can cause deadlock.
-                let c = client.clone();
-                tokio::spawn(async move {
-                    c.ack(&publish).await.unwrap();
-                });
-            }
-            _ => {}
-        }
+
+        todo!("fix the commented out code below")
+
+        // match event {
+        //     Ok(Event::Incoming(Incoming::Publish(publish))) => {
+        //         // this time we will ack incoming publishes.
+        //         // Its important not to block eventloop as this can cause deadlock.
+        //         let c = client.clone();
+        //         tokio::spawn(async move {
+        //             c.ack(&publish).await.unwrap();
+        //         });
+        //     }
+        //     _ => {}
+        // }
     }
 }
 

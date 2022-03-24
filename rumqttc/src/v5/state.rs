@@ -1,4 +1,4 @@
-use super::{packet::*, Event, Incoming, Outgoing, Request};
+use super::{packet::*, Incoming, Request};
 
 use bytes::BytesMut;
 use std::collections::VecDeque;
@@ -72,13 +72,11 @@ pub struct MqttState {
     pub(crate) incoming_pub: Vec<Option<u16>>,
     /// Last collision due to broker not acking in order
     pub collision: Option<Publish>,
-    /// Buffered incoming packets
-    pub events: VecDeque<Event>,
     /// Write buffer
     pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
-    pub(crate) incoming_buf: Arc<Mutex<VecDeque<Publish>>>,
+    pub(crate) incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
     pkid_counter: Arc<AtomicU16>,
 }
 
@@ -100,7 +98,6 @@ impl MqttState {
             incoming_pub: vec![None; std::u16::MAX as usize + 1],
             collision: None,
             // TODO: Optimize these sizes later
-            events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
             incoming_buf: Arc::new(Mutex::new(VecDeque::with_capacity(cap))),
@@ -213,7 +210,7 @@ impl MqttState {
         };
 
         out?;
-        self.events.push_back(Event::Incoming(packet));
+        self.incoming_buf.lock().unwrap().push_back(packet);
         self.last_incoming = Instant::now();
         Ok(())
     }
@@ -249,12 +246,6 @@ impl MqttState {
             }
         }
 
-        // TODO: maybe limit the capacity of `self.incoming_buf`
-        self.incoming_buf
-            .lock()
-            .unwrap()
-            .push_back(publish.clone());
-
         Ok(())
     }
 
@@ -275,8 +266,6 @@ impl MqttState {
             self.inflight += 1;
 
             publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.events.push_back(event);
             self.collision_ping_count = 0;
         }
 
@@ -289,9 +278,6 @@ impl MqttState {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 PubRel::new(pubrec.pkid).write(&mut self.write)?;
-
-                let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
-                self.events.push_back(event);
                 Ok(())
             }
             None => {
@@ -305,8 +291,6 @@ impl MqttState {
         match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
             Some(_) => {
                 PubComp::new(pubrel.pkid).write(&mut self.write)?;
-                let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
-                self.events.push_back(event);
                 Ok(())
             }
             None => {
@@ -319,8 +303,6 @@ impl MqttState {
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
             publish.write(&mut self.write)?;
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.events.push_back(event);
             self.collision_ping_count = 0;
         }
 
@@ -358,8 +340,6 @@ impl MqttState {
             {
                 info!("Collision on packet id = {:?}", publish.pkid);
                 self.collision = Some(publish);
-                let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
-                self.events.push_back(event);
                 return Ok(());
             }
 
@@ -377,8 +357,6 @@ impl MqttState {
         );
 
         publish.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-        self.events.push_back(event);
         Ok(())
     }
 
@@ -387,23 +365,16 @@ impl MqttState {
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
         PubRel::new(pubrel.pkid).write(&mut self.write)?;
-
-        let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
-        self.events.push_back(event);
         Ok(())
     }
 
     fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
         puback.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::PubAck(puback.pkid));
-        self.events.push_back(event);
         Ok(())
     }
 
     fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
         pubrec.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
-        self.events.push_back(event);
         Ok(())
     }
 
@@ -437,8 +408,6 @@ impl MqttState {
         );
 
         PingReq.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::PingReq);
-        self.events.push_back(event);
         Ok(())
     }
 
@@ -452,8 +421,6 @@ impl MqttState {
         );
 
         subscription.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
-        self.events.push_back(event);
         Ok(())
     }
 
@@ -467,8 +434,6 @@ impl MqttState {
         );
 
         unsub.write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
-        self.events.push_back(event);
         Ok(())
     }
 
@@ -476,8 +441,6 @@ impl MqttState {
         debug!("Disconnect");
 
         Disconnect::new().write(&mut self.write)?;
-        let event = Event::Outgoing(Outgoing::Disconnect);
-        self.events.push_back(event);
         Ok(())
     }
 
@@ -528,7 +491,7 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::v5::{packet::*, Event, Incoming, MqttOptions, Outgoing, Request};
+    use crate::v5::{packet::*, Incoming, MqttOptions, Request};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -640,18 +603,6 @@ mod test {
         mqtt.handle_incoming_publish(&publish1).unwrap();
         mqtt.handle_incoming_publish(&publish2).unwrap();
         mqtt.handle_incoming_publish(&publish3).unwrap();
-
-        if let Event::Outgoing(Outgoing::PubAck(pkid)) = mqtt.events[0] {
-            assert_eq!(pkid, 2);
-        } else {
-            panic!("missing puback")
-        }
-
-        if let Event::Outgoing(Outgoing::PubRec(pkid)) = mqtt.events[1] {
-            assert_eq!(pkid, 3);
-        } else {
-            panic!("missing PubRec")
-        }
     }
 
     #[test]
@@ -671,7 +622,7 @@ mod test {
         let pkid = mqtt.incoming_pub[3].unwrap();
         assert_eq!(pkid, 3);
 
-        assert!(mqtt.events.is_empty());
+        assert!(mqtt.incoming_buf.lock().unwrap().is_empty());
     }
 
     #[test]

@@ -12,7 +12,7 @@ use flume::{SendError, Sender, TrySendError};
 use crate::v5::{
     client::get_ack_req,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    ClientError, EventLoop, MqttOptions, QoS, Request,
+    ClientError, EventLoop, Incoming, MqttOptions, QoS, Request,
 };
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
@@ -20,10 +20,10 @@ use crate::v5::{
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     incoming_buf: Arc<Mutex<VecDeque<Request>>>,
-    outgoing_buf: Arc<Mutex<VecDeque<Publish>>>,
+    outgoing_buf: Arc<Mutex<VecDeque<Incoming>>>,
     pkid_counter: Arc<AtomicU16>,
     max_inflight: u16,
-    incoming_buf_cache: VecDeque<Publish>,
+    incoming_buf_cache: VecDeque<Incoming>,
     incoming_buf_capacity: usize,
     request_tx: Sender<()>,
 }
@@ -124,7 +124,8 @@ impl AsyncClient {
         publish.retain = retain;
         let pkid = self.increment_pkid();
         publish.pkid = pkid;
-        self.push_and_async_notify(Request::Publish(publish)).await?;
+        self.push_and_async_notify(Request::Publish(publish))
+            .await?;
         Ok(pkid)
     }
 
@@ -221,7 +222,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    pub fn next_publish(&mut self) -> Option<Publish> {
+    pub fn next_publish(&mut self) -> Option<Incoming> {
         if let Some(publish) = self.incoming_buf_cache.pop_front() {
             return Some(publish);
         }

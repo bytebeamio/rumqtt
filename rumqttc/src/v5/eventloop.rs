@@ -1,5 +1,5 @@
 use crate::v5::{
-    framed::Network, packet::*, Incoming, MqttOptions, MqttState, Outgoing, Packet, Request,
+    framed::Network, packet::*, Incoming, MqttOptions, MqttState, Packet, Request,
     StateError, Transport,
 };
 #[cfg(feature = "use-rustls")]
@@ -69,13 +69,6 @@ pub struct EventLoop {
     pub(crate) keepalive_timeout: Option<Pin<Box<Sleep>>>,
 }
 
-/// Events which can be yielded by the event loop
-#[derive(Debug, PartialEq, Clone)]
-pub enum Event {
-    Incoming(Incoming),
-    Outgoing(Outgoing),
-}
-
 impl EventLoop {
     /// New MQTT `EventLoop`
     ///
@@ -111,7 +104,7 @@ impl EventLoop {
         &self.incoming_buf
     }
 
-    pub fn sub_events_buf(&self) -> &Arc<Mutex<VecDeque<Publish>>> {
+    pub fn sub_events_buf(&self) -> &Arc<Mutex<VecDeque<Incoming>>> {
         &self.state.incoming_buf
     }
 
@@ -126,40 +119,34 @@ impl EventLoop {
     /// the broker. Continuing to poll will reconnect to the broker if there is
     /// a disconnection.
     /// **NOTE** Don't block this while iterating
-    pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
+    pub async fn poll(&mut self) -> Result<(), ConnectionError> {
         if self.network.is_none() {
-            let (network, connack) = connect(&self.options).await?;
+            let (network, _connack) = connect(&self.options).await?;
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(connack));
+            return Ok(());
         }
 
-        match self.select().await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                self.clean();
-                Err(e)
-            }
+        if let Err(e) = self.select().await {
+            self.clean();
+            return Err(e);
         }
+
+        Ok(())
     }
 
     /// Select on network and requests and generate keepalive pings when necessary
-    async fn select(&mut self) -> Result<Event, ConnectionError> {
+    async fn select(&mut self) -> Result<(), ConnectionError> {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.options.inflight;
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
-
-        // Read buffered events from previous polls before calling a new poll
-        if let Some(event) = self.state.events.pop_front() {
-            return Ok(event);
-        }
 
         // this loop is necessary as self.request_buf might be empty, in which case it is possible
         // for self.state.events to be empty, and so popping off from it might return None. If None
@@ -171,7 +158,7 @@ impl EventLoop {
                     o?;
                     // flush all the acks and return first incoming packet
                     network.flush(&mut self.state.write).await?;
-                    return Ok(self.state.events.pop_front().unwrap());
+                    return Ok(());
                 },
                 // Pull next request from user requests channel.
                 // If conditions in the below branch are for flow control. We read next user
@@ -210,7 +197,7 @@ impl EventLoop {
                         network.flush(&mut self.state.write).await?;
                         // remaining events in the self.state.events will be taken out in next call
                         // to poll() even before the select! is used.
-                        return Ok(self.state.events.pop_front().unwrap())
+                        return Ok(())
                     }
                     Err(_) => return Err(ConnectionError::RequestsDone),
                 },
@@ -219,7 +206,7 @@ impl EventLoop {
                 Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
-                    return Ok(self.state.events.pop_front().unwrap())
+                    return Ok(())
                 },
                 // We generate pings irrespective of network activity. This keeps the ping logic
                 // simple. We can change this behavior in future if necessary (to prevent extra pings)
@@ -229,7 +216,7 @@ impl EventLoop {
 
                     self.state.handle_outgoing_packet(Request::PingReq)?;
                     network.flush(&mut self.state.write).await?;
-                    return Ok(self.state.events.pop_front().unwrap())
+                    return Ok(())
                 }
             }
         }
