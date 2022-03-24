@@ -1,7 +1,9 @@
 use crate::v5::{
-    framed::Network, packet::*, tls, Incoming, MqttOptions, MqttState, Outgoing, Packet, Request,
+    framed::Network, packet::*, Incoming, MqttOptions, MqttState, Outgoing, Packet, Request,
     StateError, Transport,
 };
+#[cfg(feature = "use-rustls")]
+use crate::v5::tls;
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
@@ -34,6 +36,7 @@ pub enum ConnectionError {
     Timeout(#[from] Elapsed),
     #[error("Packet parsing error: {0}")]
     Mqtt5Bytes(Error),
+    #[cfg(feature = "use-rustls")]
     #[error("Network: {0}")]
     Network(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -269,8 +272,9 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = TcpStream::connect((addr, port)).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
+        #[cfg(feature = "use-rustls")]
         Transport::Tls(tls_config) => {
-            let socket = tls::tls_connect(&options, &tls_config).await?;
+            let socket = tls::tls_connect(options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]
