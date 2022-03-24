@@ -78,7 +78,7 @@ pub struct MqttState {
     pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
-    pub(crate) sub_events_buf: Arc<Mutex<VecDeque<Publish>>>,
+    pub(crate) incoming_buf: Arc<Mutex<VecDeque<Publish>>>,
     pkid_counter: Arc<AtomicU16>,
 }
 
@@ -103,7 +103,7 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
-            sub_events_buf: Arc::new(Mutex::new(VecDeque::with_capacity(cap))),
+            incoming_buf: Arc::new(Mutex::new(VecDeque::with_capacity(cap))),
             pkid_counter: Arc::new(AtomicU16::new(0)),
         }
     }
@@ -249,8 +249,8 @@ impl MqttState {
             }
         }
 
-        // TODO: maybe limit the capacity of `self.sub_events_buf`
-        self.sub_events_buf
+        // TODO: maybe limit the capacity of `self.incoming_buf`
+        self.incoming_buf
             .lock()
             .unwrap()
             .push_back(publish.clone());

@@ -9,8 +9,8 @@ use flume::{SendError, Sender, TrySendError};
 use crate::v5::{packet::Publish, ClientError, QoS, Request};
 
 pub struct Publisher {
-    pub(crate) request_buf: Arc<Mutex<VecDeque<Request>>>,
-    pub(crate) request_buf_capacity: usize,
+    pub(crate) incoming_buf: Arc<Mutex<VecDeque<Request>>>,
+    pub(crate) incoming_buf_capacity: usize,
     pub(crate) pkid_counter: Arc<AtomicU16>,
     pub(crate) max_inflight: u16,
     pub(crate) request_tx: Sender<()>,
@@ -60,8 +60,8 @@ impl Publisher {
 
     async fn send_async_and_notify(&self, request: Request) -> Result<(), ClientError> {
         {
-            let mut request_buf = self.request_buf.lock().unwrap();
-            if request_buf.len() == self.request_buf_capacity {
+            let mut request_buf = self.incoming_buf.lock().unwrap();
+            if request_buf.len() == self.incoming_buf_capacity {
                 return Err(ClientError::RequestsFull);
             }
             request_buf.push_back(request);
@@ -83,8 +83,8 @@ impl Publisher {
     }
 
     fn try_send_and_notify(&self, request: Request) -> Result<(), ClientError> {
-        let mut request_buf = self.request_buf.lock().unwrap();
-        if request_buf.len() == self.request_buf_capacity {
+        let mut request_buf = self.incoming_buf.lock().unwrap();
+        if request_buf.len() == self.incoming_buf_capacity {
             return Err(ClientError::RequestsFull);
         }
         request_buf.push_back(request);

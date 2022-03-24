@@ -12,24 +12,24 @@ use crate::v5::{
 
 #[derive(Debug, Clone)]
 pub struct Subscriber {
-    pub(crate) request_buf: Arc<Mutex<VecDeque<Request>>>,
-    pub(crate) sub_events_buf: Arc<Mutex<VecDeque<Publish>>>,
-    pub(crate) sub_events_buf_cache: VecDeque<Publish>,
+    pub(crate) outgoing_buf: Arc<Mutex<VecDeque<Request>>>,
+    pub(crate) incoming_buf: Arc<Mutex<VecDeque<Publish>>>,
+    pub(crate) incoming_buf_cache: VecDeque<Publish>,
     pub(crate) request_buf_capacity: usize,
     pub(crate) request_tx: Sender<()>,
 }
 
 impl Subscriber {
     pub fn next_publish(&mut self) -> Option<Publish> {
-        if let Some(publish) = self.sub_events_buf_cache.pop_front() {
+        if let Some(publish) = self.incoming_buf_cache.pop_front() {
             return Some(publish);
         }
 
         std::mem::swap(
-            &mut self.sub_events_buf_cache,
-            &mut *self.sub_events_buf.lock().unwrap(),
+            &mut self.incoming_buf_cache,
+            &mut *self.incoming_buf.lock().unwrap(),
         );
-        self.sub_events_buf_cache.pop_front()
+        self.incoming_buf_cache.pop_front()
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
@@ -95,7 +95,7 @@ impl Subscriber {
 
     async fn send_async_and_notify(&self, request: Request) -> Result<(), ClientError> {
         {
-            let mut request_buf = self.request_buf.lock().unwrap();
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
             if request_buf.len() == self.request_buf_capacity {
                 return Err(ClientError::RequestsFull);
             }
@@ -108,7 +108,7 @@ impl Subscriber {
     }
 
     fn try_send_and_notify(&self, request: Request) -> Result<(), ClientError> {
-        let mut request_buf = self.request_buf.lock().unwrap();
+        let mut request_buf = self.outgoing_buf.lock().unwrap();
         if request_buf.len() == self.request_buf_capacity {
             return Err(ClientError::RequestsFull);
         }

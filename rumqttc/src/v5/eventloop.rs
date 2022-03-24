@@ -52,12 +52,12 @@ pub struct EventLoop {
     pub options: MqttOptions,
     /// Current state of the connection
     pub state: MqttState,
-    request_buf: Arc<Mutex<VecDeque<Request>>>,
-    request_buf_cache: VecDeque<Request>,
+    incoming_buf: Arc<Mutex<VecDeque<Request>>>,
+    incoming_buf_cache: VecDeque<Request>,
     /// Request stream
-    pub requests_rx: Receiver<()>,
+    pub incoming_rx: Receiver<()>,
     /// Requests handle to send requests
-    pub requests_tx: Sender<()>,
+    pub incoming_tx: Sender<()>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
@@ -79,7 +79,7 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(1);
+        let (incoming_tx, incoming_rx) = bounded(1);
         let request_buf = Arc::new(Mutex::new(VecDeque::with_capacity(cap)));
         let pending = Vec::new();
         let pending = pending.into_iter();
@@ -89,10 +89,10 @@ impl EventLoop {
         EventLoop {
             options,
             state: MqttState::new(max_inflight, manual_acks, cap),
-            request_buf,
-            request_buf_cache: VecDeque::with_capacity(cap),
-            requests_tx,
-            requests_rx,
+            incoming_buf: request_buf,
+            incoming_buf_cache: VecDeque::with_capacity(cap),
+            incoming_tx,
+            incoming_rx,
             pending,
             network: None,
             keepalive_timeout: None,
@@ -101,15 +101,15 @@ impl EventLoop {
 
     /// Returns a handle to communicate with this eventloop
     pub fn handle(&self) -> Sender<()> {
-        self.requests_tx.clone()
+        self.incoming_tx.clone()
     }
 
     pub fn request_buf(&self) -> &Arc<Mutex<VecDeque<Request>>> {
-        &self.request_buf
+        &self.incoming_buf
     }
 
     pub fn sub_events_buf(&self) -> &Arc<Mutex<VecDeque<Publish>>> {
-        &self.state.sub_events_buf
+        &self.state.incoming_buf
     }
 
     fn clean(&mut self) {
@@ -194,14 +194,14 @@ impl EventLoop {
                 // After collision with pkid 1        -> [1b ,2, x, 4, 5].
                 // 1a is saved to state and event loop is set to collision mode stopping new
                 // outgoing requests (along with 1b).
-                o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
+                o = self.incoming_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                     Ok(_request_notif) => {
                         // swapping to avoid blocking the mutex
-                        std::mem::swap(&mut self.request_buf_cache,&mut *self.request_buf.lock().unwrap());
-                        if self.request_buf_cache.is_empty() {
+                        std::mem::swap(&mut self.incoming_buf_cache,&mut *self.incoming_buf.lock().unwrap());
+                        if self.incoming_buf_cache.is_empty() {
                             continue;
                         }
-                        for request in self.request_buf_cache.drain(..) {
+                        for request in self.incoming_buf_cache.drain(..) {
                             self.state.handle_outgoing_packet(request)?;
                         }
                         network.flush(&mut self.state.write).await?;
