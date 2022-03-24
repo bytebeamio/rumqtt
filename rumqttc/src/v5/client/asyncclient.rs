@@ -222,7 +222,7 @@ impl AsyncClient {
         Ok(())
     }
 
-    pub fn next_publish(&mut self) -> Option<Incoming> {
+    pub fn next(&mut self) -> Option<Incoming> {
         if let Some(publish) = self.incoming_buf_cache.pop_front() {
             return Some(publish);
         }
