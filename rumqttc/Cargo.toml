@@ -14,14 +14,15 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+default = ["use-rustls"]
 websocket = ["async-tungstenite", "ws_stream_tungstenite"]
+use-rustls = ["tokio-rustls", "rustls-pemfile"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
-webpki = "0.22.0"
-tokio-rustls = "0.23.2"
-rustls-pemfile = "0.3.0"
+tokio-rustls = { version = "0.23.2", optional = true }
+rustls-pemfile = { version = "0.3.0", optional = true }
 async-tungstenite = { version = "0.16.1", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
 ws_stream_tungstenite = { version = "0.7.0", default-features = false, features = ["tokio_io"], optional = true }
 pollster = "0.2"
