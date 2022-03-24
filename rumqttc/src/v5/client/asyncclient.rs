@@ -52,27 +52,6 @@ impl AsyncClient {
         (client, eventloop)
     }
 
-    /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
-    /// creating a test instance.
-    pub fn from_senders(
-        request_buf: Arc<Mutex<VecDeque<Request>>>,
-        incoming_buf: Arc<Mutex<VecDeque<Publish>>>,
-        pkid_counter: Arc<AtomicU16>,
-        max_inflight: u16,
-        request_tx: Sender<()>,
-        cap: usize,
-    ) -> AsyncClient {
-        AsyncClient {
-            incoming_buf: request_buf,
-            incoming_buf_capacity: cap,
-            pkid_counter,
-            max_inflight,
-            outgoing_buf: incoming_buf,
-            incoming_buf_cache: VecDeque::with_capacity(cap),
-            request_tx,
-        }
-    }
-
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish<S, V>(
         &self,
