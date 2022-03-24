@@ -166,6 +166,7 @@ impl MqttState {
         pending
     }
 
+    #[inline]
     pub fn inflight(&self) -> u16 {
         self.inflight
     }
@@ -215,10 +216,12 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn handle_incoming_suback(&mut self) -> Result<(), StateError> {
         Ok(())
     }
 
+    #[inline]
     fn handle_incoming_unsuback(&mut self) -> Result<(), StateError> {
         Ok(())
     }
@@ -318,6 +321,7 @@ impl MqttState {
         }
     }
 
+    #[inline]
     fn handle_incoming_pingresp(&mut self) -> Result<(), StateError> {
         self.await_pingresp = false;
         Ok(())
@@ -360,6 +364,7 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<(), StateError> {
         let pubrel = self.save_pubrel(pubrel)?;
 
@@ -368,11 +373,13 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
         puback.write(&mut self.write)?;
         Ok(())
     }
 
+    #[inline]
     fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
         pubrec.write(&mut self.write)?;
         Ok(())
@@ -411,6 +418,7 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
         let pkid = self.increment_pkid();
         subscription.pkid = pkid;
@@ -424,6 +432,7 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
         let pkid = self.increment_pkid();
         unsub.pkid = pkid;
@@ -437,6 +446,7 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
 
@@ -444,6 +454,7 @@ impl MqttState {
         Ok(())
     }
 
+    #[inline]
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
         if let Some(publish) = &self.collision {
             if publish.pkid == pkid {
@@ -454,6 +465,7 @@ impl MqttState {
         None
     }
 
+    #[inline]
     fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {
         let pubrel = match pubrel.pkid {
             // consider PacketIdentifier(0) as uninitialized packets
