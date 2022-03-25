@@ -28,9 +28,9 @@ impl Notifier {
     pub fn next(&mut self) -> Option<Incoming> {
         match self.incoming_buf_cache.pop_front() {
             None => {
-                mem::replace(
+                mem::swap(
                     &mut self.incoming_buf_cache,
-                    *self.incoming_buf.lock().unwrap(),
+                    &mut *self.incoming_buf.lock().unwrap(),
                 );
                 self.incoming_buf_cache.pop_front()
             }

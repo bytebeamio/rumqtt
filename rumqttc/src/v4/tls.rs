@@ -96,7 +96,7 @@ pub async fn tls_connector(tls_config: &TlsConfiguration) -> Result<TlsConnector
                     None => return Err(Error::NoValidCertInChain),
                 };
 
-                let certs = certs.into_iter().map(|cert| Certificate(cert)).collect();
+                let certs = certs.into_iter().map(Certificate).collect();
 
                 config.with_single_cert(certs, PrivateKey(key))?
             } else {

@@ -19,13 +19,13 @@ mod tls;
 pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
+pub use notifier::Notifier;
 pub use packet::*;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
-pub use notifier::Notifier;
 
 pub type Incoming = Packet;
 
@@ -601,11 +601,9 @@ pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, N
 
     let client = AsyncClient {
         outgoing_buf,
-        incoming_buf_capacity: cap,
-        incoming_buf,
+        outgoing_buf_capacity: cap,
         pkid_counter,
         max_inflight,
-        incoming_buf_cache,
         request_tx,
     };
 
@@ -617,7 +615,7 @@ pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, N
         }
     });
 
-    Ok((client, Notifier {}))
+    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
 }
 
 #[cfg(test)]
