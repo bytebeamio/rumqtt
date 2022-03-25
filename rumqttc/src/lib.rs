@@ -99,6 +99,7 @@
 #[macro_use]
 extern crate log;
 
+#[allow(clippy::all)]
 pub mod mqttbytes;
 pub mod v4;
 pub mod v5;

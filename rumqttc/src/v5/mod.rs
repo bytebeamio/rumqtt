@@ -1,11 +1,16 @@
-use std::fmt::{self, Debug, Formatter};
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::VecDeque,
+    fmt::{self, Debug, Formatter},
+    time::Duration,
+};
 
 mod client;
 mod eventloop;
 mod framed;
+mod notifier;
+#[allow(clippy::all)]
 mod packet;
 mod state;
 #[cfg(feature = "use-rustls")]
@@ -20,6 +25,7 @@ pub use state::{MqttState, StateError};
 pub use tls::Error;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
+pub use notifier::Notifier;
 
 pub type Incoming = Packet;
 
@@ -69,7 +75,7 @@ impl From<Unsubscribe> for Request {
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
-#[cfg(feature = "use-rustls")]
+    #[cfg(feature = "use-rustls")]
     Tls(TlsConfiguration),
     #[cfg(unix)]
     Unix,
@@ -582,6 +588,36 @@ impl Debug for MqttOptions {
             .field("manual_acks", &self.manual_acks)
             .finish()
     }
+}
+
+pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
+    let mut eventloop = EventLoop::new(options, cap);
+    let outgoing_buf = eventloop.request_buf().clone();
+    let incoming_buf = eventloop.state.incoming_buf.clone();
+    let incoming_buf_cache = VecDeque::with_capacity(cap);
+    let request_tx = eventloop.handle();
+    let max_inflight = eventloop.state.max_inflight;
+    let pkid_counter = eventloop.state.pkid_counter().clone();
+
+    let client = AsyncClient {
+        outgoing_buf,
+        incoming_buf_capacity: cap,
+        incoming_buf,
+        pkid_counter,
+        max_inflight,
+        incoming_buf_cache,
+        request_tx,
+    };
+
+    tokio::spawn(async move {
+        loop {
+            // TODO: maybe do something like retries for some specific errors? or maybe give user
+            // options to configure these retries?
+            eventloop.poll().await.unwrap();
+        }
+    });
+
+    Ok((client, Notifier {}))
 }
 
 #[cfg(test)]

@@ -12,40 +12,34 @@ use flume::{SendError, Sender, TrySendError};
 use crate::v5::{
     client::get_ack_req,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    ClientError, EventLoop, Incoming, MqttOptions, QoS, Request,
+    ClientError, EventLoop, MqttOptions, QoS, Request,
 };
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
 /// This is cloneable and can be used to asynchronously Publish, Subscribe.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    incoming_buf: Arc<Mutex<VecDeque<Request>>>,
-    outgoing_buf: Arc<Mutex<VecDeque<Incoming>>>,
-    pkid_counter: Arc<AtomicU16>,
-    max_inflight: u16,
-    incoming_buf_cache: VecDeque<Incoming>,
-    incoming_buf_capacity: usize,
-    request_tx: Sender<()>,
+    pub(crate) outgoing_buf: Arc<Mutex<VecDeque<Request>>>,
+    pub(crate) outgoing_buf_capacity: usize,
+    pub(crate) pkid_counter: Arc<AtomicU16>,
+    pub(crate) max_inflight: u16,
+    pub(crate) request_tx: Sender<()>,
 }
 
 impl AsyncClient {
     /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
-        let request_buf = eventloop.request_buf().clone();
-        let incoming_buf = eventloop.state.incoming_buf.clone();
-        let incoming_buf_cache = VecDeque::with_capacity(cap);
+        let outgoing_buf = eventloop.request_buf().clone();
         let request_tx = eventloop.handle();
         let max_inflight = eventloop.state.max_inflight;
         let pkid_counter = eventloop.state.pkid_counter().clone();
 
         let client = AsyncClient {
-            incoming_buf: request_buf,
-            incoming_buf_capacity: cap,
-            outgoing_buf: incoming_buf,
+            outgoing_buf,
+            outgoing_buf_capacity: cap,
             pkid_counter,
             max_inflight,
-            incoming_buf_cache,
             request_tx,
         };
 
@@ -66,7 +60,11 @@ impl AsyncClient {
     {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.increment_pkid();
+        let pkid = if qos != QoS::AtMostOnce {
+            self.increment_pkid()
+        } else {
+            0
+        };
         publish.pkid = pkid;
         self.push_and_async_notify(Request::Publish(publish))
             .await?;
@@ -87,7 +85,11 @@ impl AsyncClient {
     {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.increment_pkid();
+        let pkid = if qos != QoS::AtMostOnce {
+            self.increment_pkid()
+        } else {
+            0
+        };
         publish.pkid = pkid;
         self.push_and_try_notify(Request::Publish(publish))?;
         Ok(pkid)
@@ -122,7 +124,11 @@ impl AsyncClient {
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.increment_pkid();
+        let pkid = if qos != QoS::AtMostOnce {
+            self.increment_pkid()
+        } else {
+            0
+        };
         publish.pkid = pkid;
         self.push_and_async_notify(Request::Publish(publish))
             .await?;
@@ -186,8 +192,8 @@ impl AsyncClient {
 
     async fn push_and_async_notify(&self, request: Request) -> Result<(), ClientError> {
         {
-            let mut request_buf = self.incoming_buf.lock().unwrap();
-            if request_buf.len() == self.incoming_buf_capacity {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.len() == self.outgoing_buf_capacity {
                 return Err(ClientError::RequestsFull);
             }
             request_buf.push_back(request);
@@ -199,8 +205,8 @@ impl AsyncClient {
     }
 
     pub(crate) fn push_and_notify(&self, request: Request) -> Result<(), ClientError> {
-        let mut request_buf = self.incoming_buf.lock().unwrap();
-        if request_buf.len() == self.incoming_buf_capacity {
+        let mut request_buf = self.outgoing_buf.lock().unwrap();
+        if request_buf.len() == self.outgoing_buf_capacity {
             return Err(ClientError::RequestsFull);
         }
         request_buf.push_back(request);
@@ -211,8 +217,8 @@ impl AsyncClient {
     }
 
     fn push_and_try_notify(&self, request: Request) -> Result<(), ClientError> {
-        let mut request_buf = self.incoming_buf.lock().unwrap();
-        if request_buf.len() == self.incoming_buf_capacity {
+        let mut request_buf = self.outgoing_buf.lock().unwrap();
+        if request_buf.len() == self.outgoing_buf_capacity {
             return Err(ClientError::RequestsFull);
         }
         request_buf.push_back(request);
@@ -220,18 +226,6 @@ impl AsyncClient {
             return Err(ClientError::EventloopClosed);
         }
         Ok(())
-    }
-
-    pub fn next(&mut self) -> Option<Incoming> {
-        if let Some(publish) = self.incoming_buf_cache.pop_front() {
-            return Some(publish);
-        }
-
-        std::mem::swap(
-            &mut self.incoming_buf_cache,
-            &mut *self.outgoing_buf.lock().unwrap(),
-        );
-        self.incoming_buf_cache.pop_front()
     }
 
     fn increment_pkid(&self) -> u16 {
