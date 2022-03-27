@@ -5,7 +5,7 @@ use tokio::{task, time};
 mod broker;
 
 use broker::*;
-use rumqttc::v4::*;
+use rumqttc::*;
 
 async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Request>) {
     for i in 1..=count {

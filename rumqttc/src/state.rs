@@ -1,4 +1,4 @@
-use crate::v4::{Event, Incoming, Outgoing, Request};
+use crate::{Event, Incoming, Outgoing, Request};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
@@ -487,7 +487,9 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::{mqttbytes::v4::read, v4::*};
+    use crate::mqttbytes::v4::*;
+    use crate::mqttbytes::*;
+    use crate::{Event, Incoming, MqttOptions, Outgoing, Request};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

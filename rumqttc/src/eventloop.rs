@@ -1,8 +1,7 @@
-use crate::v4::{framed::Network, Transport};
-use crate::v4::{Incoming, MqttState, Packet, Request, StateError};
-use crate::v4::{MqttOptions, Outgoing};
+use crate::framed::Network;
 #[cfg(feature = "use-rustls")]
-use crate::v4::tls;
+use crate::tls;
+use crate::{Incoming, MqttOptions, MqttState, Outgoing, Packet, Request, StateError, Transport};
 
 use crate::mqttbytes::v4::*;
 use async_channel::{bounded, Receiver, Sender};

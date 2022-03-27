@@ -1,9 +1,9 @@
-use crate::v5::{
-    framed::Network, packet::*, Incoming, MqttOptions, MqttState, Packet, Request,
-    StateError, Transport,
-};
 #[cfg(feature = "use-rustls")]
 use crate::v5::tls;
+use crate::v5::{
+    framed::Network, packet::*, Incoming, MqttOptions, MqttState, Packet, Request, StateError,
+    Transport,
+};
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
