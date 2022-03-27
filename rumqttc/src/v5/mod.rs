@@ -597,12 +597,11 @@ pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, N
     let incoming_buf_cache = VecDeque::with_capacity(cap);
     let request_tx = eventloop.handle();
     let max_inflight = eventloop.state.max_inflight;
-    let pkid_counter = eventloop.state.pkid_counter().clone();
 
     let client = AsyncClient {
         outgoing_buf,
         outgoing_buf_capacity: cap,
-        pkid_counter,
+        pkid_counter: 0,
         max_inflight,
         request_tx,
     };

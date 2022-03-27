@@ -10,7 +10,6 @@ use crate::v5::{
 ///
 /// Client is cloneable and can be used to synchronously Publish, Subscribe.
 /// Asynchronous channel handle can also be extracted if necessary
-#[derive(Clone)]
 pub struct Client {
     client: AsyncClient,
 }
@@ -71,14 +70,17 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn try_ack(&mut self, publish: &Publish) -> Result<(), ClientError> {
         self.client.try_ack(publish)
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-        self.client.push_and_notify(Request::Subscribe(subscribe))
+    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<u16, ClientError> {
+        let mut subscribe = Subscribe::new(topic.into(), qos);
+        let pkid = self.client.increment_pkid();
+        subscribe.pkid = pkid;
+        self.client.push_and_notify(Request::Subscribe(subscribe))?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe to the eventloop
@@ -86,20 +88,23 @@ impl Client {
         &mut self,
         topic: S,
         qos: QoS,
-    ) -> Result<(), ClientError> {
+    ) -> Result<u16, ClientError> {
         self.client.try_subscribe(topic, qos)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
-    pub fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
+    pub fn subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
-        self.client.push_and_notify(Request::Subscribe(subscribe))
+        let mut subscribe = Subscribe::new_many(topics);
+        let pkid = self.client.increment_pkid();
+        subscribe.pkid = pkid;
+        self.client.push_and_notify(Request::Subscribe(subscribe))?;
+        Ok(pkid)
     }
 
-    pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -107,14 +112,17 @@ impl Client {
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic.into());
+    pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        let pkid = self.client.increment_pkid();
+        unsubscribe.pkid = pkid;
         self.client
-            .push_and_notify(Request::Unsubscribe(unsubscribe))
+            .push_and_notify(Request::Unsubscribe(unsubscribe))?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
         self.client.try_unsubscribe(topic)
     }
 

@@ -1,9 +1,6 @@
 use std::{
     collections::VecDeque,
-    sync::{
-        atomic::{AtomicU16, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 use bytes::Bytes;
@@ -17,11 +14,11 @@ use crate::v5::{
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
 /// This is cloneable and can be used to asynchronously Publish, Subscribe.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AsyncClient {
     pub(crate) outgoing_buf: Arc<Mutex<VecDeque<Request>>>,
     pub(crate) outgoing_buf_capacity: usize,
-    pub(crate) pkid_counter: Arc<AtomicU16>,
+    pub(crate) pkid_counter: u16,
     pub(crate) max_inflight: u16,
     pub(crate) request_tx: Sender<()>,
 }
@@ -33,12 +30,11 @@ impl AsyncClient {
         let outgoing_buf = eventloop.request_buf().clone();
         let request_tx = eventloop.handle();
         let max_inflight = eventloop.state.max_inflight;
-        let pkid_counter = eventloop.state.pkid_counter().clone();
 
         let client = AsyncClient {
             outgoing_buf,
             outgoing_buf_capacity: cap,
-            pkid_counter,
+            pkid_counter: 0,
             max_inflight,
             request_tx,
         };
@@ -48,7 +44,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish<S, V>(
-        &self,
+        &mut self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -73,7 +69,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub fn try_publish<S, V>(
-        &self,
+        &mut self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -96,7 +92,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub async fn ack(&mut self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
             self.push_and_async_notify(ack).await?;
         }
@@ -104,7 +100,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn try_ack(&mut self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
             self.push_and_try_notify(ack)?;
         }
@@ -113,7 +109,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish_bytes<S>(
-        &self,
+        &mut self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -136,57 +132,83 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+    pub async fn subscribe<S: Into<String>>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<u16, ClientError> {
+        let mut subscribe = Subscribe::new(topic.into(), qos);
+        let pkid = self.increment_pkid();
+        subscribe.pkid = pkid;
         self.push_and_async_notify(Request::Subscribe(subscribe))
-            .await
+            .await?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-        self.push_and_try_notify(Request::Subscribe(subscribe))
+    pub fn try_subscribe<S: Into<String>>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<u16, ClientError> {
+        let mut subscribe = Subscribe::new(topic.into(), qos);
+        let pkid = self.increment_pkid();
+        subscribe.pkid = pkid;
+        self.push_and_try_notify(Request::Subscribe(subscribe))?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub async fn subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let mut subscribe = Subscribe::new_many(topics);
+        let pkid = self.increment_pkid();
+        subscribe.pkid = pkid;
         self.push_and_async_notify(Request::Subscribe(subscribe))
-            .await
+            .await?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
-        self.push_and_try_notify(Request::Subscribe(subscribe))
+        let mut subscribe = Subscribe::new_many(topics);
+        let pkid = self.increment_pkid();
+        subscribe.pkid = pkid;
+        self.push_and_try_notify(Request::Subscribe(subscribe))?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic.into());
+    pub async fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        let pkid = self.increment_pkid();
+        unsubscribe.pkid = pkid;
         self.push_and_async_notify(Request::Unsubscribe(unsubscribe))
-            .await
+            .await?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic.into());
-        self.push_and_try_notify(Request::Unsubscribe(unsubscribe))
+    pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        let pkid = self.increment_pkid();
+        unsubscribe.pkid = pkid;
+        self.push_and_try_notify(Request::Unsubscribe(unsubscribe))?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT disconnect to the eventloop
-    pub async fn disconnect(&self) -> Result<(), ClientError> {
+    pub async fn disconnect(&mut self) -> Result<(), ClientError> {
         self.push_and_async_notify(Request::Disconnect).await
     }
 
     /// Sends a MQTT disconnect to the eventloop
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
+    pub fn try_disconnect(&mut self) -> Result<(), ClientError> {
         self.push_and_try_notify(Request::Disconnect)
     }
 
@@ -228,23 +250,13 @@ impl AsyncClient {
         Ok(())
     }
 
-    fn increment_pkid(&self) -> u16 {
-        let mut cur_pkid = self.pkid_counter.load(Ordering::SeqCst);
-        loop {
-            let new_pkid = if cur_pkid > self.max_inflight {
-                1
-            } else {
-                cur_pkid + 1
-            };
-            match self.pkid_counter.compare_exchange(
-                cur_pkid,
-                new_pkid,
-                Ordering::SeqCst,
-                Ordering::Relaxed,
-            ) {
-                Ok(_prev_pkid) => break new_pkid,
-                Err(actual_pkid) => cur_pkid = actual_pkid,
-            }
-        }
+    #[inline]
+    pub(crate) fn increment_pkid(&mut self) -> u16 {
+        self.pkid_counter = if self.pkid_counter == self.max_inflight {
+            1
+        } else {
+            self.pkid_counter + 1
+        };
+        self.pkid_counter
     }
 }

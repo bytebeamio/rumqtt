@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_imports)]
 use tokio::{task, time};
 
 use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions, QoS};
@@ -16,58 +17,59 @@ fn create_conn() -> (AsyncClient, EventLoop) {
 
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
-    pretty_env_logger::init();
+    todo!("fix this example with new way of spawning clients")
+    // pretty_env_logger::init();
 
-    // create mqtt connection with clean_session = false and manual_acks = true
-    let (client, mut eventloop) = create_conn();
+    // // create mqtt connection with clean_session = false and manual_acks = true
+    // let (client, mut eventloop) = create_conn();
 
-    // subscribe example topic
-    client
-        .subscribe("hello/world", QoS::AtLeastOnce)
-        .await
-        .unwrap();
+    // // subscribe example topic
+    // client
+    //     .subscribe("hello/world", QoS::AtLeastOnce)
+    //     .await
+    //     .unwrap();
 
-    task::spawn(async move {
-        // send some messages to example topic and disconnect
-        requests(client.clone()).await;
-        client.disconnect().await.unwrap()
-    });
+    // task::spawn(async move {
+    //     // send some messages to example topic and disconnect
+    //     requests(client.clone()).await;
+    //     client.disconnect().await.unwrap()
+    // });
 
-    loop {
-        // get subscribed messages without acking
-        let event = eventloop.poll().await;
-        println!("{:?}", event);
-        if let Err(_err) = event {
-            // break loop on disconnection
-            break;
-        }
-    }
+    // loop {
+    //     // get subscribed messages without acking
+    //     let event = eventloop.poll().await;
+    //     println!("{:?}", event);
+    //     if let Err(_err) = event {
+    //         // break loop on disconnection
+    //         break;
+    //     }
+    // }
 
-    // create new broker connection
-    let (_client, mut eventloop) = create_conn();
+    // // create new broker connection
+    // let (_client, mut eventloop) = create_conn();
 
-    loop {
-        // previously published messages should be republished after reconnection.
-        let event = eventloop.poll().await;
-        println!("{:?}", event);
+    // loop {
+    //     // previously published messages should be republished after reconnection.
+    //     let event = eventloop.poll().await;
+    //     println!("{:?}", event);
 
-        todo!("fix the commented out code below")
+    //     todo!("fix the commented out code below")
 
-        // match event {
-        //     Ok(Event::Incoming(Incoming::Publish(publish))) => {
-        //         // this time we will ack incoming publishes.
-        //         // Its important not to block eventloop as this can cause deadlock.
-        //         let c = client.clone();
-        //         tokio::spawn(async move {
-        //             c.ack(&publish).await.unwrap();
-        //         });
-        //     }
-        //     _ => {}
-        // }
-    }
+    //     // match event {
+    //     //     Ok(Event::Incoming(Incoming::Publish(publish))) => {
+    //     //         // this time we will ack incoming publishes.
+    //     //         // Its important not to block eventloop as this can cause deadlock.
+    //     //         let c = client.clone();
+    //     //         tokio::spawn(async move {
+    //     //             c.ack(&publish).await.unwrap();
+    //     //         });
+    //     //     }
+    //     //     _ => {}
+    //     // }
+    // }
 }
 
-async fn requests(client: AsyncClient) {
+async fn requests(mut client: AsyncClient) {
     for i in 1..=10 {
         client
             .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
