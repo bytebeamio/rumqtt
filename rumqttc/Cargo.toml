@@ -14,10 +14,10 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["use-rustls", "websocket"]
+default = ["use-rustls"]
 use-rustls = ["tokio-rustls", "rustls-pemfile"]
 use-native-tls = ["tokio-native-tls", "native-tls"]
-websocket = ["async-tungstenite", "ws_stream_tungstenite", "use-rustls", "http"]
+websocket = ["async-tungstenite", "ws_stream_tungstenite", "http"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
@@ -31,7 +31,6 @@ thiserror = "1.0.21"
 # rustls
 tokio-rustls = { version = "0.23.2", optional = true }
 rustls-pemfile = { version = "0.3.0", optional = true }
-# webpki = { version = "0.22.0", optional = true }
 # websockets
 async-tungstenite = { version = "0.16.1", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
 ws_stream_tungstenite = { version = "0.7.0", default-features = false, features = ["tokio_io"], optional = true }

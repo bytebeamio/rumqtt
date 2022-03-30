@@ -281,7 +281,7 @@ impl Transport {
 }
 
 #[derive(Clone)]
-#[cfg(feature = "use-rustls")]
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub enum TlsConfiguration {
     #[cfg(feature = "use-rustls")]
     Simple {
