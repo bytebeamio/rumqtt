@@ -312,7 +312,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .body(())
                 .unwrap();
 
-            let connector = tls::tls_connector(&tls_config).await?;
+            let connector = tls::rustls_connector(&tls_config).await?;
 
             let (socket, _) = connect_async_with_tls_connector(request, Some(connector)).await?;
 
