@@ -347,7 +347,21 @@ pub struct MqttOptions {
 }
 
 impl MqttOptions {
-    /// New mqtt options
+    /// Create an [`MqttOptions`] object that contains default values for all settings other than
+    /// - id: A string to identify the device connecting to a broker
+    /// - host: The broker's domain name or IP address
+    /// - port: The port number on which broker must be listening for incoming connections
+    /// 
+    /// ```
+    /// # use rumqttc::MqttOptions;
+    /// let options = MqttOptions::new("123", "localhost", 1883);
+    /// ```
+    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
+    /// for example, the following code would panic:
+    /// ```should_panic
+    /// # use rumqttc::MqttOptions;
+    /// let options = MqttOptions::new("", "localhost", 1883);
+    /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         let id = id.into();
         if id.starts_with(' ') || id.is_empty() {
@@ -375,6 +389,17 @@ impl MqttOptions {
     }
 
     #[cfg(feature = "url")]
+    /// Creates an [`MqttOptions`] Object by parsing a string with the [url] crate's
+    /// [`parse`](url::Url::parse) method. Only enabled when run using the "url" feature
+    /// which enables the url crate.
+    /// 
+    /// ```
+    /// # use rumqttc::MqttOptions;
+    /// let options = MqttOptions::parse("mqtt://example.com:1883?client_id=123").unwrap();
+    /// ```
+    /// 
+    /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+    /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
     pub fn parse<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
         use std::convert::TryFrom;
 
