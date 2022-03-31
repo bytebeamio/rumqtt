@@ -389,18 +389,17 @@ impl MqttOptions {
     }
 
     #[cfg(feature = "url")]
-    /// Creates an [`MqttOptions`] Object by parsing a string with the [url] crate's
-    /// [`parse`](url::Url::parse) method. Only enabled when run using the "url" feature
-    /// which enables the url crate.
+    /// Creates an [`MqttOptions`] object by parsing provided string with the [url] crate's
+    /// [`Url::parse(url)`](url::Url::parse) method and is only enabled when run using the "url" feature.
     /// 
     /// ```
     /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::parse("mqtt://example.com:1883?client_id=123").unwrap();
+    /// let options = MqttOptions::parse_url("mqtt://example.com:1883?client_id=123").unwrap();
     /// ```
     /// 
     /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
     /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
-    pub fn parse<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
+    pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
         use std::convert::TryFrom;
 
         let url = url::Url::parse(&url.into())?;
