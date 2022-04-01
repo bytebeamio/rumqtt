@@ -10,6 +10,7 @@ mod client;
 mod eventloop;
 mod framed;
 mod notifier;
+mod outgoing_buf;
 #[allow(clippy::all)]
 mod packet;
 mod state;
@@ -592,17 +593,13 @@ impl Debug for MqttOptions {
 
 pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
     let mut eventloop = EventLoop::new(options, cap);
-    let outgoing_buf = eventloop.request_buf().clone();
+    let outgoing_buf = eventloop.state.outgoing_buf.clone();
     let incoming_buf = eventloop.state.incoming_buf.clone();
     let incoming_buf_cache = VecDeque::with_capacity(cap);
     let request_tx = eventloop.handle();
-    let max_inflight = eventloop.state.max_inflight;
 
     let client = AsyncClient {
         outgoing_buf,
-        outgoing_buf_capacity: cap,
-        pkid_counter: 0,
-        max_inflight,
         request_tx,
     };
 

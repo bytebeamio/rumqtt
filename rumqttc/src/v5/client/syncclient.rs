@@ -42,8 +42,19 @@ impl Client {
     {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        let pkid = publish.pkid;
-        self.client.push_and_notify(Request::Publish(publish))?;
+        let pkid = if qos != QoS::AtMostOnce {
+            let mut request_buf = self.client.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            publish.pkid = pkid;
+            request_buf.buf.push_back(Request::Publish(publish));
+            pkid
+        } else {
+            0
+        };
+        self.client.notify()?;
         Ok(pkid)
     }
 
@@ -64,7 +75,12 @@ impl Client {
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
-            self.client.push_and_notify(ack)?;
+            let mut request_buf = self.client.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            request_buf.buf.push_back(ack);
+            self.client.notify()?;
         }
         Ok(())
     }
@@ -77,9 +93,19 @@ impl Client {
     /// Sends a MQTT Subscribe to the eventloop
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<u16, ClientError> {
         let mut subscribe = Subscribe::new(topic.into(), qos);
-        let pkid = self.client.increment_pkid();
-        subscribe.pkid = pkid;
-        self.client.push_and_notify(Request::Subscribe(subscribe))?;
+        let pkid = if qos != QoS::AtMostOnce {
+            let mut request_buf = self.client.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            subscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Subscribe(subscribe));
+            pkid
+        } else {
+            0
+        };
+        self.client.notify()?;
         Ok(pkid)
     }
 
@@ -98,9 +124,17 @@ impl Client {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let mut subscribe = Subscribe::new_many(topics);
-        let pkid = self.client.increment_pkid();
-        subscribe.pkid = pkid;
-        self.client.push_and_notify(Request::Subscribe(subscribe))?;
+        let pkid = {
+            let mut request_buf = self.client.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            subscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Subscribe(subscribe));
+            pkid
+        };
+        self.client.notify()?;
         Ok(pkid)
     }
 
@@ -114,10 +148,17 @@ impl Client {
     /// Sends a MQTT Unsubscribe to the eventloop
     pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
         let mut unsubscribe = Unsubscribe::new(topic.into());
-        let pkid = self.client.increment_pkid();
-        unsubscribe.pkid = pkid;
-        self.client
-            .push_and_notify(Request::Unsubscribe(unsubscribe))?;
+        let pkid = {
+            let mut request_buf = self.client.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            unsubscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Unsubscribe(unsubscribe));
+            pkid
+        };
+        self.client.notify()?;
         Ok(pkid)
     }
 
@@ -128,7 +169,12 @@ impl Client {
 
     /// Sends a MQTT disconnect to the eventloop
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        self.client.push_and_notify(Request::Disconnect)
+        let mut request_buf = self.client.outgoing_buf.lock().unwrap();
+        if request_buf.buf.len() == request_buf.capacity {
+            return Err(ClientError::RequestsFull);
+        }
+        request_buf.buf.push_back(Request::Disconnect);
+        self.client.notify()
     }
 
     /// Sends a MQTT disconnect to the eventloop
