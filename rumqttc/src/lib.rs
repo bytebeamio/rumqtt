@@ -309,7 +309,7 @@ impl From<ClientConfig> for TlsConfiguration {
 /// Options to configure the behaviour of MQTT connection
 /// 
 /// # Example: Use TLS transport
-/// ```no_run
+/// ```ignore
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn Error>> {
 ///     use rumqttc::{self, AsyncClient, Key, MqttOptions, TlsConfiguration, Transport};
