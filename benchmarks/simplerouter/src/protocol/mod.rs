@@ -1,46 +1,38 @@
-//! # mqttbytes
-//!
-//! This module contains the low level struct definitions required to assemble and disassemble MQTT 3.1.1 packets in rumqttd.
-//! The [`bytes`](https://docs.rs/bytes) crate is used internally.
+#![allow(dead_code)]
+use std::{slice::Iter, str::Utf8Error};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core::fmt::{self, Display, Formatter};
-use std::slice::Iter;
 
-mod topic;
 pub mod v4;
+pub mod v5;
 
-pub use topic::*;
+/// Checks if the filter is valid
+///
+/// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106
+pub fn valid_filter(filter: &str) -> bool {
+    if filter.is_empty() {
+        return false;
+    }
 
-/// Error during serialization and deserialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    NotConnect(PacketType),
-    UnexpectedConnect,
-    InvalidConnectReturnCode(u8),
-    InvalidReason(u8),
-    InvalidProtocol,
-    InvalidProtocolLevel(u8),
-    IncorrectPacketFormat,
-    InvalidPacketType(u8),
-    InvalidPropertyType(u8),
-    InvalidRetainForwardRule(u8),
-    InvalidQoS(u8),
-    InvalidSubscribeReasonCode(u8),
-    PacketIdZero,
-    SubscriptionIdZero,
-    PayloadSizeIncorrect,
-    PayloadTooLong,
-    PayloadSizeLimitExceeded(usize),
-    PayloadRequired,
-    TopicNotUtf8,
-    BoundaryCrossed(usize),
-    MalformedPacket,
-    MalformedRemainingLength,
-    /// More bytes required to frame packet. Argument
-    /// implies minimum additional bytes required to
-    /// proceed further
-    InsufficientBytes(usize),
+    let hirerarchy = filter.split('/').collect::<Vec<&str>>();
+    if let Some((last, remaining)) = hirerarchy.split_last() {
+        // # is not allowed in filer except as a last entry
+        // invalid: sport/tennis#/player
+        // invalid: sport/tennis/#/ranking
+        for entry in remaining.iter() {
+            if entry.contains('#') {
+                return false;
+            }
+        }
+
+        // only single '#" is allowed in last entry
+        // invalid: sport/tennis#
+        if last.len() != 1 && last.contains('#') {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// MQTT packet type
@@ -63,26 +55,82 @@ pub enum PacketType {
     Disconnect,
 }
 
-/// Protocol type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Protocol {
-    V4,
-    V5,
+/// Error during serialization and deserialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Error {
+    #[error("Expected connect packet, received = {0:?}")]
+    NotConnect(PacketType),
+    #[error("Received an unexpected connect packet")]
+    UnexpectedConnect,
+    #[error("Invalid return code received as response for connect = {0}")]
+    InvalidConnectReturnCode(u8),
+    #[error("Invalid reason = {0}")]
+    InvalidReason(u8),
+    #[error("Invalid protocol used")]
+    InvalidProtocol,
+    #[error("Invalid protocol level")]
+    InvalidProtocolLevel(u8),
+    #[error("Invalid packet format")]
+    IncorrectPacketFormat,
+    #[error("Invalid packet type = {0}")]
+    InvalidPacketType(u8),
+    #[error("Packet type unsupported = {0:?}")]
+    UnsupportedPacket(PacketType),
+    #[error("Invalid retain forward rule = {0}")]
+    InvalidRetainForwardRule(u8),
+    #[error("Invalid QoS level = {0}")]
+    InvalidQoS(u8),
+    #[error("Invalid subscribe reason code = {0}")]
+    InvalidSubscribeReasonCode(u8),
+    #[error("Packet received has id Zero")]
+    PacketIdZero,
+    #[error("Subscription had id Zero")]
+    SubscriptionIdZero,
+    #[error("Payload size is incorrect")]
+    PayloadSizeIncorrect,
+    #[error("Payload is too long")]
+    PayloadTooLong,
+    #[error("Payload size has been exceeded by {0} bytes")]
+    PayloadSizeLimitExceeded(usize),
+    #[error("Payload is required")]
+    PayloadRequired,
+    #[error("Topic not utf-8 = {0}")]
+    TopicNotUtf8(#[from] Utf8Error),
+    #[error("Promised boundary crossed, contains {0} bytes")]
+    BoundaryCrossed(usize),
+    #[error("Packet is malformed")]
+    MalformedPacket,
+    #[error("Remaining length is malformed")]
+    MalformedRemainingLength,
+    /// More bytes required to frame packet. Argument
+    /// implies minimum additional bytes required to
+    /// proceed further
+    #[error("Insufficient number of bytes to frame packet, {0} more bytes required")]
+    InsufficientBytes(usize),
+    #[error("Property does not exist = {0}")]
+    InvalidPropertyType(u8),
 }
 
 /// Quality of service
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
-#[allow(clippy::enum_variant_names)]
 pub enum QoS {
     AtMostOnce = 0,
     AtLeastOnce = 1,
-    ExactlyOnce = 2,
+}
+
+/// Maps a number to QoS
+pub fn qos(num: u8) -> Result<QoS, Error> {
+    match num {
+        0 => Ok(QoS::AtMostOnce),
+        1 => Ok(QoS::AtLeastOnce),
+        qos => Err(Error::InvalidQoS(qos)),
+    }
 }
 
 /// Packet type from a byte
 ///
-/// ```text
+/// ```ignore
 ///          7                          3                          0
 ///          +--------------------------+--------------------------+
 /// byte 1   | MQTT Control Packet Type | Flags for each type      |
@@ -96,14 +144,14 @@ pub enum QoS {
 pub struct FixedHeader {
     /// First byte of the stream. Used to identify packet types and
     /// several flags
-    byte1: u8,
+    pub byte1: u8,
     /// Length of fixed header. Byte 1 + (1..4) bytes. So fixed header
     /// len can vary from 2 bytes to 5 bytes
     /// 1..4 bytes are variable length encoded to represent remaining length
-    fixed_header_len: usize,
+    pub fixed_header_len: usize,
     /// Remaining length of the packet. Doesn't include fixed header bytes
     /// Represents variable header + payload size
-    remaining_len: usize,
+    pub remaining_len: usize,
 }
 
 impl FixedHeader {
@@ -187,7 +235,7 @@ fn parse_fixed_header(mut stream: Iter<u8>) -> Result<FixedHeader, Error> {
 /// Parses variable byte integer in the stream and returns the length
 /// and number of bytes that make it. Used for remaining length calculation
 /// as well as for calculating property lengths
-fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
+pub fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     let mut len: usize = 0;
     let mut len_len = 0;
     let mut done = false;
@@ -226,6 +274,57 @@ fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     Ok((len_len, len))
 }
 
+/// Returns big endian u16 view from next 2 bytes
+pub fn view_u16(stream: &[u8]) -> Result<u16, Error> {
+    let v = match stream.get(0..2) {
+        Some(v) => (v[0] as u16) << 8 | (v[1] as u16),
+        None => return Err(Error::MalformedPacket),
+    };
+
+    Ok(v)
+}
+
+/// Returns big endian u16 view from next 2 bytes
+pub fn view_str(stream: &[u8], end: usize) -> Result<&str, Error> {
+    let v = match stream.get(0..end) {
+        Some(v) => v,
+        None => return Err(Error::BoundaryCrossed(stream.len())),
+    };
+
+    let v = std::str::from_utf8(v)?;
+    Ok(v)
+}
+
+/// After collecting enough bytes to frame a packet (packet's frame())
+/// , It's possible that content itself in the stream is wrong. Like expected
+/// packet id or qos not being present. In cases where `read_mqtt_string` or
+/// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
+/// parse qos next, these pre checks will prevent `bytes` crashes
+
+fn read_u32(stream: &mut Bytes) -> Result<u32, Error> {
+    if stream.len() < 4 {
+        return Err(Error::MalformedPacket);
+    }
+
+    Ok(stream.get_u32())
+}
+
+pub fn read_u16(stream: &mut Bytes) -> Result<u16, Error> {
+    if stream.len() < 2 {
+        return Err(Error::MalformedPacket);
+    }
+
+    Ok(stream.get_u16())
+}
+
+fn read_u8(stream: &mut Bytes) -> Result<u8, Error> {
+    if stream.len() < 1 {
+        return Err(Error::MalformedPacket);
+    }
+
+    Ok(stream.get_u8())
+}
+
 /// Reads a series of bytes with a length from a byte stream
 fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
     let len = read_u16(stream)? as usize;
@@ -241,15 +340,6 @@ fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
     Ok(stream.split_to(len))
 }
 
-/// Reads a string from bytes stream
-fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
-    let s = read_mqtt_bytes(stream)?;
-    match String::from_utf8(s.to_vec()) {
-        Ok(v) => Ok(v),
-        Err(_e) => Err(Error::TopicNotUtf8),
-    }
-}
-
 /// Serializes bytes to stream (including length)
 fn write_mqtt_bytes(stream: &mut BytesMut, bytes: &[u8]) {
     stream.put_u16(bytes.len() as u16);
@@ -257,12 +347,12 @@ fn write_mqtt_bytes(stream: &mut BytesMut, bytes: &[u8]) {
 }
 
 /// Serializes a string to stream
-fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
+pub fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
     write_mqtt_bytes(stream, string.as_bytes());
 }
 
 /// Writes remaining length to stream and returns number of bytes for remaining length
-fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Error> {
+pub fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Error> {
     if len > 268_435_455 {
         return Err(Error::PayloadTooLong);
     }
@@ -286,39 +376,55 @@ fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Er
     Ok(count)
 }
 
-/// Maps a number to QoS
-pub fn qos(num: u8) -> Result<QoS, Error> {
-    match num {
-        0 => Ok(QoS::AtMostOnce),
-        1 => Ok(QoS::AtLeastOnce),
-        2 => Ok(QoS::ExactlyOnce),
-        qos => Err(Error::InvalidQoS(qos)),
+/// Return number of remaining length bytes required for encoding length
+fn len_len(len: usize) -> usize {
+    if len >= 2_097_152 {
+        4
+    } else if len >= 16_384 {
+        3
+    } else if len >= 128 {
+        2
+    } else {
+        1
     }
 }
 
-/// After collecting enough bytes to frame a packet (packet's frame())
-/// , It's possible that content itself in the stream is wrong. Like expected
-/// packet id or qos not being present. In cases where `read_mqtt_string` or
-/// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
-/// parse qos next, these pre checks will prevent `bytes` crashes
-fn read_u16(stream: &mut Bytes) -> Result<u16, Error> {
-    if stream.len() < 2 {
-        return Err(Error::MalformedPacket);
-    }
-
-    Ok(stream.get_u16())
+pub enum Connect {
+    V4(v4::connect::Connect),
+    V5(v5::connect::Connect),
 }
 
-fn read_u8(stream: &mut Bytes) -> Result<u8, Error> {
-    if stream.is_empty() {
-        return Err(Error::MalformedPacket);
-    }
-
-    Ok(stream.get_u8())
+#[derive(Debug)]
+pub enum Packet {
+    V4(v4::Packet),
+    V5(v5::Packet),
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Error = {:?}", self)
+pub(crate) fn read_first_connect(stream: &mut BytesMut, max_size: usize) -> Result<Connect, Error> {
+    let fixed_header = check(stream.iter(), max_size)?;
+
+    // Test with a stream with exactly the size to check border panics
+    let packet = stream.split_to(fixed_header.frame_length());
+    match fixed_header.packet_type()? {
+        PacketType::Connect => {}
+        p => return Err(Error::NotConnect(p)),
+    }
+    let mut packet = packet.freeze();
+
+    let variable_header_index = fixed_header.fixed_header_len;
+    packet.advance(variable_header_index);
+
+    // Variable header
+    let protocol_name = read_mqtt_bytes(&mut packet)?;
+    let protocol_name = std::str::from_utf8(&protocol_name)?.to_owned();
+    let protocol_level = read_u8(&mut packet)?;
+    if protocol_name != "MQTT" {
+        return Err(Error::InvalidProtocol);
+    }
+
+    match protocol_level {
+        4 => Ok(Connect::V4(v4::connect::connect_v4_part(packet)?)),
+        5 => Ok(Connect::V5(v5::connect::connect_v5_part(packet)?)),
+        _ => Err(Error::InvalidProtocolLevel(protocol_level)),
     }
 }

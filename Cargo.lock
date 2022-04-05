@@ -1667,7 +1667,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "url",
- "webpki",
  "ws_stream_tungstenite",
 ]
 
@@ -1922,6 +1921,17 @@ dependencies = [
  "chrono",
  "num-bigint",
  "num-traits",
+]
+
+[[package]]
+name = "simplerouter"
+version = "0.1.0"
+dependencies = [
+ "bytes 1.1.0",
+ "log",
+ "pretty_env_logger",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

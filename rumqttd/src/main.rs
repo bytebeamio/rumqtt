@@ -17,7 +17,7 @@ struct CommandLine {
         default = "PathBuf::from(\"config/rumqttd.conf\")"
     )]
     config: PathBuf,
-    #[cfg(feature = "prof")]
+    #[cfg(all(feature = "prof", not(target_env = "msvc")))]
     /// enable profiling
     #[argh(switch, short = 'p')]
     profile: bool,
@@ -28,14 +28,14 @@ fn main() {
     let commandline: CommandLine = argh::from_env();
     let config: Config = confy::load_path(&commandline.config).unwrap();
 
-    #[cfg(feature = "prof")]
+    #[cfg(all(feature = "prof", not(target_env = "msvc")))]
     let _guard = prof::new(commandline.profile);
 
     let o = Broker::new(config).start();
     println!("Stopping broker!! Error = {:?}", o);
 }
 
-#[cfg(feature = "prof")]
+#[cfg(all(feature = "prof", not(target_env = "msvc")))]
 mod prof {
     use pprof::protos::Message;
     pub struct Profile(pprof::ProfilerGuard<'static>);
