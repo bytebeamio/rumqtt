@@ -48,7 +48,7 @@ pub enum Error {
     DNSName(#[from] InvalidDnsNameError),
     #[cfg(feature = "use-rustls")]
     #[error("TLS error")]
-    TLS(#[from] rustls::Error),
+    Rustls(#[from] rustls::Error),
     #[error("No valid cert in chain")]
     NoValidCertInChain,
     #[cfg(feature = "use-native-tls")]
