@@ -30,7 +30,6 @@ pretty_env_logger = "0.4"
 bytes = "1.0"
 warp = "0.3"
 futures-util = "0.3.8"
-pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
 rustls-pemfile = "0.3.0"
 jackiechan = "0.0.4"
 segments = "0.1"
@@ -44,3 +43,4 @@ pretty_assertions = "0.6.1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"
+pprof = { version = "0.4", features = ["flamegraph", "protobuf"], optional = true }
