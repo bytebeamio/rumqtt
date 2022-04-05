@@ -10,6 +10,7 @@ use std::time::Duration;
 mod client;
 mod eventloop;
 mod framed;
+pub mod mqttbytes;
 mod state;
 mod tls;
 
@@ -19,8 +20,8 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
-pub use tokio_rustls::rustls::ClientConfig;
 pub use tls::Error;
+pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
@@ -341,7 +342,11 @@ impl MqttOptions {
     }
 
     /// Username and password
-    pub fn set_credentials<U: Into<String>, P: Into<String>>(&mut self, username: U, password: P) -> &mut Self {
+    pub fn set_credentials<U: Into<String>, P: Into<String>>(
+        &mut self,
+        username: U,
+        password: P,
+    ) -> &mut Self {
         self.credentials = Some((username.into(), password.into()));
         self
     }
@@ -575,7 +580,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             inflight,
             last_will: None,
             conn_timeout,
-            manual_acks: false
+            manual_acks: false,
         })
     }
 }

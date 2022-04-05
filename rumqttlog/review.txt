@@ -1,1 +1,0 @@
-- Data should not be sent to unsubscribed topic
