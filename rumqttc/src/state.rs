@@ -218,9 +218,13 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
-        let v = match mem::replace(&mut self.outgoing_pub[puback.pkid as usize], None) {
-            Some(_) => {
-                self.inflight -= 1;
+        let v = match self.outgoing_pub.get_mut(puback.pkid as usize) {
+            Some(pkid) => {
+                if let Some(_) = pkid {
+                    self.inflight -= 1;
+                    *pkid = None;
+                }
+
                 Ok(())
             }
             None => {
@@ -243,8 +247,10 @@ impl MqttState {
     }
 
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), StateError> {
-        match mem::replace(&mut self.outgoing_pub[pubrec.pkid as usize], None) {
-            Some(_) => {
+        match self.outgoing_pub.get_mut(pubrec.pkid as usize) {
+            Some(pkid) => {
+                *pkid = None;
+
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 PubRel::new(pubrec.pkid).write(&mut self.write)?;
@@ -261,13 +267,15 @@ impl MqttState {
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
-        match mem::replace(&mut self.incoming_pub[pubrel.pkid as usize], None) {
-            Some(_) => {
+        match self.incoming_pub.get_mut(pubrel.pkid as usize) {
+            Some(pkid) => {
+                *pkid = None;
+
                 PubComp::new(pubrel.pkid).write(&mut self.write)?;
                 let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
                 self.events.push_back(event);
                 Ok(())
-            }
+            },
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
                 Err(StateError::Unsolicited(pubrel.pkid))
@@ -283,11 +291,16 @@ impl MqttState {
             self.collision_ping_count = 0;
         }
 
-        match mem::replace(&mut self.outgoing_rel[pubcomp.pkid as usize], None) {
-            Some(_) => {
-                self.inflight -= 1;
+        match self.outgoing_rel.get_mut(pubcomp.pkid as usize) {
+            Some(pkid) => {
+                if let Some(_) = pkid {
+                    self.inflight -= 1;
+                    *pkid = None;
+                }
+
                 Ok(())
-            }
+
+            },
             None => {
                 error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
                 Err(StateError::Unsolicited(pubcomp.pkid))
@@ -670,6 +683,22 @@ mod test {
     }
 
     #[test]
+    fn should_handle_incoming_puback_with_pkid_greater_than_max_inflight_gracefully() {
+        let mut mqtt = build_mqttstate();
+        let want = StateError::Unsolicited(101);
+
+        let got = mqtt.handle_incoming_puback(&PubAck::new(101)).unwrap_err();
+
+        if let StateError::Unsolicited(pkid) = got {
+            assert_eq!(pkid, 101);
+        } else {
+            assert!(false);
+        }
+
+        // assert_eq!(want, got);
+    }
+
+    #[test]
     fn incoming_pubrec_should_release_publish_from_queue_and_add_relid_to_rel_queue() {
         let mut mqtt = build_mqttstate();
 
@@ -723,6 +752,7 @@ mod test {
         }
 
         mqtt.handle_incoming_pubrel(&PubRel::new(1)).unwrap();
+        mqtt.handle_incoming_pubrel(&PubRel::new(111)).unwrap();
         let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubComp(pubcomp) => assert_eq!(pubcomp.pkid, 1),
