@@ -4,7 +4,7 @@ use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
 use std::collections::VecDeque;
-use std::{io, mem, time::Instant};
+use std::{io, time::Instant};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -221,7 +221,7 @@ impl MqttState {
         let publish = self
             .outgoing_pub
             .get_mut(puback.pkid as usize)
-            .ok_or_else(|| StateError::Unsolicited(puback.pkid))?;
+            .ok_or(StateError::Unsolicited(puback.pkid))?;
         let v = match publish.take() {
             Some(_) => {
                 self.inflight -= 1;
@@ -247,10 +247,12 @@ impl MqttState {
     }
 
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), StateError> {
-        match self.outgoing_pub.get_mut(pubrec.pkid as usize) {
-            Some(pkid) => {
-                *pkid = None;
-
+        let publish = self
+            .outgoing_pub
+            .get_mut(pubrec.pkid as usize)
+            .ok_or(StateError::Unsolicited(pubrec.pkid))?;
+        match publish.take() {
+            Some(_) => {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 PubRel::new(pubrec.pkid).write(&mut self.write)?;
@@ -267,15 +269,17 @@ impl MqttState {
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
-        match self.incoming_pub.get_mut(pubrel.pkid as usize) {
-            Some(pkid) => {
-                *pkid = None;
-
+        let publish = self
+            .incoming_pub
+            .get_mut(pubrel.pkid as usize)
+            .ok_or(StateError::Unsolicited(pubrel.pkid))?;
+        match publish.take() {
+            Some(_) => {
                 PubComp::new(pubrel.pkid).write(&mut self.write)?;
                 let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
                 self.events.push_back(event);
                 Ok(())
-            },
+            }
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
                 Err(StateError::Unsolicited(pubrel.pkid))
@@ -291,16 +295,15 @@ impl MqttState {
             self.collision_ping_count = 0;
         }
 
-        match self.outgoing_rel.get_mut(pubcomp.pkid as usize) {
-            Some(pkid) => {
-                if let Some(_) = pkid {
-                    self.inflight -= 1;
-                    *pkid = None;
-                }
-
+        let pubrel = self
+            .outgoing_rel
+            .get_mut(pubcomp.pkid as usize)
+            .ok_or(StateError::Unsolicited(pubcomp.pkid))?;
+        match pubrel.take() {
+            Some(_) => {
+                self.inflight -= 1;
                 Ok(())
-
-            },
+            }
             None => {
                 error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
                 Err(StateError::Unsolicited(pubcomp.pkid))
@@ -325,7 +328,7 @@ impl MqttState {
             if self
                 .outgoing_pub
                 .get(publish.pkid as usize)
-                .unwrap()
+                .ok_or(StateError::Unsolicited(publish.pkid))?
                 .is_some()
             {
                 info!("Collision on packet id = {:?}", publish.pkid);
@@ -683,19 +686,15 @@ mod test {
     }
 
     #[test]
-    fn should_handle_incoming_puback_with_pkid_greater_than_max_inflight_gracefully() {
+    fn incoming_puback_with_pkid_greater_than_max_inflight_should_be_handled_gracefully() {
         let mut mqtt = build_mqttstate();
-        let want = StateError::Unsolicited(101);
 
         let got = mqtt.handle_incoming_puback(&PubAck::new(101)).unwrap_err();
 
-        if let StateError::Unsolicited(pkid) = got {
-            assert_eq!(pkid, 101);
-        } else {
-            assert!(false);
+        match got {
+            StateError::Unsolicited(pkid) => assert_eq!(pkid, 101),
+            e => panic!("Unexpected error: {}", e),
         }
-
-        // assert_eq!(want, got);
     }
 
     #[test]
@@ -752,7 +751,6 @@ mod test {
         }
 
         mqtt.handle_incoming_pubrel(&PubRel::new(1)).unwrap();
-        mqtt.handle_incoming_pubrel(&PubRel::new(111)).unwrap();
         let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubComp(pubcomp) => assert_eq!(pubcomp.pkid, 1),
