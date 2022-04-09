@@ -218,13 +218,13 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
-        let v = match self.outgoing_pub.get_mut(puback.pkid as usize) {
-            Some(pkid) => {
-                if let Some(_) = pkid {
-                    self.inflight -= 1;
-                    *pkid = None;
-                }
-
+        let publish = self
+            .outgoing_pub
+            .get_mut(puback.pkid as usize)
+            .ok_or_else(|| StateError::Unsolicited(puback.pkid))?;
+        let v = match publish.take() {
+            Some(_) => {
+                self.inflight -= 1;
                 Ok(())
             }
             None => {
