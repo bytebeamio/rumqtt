@@ -1,3 +1,8 @@
+//! # mqttbytes
+//!
+//! This module contains the low level struct definitions required to assemble and disassemble MQTT 3.1.1 packets in rumqttc.
+//! The [`bytes`](https://docs.rs/bytes) crate is used internally.
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core::fmt::{self, Display, Formatter};
 use std::slice::Iter;

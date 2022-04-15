@@ -1,17 +1,28 @@
-# rumqtt
+<h1 align="center">
+  <a href="https://bytebeamio.github.io/rumqtt">
+    <img alt="rumqtt Logo" src="docs/rumqtt.png" width="60%" />
+  </a>
+</h1>
 
-[![build status](https://github.com/bytebeamio/rumqtt/workflows/master/badge.svg)](https://github.com/tekjar/rumq/actions)
-[![Discord chat](https://img.shields.io/discord/633193308033646605?style=flat)](https://discord.gg/mpkSqDg)
+<div align="center">
+  <a href="https://github.com/bytebeamio/rumqtt/actions">
+    <img alt="build status" src="https://github.com/bytebeamio/rumqtt/workflows/features/badge.svg">
+  </a>
+  <a href="https://discord.gg/mpkSqDg">
+    <img alt="Discord chat" src="https://img.shields.io/discord/633193308033646605?style=flat">
+  </a>
+</div>
+<br/>
 
-MQTT libraries in rust which strives to be simple, robust and performant
+rumqtt is an opensource set of libraries written in rust-lang to implement the MQTT standard while striving to be simple, robust and performant.
 
-- **mqttbytes:**         MQTT 3.1.1/5 serialization and deserialization
-- **rumqttc:**           A high level, easy to use mqtt client
-- **rumqttd:**           A high performance, embeddable, clustered MQTT broker
+- [![crates.io page](https://img.shields.io/crates/v/rumqttc.svg)](https://crates.io/crates/rumqttc) [![docs.rs page](https://docs.rs/rumqttc/badge.svg)](https://docs.rs/rumqttc) [**rumqttc:**](./rumqttc/)        A high level, easy to use mqtt client 
+- [![crates.io page](https://img.shields.io/crates/v/rumqttd.svg)](https://crates.io/crates/rumqttd) [![docs.rs page](https://docs.rs/rumqttd/badge.svg)](https://docs.rs/rumqttd) [**rumqttd:**](./rumqttd/)        A high performance, embeddable, clustered MQTT broker
 
-See respective folders for more details
+## Contributing
+Please follow the [code of conduct](docs/CoC.md) while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide](CONTRIBUTING.md) to get a better idea of what we'd appreciate and what we won't.
 
-# License
+## License
 
-Apache License, Version 2.0 ([LICENSE](./LICENSE) or http://www.apache.org/licenses/LICENSE-2.0)
+This project is released under The Apache License, Version 2.0 ([LICENSE](./LICENSE) or http://www.apache.org/licenses/LICENSE-2.0)
 
