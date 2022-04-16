@@ -14,8 +14,8 @@ pub enum Error {
     #[error("State = {0}")]
     State(#[from] state::Error),
     #[error("Invalid data = {0}")]
-    Mqtt(mqttbytes::Error),
-    #[error["Keep alive timeout"]]
+    Mqtt(#[from] mqttbytes::Error),
+    #[error("Keep alive timeout")]
     KeepAlive(#[from] Elapsed),
 }
 

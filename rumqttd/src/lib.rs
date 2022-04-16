@@ -86,13 +86,14 @@ pub enum Error {
     #[error("Invalid server cert file {0}")]
     InvalidServerCert(String),
     #[error("Invalid server pass")]
-    InvalidServerPass(),
+    InvalidServerPass,
     #[error("Invalid server key file {0}")]
     InvalidServerKey(String),
     RustlsNotEnabled,
     NativeTlsNotEnabled,
     Disconnected,
     NetworkClosed,
+    #[error("Wrong packet {0:?}")]
     WrongPacket(Packet),
 }
 
@@ -285,7 +286,7 @@ impl Server {
 
         // Get the identity
         let identity = native_tls::Identity::from_pkcs12(&buf, pkcs12_pass)
-            .map_err(|_| Error::InvalidServerPass())?;
+            .map_err(|_| Error::InvalidServerPass)?;
 
         // Builder
         let builder = native_tls::TlsAcceptor::builder(identity).build()?;

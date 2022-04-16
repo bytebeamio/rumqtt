@@ -11,8 +11,8 @@ use std::vec::IntoIter;
 pub enum Error {
     #[error("Received unsolicited ack from the device. {0}")]
     Unsolicited(u16),
-    #[error("Collision with an unacked packet")]
-    Serialization(mqttbytes::Error),
+    #[error("Collision with an unacked packet: {0}")]
+    Serialization(#[from] mqttbytes::Error),
     #[error("Collision with an unacked packet")]
     Collision,
     #[error("Duplicate connect")]
@@ -21,12 +21,6 @@ pub enum Error {
     ClientConnAck,
     #[error("Client disconnect")]
     Disconnect,
-}
-
-impl From<mqttbytes::Error> for Error {
-    fn from(e: mqttbytes::Error) -> Error {
-        Error::Serialization(e)
-    }
 }
 
 #[derive(Debug)]

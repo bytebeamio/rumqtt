@@ -19,13 +19,13 @@ use std::sync::Arc;
 pub enum Error {
     #[error("Addr")]
     Addr(#[from] AddrParseError),
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("Web Pki")]
+    #[error("Web Pki: {0}")]
     WebPki(#[from] webpki::Error),
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
-    #[error("TLS error")]
+    #[error("TLS error: {0}")]
     TLS(#[from] rustls::Error),
     #[error("No valid cert in chain")]
     NoValidCertInChain,

@@ -13,7 +13,7 @@ pub mod v4;
 pub use topic::*;
 
 /// Error during serialization and deserialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     NotConnect(PacketType),
     UnexpectedConnect,

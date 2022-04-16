@@ -29,14 +29,8 @@ pub enum StateError {
     WrongPacket,
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
-    #[error("Mqtt serialization/deserialization error")]
-    Deserialization(mqttbytes::Error),
-}
-
-impl From<mqttbytes::Error> for StateError {
-    fn from(e: mqttbytes::Error) -> StateError {
-        StateError::Deserialization(e)
-    }
+    #[error("Mqtt serialization/deserialization error: {0}")]
+    Deserialization(#[from] mqttbytes::Error),
 }
 
 /// State of the mqtt connection.
