@@ -3,11 +3,11 @@ on:
     branches:
       - master
 
-name: features
+name: Build and Test
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }} with ${{ matrix.features }}
+    name: Build and test on ${{ matrix.os }} with ${{ matrix.features }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
