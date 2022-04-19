@@ -9,11 +9,11 @@ use tokio::time::{self, error::Elapsed, Duration};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("I/O = {0}")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("State = {0}")]
+    #[error("State: {0}")]
     State(#[from] state::Error),
-    #[error("Invalid data = {0}")]
+    #[error("Invalid data: {0}")]
     Mqtt(#[from] mqttbytes::Error),
     #[error("Keep alive timeout")]
     KeepAlive(#[from] Elapsed),

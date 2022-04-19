@@ -11,9 +11,9 @@ use std::time::Instant;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
-    #[error("Unexpected router message {0:?}")]
+    #[error("Unexpected router message: {0:?}")]
     NotConnectionAck(Notification),
-    #[error("Connack error {0}")]
+    #[error("Connack error: {0}")]
     ConnectionAck(String),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),

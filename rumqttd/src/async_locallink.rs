@@ -17,7 +17,7 @@ use log::{error, trace, warn};
 pub enum LinkError {
     #[error("Unexpected router message: {0:?}")]
     NotConnectionAck(Notification),
-    #[error("Connack error {0}")]
+    #[error("Connack error: {0}")]
     ConnectionAck(String),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),

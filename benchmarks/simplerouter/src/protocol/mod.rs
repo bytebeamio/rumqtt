@@ -68,7 +68,7 @@ pub enum Error {
     InvalidReason(u8),
     #[error("Invalid protocol used")]
     InvalidProtocol,
-    #[error("Invalid protocol level")]
+    #[error("Invalid protocol level = {0}")]
     InvalidProtocolLevel(u8),
     #[error("Invalid packet format")]
     IncorrectPacketFormat,

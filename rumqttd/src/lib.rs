@@ -55,9 +55,9 @@ use std::io::BufReader;
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
 pub enum Error {
-    #[error("I/O {0}")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("Connection error {0}")]
+    #[error("Connection error: {0}")]
     Connection(#[from] remotelink::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
@@ -66,10 +66,10 @@ pub enum Error {
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),
     #[cfg(feature = "use-native-tls")]
-    #[error("Native TLS error {0}")]
+    #[error("Native TLS error: {0}")]
     NativeTls(#[from] NativeTlsError),
     #[cfg(feature = "use-rustls")]
-    #[error("Rustls error {0}")]
+    #[error("Rustls error: {0}")]
     Rustls(#[from] RustlsError),
     #[error("Server cert not provided")]
     ServerCertRequired,
@@ -81,19 +81,19 @@ pub enum Error {
     ServerCertNotFound(String),
     #[error("Server private key file {0} not found")]
     ServerKeyNotFound(String),
-    #[error("Invalid CA cert file {0}")]
+    #[error("Invalid CA cert file: {0}")]
     InvalidCACert(String),
-    #[error("Invalid server cert file {0}")]
+    #[error("Invalid server cert file: {0}")]
     InvalidServerCert(String),
     #[error("Invalid server pass")]
     InvalidServerPass,
-    #[error("Invalid server key file {0}")]
+    #[error("Invalid server key file: {0}")]
     InvalidServerKey(String),
     RustlsNotEnabled,
     NativeTlsNotEnabled,
     Disconnected,
     NetworkClosed,
-    #[error("Wrong packet {0:?}")]
+    #[error("Wrong packet: {0:?}")]
     WrongPacket(Packet),
 }
 

@@ -9,7 +9,7 @@ use std::vec::IntoIter;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Received unsolicited ack from the device. {0}")]
+    #[error("Received unsolicited ack from the device: {0}")]
     Unsolicited(u16),
     #[error("Collision with an unacked packet: {0}")]
     Serialization(#[from] mqttbytes::Error),
