@@ -27,17 +27,17 @@ pub struct RemoteLink {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("Network {0}")]
+    #[error("Network: {0}")]
     Network(#[from] network::Error),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
-    #[error("State error")]
+    #[error("State error: {0}")]
     State(#[from] state::Error),
-    #[error("Unexpected router message")]
+    #[error("Unexpected router message: {0:?}")]
     RouterMessage(Notification),
-    #[error("Connack error {0}")]
+    #[error("Connack error: {0}")]
     ConnAck(String),
     #[error("Keep alive time exceeded")]
     KeepAlive,
@@ -45,7 +45,7 @@ pub enum Error {
     Send(#[from] SendError<(Id, Event)>),
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
-    #[error("Payload count greater than max inflight")]
+    #[error("Payload count ({0}) greater than max inflight")]
     TooManyPayloads(usize),
     #[error("Persistent session requires valid client id")]
     InvalidClientId,

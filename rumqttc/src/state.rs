@@ -10,16 +10,16 @@ use std::{io, time::Instant};
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
     /// Io Error while state is passed to network
-    #[error("Io error {0:?}")]
+    #[error("Io error: {0:?}")]
     Io(#[from] io::Error),
     /// Broker's error reply to client's connect packet
-    #[error("Connect return code `{0:?}`")]
+    #[error("Connect return code: `{0:?}`")]
     Connect(ConnectReturnCode),
     /// Invalid state for a given operation
     #[error("Invalid state for a given operation")]
     InvalidState,
     /// Received a packet (ack) which isn't asked for
-    #[error("Received unsolicited ack pkid {0}")]
+    #[error("Received unsolicited ack pkid: {0}")]
     Unsolicited(u16),
     /// Last pingreq isn't acked
     #[error("Last pingreq isn't acked")]
@@ -29,14 +29,8 @@ pub enum StateError {
     WrongPacket,
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
-    #[error("Mqtt serialization/deserialization error")]
-    Deserialization(mqttbytes::Error),
-}
-
-impl From<mqttbytes::Error> for StateError {
-    fn from(e: mqttbytes::Error) -> StateError {
-        StateError::Deserialization(e)
-    }
+    #[error("Mqtt serialization/deserialization error: {0}")]
+    Deserialization(#[from] mqttbytes::Error),
 }
 
 /// State of the mqtt connection.
