@@ -15,54 +15,48 @@ pub use topic::*;
 /// Error during serialization and deserialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("expected connect but got packet: {0:?}")]
+    #[error("Expected Connect, received: {0:?}")]
     NotConnect(PacketType),
-    #[error("unexpected connect")]
+    #[error("Unexpected Connect")]
     UnexpectedConnect,
-    #[error("invalid connect return type: {0}")]
+    #[error("Invalid Connect return code: {0}")]
     InvalidConnectReturnCode(u8),
-    #[error("invalid reason: {0}")]
-    InvalidReason(u8),
-    #[error("invalid protocol")]
+    #[error("Invalid protocol")]
     InvalidProtocol,
-    #[error("invalid protocol level: {0}")]
+    #[error("Invalid protocol level: {0}")]
     InvalidProtocolLevel(u8),
-    #[error("incorrect packet format")]
+    #[error("Incorrect packet format")]
     IncorrectPacketFormat,
-    #[error("invalid packet type: {0}")]
+    #[error("Invalid packet type: {0}")]
     InvalidPacketType(u8),
-    #[error("invalid property type: {0}")]
+    #[error("Invalid property type: {0}")]
     InvalidPropertyType(u8),
-    #[error("invalid retain forward rule: {0}")]
-    InvalidRetainForwardRule(u8),
-    #[error("invalid QoS: {0}")]
+    #[error("Invalid QoS level: {0}")]
     InvalidQoS(u8),
-    #[error("invalid subscribe reason code: {0}")]
+    #[error("Invalid subscribe reason code: {0}")]
     InvalidSubscribeReasonCode(u8),
-    #[error("packet id is zero")]
+    #[error("Packet id Zero")]
     PacketIdZero,
-    #[error("subscription id is zero")]
-    SubscriptionIdZero,
-    #[error("payload size is incorrect")]
+    #[error("Payload size is incorrect")]
     PayloadSizeIncorrect,
     #[error("payload is too long")]
     PayloadTooLong,
     #[error("payload size limit exceeded: {0}")]
     PayloadSizeLimitExceeded(usize),
-    #[error("payload required")]
+    #[error("Payload required")]
     PayloadRequired,
-    #[error("topic is not UTF-8")]
+    #[error("Topic is not UTF-8")]
     TopicNotUtf8,
-    #[error("boundary crossed: {0}")]
+    #[error("Promised boundary crossed: {0}")]
     BoundaryCrossed(usize),
-    #[error("malformed packet")]
+    #[error("Malformed packet")]
     MalformedPacket,
-    #[error("malformed remaining length")]
+    #[error("Malformed remaining length")]
     MalformedRemainingLength,
     /// More bytes required to frame packet. Argument
     /// implies minimum additional bytes required to
     /// proceed further
-    #[error("More bytes required to frame packet. Requires at least {0} more bytes.")]
+    #[error("At least {0} more bytes required to frame packet")]
     InsufficientBytes(usize),
 }
 
