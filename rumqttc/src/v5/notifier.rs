@@ -25,7 +25,16 @@ impl Notifier {
     }
 
     #[inline]
-    pub fn next(&mut self) -> Option<Incoming> {
+    pub fn iter(&mut self) -> NotifierIter<'_> {
+        NotifierIter(self)
+    }
+}
+
+impl Iterator for Notifier {
+    type Item = Incoming;
+
+    #[inline]
+    fn next(&mut self) -> Option<Incoming> {
         match self.incoming_buf_cache.pop_front() {
             None => {
                 mem::swap(
@@ -36,11 +45,6 @@ impl Notifier {
             }
             val => val,
         }
-    }
-
-    #[inline]
-    pub fn iter(&mut self) -> NotifierIter<'_> {
-        NotifierIter(self)
     }
 }
 
