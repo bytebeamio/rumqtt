@@ -20,6 +20,8 @@ pub enum ClientError {
     TryRequest(#[from] TrySendError<Request>),
     #[error("Serialization error: {0}")]
     Mqtt4(#[from] mqttbytes::Error),
+    #[error("A Subscribe packet must contain atleast one filter")]
+    EmptySubscription,
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
@@ -151,6 +153,10 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
+        if subscribe.filters.is_empty() {
+            return Err(ClientError::EmptySubscription);
+        }
+
         let request = Request::Subscribe(subscribe);
         self.request_tx.send(request).await?;
         Ok(())
@@ -162,6 +168,10 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
+        if subscribe.filters.is_empty() {
+            return Err(ClientError::EmptySubscription);
+        }
+
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())
