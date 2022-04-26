@@ -53,6 +53,8 @@ pub enum Error {
     MalformedPacket,
     #[error("Malformed remaining length")]
     MalformedRemainingLength,
+    #[error("A Subscribe packet must contain atleast one filter")]
+    EmptySubscription,
     /// More bytes required to frame packet. Argument
     /// implies minimum additional bytes required to
     /// proceed further
