@@ -276,7 +276,7 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
-    let network = match options.transport() {
+    let network = match &options.transport {
         Transport::Tcp => {
             let addr = options.broker_addr.as_str();
             let port = options.port;
@@ -325,33 +325,30 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     Ok(network)
 }
 
+#[allow(clippy::cast_possible_truncation)]
 async fn mqtt_connect(
     options: &MqttOptions,
     network: &mut Network,
 ) -> Result<Incoming, ConnectionError> {
-    let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_session = options.clean_session();
-    let last_will = options.last_will();
+    let mut connect = Connect::new(options.client_id.clone());
+    connect.keep_alive = options.keep_alive.as_secs() as u16;
+    connect.clean_session = options.clean_session;
+    connect.last_will = options.last_will.clone();
 
-    let mut connect = Connect::new(options.client_id());
-    connect.keep_alive = keep_alive;
-    connect.clean_session = clean_session;
-    connect.last_will = last_will;
-
-    if let Some((username, password)) = options.credentials() {
+    if let Some((username, password)) = &options.credentials {
         let login = Login::new(username, password);
         connect.login = Some(login);
     }
 
     // mqtt connection with timeout
-    time::timeout(Duration::from_secs(options.connection_timeout()), async {
+    time::timeout(Duration::from_secs(options.connection_timeout), async {
         network.connect(connect).await?;
         Ok::<_, ConnectionError>(())
     })
     .await??;
 
     // wait for 'timeout' time to validate connack
-    let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
+    let packet = time::timeout(Duration::from_secs(options.connection_timeout), async {
         match network.read().await? {
             Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
                 Ok(Packet::ConnAck(connack))

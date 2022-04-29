@@ -5,11 +5,14 @@ use std::error::Error;
 use std::time::Duration;
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions
-        .set_keep_alive(Duration::from_secs(5))
-        .set_manual_acks(true)
-        .set_clean_session(false);
+    let mqttoptions = MqttOptions::builder()
+        .broker_addr("localhost")
+        .port(1883)
+        .client_id("test-1".parse().expect("invalid client id"))
+        .keep_alive(Duration::from_secs(5))
+        .manual_acks(true)
+        .clean_session(false)
+        .build();
 
     AsyncClient::new(mqttoptions, 10)
 }
@@ -30,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     task::spawn(async move {
         // send some messages to example topic and disconnect
         requests(client.clone()).await;
-        client.disconnect().await.unwrap()
+        client.disconnect().await.unwrap();
     });
 
     loop {

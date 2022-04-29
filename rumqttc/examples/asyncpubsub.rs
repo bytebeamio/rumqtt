@@ -9,8 +9,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     // color_backtrace::install();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    let mqttoptions = MqttOptions::builder()
+        .broker_addr("localhost")
+        .port(1883)
+        .client_id("test-1".parse().expect("invalid client id"))
+        .keep_alive(Duration::from_secs(5))
+        .build();
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     task::spawn(async move {

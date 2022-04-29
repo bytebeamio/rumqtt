@@ -21,9 +21,13 @@ async fn main() {
 }
 
 pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn Error>> {
-    let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(Duration::from_secs(20));
-    mqttoptions.set_inflight(100);
+    let mqttoptions = MqttOptions::builder()
+        .broker_addr("localhost")
+        .port(1883)
+        .client_id(id.parse().unwrap())
+        .keep_alive(Duration::from_secs(20))
+        .inflight(100)
+        .build();
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     task::spawn(async move {

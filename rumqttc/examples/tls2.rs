@@ -9,9 +9,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let mut mqtt_options = MqttOptions::new("test-1", "localhost", 8883);
-    mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
-
     // Dummies to prevent compilation error in CI
     let ca = vec![1, 2, 3];
     let client_cert = vec![1, 2, 3];
@@ -21,14 +18,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //     let client_key = include_bytes!("/home/tekjar/tlsfiles/device-1.key.pem");
 
     let transport = Transport::Tls(TlsConfiguration::Simple {
-        ca: ca.to_vec(),
+        ca,
         alpn: None,
-        client_auth: Some((client_cert.to_vec(), Key::RSA(client_key.to_vec()))),
+        client_auth: Some((client_cert, Key::RSA(client_key))),
     });
 
-    mqtt_options.set_transport(transport);
+    let mqttoptions = MqttOptions::builder()
+        .broker_addr("localhost")
+        .port(8883)
+        .client_id("test-1".parse().expect("invalid client id"))
+        .keep_alive(std::time::Duration::from_secs(5))
+        .transport(transport)
+        .build();
 
-    let (_client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
+    let (_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
     loop {
         match eventloop.poll().await {

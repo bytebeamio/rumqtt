@@ -10,14 +10,13 @@ use tokio::{task, time};
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
-    // port parameter is ignored when scheme is websocket
-    let mut mqttoptions = MqttOptions::new(
-        "clientId-aSziq39Bp3",
-        "ws://broker.mqttdashboard.com:8000/mqtt",
-        8000,
-    );
-    mqttoptions.set_transport(Transport::Ws);
-    mqttoptions.set_keep_alive(Duration::from_secs(60));
+    let mqttoptions = MqttOptions::builder()
+        .broker_addr("ws://broker.mqttdashboard.com:8000/mqtt")
+        // port parameter is ignored when scheme is websocket
+        .port(8000)
+        .client_id("clientId-aSziq39Bp3".parse().expect("invalid client id"))
+        .transport(Transport::Ws)
+        .build();
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     task::spawn(async move {

@@ -80,6 +80,11 @@ impl MqttState {
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
     pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
+        // TODO: Maybe std::num::NonZeroU16 might be neat here?
+        if max_inflight == 0 {
+            panic!("zero inflight is not allowed");
+        }
+
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -505,7 +510,7 @@ mod test {
     use super::{MqttState, StateError};
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
-    use crate::{Event, Incoming, MqttOptions, Outgoing, Request};
+    use crate::{Event, Incoming, Outgoing, Request};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -773,8 +778,6 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-        let mut opts = MqttOptions::new("test", "localhost", 1883);
-        opts.set_keep_alive(std::time::Duration::from_secs(10));
         mqtt.outgoing_ping().unwrap();
 
         // network activity other than pingresp
@@ -795,9 +798,6 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
-
-        let mut opts = MqttOptions::new("test", "localhost", 1883);
-        opts.set_keep_alive(std::time::Duration::from_secs(10));
 
         // should ping
         mqtt.outgoing_ping().unwrap();

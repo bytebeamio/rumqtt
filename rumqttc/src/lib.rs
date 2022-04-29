@@ -13,8 +13,13 @@
 //! use std::time::Duration;
 //! use std::thread;
 //!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mqttoptions = MqttOptions::builder()
+//!     .broker_addr("test.mosquitto.org")
+//!     .port(1883)
+//!     .client_id("rumqtt-sync".parse()?)
+//!     .keep_alive(Duration::from_secs(5))
+//!     .build();
 //!
 //! let (mut client, mut connection) = Client::new(mqttoptions, 10);
 //! client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
@@ -27,6 +32,8 @@
 //! for (i, notification) in connection.iter().enumerate() {
 //!     println!("Notification = {:?}", notification);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! A simple asynchronous publish and subscribe
@@ -39,9 +46,13 @@
 //! use std::error::Error;
 //!
 //! # #[tokio::main(worker_threads = 1)]
-//! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mqttoptions = MqttOptions::builder()
+//!     .broker_addr("test.mosquitto.org")
+//!     .port(1883)
+//!     .client_id("rumqtt-async".parse()?)
+//!     .keep_alive(Duration::from_secs(5))
+//!     .build();
 //!
 //! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 //! client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
@@ -65,7 +76,7 @@
 //! - Pings the broker when necessary and detects client side half open connections as well
 //! - Throttling of outgoing packets (todo)
 //! - Queue size based flow control on outgoing packets
-//! - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop`
+//! - Automatic reconnections by just continuing the `eventloop.poll()`/`connection.iter()` loop
 //! - Natural backpressure to client APIs during bad network
 //! - Immediate cancellation with `client.cancel()`
 //!
@@ -100,9 +111,11 @@
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
+use std::str::FromStr;
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::time::Duration;
+use typed_builder::TypedBuilder;
 
 mod client;
 mod eventloop;
@@ -302,253 +315,152 @@ impl From<ClientConfig> for TlsConfiguration {
     }
 }
 
-// TODO: Should all the options be exposed as public? Drawback
-// would be loosing the ability to panic when the user options
-// are wrong (e.g empty client id) or aggressive (keep alive time)
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum ClientIdError {
+    #[error("client id is empty")]
+    Empty,
+    #[error("client id can not start with a space")]
+    StartsWithSpace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct ClientId(String);
+
+impl FromStr for ClientId {
+    type Err = ClientIdError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            Err(ClientIdError::Empty)
+        } else if s.starts_with(' ') {
+            Err(ClientIdError::StartsWithSpace)
+        } else {
+            Ok(Self(s.to_string()))
+        }
+    }
+}
+
+impl From<ClientId> for String {
+    fn from(c: ClientId) -> Self {
+        c.0
+    }
+}
+
 /// Options to configure the behaviour of mqtt connection
-#[derive(Clone)]
+///
+/// When not further specified the default will be a connection to <mqtt://localhost:1883> without credentials.
+///
+/// ```
+/// # use rumqttc::MqttOptions;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let options = MqttOptions::builder()
+///     .broker_addr("localhost")
+///     .port(1883)
+///     .client_id("123".parse()?)
+///     .build();
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Parsing from URL
+///
+/// When the [`url`] feature is enabled the [`MqttOptions`] can be parsed from an [`Url`](url::Url) or `str`.
+///
+/// ```
+/// # use rumqttc::MqttOptions;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let options = "mqtt://example.com:1883?client_id=123".parse::<MqttOptions>()?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// You can also go from an [`Url`](url::Url) directly:
+///
+/// ```
+/// # use rumqttc::MqttOptions;
+/// use std::convert::TryFrom;
+/// # use url::Url;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let url = Url::parse("mqtt://example.com:1883?client_id=123")?;
+/// let options = MqttOptions::try_from(url)?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// NOTE: An URL must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+/// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
+#[derive(Clone, TypedBuilder)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
-    broker_addr: String,
+    #[builder(setter(into), default = "localhost".to_string())]
+    pub broker_addr: String,
     /// broker port
-    port: u16,
+    #[builder(default = 1883)]
+    pub port: u16,
     // What transport protocol to use
-    transport: Transport,
+    #[builder(default = Transport::Tcp)]
+    pub transport: Transport,
     /// keep alive time to send pingreq to broker when the connection is idle
-    keep_alive: Duration,
+    #[builder(default = Duration::from_secs(60))]
+    pub keep_alive: Duration,
     /// clean (or) persistent session
-    clean_session: bool,
+    #[builder(default = true)]
+    pub clean_session: bool,
     /// client identifier
-    client_id: String,
+    pub client_id: ClientId,
     /// username and password
-    credentials: Option<(String, String)>,
+    #[builder(setter(into, strip_option), default)]
+    pub credentials: Option<(String, String)>,
     /// maximum incoming packet size (verifies remaining length of the packet)
-    max_incoming_packet_size: usize,
+    #[builder(default = 10 * 1024)]
+    pub max_incoming_packet_size: usize,
     /// Maximum outgoing packet size (only verifies publish payload size)
     // TODO Verify this with all packets. This can be packet.write but message left in
     // the state might be a footgun as user has to explicitly clean it. Probably state
     // has to be moved to network
-    max_outgoing_packet_size: usize,
+    #[allow(dead_code)]
+    #[builder(default = 10 * 1024)]
+    pub max_outgoing_packet_size: usize,
     /// request (publish, subscribe) channel capacity
-    request_channel_capacity: usize,
+    #[builder(default = 10)]
+    pub request_channel_capacity: usize,
     /// Max internal request batching
-    max_request_batch: usize,
+    #[builder(default = 0)]
+    pub max_request_batch: usize,
     /// Minimum delay time between consecutive outgoing packets
     /// while retransmitting pending packets
-    pending_throttle: Duration,
+    #[builder(default = Duration::from_micros(0))]
+    pub pending_throttle: Duration,
     /// maximum number of outgoing inflight messages
-    inflight: u16,
+    #[builder(default = 100)]
+    pub inflight: u16,
     /// Last will that will be issued on unexpected disconnect
-    last_will: Option<LastWill>,
+    #[builder(setter(into, strip_option), default)]
+    pub last_will: Option<LastWill>,
     /// Connection timeout
-    conn_timeout: u64,
+    #[builder(default = 5)]
+    pub connection_timeout: u64,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
-    manual_acks: bool,
+    #[builder(default = false)]
+    pub manual_acks: bool,
 }
 
 impl MqttOptions {
-    /// Create an [`MqttOptions`] object that contains default values for all settings other than
-    /// - id: A string to identify the device connecting to a broker
-    /// - host: The broker's domain name or IP address
-    /// - port: The port number on which broker must be listening for incoming connections
-    ///
-    /// ```
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("123", "localhost", 1883);
-    /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
-    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id")
-        }
-
-        MqttOptions {
-            broker_addr: host.into(),
-            port,
-            transport: Transport::tcp(),
-            keep_alive: Duration::from_secs(60),
-            clean_session: true,
-            client_id: id,
-            credentials: None,
-            max_incoming_packet_size: 10 * 1024,
-            max_outgoing_packet_size: 10 * 1024,
-            request_channel_capacity: 10,
-            max_request_batch: 0,
-            pending_throttle: Duration::from_micros(0),
-            inflight: 100,
-            last_will: None,
-            conn_timeout: 5,
-            manual_acks: false,
-        }
+    #[deprecated = "Use MqttOptions::builder() instead"]
+    pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> Self {
+        let id = id.into().parse().expect("invalid client id");
+        Self::builder()
+            .broker_addr(host)
+            .port(port)
+            .client_id(id)
+            .build()
     }
 
     #[cfg(feature = "url")]
-    /// Creates an [`MqttOptions`] object by parsing provided string with the [url] crate's
-    /// [`Url::parse(url)`](url::Url::parse) method and is only enabled when run using the "url" feature.
-    ///
-    /// ```
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::parse_url("mqtt://example.com:1883?client_id=123").unwrap();
-    /// ```
-    ///
-    /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
-    /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
-    pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
-        use std::convert::TryFrom;
-
-        let url = url::Url::parse(&url.into())?;
-        let options = MqttOptions::try_from(url)?;
-
-        Ok(options)
-    }
-
-    /// Broker address
-    pub fn broker_address(&self) -> (String, u16) {
-        (self.broker_addr.clone(), self.port)
-    }
-
-    pub fn set_last_will(&mut self, will: LastWill) -> &mut Self {
-        self.last_will = Some(will);
-        self
-    }
-
-    pub fn last_will(&self) -> Option<LastWill> {
-        self.last_will.clone()
-    }
-
-    pub fn set_transport(&mut self, transport: Transport) -> &mut Self {
-        self.transport = transport;
-        self
-    }
-
-    pub fn transport(&self) -> Transport {
-        self.transport.clone()
-    }
-
-    /// Set number of seconds after which client should ping the broker
-    /// if there is no other data exchange
-    pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
-        assert!(duration.as_secs() >= 5, "Keep alives should be >= 5  secs");
-
-        self.keep_alive = duration;
-        self
-    }
-
-    /// Keep alive time
-    pub fn keep_alive(&self) -> Duration {
-        self.keep_alive
-    }
-
-    /// Client identifier
-    pub fn client_id(&self) -> String {
-        self.client_id.clone()
-    }
-
-    /// Set packet size limit for outgoing an incoming packets
-    pub fn set_max_packet_size(&mut self, incoming: usize, outgoing: usize) -> &mut Self {
-        self.max_incoming_packet_size = incoming;
-        self.max_outgoing_packet_size = outgoing;
-        self
-    }
-
-    /// Maximum packet size
-    pub fn max_packet_size(&self) -> usize {
-        self.max_incoming_packet_size
-    }
-
-    /// `clean_session = true` removes all the state from queues & instructs the broker
-    /// to clean all the client state when client disconnects.
-    ///
-    /// When set `false`, broker will hold the client state and performs pending
-    /// operations on the client when reconnection with same `client_id`
-    /// happens. Local queue state is also held to retransmit packets after reconnection.
-    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
-        self.clean_session = clean_session;
-        self
-    }
-
-    /// Clean session
-    pub fn clean_session(&self) -> bool {
-        self.clean_session
-    }
-
-    /// Username and password
-    pub fn set_credentials<U: Into<String>, P: Into<String>>(
-        &mut self,
-        username: U,
-        password: P,
-    ) -> &mut Self {
-        self.credentials = Some((username.into(), password.into()));
-        self
-    }
-
-    /// Security options
-    pub fn credentials(&self) -> Option<(String, String)> {
-        self.credentials.clone()
-    }
-
-    /// Set request channel capacity
-    pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
-        self.request_channel_capacity = capacity;
-        self
-    }
-
-    /// Request channel capacity
-    pub fn request_channel_capacity(&self) -> usize {
-        self.request_channel_capacity
-    }
-
-    /// Enables throttling and sets outoing message rate to the specified 'rate'
-    pub fn set_pending_throttle(&mut self, duration: Duration) -> &mut Self {
-        self.pending_throttle = duration;
-        self
-    }
-
-    /// Outgoing message rate
-    pub fn pending_throttle(&self) -> Duration {
-        self.pending_throttle
-    }
-
-    /// Set number of concurrent in flight messages
-    pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
-        assert!(inflight != 0, "zero in flight is not allowed");
-
-        self.inflight = inflight;
-        self
-    }
-
-    /// Number of concurrent in flight messages
-    pub fn inflight(&self) -> u16 {
-        self.inflight
-    }
-
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
-        self
-    }
-
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
-    }
-
-    /// set manual acknowledgements
-    pub fn set_manual_acks(&mut self, manual_acks: bool) -> &mut Self {
-        self.manual_acks = manual_acks;
-        self
-    }
-
-    /// get manual acknowledgements
-    pub fn manual_acks(&self) -> bool {
-        self.manual_acks
+    #[deprecated = "use url.parse::<MqttOptions>()"]
+    pub fn parse_url<S: Into<String>>(url: S) -> Result<Self, OptionError> {
+        url.into().parse()
     }
 }
 
@@ -558,7 +470,7 @@ pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
 
-    #[error("Missing client ID.")]
+    #[error("Missing or invalid client ID.")]
     ClientId,
 
     #[error("Invalid keep-alive value.")]
@@ -596,9 +508,19 @@ pub enum OptionError {
 }
 
 #[cfg(feature = "url")]
+impl FromStr for MqttOptions {
+    type Err = OptionError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use std::convert::TryFrom;
+        Self::try_from(url::Url::parse(s)?)
+    }
+}
+
+#[cfg(feature = "url")]
 impl std::convert::TryFrom<url::Url> for MqttOptions {
     type Error = OptionError;
 
+    #[allow(clippy::too_many_lines)]
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
         use std::collections::HashMap;
 
@@ -611,9 +533,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             "mqtts" | "ssl" => (Transport::Tcp, 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
             #[cfg(feature = "websocket")]
-            "ws" => (Transport::Ws, 8000),
-            #[cfg(feature = "websocket")]
-            "wss" => (Transport::Ws, 8000),
+            "ws" | "wss" => (Transport::Ws, 8000),
             _ => return Err(OptionError::Scheme),
         };
 
@@ -623,18 +543,22 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
 
         let id = queries
             .remove("client_id")
-            .ok_or(OptionError::ClientId)?
-            .into_owned();
+            .and_then(|s| s.parse::<ClientId>().ok())
+            .ok_or(OptionError::ClientId)?;
 
-        let mut options = MqttOptions::new(id, host, port);
-        options.set_transport(transport);
+        let mut options = Self::builder()
+            .broker_addr(host)
+            .port(port)
+            .client_id(id)
+            .transport(transport)
+            .build();
 
         if let Some(keep_alive) = queries
             .remove("keep_alive_secs")
             .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
             .transpose()?
         {
-            options.set_keep_alive(Duration::from_secs(keep_alive));
+            options.keep_alive = Duration::from_secs(keep_alive);
         }
 
         if let Some(clean_session) = queries
@@ -642,7 +566,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             .map(|v| v.parse::<bool>().map_err(|_| OptionError::CleanSession))
             .transpose()?
         {
-            options.set_clean_session(clean_session);
+            options.clean_session = clean_session;
         }
 
         if let Some((username, password)) = {
@@ -654,7 +578,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
                 )),
             }
         } {
-            options.set_credentials(username, password);
+            options.credentials = Some((username, password));
         }
 
         if let (Some(incoming), Some(outgoing)) = (
@@ -673,7 +597,8 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
                 })
                 .transpose()?,
         ) {
-            options.set_max_packet_size(incoming, outgoing);
+            options.max_incoming_packet_size = incoming;
+            options.max_outgoing_packet_size = outgoing;
         }
 
         if let Some(request_channel_capacity) = queries
@@ -700,7 +625,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             .map(|v| v.parse::<u64>().map_err(|_| OptionError::PendingThrottle))
             .transpose()?
         {
-            options.set_pending_throttle(Duration::from_micros(pending_throttle));
+            options.pending_throttle = Duration::from_micros(pending_throttle);
         }
 
         if let Some(inflight) = queries
@@ -708,7 +633,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             .map(|v| v.parse::<u16>().map_err(|_| OptionError::Inflight))
             .transpose()?
         {
-            options.set_inflight(inflight);
+            options.inflight = inflight;
         }
 
         if let Some(conn_timeout) = queries
@@ -716,7 +641,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
             .transpose()?
         {
-            options.set_connection_timeout(conn_timeout);
+            options.connection_timeout = conn_timeout;
         }
 
         if let Some((opt, _)) = queries.into_iter().next() {
@@ -744,7 +669,7 @@ impl Debug for MqttOptions {
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
-            .field("conn_timeout", &self.conn_timeout)
+            .field("connection_timeout", &self.connection_timeout)
             .field("manual_acks", &self.manual_acks)
             .finish()
     }
@@ -755,23 +680,33 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
+        assert_eq!(
+            " client_a".parse::<ClientId>(),
+            Err(ClientIdError::StartsWithSpace)
+        );
+    }
+
+    #[test]
+    fn no_client_id() {
+        assert_eq!("".parse::<ClientId>(), Err(ClientIdError::Empty),);
     }
 
     #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
-        let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
-
-        _mqtt_opts.set_transport(crate::Transport::wss(Vec::from("Test CA"), None, None));
+        let opts = MqttOptions::builder()
+            .client_id("client_a".parse().unwrap())
+            .broker_addr("a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host")
+            .port(443)
+            .transport(crate::Transport::wss(Vec::from("Test CA"), None, None))
+            .build();
 
         if let crate::Transport::Wss(TlsConfiguration::Simple {
             ca,
             client_auth,
             alpn,
-        }) = _mqtt_opts.transport
+        }) = opts.transport
         {
             assert_eq!(ca, Vec::from("Test CA"));
             assert_eq!(client_auth, None);
@@ -780,14 +715,14 @@ mod test {
             panic!("Unexpected transport!");
         }
 
-        assert_eq!(_mqtt_opts.broker_addr, "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
+        assert_eq!(opts.broker_addr, "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
     }
 
     #[test]
     #[cfg(feature = "url")]
     fn from_url() {
         fn opt(s: &str) -> Result<MqttOptions, OptionError> {
-            MqttOptions::parse_url(s)
+            s.parse()
         }
         fn ok(s: &str) -> MqttOptions {
             opt(s).expect("valid options")
@@ -797,8 +732,9 @@ mod test {
         }
 
         let v = ok("mqtt://host:42?client_id=foo");
-        assert_eq!(v.broker_address(), ("host".to_owned(), 42));
-        assert_eq!(v.client_id(), "foo".to_owned());
+        assert_eq!(v.broker_addr, "host");
+        assert_eq!(v.port, 42);
+        assert_eq!(v.client_id, "foo".parse().unwrap());
 
         let v = ok("mqtt://host:42?client_id=foo&keep_alive_secs=5");
         assert_eq!(v.keep_alive, Duration::from_secs(5));
@@ -845,11 +781,5 @@ mod test {
             err("mqtt://host:42?client_id=foo&conn_timeout_secs=foo"),
             OptionError::ConnTimeout
         );
-    }
-
-    #[test]
-    #[should_panic]
-    fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
 }
