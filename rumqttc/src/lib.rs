@@ -367,24 +367,32 @@ impl From<ClientId> for String {
 /// When the [`url`] feature is enabled the [`MqttOptions`] can be parsed from an [`Url`](url::Url) or `str`.
 ///
 /// ```
+/// // Requires feature: url
 /// # use rumqttc::MqttOptions;
+/// # #[cfg(feature = "url")]
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let options = "mqtt://example.com:1883?client_id=123".parse::<MqttOptions>()?;
 /// # Ok(())
 /// # }
+/// # #[cfg(not(feature = "url"))]
+/// # fn main() {}
 /// ```
 ///
 /// You can also go from an [`Url`](url::Url) directly:
 ///
 /// ```
+/// // Requires feature: url
 /// # use rumqttc::MqttOptions;
 /// use std::convert::TryFrom;
-/// # use url::Url;
+/// # #[cfg(feature = "url")]
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # use url::Url;
 /// let url = Url::parse("mqtt://example.com:1883?client_id=123")?;
 /// let options = MqttOptions::try_from(url)?;
 /// # Ok(())
 /// # }
+/// # #[cfg(not(feature = "url"))]
+/// # fn main() {}
 /// ```
 ///
 /// NOTE: An URL must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
