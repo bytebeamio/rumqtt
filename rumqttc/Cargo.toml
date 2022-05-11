@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.11.0"
+version = "0.12.0"
 description = "An efficient and robust mqtt client for your connected devices"
 license = "Apache-2.0"
 repository = "https://github.com/bytebeamio/rumqtt"

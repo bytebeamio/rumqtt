@@ -1,3 +1,19 @@
+### R12
+----------------
+rumqttc v0.12.0
+-----------
+- Enable compilation without `rustls` as a dependency using `--no-default-features` (#365)
+- Rework variants of `ConnectionError` (#370)
+- New constructor `MqttOptions::parse()` using [`url`](https://docs.rs/url) (#379)
+- Use `get_mut()` instead of index based access to ensure no panic (#384)
+- Better error messages (#385) 
+
+rumqttd v0.11.0
+-----------
+- Enable compilation without rustls as a dependency using `--no-default-features` (#365)
+- Better error messages (#385)
+-----------
+
 ### R11
 ----------------
 rumqttc v0.11.0

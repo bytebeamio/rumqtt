@@ -18,8 +18,8 @@ pub enum ClientError {
     Request(#[from] SendError<Request>),
     #[error("Failed to send mqtt requests to eventloop")]
     TryRequest(#[from] TrySendError<Request>),
-    #[error("Serialization error")]
-    Mqtt4(mqttbytes::Error),
+    #[error("Serialization error: {0}")]
+    Mqtt4(#[from] mqttbytes::Error),
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
