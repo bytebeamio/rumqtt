@@ -1,157 +1,34 @@
-//! A pure rust MQTT client which strives to be robust, efficient and easy to use.
-//! This library is backed by an async (tokio) eventloop which handles all the
-//! robustness and and efficiency parts of MQTT but naturally fits into both sync
-//! and async worlds as we'll see
-//!
-//! Let's jump into examples right away
-//!
-//! A simple synchronous publish and subscribe
-//! ----------------------------
-//!
-//! ```no_run
-//! use rumqttc::{MqttOptions, Client, QoS};
-//! use std::time::Duration;
-//! use std::thread;
-//!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
-//!
-//! let (mut client, mut connection) = Client::new(mqttoptions, 10);
-//! client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-//! thread::spawn(move || for i in 0..10 {
-//!    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).unwrap();
-//!    thread::sleep(Duration::from_millis(100));
-//! });
-//!
-//! // Iterate to poll the eventloop for connection progress
-//! for (i, notification) in connection.iter().enumerate() {
-//!     println!("Notification = {:?}", notification);
-//! }
-//! ```
-//!
-//! A simple asynchronous publish and subscribe
-//! ------------------------------
-//!
-//! ```no_run
-//! use rumqttc::{MqttOptions, AsyncClient, QoS};
-//! use tokio::{task, time};
-//! use std::time::Duration;
-//! use std::error::Error;
-//!
-//! # #[tokio::main(worker_threads = 1)]
-//! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
-//!
-//! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
-//! client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
-//!
-//! task::spawn(async move {
-//!     for i in 0..10 {
-//!         client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).await.unwrap();
-//!         time::sleep(Duration::from_millis(100)).await;
-//!     }
-//! });
-//!
-//! loop {
-//!     let notification = eventloop.poll().await.unwrap();
-//!     println!("Received = {:?}", notification);
-//! }
-//! # }
-//! ```
-//!
-//! Quick overview of features
-//! - Eventloop orchestrates outgoing/incoming packets concurrently and hadles the state
-//! - Pings the broker when necessary and detects client side half open connections as well
-//! - Throttling of outgoing packets (todo)
-//! - Queue size based flow control on outgoing packets
-//! - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop`
-//! - Natural backpressure to client APIs during bad network
-//! - Immediate cancellation with `client.cancel()`
-//!
-//! In short, everything necessary to maintain a robust connection
-//!
-//! Since the eventloop is externally polled (with `iter()/poll()` in a loop)
-//! out side the library and `Eventloop` is accessible, users can
-//! - Distribute incoming messages based on topics
-//! - Stop it when required
-//! - Access internal state for use cases like graceful shutdown or to modify options before reconnection
-//!
-//! ## Important notes
-//!
-//! - Looping on `connection.iter()`/`eventloop.poll()` is necessary to run the
-//!   event loop and make progress. It yields incoming and outgoing activity
-//!   notifications which allows customization as you see fit.
-//!
-//! - Blocking inside the `connection.iter()`/`eventloop.poll()` loop will block
-//!   connection progress.
-//!
-//! ## FAQ
-//! **Connecting to a broker using raw ip doesn't work**
-//!
-//! You cannot create a TLS connection to a bare IP address with a self-signed
-//! certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
-//! One workaround, which only works under *nix/BSD-like systems, is to add an
-//! entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
-//! address and use that name in your code.
-#![cfg_attr(docsrs, feature(doc_cfg))]
-
-#[macro_use]
-extern crate log;
-
-use std::fmt::{self, Debug, Formatter};
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::VecDeque,
+    fmt::{self, Debug, Formatter},
+    time::Duration,
+};
 
 mod client;
 mod eventloop;
 mod framed;
-pub mod mqttbytes;
+mod notifier;
+mod outgoing_buf;
+#[allow(clippy::all)]
+mod packet;
 mod state;
 #[cfg(feature = "use-rustls")]
 mod tls;
-pub mod v5;
 
-pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
-pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use mqttbytes::v4::*;
-pub use mqttbytes::*;
+pub use eventloop::{ConnectionError, EventLoop};
+pub use flume::{SendError, Sender, TrySendError};
+pub use notifier::Notifier;
+pub use packet::*;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
-pub use tls::Error as TlsError;
+pub use tls::Error;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
-
-/// Current outgoing activity on the eventloop
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Outgoing {
-    /// Publish packet with packet identifier. 0 implies QoS 0
-    Publish(u16),
-    /// Subscribe packet with packet identifier
-    Subscribe(u16),
-    /// Unsubscribe packet with packet identifier
-    Unsubscribe(u16),
-    /// PubAck packet
-    PubAck(u16),
-    /// PubRec packet
-    PubRec(u16),
-    /// PubRel packet
-    PubRel(u16),
-    /// PubComp packet
-    PubComp(u16),
-    /// Ping request packet
-    PingReq,
-    /// Ping response packet
-    PingResp,
-    /// Disconnect packet
-    Disconnect,
-    /// Await for an ack for more outgoing progress
-    AwaitAck(u16),
-}
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
@@ -714,6 +591,29 @@ impl Debug for MqttOptions {
     }
 }
 
+pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
+    let mut eventloop = EventLoop::new(options, cap);
+    let outgoing_buf = eventloop.state.outgoing_buf.clone();
+    let incoming_buf = eventloop.state.incoming_buf.clone();
+    let incoming_buf_cache = VecDeque::with_capacity(cap);
+    let request_tx = eventloop.handle();
+
+    let client = AsyncClient {
+        outgoing_buf,
+        request_tx,
+    };
+
+    tokio::spawn(async move {
+        loop {
+            // TODO: maybe do something like retries for some specific errors? or maybe give user
+            // options to configure these retries?
+            eventloop.poll().await.unwrap();
+        }
+    });
+
+    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -729,9 +629,9 @@ mod test {
     fn no_scheme() {
         let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
 
-        _mqtt_opts.set_transport(crate::Transport::wss(Vec::from("Test CA"), None, None));
+        _mqtt_opts.set_transport(crate::v5::Transport::wss(Vec::from("Test CA"), None, None));
 
-        if let crate::Transport::Wss(TlsConfiguration::Simple {
+        if let crate::v5::Transport::Wss(TlsConfiguration::Simple {
             ca,
             client_auth,
             alpn,

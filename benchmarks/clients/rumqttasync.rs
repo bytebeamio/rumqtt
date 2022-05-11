@@ -1,4 +1,4 @@
-use rumqttc::*;
+use rumqttc::v4::*;
 use std::error::Error;
 use std::time::{Duration, Instant};
 

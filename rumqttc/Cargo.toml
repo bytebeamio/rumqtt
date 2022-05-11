@@ -14,14 +14,15 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+default = ["use-rustls"]
 websocket = ["async-tungstenite", "ws_stream_tungstenite"]
+use-rustls = ["tokio-rustls", "rustls-pemfile"]
 
 [dependencies]
 tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
-webpki = "0.22.0"
-tokio-rustls = "0.23.2"
-rustls-pemfile = "0.3.0"
+tokio-rustls = { version = "0.23.2", optional = true }
+rustls-pemfile = { version = "0.3.0", optional = true }
 async-tungstenite = { version = "0.16.1", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
 ws_stream_tungstenite = { version = "0.7.0", default-features = false, features = ["tokio_io"], optional = true }
 pollster = "0.2"
@@ -30,6 +31,7 @@ log = "0.4"
 thiserror = "1.0.21"
 http = "^0.2"
 url = { version = "2.2", default-features = false, optional = true }
+flume = "0.10.10"
 
 [dev-dependencies]
 pretty_env_logger = "0.4"
@@ -42,4 +44,4 @@ tokio = { version = "1.0", features = ["full", "macros"] }
 matches = "0.1.8"
 rustls = "0.20.2"
 rustls-native-certs = "0.6.1"
-pretty_assertions = "0.6.1"
+pretty_assertions = "1.1.0"
