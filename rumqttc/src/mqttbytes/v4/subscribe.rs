@@ -27,14 +27,10 @@ impl Subscribe {
     {
         let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
 
-        if filters.is_empty() {
-            return Err(Error::EmptySubscription)
+        match filters.len() {
+            0 => Err(Error::EmptySubscription),
+            _ => Ok(Subscribe { pkid: 0, filters }),
         }
-
-        Ok(Subscribe {
-            pkid: 0,
-            filters,
-        })
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
@@ -69,9 +65,10 @@ impl Subscribe {
             });
         }
 
-        let subscribe = Subscribe { pkid, filters };
-
-        Ok(subscribe)
+        match filters.len() {
+            0 => Err(Error::EmptySubscription),
+            _ => Ok(Subscribe { pkid, filters }),
+        }
     }
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
