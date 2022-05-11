@@ -96,11 +96,13 @@ impl AsyncClient {
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
     pub async fn ack(&mut self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
-            let mut request_buf = self.outgoing_buf.lock().unwrap();
-            if request_buf.buf.len() == request_buf.capacity {
-                return Err(ClientError::RequestsFull);
+            {
+                let mut request_buf = self.outgoing_buf.lock().unwrap();
+                if request_buf.buf.len() == request_buf.capacity {
+                    return Err(ClientError::RequestsFull);
+                }
+                request_buf.buf.push_back(ack);
             }
-            request_buf.buf.push_back(ack);
             self.notify_async().await?;
         }
         Ok(())
@@ -267,11 +269,13 @@ impl AsyncClient {
     /// Sends a MQTT disconnect to the eventloop
     #[inline]
     pub async fn disconnect(&mut self) -> Result<(), ClientError> {
-        let mut request_buf = self.outgoing_buf.lock().unwrap();
-        if request_buf.buf.len() == request_buf.capacity {
-            return Err(ClientError::RequestsFull);
+        {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            request_buf.buf.push_back(Request::Disconnect);
         }
-        request_buf.buf.push_back(Request::Disconnect);
         self.notify_async().await
     }
 
