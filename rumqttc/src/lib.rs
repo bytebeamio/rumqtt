@@ -518,7 +518,7 @@ impl MqttOptions {
 
     /// Set number of concurrent in flight messages
     pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
-        assert_eq!(inflight, 0, "zero in flight is not allowed");
+        assert!(inflight != 0, "zero in flight is not allowed");
 
         self.inflight = inflight;
         self
