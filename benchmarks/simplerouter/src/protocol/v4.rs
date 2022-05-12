@@ -157,16 +157,16 @@ pub(crate) mod connect {
             len
         }
 
-        fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
+        fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
             let last_will = match connect_flags & 0b100 {
                 0 if (connect_flags & 0b0011_1000) != 0 => {
                     return Err(Error::IncorrectPacketFormat);
                 }
                 0 => None,
                 _ => {
-                    let will_topic = read_mqtt_bytes(&mut bytes)?;
+                    let will_topic = read_mqtt_bytes(bytes)?;
                     let will_topic = std::str::from_utf8(&will_topic)?.to_owned();
-                    let will_message = read_mqtt_bytes(&mut bytes)?;
+                    let will_message = read_mqtt_bytes(bytes)?;
                     let will_qos = qos((connect_flags & 0b11000) >> 3)?;
                     Some(LastWill {
                         topic: will_topic,
@@ -208,11 +208,11 @@ pub(crate) mod connect {
             }
         }
 
-        fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<Login>, Error> {
+        fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<Login>, Error> {
             let username = match connect_flags & 0b1000_0000 {
                 0 => String::new(),
                 _ => {
-                    let username = read_mqtt_bytes(&mut bytes)?;
+                    let username = read_mqtt_bytes(bytes)?;
                     std::str::from_utf8(&username)?.to_owned()
                 }
             };
@@ -220,7 +220,7 @@ pub(crate) mod connect {
             let password = match connect_flags & 0b0100_0000 {
                 0 => String::new(),
                 _ => {
-                    let password = read_mqtt_bytes(&mut bytes)?;
+                    let password = read_mqtt_bytes(bytes)?;
                     std::str::from_utf8(&password)?.to_owned()
                 }
             };
@@ -392,7 +392,7 @@ pub(crate) mod publish {
 
             // FIXME: Remove indexes and use get method
             let stream = &self.raw[self.fixed_header.fixed_header_len..];
-            let topic_len = view_u16(&stream)? as usize;
+            let topic_len = view_u16(stream)? as usize;
 
             let stream = &stream[2..];
             let topic = view_str(stream, topic_len)?;
@@ -401,8 +401,7 @@ pub(crate) mod publish {
                 0 => 0,
                 1 => {
                     let stream = &stream[topic_len..];
-                    let pkid = view_u16(stream)?;
-                    pkid
+                    view_u16(stream)?
                 }
                 v => return Err(Error::InvalidQoS(v)),
             };
@@ -417,7 +416,7 @@ pub(crate) mod publish {
         pub fn view_topic(&self) -> Result<&str, Error> {
             // FIXME: Remove indexes
             let stream = &self.raw[self.fixed_header.fixed_header_len..];
-            let topic_len = view_u16(&stream)? as usize;
+            let topic_len = view_u16(stream)? as usize;
 
             let stream = &stream[2..];
             let topic = view_str(stream, topic_len)?;
@@ -496,7 +495,7 @@ pub(crate) mod publish {
             buffer.put_u16(pkid);
         }
 
-        buffer.extend_from_slice(&payload);
+        buffer.extend_from_slice(payload);
 
         // TODO: Returned length is wrong in other packets. Fix it
         Ok(1 + count + len)
@@ -567,8 +566,7 @@ pub(crate) mod subscribe {
                 qos,
             };
 
-            let mut filters = Vec::new();
-            filters.push(filter);
+            let filters = vec![filter];
             Subscribe { pkid: 0, filters }
         }
 
@@ -680,8 +678,7 @@ pub(crate) mod suback {
         }
 
         pub fn len(&self) -> usize {
-            let len = 2 + self.return_codes.len();
-            len
+            2 + self.return_codes.len()
         }
 
         pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
