@@ -21,7 +21,7 @@ fn main() {
     println!("Done with the stream!!");
 }
 
-fn publish(mut client: Client) {
+fn publish(client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..10 {
         let payload = vec![1; i as usize];
