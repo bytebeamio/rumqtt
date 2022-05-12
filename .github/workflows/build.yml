@@ -2,6 +2,10 @@ on:
   pull_request:
     branches:
       - master
+    paths:
+      - '**.rs'
+      - 'Cargo.*'
+      - '*/Cargo.*'
 
 name: Build and Test
 
