@@ -35,7 +35,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish<S, V>(
-        &mut self,
+        &self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -65,7 +65,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub fn try_publish<S, V>(
-        &mut self,
+        &self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -94,7 +94,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(&mut self, publish: &Publish) -> Result<(), ClientError> {
+    pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
             {
                 let mut request_buf = self.outgoing_buf.lock().unwrap();
@@ -109,7 +109,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the eventloop. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&mut self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         if let Some(ack) = get_ack_req(publish.qos, publish.pkid) {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
             if request_buf.buf.len() == request_buf.capacity {
@@ -123,7 +123,7 @@ impl AsyncClient {
 
     /// Sends a MQTT Publish to the eventloop
     pub async fn publish_bytes<S>(
-        &mut self,
+        &self,
         topic: S,
         qos: QoS,
         retain: bool,
@@ -151,11 +151,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub async fn subscribe<S: Into<String>>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-    ) -> Result<u16, ClientError> {
+    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<u16, ClientError> {
         let mut subscribe = Subscribe::new(topic.into(), qos);
         let pkid = {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
@@ -172,11 +168,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe to the eventloop
-    pub fn try_subscribe<S: Into<String>>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-    ) -> Result<u16, ClientError> {
+    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<u16, ClientError> {
         let mut subscribe = Subscribe::new(topic.into(), qos);
         let pkid = {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
@@ -193,7 +185,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
-    pub async fn subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -213,7 +205,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the eventloop
-    pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -233,7 +225,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub async fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<u16, ClientError> {
         let mut unsubscribe = Unsubscribe::new(topic.into());
         let pkid = {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
@@ -250,7 +242,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
-    pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<u16, ClientError> {
         let mut unsubscribe = Unsubscribe::new(topic.into());
         let pkid = {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
@@ -268,7 +260,7 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the eventloop
     #[inline]
-    pub async fn disconnect(&mut self) -> Result<(), ClientError> {
+    pub async fn disconnect(&self) -> Result<(), ClientError> {
         {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
             if request_buf.buf.len() == request_buf.capacity {
@@ -281,7 +273,7 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the eventloop
     #[inline]
-    pub fn try_disconnect(&mut self) -> Result<(), ClientError> {
+    pub fn try_disconnect(&self) -> Result<(), ClientError> {
         let mut request_buf = self.outgoing_buf.lock().unwrap();
         if request_buf.buf.len() == request_buf.capacity {
             return Err(ClientError::RequestsFull);
