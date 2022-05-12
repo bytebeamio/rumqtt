@@ -27,22 +27,19 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many<T>(topics: T) -> Subscribe
+    pub fn new_many<T>(topics: T) -> Result<Subscribe, Error>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        Subscribe {
-            pkid: 0,
-            filters: topics.into_iter().collect(),
-            properties: None,
-        }
-    }
+        let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
 
-    pub fn empty_subscribe() -> Subscribe {
-        Subscribe {
-            pkid: 0,
-            filters: Vec::new(),
-            properties: None,
+        match filters.len() {
+            0 => Err(Error::EmptySubscription),
+            _ => Ok(Subscribe {
+                pkid: 0,
+                filters,
+                properties: None,
+            }),
         }
     }
 
@@ -112,13 +109,14 @@ impl Subscribe {
             });
         }
 
-        let subscribe = Subscribe {
-            pkid,
-            filters,
-            properties,
-        };
-
-        Ok(subscribe)
+        match filters.len() {
+            0 => Err(Error::EmptySubscription),
+            _ => Ok(Subscribe {
+                pkid,
+                filters,
+                properties,
+            }),
+        }
     }
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {

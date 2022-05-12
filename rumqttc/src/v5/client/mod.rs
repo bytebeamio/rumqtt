@@ -21,7 +21,7 @@ pub enum ClientError {
     #[error("Failed to send mqtt request to evenloop, to requests buffer is full right now")]
     RequestsFull,
     #[error("Serialization error")]
-    Mqtt5(Error),
+    Mqtt5(#[from] Error),
 }
 
 fn get_ack_req(qos: QoS, pkid: u16) -> Option<Request> {
