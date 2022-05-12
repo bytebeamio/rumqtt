@@ -1,157 +1,34 @@
-//! A pure rust MQTT client which strives to be robust, efficient and easy to use.
-//! This library is backed by an async (tokio) eventloop which handles all the
-//! robustness and and efficiency parts of MQTT but naturally fits into both sync
-//! and async worlds as we'll see
-//!
-//! Let's jump into examples right away
-//!
-//! A simple synchronous publish and subscribe
-//! ----------------------------
-//!
-//! ```no_run
-//! use rumqttc::{MqttOptions, Client, QoS};
-//! use std::time::Duration;
-//! use std::thread;
-//!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
-//!
-//! let (mut client, mut connection) = Client::new(mqttoptions, 10);
-//! client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-//! thread::spawn(move || for i in 0..10 {
-//!    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).unwrap();
-//!    thread::sleep(Duration::from_millis(100));
-//! });
-//!
-//! // Iterate to poll the eventloop for connection progress
-//! for (i, notification) in connection.iter().enumerate() {
-//!     println!("Notification = {:?}", notification);
-//! }
-//! ```
-//!
-//! A simple asynchronous publish and subscribe
-//! ------------------------------
-//!
-//! ```no_run
-//! use rumqttc::{MqttOptions, AsyncClient, QoS};
-//! use tokio::{task, time};
-//! use std::time::Duration;
-//! use std::error::Error;
-//!
-//! # #[tokio::main(worker_threads = 1)]
-//! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
-//!
-//! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
-//! client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
-//!
-//! task::spawn(async move {
-//!     for i in 0..10 {
-//!         client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).await.unwrap();
-//!         time::sleep(Duration::from_millis(100)).await;
-//!     }
-//! });
-//!
-//! loop {
-//!     let notification = eventloop.poll().await.unwrap();
-//!     println!("Received = {:?}", notification);
-//! }
-//! # }
-//! ```
-//!
-//! Quick overview of features
-//! - Eventloop orchestrates outgoing/incoming packets concurrently and hadles the state
-//! - Pings the broker when necessary and detects client side half open connections as well
-//! - Throttling of outgoing packets (todo)
-//! - Queue size based flow control on outgoing packets
-//! - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop`
-//! - Natural backpressure to client APIs during bad network
-//! - Immediate cancellation with `client.cancel()`
-//!
-//! In short, everything necessary to maintain a robust connection
-//!
-//! Since the eventloop is externally polled (with `iter()/poll()` in a loop)
-//! out side the library and `Eventloop` is accessible, users can
-//! - Distribute incoming messages based on topics
-//! - Stop it when required
-//! - Access internal state for use cases like graceful shutdown or to modify options before reconnection
-//!
-//! ## Important notes
-//!
-//! - Looping on `connection.iter()`/`eventloop.poll()` is necessary to run the
-//!   event loop and make progress. It yields incoming and outgoing activity
-//!   notifications which allows customization as you see fit.
-//!
-//! - Blocking inside the `connection.iter()`/`eventloop.poll()` loop will block
-//!   connection progress.
-//!
-//! ## FAQ
-//! **Connecting to a broker using raw ip doesn't work**
-//!
-//! You cannot create a TLS connection to a bare IP address with a self-signed
-//! certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
-//! One workaround, which only works under *nix/BSD-like systems, is to add an
-//! entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
-//! address and use that name in your code.
-#![cfg_attr(docsrs, feature(doc_cfg))]
-
-#[macro_use]
-extern crate log;
-
-use std::fmt::{self, Debug, Formatter};
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::VecDeque,
+    fmt::{self, Debug, Formatter},
+    time::Duration,
+};
 
 mod client;
 mod eventloop;
 mod framed;
-pub mod mqttbytes;
+mod notifier;
+mod outgoing_buf;
+#[allow(clippy::all)]
+mod packet;
 mod state;
 #[cfg(feature = "use-rustls")]
 mod tls;
-pub mod v5;
 
-pub use async_channel::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
-pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use mqttbytes::v4::*;
-pub use mqttbytes::*;
+pub use eventloop::{ConnectionError, EventLoop};
+pub use flume::{SendError, Sender, TrySendError};
+pub use notifier::Notifier;
+pub use packet::*;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
-pub use tls::Error as TlsError;
+pub use tls::Error;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
-
-/// Current outgoing activity on the eventloop
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Outgoing {
-    /// Publish packet with packet identifier. 0 implies QoS 0
-    Publish(u16),
-    /// Subscribe packet with packet identifier
-    Subscribe(u16),
-    /// Unsubscribe packet with packet identifier
-    Unsubscribe(u16),
-    /// PubAck packet
-    PubAck(u16),
-    /// PubRec packet
-    PubRec(u16),
-    /// PubRel packet
-    PubRel(u16),
-    /// PubComp packet
-    PubComp(u16),
-    /// Ping request packet
-    PingReq,
-    /// Ping response packet
-    PingResp,
-    /// Disconnect packet
-    Disconnect,
-    /// Await for an ack for more outgoing progress
-    AwaitAck(u16),
-}
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
@@ -348,21 +225,7 @@ pub struct MqttOptions {
 }
 
 impl MqttOptions {
-    /// Create an [`MqttOptions`] object that contains default values for all settings other than
-    /// - id: A string to identify the device connecting to a broker
-    /// - host: The broker's domain name or IP address
-    /// - port: The port number on which broker must be listening for incoming connections
-    ///
-    /// ```
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("123", "localhost", 1883);
-    /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
+    /// New mqtt options
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         let id = id.into();
         if id.starts_with(' ') || id.is_empty() {
@@ -387,26 +250,6 @@ impl MqttOptions {
             conn_timeout: 5,
             manual_acks: false,
         }
-    }
-
-    #[cfg(feature = "url")]
-    /// Creates an [`MqttOptions`] object by parsing provided string with the [url] crate's
-    /// [`Url::parse(url)`](url::Url::parse) method and is only enabled when run using the "url" feature.
-    ///
-    /// ```
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::parse_url("mqtt://example.com:1883?client_id=123").unwrap();
-    /// ```
-    ///
-    /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
-    /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
-    pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
-        use std::convert::TryFrom;
-
-        let url = url::Url::parse(&url.into())?;
-        let options = MqttOptions::try_from(url)?;
-
-        Ok(options)
     }
 
     /// Broker address
@@ -518,7 +361,9 @@ impl MqttOptions {
 
     /// Set number of concurrent in flight messages
     pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
-        assert!(inflight != 0, "zero in flight is not allowed");
+        if inflight == 0 {
+            panic!("zero in flight is not allowed")
+        }
 
         self.inflight = inflight;
         self
@@ -590,9 +435,6 @@ pub enum OptionError {
 
     #[error("Unknown option: {0}")]
     Unknown(String),
-
-    #[error("Couldn't parse option from url: {0}")]
-    Parse(#[from] url::ParseError),
 }
 
 #[cfg(feature = "url")]
@@ -602,7 +444,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
     fn try_from(url: url::Url) -> Result<Self, Self::Error> {
         use std::collections::HashMap;
 
-        let host = url.host_str().unwrap_or_default().to_owned();
+        let broker_addr = url.host_str().unwrap_or_default().to_owned();
 
         let (transport, default_port) = match url.scheme() {
             // Encrypted connections are supported, but require explicit TLS configuration. We fall
@@ -610,10 +452,6 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             // configure the encrypted transport layer with the provided TLS configuration.
             "mqtts" | "ssl" => (Transport::Tcp, 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
-            #[cfg(feature = "websocket")]
-            "ws" => (Transport::Ws, 8000),
-            #[cfg(feature = "websocket")]
-            "wss" => (Transport::Ws, 8000),
             _ => return Err(OptionError::Scheme),
         };
 
@@ -621,31 +459,26 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
 
         let mut queries = url.query_pairs().collect::<HashMap<_, _>>();
 
-        let id = queries
+        let keep_alive = Duration::from_secs(
+            queries
+                .remove("keep_alive_secs")
+                .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
+                .transpose()?
+                .unwrap_or(60),
+        );
+
+        let client_id = queries
             .remove("client_id")
             .ok_or(OptionError::ClientId)?
             .into_owned();
 
-        let mut options = MqttOptions::new(id, host, port);
-        options.set_transport(transport);
-
-        if let Some(keep_alive) = queries
-            .remove("keep_alive_secs")
-            .map(|v| v.parse::<u64>().map_err(|_| OptionError::KeepAlive))
-            .transpose()?
-        {
-            options.set_keep_alive(Duration::from_secs(keep_alive));
-        }
-
-        if let Some(clean_session) = queries
+        let clean_session = queries
             .remove("clean_session")
             .map(|v| v.parse::<bool>().map_err(|_| OptionError::CleanSession))
             .transpose()?
-        {
-            options.set_clean_session(clean_session);
-        }
+            .unwrap_or(true);
 
-        if let Some((username, password)) = {
+        let credentials = {
             match url.username() {
                 "" => None,
                 username => Some((
@@ -653,77 +486,83 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
                     url.password().unwrap_or_default().to_owned(),
                 )),
             }
-        } {
-            options.set_credentials(username, password);
-        }
+        };
 
-        if let (Some(incoming), Some(outgoing)) = (
-            queries
-                .remove("max_incoming_packet_size_bytes")
-                .map(|v| {
-                    v.parse::<usize>()
-                        .map_err(|_| OptionError::MaxIncomingPacketSize)
-                })
-                .transpose()?,
-            queries
-                .remove("max_outgoing_packet_size_bytes")
-                .map(|v| {
-                    v.parse::<usize>()
-                        .map_err(|_| OptionError::MaxOutgoingPacketSize)
-                })
-                .transpose()?,
-        ) {
-            options.set_max_packet_size(incoming, outgoing);
-        }
+        let max_incoming_packet_size = queries
+            .remove("max_incoming_packet_size_bytes")
+            .map(|v| {
+                v.parse::<usize>()
+                    .map_err(|_| OptionError::MaxIncomingPacketSize)
+            })
+            .transpose()?
+            .unwrap_or(10 * 1024);
 
-        if let Some(request_channel_capacity) = queries
+        let max_outgoing_packet_size = queries
+            .remove("max_outgoing_packet_size_bytes")
+            .map(|v| {
+                v.parse::<usize>()
+                    .map_err(|_| OptionError::MaxOutgoingPacketSize)
+            })
+            .transpose()?
+            .unwrap_or(10 * 1024);
+
+        let request_channel_capacity = queries
             .remove("request_channel_capacity_num")
             .map(|v| {
                 v.parse::<usize>()
                     .map_err(|_| OptionError::RequestChannelCapacity)
             })
             .transpose()?
-        {
-            options.request_channel_capacity = request_channel_capacity;
-        }
+            .unwrap_or(10);
 
-        if let Some(max_request_batch) = queries
+        let max_request_batch = queries
             .remove("max_request_batch_num")
             .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxRequestBatch))
             .transpose()?
-        {
-            options.max_request_batch = max_request_batch;
-        }
+            .unwrap_or(0);
 
-        if let Some(pending_throttle) = queries
-            .remove("pending_throttle_usecs")
-            .map(|v| v.parse::<u64>().map_err(|_| OptionError::PendingThrottle))
-            .transpose()?
-        {
-            options.set_pending_throttle(Duration::from_micros(pending_throttle));
-        }
+        let pending_throttle = Duration::from_micros(
+            queries
+                .remove("pending_throttle_usecs")
+                .map(|v| v.parse::<u64>().map_err(|_| OptionError::PendingThrottle))
+                .transpose()?
+                .unwrap_or(0),
+        );
 
-        if let Some(inflight) = queries
+        let inflight = queries
             .remove("inflight_num")
             .map(|v| v.parse::<u16>().map_err(|_| OptionError::Inflight))
             .transpose()?
-        {
-            options.set_inflight(inflight);
-        }
+            .unwrap_or(100);
 
-        if let Some(conn_timeout) = queries
+        let conn_timeout = queries
             .remove("conn_timeout_secs")
             .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
             .transpose()?
-        {
-            options.set_connection_timeout(conn_timeout);
-        }
+            .unwrap_or(5);
 
         if let Some((opt, _)) = queries.into_iter().next() {
             return Err(OptionError::Unknown(opt.into_owned()));
         }
 
-        Ok(options)
+        Ok(Self {
+            broker_addr,
+            port,
+            transport,
+            keep_alive,
+            clean_session,
+            client_id,
+            credentials,
+            max_incoming_packet_size,
+            max_outgoing_packet_size,
+            request_channel_capacity,
+            max_request_batch,
+            pending_throttle,
+            inflight,
+            last_will: None,
+            conn_timeout,
+            manual_acks: false,
+        })
     }
 }
 
@@ -750,6 +589,29 @@ impl Debug for MqttOptions {
     }
 }
 
+pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
+    let mut eventloop = EventLoop::new(options, cap);
+    let outgoing_buf = eventloop.state.outgoing_buf.clone();
+    let incoming_buf = eventloop.state.incoming_buf.clone();
+    let incoming_buf_cache = VecDeque::with_capacity(cap);
+    let request_tx = eventloop.handle();
+
+    let client = AsyncClient {
+        outgoing_buf,
+        request_tx,
+    };
+
+    tokio::spawn(async move {
+        loop {
+            // TODO: maybe do something like retries for some specific errors? or maybe give user
+            // options to configure these retries?
+            eventloop.poll().await.unwrap();
+        }
+    });
+
+    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -765,9 +627,9 @@ mod test {
     fn no_scheme() {
         let mut _mqtt_opts = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
 
-        _mqtt_opts.set_transport(crate::Transport::wss(Vec::from("Test CA"), None, None));
+        _mqtt_opts.set_transport(crate::v5::Transport::wss(Vec::from("Test CA"), None, None));
 
-        if let crate::Transport::Wss(TlsConfiguration::Simple {
+        if let crate::v5::Transport::Wss(TlsConfiguration::Simple {
             ca,
             client_auth,
             alpn,
@@ -786,8 +648,11 @@ mod test {
     #[test]
     #[cfg(feature = "url")]
     fn from_url() {
+        use std::convert::TryInto;
+        use std::str::FromStr;
+
         fn opt(s: &str) -> Result<MqttOptions, OptionError> {
-            MqttOptions::parse_url(s)
+            url::Url::from_str(s).expect("valid url").try_into()
         }
         fn ok(s: &str) -> MqttOptions {
             opt(s).expect("valid options")

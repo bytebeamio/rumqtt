@@ -3,7 +3,7 @@ use tokio::task;
 use std::thread;
 use std::path::PathBuf;
 use bytes::Bytes;
-use rumqttlog::router::{Data};
+use rumqttlog::router::Data;
 
 mod common;
 
@@ -74,5 +74,3 @@ async fn read(tx: Sender<(usize, RouterInMessage)>) {
 
     println!("Id = {}, Total size = {}", id, total_size);
 }
-
-
