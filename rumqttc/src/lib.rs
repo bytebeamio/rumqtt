@@ -435,10 +435,7 @@ impl MqttOptions {
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
-        assert!(
-            !(duration.as_secs() < 5),
-            "Keep alives should be >= 5  secs"
-        );
+        assert!(duration.as_secs() >= 5, "Keep alives should be >= 5  secs");
 
         self.keep_alive = duration;
         self
@@ -521,9 +518,7 @@ impl MqttOptions {
 
     /// Set number of concurrent in flight messages
     pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
-        if inflight == 0 {
-            panic!("zero in flight is not allowed")
-        }
+        assert_eq!(inflight, 0, "zero in flight is not allowed");
 
         self.inflight = inflight;
         self
