@@ -12,7 +12,7 @@ use crate::v5::{
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
 /// This is cloneable and can be used to asynchronously Publish, Subscribe.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AsyncClient {
     pub(crate) outgoing_buf: Arc<Mutex<OutgoingBuf>>,
     pub(crate) request_tx: Sender<()>,
