@@ -4,7 +4,7 @@ use crate::tls;
 use crate::{Incoming, MqttOptions, MqttState, Outgoing, Packet, Request, StateError, Transport};
 
 use crate::mqttbytes::v4::*;
-use async_channel::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
@@ -200,7 +200,7 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.recv(), if !inflight_full && !pending && !collision => match o {
+            o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
@@ -226,7 +226,7 @@ impl EventLoop {
                 Ok(self.state.events.pop_front().unwrap())
             }
             // cancellation requests to stop the polling
-            _ = self.cancel_rx.recv() => {
+            _ = self.cancel_rx.recv_async() => {
                 Err(ConnectionError::Cancel)
             }
         }
@@ -241,7 +241,7 @@ async fn connect_or_cancel(
     // resolved. Returns with an error if connections fail continuously
     select! {
         o = connect(options) => o,
-        _ = cancel_rx.recv() => {
+        _ = cancel_rx.recv_async() => {
             Err(ConnectionError::Cancel)
         }
     }

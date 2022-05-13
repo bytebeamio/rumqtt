@@ -14,7 +14,7 @@ async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Req
 
         let publish = Publish::new(topic, qos, payload);
         let request = Request::Publish(publish);
-        let _ = requests_tx.send(request).await;
+        let _ = requests_tx.send_async(request).await;
         time::sleep(Duration::from_secs(delay)).await;
     }
 }
