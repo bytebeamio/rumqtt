@@ -150,7 +150,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics)?;
         let request = Request::Subscribe(subscribe);
         self.request_tx.send(request).await?;
         Ok(())
@@ -161,7 +161,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics)?;
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())

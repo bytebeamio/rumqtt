@@ -189,7 +189,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut subscribe = Subscribe::new_many(topics);
+        let mut subscribe = Subscribe::new_many(topics)?;
         let pkid = {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
             if request_buf.buf.len() == request_buf.capacity {
@@ -209,7 +209,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut subscribe = Subscribe::new_many(topics);
+        let mut subscribe = Subscribe::new_many(topics)?;
         let pkid = {
             let mut request_buf = self.outgoing_buf.lock().unwrap();
             if request_buf.buf.len() == request_buf.capacity {

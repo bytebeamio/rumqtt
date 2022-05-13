@@ -29,6 +29,8 @@ pub enum StateError {
     WrongPacket,
     #[error("Timeout while waiting to resolve collision")]
     CollisionTimeout,
+    #[error("A Subscribe packet must contain atleast one filter")]
+    EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
 }
@@ -412,6 +414,10 @@ impl MqttState {
     }
 
     fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
+        if subscription.filters.is_empty() {
+            return Err(StateError::EmptySubscription);
+        }
+
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
 
