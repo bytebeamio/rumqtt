@@ -333,7 +333,7 @@ async fn mqtt_connect(
     let clean_session = options.clean_session();
     let last_will = options.last_will();
 
-    let mut connect = Connect::new(options.client_id());
+    let mut connect = Connect::new(options.protocol, options.client_id());
     connect.keep_alive = keep_alive;
     connect.clean_session = clean_session;
     connect.last_will = last_will;

@@ -85,6 +85,7 @@ pub enum PacketType {
 /// Protocol type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
+    V3,
     V4,
     V5,
 }

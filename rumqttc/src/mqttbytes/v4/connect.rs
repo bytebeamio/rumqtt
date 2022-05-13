@@ -19,9 +19,9 @@ pub struct Connect {
 }
 
 impl Connect {
-    pub fn new<S: Into<String>>(id: S) -> Connect {
+    pub fn new<S: Into<String>>(protocol: Protocol, id: S) -> Connect {
         Connect {
-            protocol: Protocol::V4,
+            protocol,
             keep_alive: 10,
             client_id: id.into(),
             clean_session: true,
@@ -41,8 +41,18 @@ impl Connect {
     }
 
     fn len(&self) -> usize {
-        let mut len = 2 + "MQTT".len() // protocol name
-                              + 1            // protocol version
+        let protocol_specific_len = match self.protocol {
+            Protocol::V3 => {
+                2 + "MQIsdp".len() // protocol name
+             + 1 // protocol version
+            }
+            Protocol::V4 => {
+                2 + "MQTT".len() // protocol name
+              + 1 // protocol version
+            }
+            Protocol::V5 => unreachable!(),
+        };
+        let mut len = protocol_specific_len
                               + 1            // connect flags
                               + 2; // keep alive
 
@@ -73,6 +83,7 @@ impl Connect {
         }
 
         let protocol = match protocol_level {
+            3 => Protocol::V3,
             4 => Protocol::V4,
             5 => Protocol::V5,
             num => return Err(Error::InvalidProtocolLevel(num)),
@@ -83,6 +94,9 @@ impl Connect {
         let keep_alive = read_u16(&mut bytes)?;
 
         let client_id = read_mqtt_string(&mut bytes)?;
+        if protocol == Protocol::V3 && client_id.len() > 23 {
+            return Err(Error::PayloadTooLong);
+        }
         let last_will = LastWill::read(connect_flags, &mut bytes)?;
         let login = Login::read(connect_flags, &mut bytes)?;
 
@@ -102,14 +116,20 @@ impl Connect {
         let len = self.len();
         buffer.put_u8(0b0001_0000);
         let count = write_remaining_length(buffer, len)?;
-        write_mqtt_string(buffer, "MQTT");
+        let protocol_name = match self.protocol {
+            Protocol::V3 => "MQIsdp",
+            Protocol::V4 => "MQTT",
+            Protocol::V5 => unreachable!(),
+        };
+        write_mqtt_string(buffer, protocol_name);
 
         match self.protocol {
+            Protocol::V3 => buffer.put_u8(0x03),
             Protocol::V4 => buffer.put_u8(0x04),
             Protocol::V5 => buffer.put_u8(0x05),
         }
 
-        let flags_index = 1 + count + 2 + 4 + 1;
+        let flags_index = 1 + count + 2 + protocol_name.len() + 1;
 
         let mut connect_flags = 0;
         if self.clean_session {
@@ -118,6 +138,10 @@ impl Connect {
 
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
+
+        if self.protocol == Protocol::V3 && self.client_id.len() > 23 {
+            return Err(Error::PayloadTooLong);
+        }
         write_mqtt_string(buffer, &self.client_id);
 
         if let Some(last_will) = &self.last_will {
