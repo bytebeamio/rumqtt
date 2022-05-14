@@ -197,7 +197,7 @@ impl MqttState {
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
                     let puback = PubAck::new(publish.pkid);
-                    self.outgoing_puback(puback)?
+                    self.outgoing_puback(puback)?;
                 }
                 Ok(())
             }
@@ -505,7 +505,7 @@ mod test {
     use super::{MqttState, StateError};
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
-    use crate::{Event, Incoming, MqttOptions, Outgoing, Request};
+    use crate::{Event, Incoming, Outgoing, Request};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -621,13 +621,13 @@ mod test {
         if let Event::Outgoing(Outgoing::PubAck(pkid)) = mqtt.events[0] {
             assert_eq!(pkid, 2);
         } else {
-            panic!("missing puback")
+            panic!("missing puback");
         }
 
         if let Event::Outgoing(Outgoing::PubRec(pkid)) = mqtt.events[1] {
             assert_eq!(pkid, 3);
         } else {
-            panic!("missing PubRec")
+            panic!("missing PubRec");
         }
     }
 
@@ -773,8 +773,6 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_throw_errors_for_no_pingresp() {
         let mut mqtt = build_mqttstate();
-        let mut opts = MqttOptions::new("test", "localhost", 1883);
-        opts.set_keep_alive(std::time::Duration::from_secs(10));
         mqtt.outgoing_ping().unwrap();
 
         // network activity other than pingresp
@@ -795,9 +793,6 @@ mod test {
     #[test]
     fn outgoing_ping_handle_should_succeed_if_pingresp_is_received() {
         let mut mqtt = build_mqttstate();
-
-        let mut opts = MqttOptions::new("test", "localhost", 1883);
-        opts.set_keep_alive(std::time::Duration::from_secs(10));
 
         // should ping
         mqtt.outgoing_ping().unwrap();

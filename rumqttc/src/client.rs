@@ -3,8 +3,8 @@
 use crate::mqttbytes::{self, v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
-use flume::{SendError, Sender, TrySendError};
 use bytes::Bytes;
+use flume::{SendError, Sender, TrySendError};
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;

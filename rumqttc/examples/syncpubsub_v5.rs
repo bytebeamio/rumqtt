@@ -23,8 +23,8 @@ fn main() {
 
 fn publish(client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
-    for i in 0..10 {
-        let payload = vec![1; i as usize];
+    for i in 0..10_usize {
+        let payload = vec![1; i];
         let topic = format!("hello/{}/world", i);
         let qos = QoS::AtLeastOnce;
 
