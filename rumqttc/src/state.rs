@@ -477,6 +477,7 @@ impl MqttState {
         };
 
         self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
+        self.inflight += 1;
         Ok(pubrel)
     }
 
