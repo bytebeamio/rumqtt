@@ -31,7 +31,7 @@ rustls-pemfile = "0.3"
 segments = "0.1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "=1.17.0", features = ["full"] }
 warp = "0.3"
 
 # Optional
