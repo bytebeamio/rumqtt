@@ -612,6 +612,22 @@ pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, N
     Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
 }
 
+pub fn connect_sync(options: MqttOptions, cap: usize) -> Result<(Client, Notifier), ()> {
+    let (client, mut connection) = Client::new(options, cap);
+    let incoming_buf = connection.eventloop.state.incoming_buf.clone();
+    let incoming_buf_cache = VecDeque::with_capacity(cap);
+
+    std::thread::spawn(move || {
+        for event in connection.iter() {
+            // TODO: maybe do something like retries for some specific errors? or maybe give user
+            // options to configure these retries?
+            event.unwrap()
+        }
+    });
+
+    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
