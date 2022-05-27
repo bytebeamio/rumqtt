@@ -1,7 +1,6 @@
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::{
-    collections::VecDeque,
     fmt::{self, Debug, Formatter},
     time::Duration,
 };
@@ -587,45 +586,6 @@ impl Debug for MqttOptions {
             .field("manual_acks", &self.manual_acks)
             .finish()
     }
-}
-
-pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
-    let mut eventloop = EventLoop::new(options, cap);
-    let outgoing_buf = eventloop.state.outgoing_buf.clone();
-    let incoming_buf = eventloop.state.incoming_buf.clone();
-    let incoming_buf_cache = VecDeque::with_capacity(cap);
-    let request_tx = eventloop.handle();
-
-    let client = AsyncClient {
-        outgoing_buf,
-        request_tx,
-    };
-
-    tokio::spawn(async move {
-        loop {
-            // TODO: maybe do something like retries for some specific errors? or maybe give user
-            // options to configure these retries?
-            eventloop.poll().await.unwrap();
-        }
-    });
-
-    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
-}
-
-pub fn connect_sync(options: MqttOptions, cap: usize) -> Result<(Client, Notifier), ()> {
-    let (client, mut connection) = Client::new(options, cap);
-    let incoming_buf = connection.eventloop.state.incoming_buf.clone();
-    let incoming_buf_cache = VecDeque::with_capacity(cap);
-
-    std::thread::spawn(move || {
-        for event in connection.iter() {
-            // TODO: maybe do something like retries for some specific errors? or maybe give user
-            // options to configure these retries?
-            event.unwrap()
-        }
-    });
-
-    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
 }
 
 #[cfg(test)]

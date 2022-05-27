@@ -1,4 +1,4 @@
-use rumqttc::v5::{Client, LastWill, MqttOptions, QoS, connect_sync};
+use rumqttc::v5::{Client, LastWill, MqttOptions, QoS};
 use std::thread;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ fn main() {
         .set_keep_alive(Duration::from_secs(5))
         .set_last_will(will);
 
-    let (client, mut connection) = connect_sync(mqttoptions, 10).unwrap();
+    let (client, mut connection) = Client::connect(mqttoptions, 10).unwrap();
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {

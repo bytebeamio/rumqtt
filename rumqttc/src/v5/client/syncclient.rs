@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
+
 use tokio::runtime;
 
 use crate::v5::{
     client::get_ack_req,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    AsyncClient, ClientError, Connection, MqttOptions, QoS, Request,
+    AsyncClient, ClientError, Connection, MqttOptions, QoS, Request, Notifier,
 };
 
 /// `Client` to communicate with MQTT eventloop `Connection`.
@@ -26,6 +28,22 @@ impl Client {
 
         let connection = Connection::new(eventloop, runtime);
         (client, connection)
+    }
+
+    pub fn connect(options: MqttOptions, cap: usize) -> Result<(Client, Notifier), ()> {
+        let (client, mut connection) = Client::new(options, cap);
+        let incoming_buf = connection.eventloop.state.incoming_buf.clone();
+        let incoming_buf_cache = VecDeque::with_capacity(cap);
+    
+        std::thread::spawn(move || {
+            for event in connection.iter() {
+                // TODO: maybe do something like retries for some specific errors? or maybe give user
+                // options to configure these retries?
+                event.unwrap()
+            }
+        });
+    
+        Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
     }
 
     /// Sends a MQTT Publish to the eventloop
