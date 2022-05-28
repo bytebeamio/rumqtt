@@ -49,16 +49,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         for event in events {
             println!("{:?}", event);
 
-            match event {
-                Packet::Publish(publish) => {
-                    // this time we will ack incoming publishes.
-                    // Its important not to block notifier as this can cause deadlock.
-                    let c = client.clone();
-                    tokio::spawn(async move {
-                        c.ack(&publish).await.unwrap();
-                    });
-                }
-                _ => {}
+            if let Packet::Publish(publish) = event {
+                // this time we will ack incoming publishes.
+                // Its important not to block notifier as this can cause deadlock.
+                let c = client.clone();
+                tokio::spawn(async move {
+                    c.ack(&publish).await.unwrap();
+                });
             }
         }
     }
