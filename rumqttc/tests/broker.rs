@@ -7,8 +7,8 @@ use tokio::net::TcpListener;
 use tokio::select;
 use tokio::{task, time};
 
-use flume::{bounded, Receiver, Sender};
 use bytes::BytesMut;
+use flume::{bounded, Receiver, Sender};
 use rumqttc::{Event, Incoming, Outgoing, Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
