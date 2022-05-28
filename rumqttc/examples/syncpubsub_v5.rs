@@ -11,7 +11,7 @@ fn main() {
         .set_keep_alive(Duration::from_secs(5))
         .set_last_will(will);
 
-    let (client, mut connection) = Client::connect(mqttoptions, 10).unwrap();
+    let (client, mut connection) = Client::connect(mqttoptions, 10);
     thread::spawn(move || publish(client));
 
     while let Ok(events) = connection.iter() {

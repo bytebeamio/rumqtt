@@ -36,11 +36,12 @@ impl AsyncClient {
         (client, eventloop)
     }
 
-    pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
+    pub async fn connect(options: MqttOptions, cap: usize) -> (AsyncClient, Notifier) {
         let (client, mut eventloop) = AsyncClient::new(options, cap);
         let incoming_buf = eventloop.state.incoming_buf.clone();
         let disconnected = eventloop.state.disconnected.clone();
         let incoming_buf_cache = VecDeque::with_capacity(cap);
+        let notifier = Notifier::new(incoming_buf, incoming_buf_cache, disconnected);
 
         tokio::spawn(async move {
             loop {
@@ -53,10 +54,7 @@ impl AsyncClient {
             }
         });
 
-        Ok((
-            client,
-            Notifier::new(incoming_buf, incoming_buf_cache, disconnected),
-        ))
+        (client, notifier)
     }
 
     /// Sends a MQTT Publish to the eventloop

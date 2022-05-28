@@ -12,7 +12,7 @@ async fn create_conn() -> (AsyncClient, Notifier) {
         .set_manual_acks(true)
         .set_clean_session(false);
 
-    AsyncClient::connect(mqttoptions, 10).await.unwrap()
+    AsyncClient::connect(mqttoptions, 10).await
 }
 
 #[tokio::main(worker_threads = 1)]

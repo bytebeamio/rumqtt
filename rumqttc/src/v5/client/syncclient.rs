@@ -30,7 +30,7 @@ impl Client {
         (client, connection)
     }
 
-    pub fn connect(options: MqttOptions, cap: usize) -> Result<(Client, Notifier), ()> {
+    pub fn connect(options: MqttOptions, cap: usize) -> (Client, Notifier) {
         let (client, mut connection) = Client::new(options, cap);
         let incoming_buf = connection.eventloop.state.incoming_buf.clone();
         let disconnected = connection.eventloop.state.disconnected.clone();
@@ -48,7 +48,7 @@ impl Client {
             }
         });
 
-        Ok((client, notifier))
+        (client, notifier)
     }
 
     /// Sends a MQTT Publish to the eventloop
