@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_imports)]
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, MqttOptions, Notifier, QoS, Packet};
+use rumqttc::v5::{AsyncClient, MqttOptions, Notifier, Packet, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ async fn create_conn() -> (AsyncClient, Notifier) {
         .set_manual_acks(true)
         .set_clean_session(false);
 
-        AsyncClient::connect(mqttoptions, 10).await.unwrap()
+    AsyncClient::connect(mqttoptions, 10).await.unwrap()
 }
 
 #[tokio::main(worker_threads = 1)]
@@ -36,27 +36,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // get subscribed messages without acking
-    for event in notifier.iter() {
-        println!("{:?}", event);
+    while let Ok(events) = notifier.iter() {
+        for event in events {
+            println!("{:?}", event);
+        }
     }
 
     // create new broker connection
     let (client, mut notifier) = create_conn().await;
 
-    for event in notifier.iter() {
-        // previously published messages should be republished after reconnection.
-        println!("{:?}", event);
+    while let Ok(events) = notifier.iter() {
+        for event in events {
+            println!("{:?}", event);
 
-        match event {
-            Packet::Publish(publish) => {
-                // this time we will ack incoming publishes.
-                // Its important not to block notifier as this can cause deadlock.
-                let c = client.clone();
-                tokio::spawn(async move {
-                    c.ack(&publish).await.unwrap();
-                });
+            match event {
+                Packet::Publish(publish) => {
+                    // this time we will ack incoming publishes.
+                    // Its important not to block notifier as this can cause deadlock.
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        c.ack(&publish).await.unwrap();
+                    });
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 

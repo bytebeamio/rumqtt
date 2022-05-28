@@ -1,15 +1,18 @@
 use std::{
     collections::VecDeque,
     mem,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::v5::Incoming;
+
+pub struct Disconnected;
 
 #[derive(Debug)]
 pub struct Notifier {
     incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
     incoming_buf_cache: VecDeque<Incoming>,
+    disconnected: Arc<RwLock<bool>>,
 }
 
 impl Notifier {
@@ -17,16 +20,27 @@ impl Notifier {
     pub(crate) fn new(
         incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
         incoming_buf_cache: VecDeque<Incoming>,
+        disconnected: Arc<RwLock<bool>>,
     ) -> Self {
         Self {
             incoming_buf,
             incoming_buf_cache,
+            disconnected,
         }
     }
 
     #[inline]
-    pub fn iter(&mut self) -> NotifierIter<'_> {
-        NotifierIter(self)
+    pub fn is_disconnected(&self) -> bool {
+        *self.disconnected.read().unwrap()
+    }
+
+    #[inline]
+    pub fn iter(&mut self) -> Result<NotifierIter<'_>, Disconnected> {
+        if self.is_disconnected() {
+            return Err(Disconnected);
+        }
+
+        Ok(NotifierIter(self))
     }
 }
 

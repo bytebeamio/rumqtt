@@ -1,4 +1,7 @@
-use std::{sync::{Arc, Mutex}, collections::VecDeque};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -7,7 +10,7 @@ use crate::v5::{
     client::get_ack_req,
     outgoing_buf::OutgoingBuf,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    ClientError, EventLoop, MqttOptions, QoS, Request, Notifier,
+    ClientError, EventLoop, MqttOptions, Notifier, QoS, Request,
 };
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
@@ -36,17 +39,24 @@ impl AsyncClient {
     pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
         let (client, mut eventloop) = AsyncClient::new(options, cap);
         let incoming_buf = eventloop.state.incoming_buf.clone();
+        let disconnected = eventloop.state.disconnected.clone();
         let incoming_buf_cache = VecDeque::with_capacity(cap);
-    
+
         tokio::spawn(async move {
             loop {
                 // TODO: maybe do something like retries for some specific errors? or maybe give user
                 // options to configure these retries?
-                eventloop.poll().await.unwrap();
+                if let Err(e) = eventloop.poll().await {
+                    println!("{}", e);
+                    break;
+                }
             }
         });
-    
-        Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
+
+        Ok((
+            client,
+            Notifier::new(incoming_buf, incoming_buf_cache, disconnected),
+        ))
     }
 
     /// Sends a MQTT Publish to the eventloop

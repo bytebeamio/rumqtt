@@ -14,8 +14,10 @@ fn main() {
     let (client, mut connection) = Client::connect(mqttoptions, 10).unwrap();
     thread::spawn(move || publish(client));
 
-    for (i, notification) in connection.iter().enumerate() {
-        println!("{}. Notification = {:?}", i, notification);
+    while let Ok(events) = connection.iter() {
+        for (i, notification) in events.enumerate() {
+            println!("{}. Notification = {:?}", i, notification);
+        }
     }
 
     println!("Done with the stream!!");

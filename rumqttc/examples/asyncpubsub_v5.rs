@@ -18,8 +18,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         time::sleep(Duration::from_secs(3)).await;
     });
 
-    for event in notifier.iter() {
-        println!("{:?}", event);
+    while let Ok(events) = notifier.iter() {
+        for event in events {
+            println!("{:?}", event);
+        }
     }
 
     Ok(())

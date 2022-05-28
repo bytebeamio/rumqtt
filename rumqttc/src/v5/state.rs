@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io, mem,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Instant,
 };
 
@@ -34,6 +34,8 @@ pub enum StateError {
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
     Deserialization(Error),
+    #[error("Couldn't get write lock")]
+    WriteLock,
 }
 
 impl From<Error> for StateError {
@@ -76,6 +78,7 @@ pub struct MqttState {
     pub manual_acks: bool,
     pub(crate) incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
     pub(crate) outgoing_buf: Arc<Mutex<OutgoingBuf>>,
+    pub(crate) disconnected: Arc<RwLock<bool>>,
 }
 
 impl MqttState {
@@ -99,6 +102,7 @@ impl MqttState {
             manual_acks,
             incoming_buf: Arc::new(Mutex::new(VecDeque::with_capacity(cap))),
             outgoing_buf: OutgoingBuf::new(max_inflight as usize),
+            disconnected: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -412,6 +416,12 @@ impl MqttState {
     #[inline]
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
+
+        let mut disconnected = self
+            .disconnected
+            .write()
+            .map_err(|_| StateError::WriteLock)?;
+        *disconnected = true;
 
         Disconnect::new().write(&mut self.write)?;
         Ok(())
