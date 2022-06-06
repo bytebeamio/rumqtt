@@ -1,5 +1,4 @@
-//! This module offers a high level synchronous and asynchronous abstraction to
-//! async eventloop.
+//! This module offers a high level synchronous and asynchronous abstraction to async eventloop.
 use crate::mqttbytes::{self, v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
@@ -364,7 +363,7 @@ impl Connection {
         let runtime = self.runtime.take().unwrap();
         Iter {
             connection: self,
-            runtime,
+            runtime: Some(runtime),
         }
     }
 }
@@ -372,7 +371,7 @@ impl Connection {
 /// Iterator which polls the eventloop for connection progress
 pub struct Iter<'a> {
     connection: &'a mut Connection,
-    runtime: runtime::Runtime,
+    runtime: Option<runtime::Runtime>,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -380,7 +379,8 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.connection.eventloop.poll();
-        match self.runtime.block_on(f) {
+        let r = self.runtime.as_ref().unwrap();
+        match r.block_on(f) {
             Ok(v) => Some(Ok(v)),
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
@@ -398,8 +398,6 @@ impl<'a> Iterator for Iter<'a> {
 
 impl<'a> Drop for Iter<'a> {
     fn drop(&mut self) {
-        // TODO: Don't create new runtime in drop
-        let runtime = runtime::Builder::new_current_thread().build().unwrap();
-        self.connection.runtime = Some(mem::replace(&mut self.runtime, runtime));
+        self.connection.runtime = None;
     }
 }
