@@ -4,7 +4,6 @@ use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use flume::{SendError, Sender, TrySendError};
 use bytes::Bytes;
-use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
 
