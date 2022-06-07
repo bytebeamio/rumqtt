@@ -397,6 +397,6 @@ impl<'a> Iterator for Iter<'a> {
 
 impl<'a> Drop for Iter<'a> {
     fn drop(&mut self) {
-        self.connection.runtime = None;
+        self.connection.runtime = self.runtime.take();
     }
 }
