@@ -400,3 +400,25 @@ impl<'a> Drop for Iter<'a> {
         self.connection.runtime = self.runtime.take();
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn call_iter_twice_on_connection() {
+        use std::time::Duration;
+
+        let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+        let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+        mqttoptions
+            .set_keep_alive(Duration::from_secs(5))
+            .set_last_will(will);
+
+        let (_, mut connection) = Client::new(mqttoptions, 10);
+        let iter1 = connection.iter();
+        drop(iter1);
+        let iter2 = connection.iter();
+        drop(iter2);
+    }
+}
