@@ -229,7 +229,7 @@ impl MqttOptions {
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
         let id = id.into();
         if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id")
+            panic!("Invalid client id");
         }
 
         MqttOptions {
@@ -362,7 +362,7 @@ impl MqttOptions {
     /// Set number of concurrent in flight messages
     pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
         if inflight == 0 {
-            panic!("zero in flight is not allowed")
+            panic!("zero in flight is not allowed");
         }
 
         self.inflight = inflight;
