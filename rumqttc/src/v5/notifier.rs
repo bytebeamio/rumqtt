@@ -6,8 +6,6 @@ use std::{
 
 use crate::v5::Incoming;
 
-pub struct Disconnected;
-
 #[derive(Debug)]
 pub struct Notifier {
     incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
@@ -35,12 +33,8 @@ impl Notifier {
     }
 
     #[inline]
-    pub fn iter(&mut self) -> Result<NotifierIter<'_>, Disconnected> {
-        if self.is_disconnected() {
-            return Err(Disconnected);
-        }
-
-        Ok(NotifierIter(self))
+    pub fn iter(&mut self) -> NotifierIter<'_> {
+        NotifierIter(self)
     }
 }
 
@@ -49,15 +43,24 @@ impl Iterator for Notifier {
 
     #[inline]
     fn next(&mut self) -> Option<Incoming> {
-        match self.incoming_buf_cache.pop_front() {
-            None => {
-                mem::swap(
-                    &mut self.incoming_buf_cache,
-                    &mut *self.incoming_buf.lock().unwrap(),
-                );
-                self.incoming_buf_cache.pop_front()
+        loop {
+            let next = match self.incoming_buf_cache.pop_front() {
+                None => {
+                    mem::swap(
+                        &mut self.incoming_buf_cache,
+                        &mut *self.incoming_buf.lock().unwrap(),
+                    );
+                    self.incoming_buf_cache.pop_front()
+                }
+                val => val,
+            };
+
+            // Retrun None only if disconnected, else block and retry
+            match next {
+                Some(p) => return Some(p),
+                None if self.is_disconnected() => return None,
+                _ => {}
             }
-            val => val,
         }
     }
 }

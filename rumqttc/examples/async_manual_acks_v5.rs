@@ -36,27 +36,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // get subscribed messages without acking
-    while let Ok(events) = notifier.iter() {
-        for event in events {
-            println!("{:?}", event);
-        }
+    for event in notifier.iter() {
+        println!("{:?}", event);
     }
 
     // create new broker connection
     let (client, mut notifier) = create_conn().await;
 
-    while let Ok(events) = notifier.iter() {
-        for event in events {
-            println!("{:?}", event);
+    for event in notifier.iter() {
+        println!("{:?}", event);
 
-            if let Packet::Publish(publish) = event {
-                // this time we will ack incoming publishes.
-                // Its important not to block notifier as this can cause deadlock.
-                let c = client.clone();
-                tokio::spawn(async move {
-                    c.ack(&publish).await.unwrap();
-                });
-            }
+        if let Packet::Publish(publish) = event {
+            // this time we will ack incoming publishes.
+            // Its important not to block notifier as this can cause deadlock.
+            let c = client.clone();
+            tokio::spawn(async move {
+                c.ack(&publish).await.unwrap();
+            });
         }
     }
 

@@ -146,6 +146,11 @@ impl MqttState {
         self.outgoing_buf.lock().unwrap().pkid_counter
     }
 
+    #[inline]
+    pub fn is_disconnected(&self) -> bool {
+        *self.disconnected.read().unwrap()
+    }
+
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {

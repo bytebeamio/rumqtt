@@ -47,6 +47,8 @@ pub enum ConnectionError {
     RequestsDone,
     #[error("Cancel request by the user")]
     Cancel,
+    #[error("MQTT connection has been disconnected")]
+    Disconnected,
 }
 
 /// Eventloop with all the state of a connection
@@ -114,6 +116,11 @@ impl EventLoop {
     /// a disconnection.
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<(), ConnectionError> {
+        // TODO: Enable user to reconnect
+        if self.state.is_disconnected() {
+            return Err(ConnectionError::Disconnected);
+        }
+
         if self.network.is_none() {
             let (network, _connack) = connect(&self.options).await?;
             self.network = Some(network);
