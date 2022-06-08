@@ -202,7 +202,7 @@ impl MqttState {
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
                     let puback = PubAck::new(publish.pkid);
-                    self.outgoing_puback(puback)?
+                    self.outgoing_puback(puback)?;
                 }
                 Ok(())
             }
@@ -482,6 +482,7 @@ impl MqttState {
         };
 
         self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
+        self.inflight += 1;
         Ok(pubrel)
     }
 
@@ -626,13 +627,13 @@ mod test {
         if let Event::Outgoing(Outgoing::PubAck(pkid)) = mqtt.events[0] {
             assert_eq!(pkid, 2);
         } else {
-            panic!("missing puback")
+            panic!("missing puback");
         }
 
         if let Event::Outgoing(Outgoing::PubRec(pkid)) = mqtt.events[1] {
             assert_eq!(pkid, 3);
         } else {
-            panic!("missing PubRec")
+            panic!("missing PubRec");
         }
     }
 

@@ -3,23 +3,22 @@ name = "benchmarks"
 version = "0.4.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 argh = "0.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+async-channel = "1"
+bytes = "1"
+futures = { version = "0.3", features = ["compat"] }
+itoa = "0.4"
+pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
+pretty_env_logger = "0.4"
+prost = "0.6"
 rumqttc = { path = "../rumqttc" }
 rumqttd = { path = "../rumqttd" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-futures = { version = "0.3", features = ["compat"] }	
-bytes = "1.0"
-async-channel = "1.4"
-pretty_env_logger = "0.4"
-itoa = "0.4"
-prost = "0.6"
-pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 # paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 # paho-mqtt = "0.7"
 
@@ -29,7 +28,6 @@ jemallocator = "0.3"
 [[bin]]
 name = "rumqttasync"
 path = "clients/rumqttasync.rs"
-
 
 [[bin]]
 name = "rumqttasyncqos0"

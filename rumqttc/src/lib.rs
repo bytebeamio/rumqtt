@@ -72,7 +72,7 @@
 //! ```
 //!
 //! Quick overview of features
-//! - Eventloop orchestrates outgoing/incoming packets concurrently and hadles the state
+//! - Eventloop orchestrates outgoing/incoming packets concurrently and handles the state
 //! - Pings the broker when necessary and detects client side half open connections as well
 //! - Throttling of outgoing packets (todo)
 //! - Queue size based flow control on outgoing packets
@@ -126,9 +126,9 @@ mod state;
 mod tls;
 pub mod v5;
 
-pub use flume::{SendError, Sender, TrySendError};
 pub use client::{AsyncClient, Client, ClientError, Connection};
 pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use flume::{SendError, Sender, TrySendError};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
@@ -703,7 +703,7 @@ mod test {
     #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
-        let opts = MqttOptions::builder()
+        let mqttoptions = MqttOptions::builder()
             .client_id("client_a".parse().unwrap())
             .broker_addr("a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host")
             .port(443)
@@ -714,7 +714,7 @@ mod test {
             ca,
             client_auth,
             alpn,
-        }) = opts.transport
+        }) = mqttoptions.transport
         {
             assert_eq!(ca, Vec::from("Test CA"));
             assert_eq!(client_auth, None);
@@ -723,7 +723,7 @@ mod test {
             panic!("Unexpected transport!");
         }
 
-        assert_eq!(opts.broker_addr, "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
+        assert_eq!(mqttoptions.broker_addr, "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host");
     }
 
     #[test]

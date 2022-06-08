@@ -4,11 +4,11 @@ use crate::tls;
 use crate::{Incoming, MqttOptions, MqttState, Outgoing, Packet, Request, StateError, Transport};
 
 use crate::mqttbytes::v4::*;
-use flume::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
 use async_tungstenite::tokio::connect_async_with_tls_connector;
+use flume::{bounded, Receiver, Sender};
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
