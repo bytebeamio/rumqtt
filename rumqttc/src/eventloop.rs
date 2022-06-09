@@ -254,18 +254,14 @@ async fn connect_or_cancel(
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = match network_connect(options).await {
-        Ok(network) => network,
-        Err(e) => {
-            return Err(e);
-        }
-    };
+    let mut network = time::timeout(
+        Duration::from_secs(options.connection_timeout()),
+        network_connect(options),
+    )
+    .await??;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = match mqtt_connect(options, &mut network).await {
-        Ok(p) => p,
-        Err(e) => return Err(e),
-    };
+    let packet = mqtt_connect(options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
