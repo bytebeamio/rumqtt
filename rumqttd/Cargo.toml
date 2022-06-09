@@ -20,26 +20,26 @@ use-rustls = ["tokio-rustls"]
 use-native-tls = ["tokio-native-tls"]
 
 [dependencies]
-tokio = { version = "1.0", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-log = "0.4"
-thiserror = "1"
-argh = "0.1.3"
-confy = "0.4.0"
-pretty_env_logger = "0.4"
-bytes = "1.0"
-warp = "0.3"
-futures-util = "0.3.8"
-rustls-pemfile = "0.3.0"
+argh = "0.1"
+bytes = "1"
+confy = "0.4"
+futures-util = "0.3"
 jackiechan = "0.0.4"
+log = "0.4"
+pretty_env_logger = "0.4"
+rustls-pemfile = "0.3"
 segments = "0.1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+tokio = { version = "=1.17.0", features = ["full"] }
+warp = "0.3"
 
 # Optional
-tokio-rustls = { version = "0.23.2", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
+tokio-rustls = { version = "0.23", optional = true }
 
 [dev-dependencies]
-pretty_assertions = "0.6.1"
+pretty_assertions = "0.6"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 jemallocator = "0.3"

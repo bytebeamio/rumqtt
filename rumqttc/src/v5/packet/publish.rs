@@ -156,11 +156,11 @@ impl PublishProperties {
         }
 
         if let Some(topic) = &self.response_topic {
-            len += 1 + 2 + topic.len()
+            len += 1 + 2 + topic.len();
         }
 
         if let Some(data) = &self.correlation_data {
-            len += 1 + 2 + data.len()
+            len += 1 + 2 + data.len();
         }
 
         for (key, value) in self.user_properties.iter() {
@@ -172,7 +172,7 @@ impl PublishProperties {
         }
 
         if let Some(typ) = &self.content_type {
-            len += 1 + 2 + typ.len()
+            len += 1 + 2 + typ.len();
         }
 
         len
