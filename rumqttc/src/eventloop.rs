@@ -238,9 +238,9 @@ async fn connect_or_cancel(
     cancel_rx: &Receiver<()>,
 ) -> Result<(Network, Incoming), ConnectionError> {
     // select here prevents cancel request from being blocked until connection request is
-    // resolved. Returns with an error if connections fail continuously
+    // resolved. Returns with an error if connections fail continuously or is timedout.
     select! {
-        o = connect(options) => o,
+        o = time::timeout(Duration::from_secs(options.connection_timeout()), connect(options)) => o?,
         _ = cancel_rx.recv_async() => {
             Err(ConnectionError::Cancel)
         }
@@ -254,11 +254,7 @@ async fn connect_or_cancel(
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = time::timeout(
-        Duration::from_secs(options.connection_timeout()),
-        network_connect(options),
-    )
-    .await??;
+    let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
     let packet = mqtt_connect(options, &mut network).await?;
@@ -339,26 +335,17 @@ async fn mqtt_connect(
         connect.login = Some(login);
     }
 
-    // mqtt connection with timeout
-    time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        network.connect(connect).await?;
-        Ok::<_, ConnectionError>(())
-    })
-    .await??;
+    // send mqtt connect packet
+    network.connect(connect).await?;
 
-    // wait for 'timeout' time to validate connack
-    let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        match network.read().await? {
-            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-                Ok(Packet::ConnAck(connack))
-            }
-            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-            packet => Err(ConnectionError::NotConnAck(packet)),
+    // validate connack
+    match network.read().await? {
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+            Ok(Packet::ConnAck(connack))
         }
-    })
-    .await??;
-
-    Ok(packet)
+        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        packet => Err(ConnectionError::NotConnAck(packet)),
+    }
 }
 
 /// Returns the next pending packet asynchronously to be used in select!

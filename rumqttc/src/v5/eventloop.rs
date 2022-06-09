@@ -41,6 +41,10 @@ pub enum ConnectionError {
     Network(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
+    #[error("Connection refused, return code: {0:?}")]
+    ConnectionRefused(ConnectReturnCode),
+    #[error("Expected ConnAck packet, received: {0:?}")]
+    NotConnAck(Packet),
     #[error("Stream done")]
     StreamDone,
     #[error("Requests done")]
@@ -115,7 +119,11 @@ impl EventLoop {
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<(), ConnectionError> {
         if self.network.is_none() {
-            let (network, _connack) = connect(&self.options).await?;
+            let (network, _connack) = time::timeout(
+                Duration::from_secs(self.options.connection_timeout()),
+                connect(&self.options),
+            )
+            .await??;
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
@@ -224,11 +232,7 @@ impl EventLoop {
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = time::timeout(
-        Duration::from_secs(options.connection_timeout()),
-        network_connect(options),
-    )
-    .await??;
+    let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
     let packet = mqtt_connect(options, &mut network).await?;
@@ -316,33 +320,17 @@ async fn mqtt_connect(
     }
 
     // mqtt connection with timeout
-    time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        network.connect(connect).await?;
-        Ok::<_, ConnectionError>(())
-    })
-    .await??;
 
-    // wait for 'timeout' time to validate connack
-    let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        let packet = match network.read().await? {
-            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-                Packet::ConnAck(connack)
-            }
-            Incoming::ConnAck(connack) => {
-                let error = format!("Broker rejected. Reason = {:?}", connack.code);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-            }
-            packet => {
-                let error = format!("Expecting connack. Received = {:?}", packet);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-            }
-        };
+    network.connect(connect).await?;
 
-        io::Result::Ok(packet)
-    })
-    .await??;
-
-    Ok(packet)
+    // validate connack
+    match network.read().await? {
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+            Ok(Packet::ConnAck(connack))
+        }
+        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        packet => Err(ConnectionError::NotConnAck(packet)),
+    }
 }
 
 /// Returns the next pending packet asynchronously to be used in select!
