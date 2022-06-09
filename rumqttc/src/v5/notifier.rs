@@ -46,11 +46,14 @@ impl Iterator for Notifier {
         loop {
             let next = match self.incoming_buf_cache.pop_front() {
                 None => {
-                    mem::swap(
-                        &mut self.incoming_buf_cache,
-                        &mut *self.incoming_buf.lock().unwrap(),
-                    );
-                    self.incoming_buf_cache.pop_front()
+                    let mut incoming_buf = self.incoming_buf.lock().unwrap();
+                    if incoming_buf.is_empty() {
+                        None
+                    } else {
+                        mem::swap(&mut self.incoming_buf_cache, &mut *incoming_buf);
+                        drop(incoming_buf);
+                        self.incoming_buf_cache.pop_front()
+                    }
                 }
                 val => val,
             };
