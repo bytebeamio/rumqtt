@@ -113,7 +113,7 @@ mod state;
 mod tls;
 pub mod v5;
 
-pub use client::{AsyncClient, Client, ClientError, Connection};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
 pub use mqttbytes::v4::*;
