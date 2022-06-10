@@ -44,7 +44,7 @@ pub enum ConnectionError {
     #[error("Connection refused, return code: {0:?}")]
     ConnectionRefused(ConnectReturnCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
-    NotConnAck(Packet),
+    NotConnAck(Box<Packet>),
     #[error("Stream done")]
     StreamDone,
     #[error("Requests done")]
@@ -329,7 +329,7 @@ async fn mqtt_connect(
             Ok(Packet::ConnAck(connack))
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-        packet => Err(ConnectionError::NotConnAck(packet)),
+        packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
     }
 }
 
