@@ -1,3 +1,14 @@
+### R13
+----------------
+rumqttc v0.13.0
+-----------
+- Add code in `rumqttc::v5`, moving towards support for operating the client with MQTT 5 (#351, #393, #398)
+- Add missing `self.inflight += 1` in `MqttState.save_pubrel()` (#389)
+- Error out when Subscription filter list is empty (#392)
+- Make public `rumqttc::client::Iter` (#402)
+
+-----------
+
 ### R12
 ----------------
 rumqttc v0.12.0
