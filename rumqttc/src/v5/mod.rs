@@ -17,7 +17,7 @@ mod state;
 #[cfg(feature = "use-rustls")]
 mod tls;
 
-pub use client::{AsyncClient, Client, ClientError, Connection};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
 pub use notifier::Notifier;
