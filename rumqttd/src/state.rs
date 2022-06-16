@@ -158,7 +158,7 @@ impl State {
         while let Some(payload) = self.pending.next() {
             let mut publish = Publish::from_bytes(&self.pending.topic, self.pending.qos, payload);
 
-            if let QoS::AtMostOnce = publish.qos {
+            if publish.qos == QoS::AtMostOnce {
                 debug!("Publish. Qos 0. Payload size = {:?}", publish.payload.len());
                 publish.write(&mut self.write)?;
                 continue;

@@ -23,7 +23,7 @@ impl ReadyQueue {
     }
 
     pub fn push_back(&mut self, id: ConnectionId) {
-        self.queue.push_back(id)
+        self.queue.push_back(id);
     }
 
     /// Remove a connection from waiters

@@ -37,9 +37,10 @@ impl Publish {
 
     fn len(&self) -> usize {
         let len = 2 + self.topic.len() + self.payload.len();
-        match self.qos != QoS::AtMostOnce && self.pkid != 0 {
-            true => len + 2,
-            _ => len,
+        if self.qos != QoS::AtMostOnce && self.pkid != 0 {
+            len + 2
+        } else {
+            len
         }
     }
 
