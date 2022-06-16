@@ -30,6 +30,7 @@ impl Client {
         (client, connection)
     }
 
+    /// Create a `Client` and it's associated [`Notifier`]
     pub fn connect(options: MqttOptions, cap: usize) -> (Client, Notifier) {
         let (client, mut connection) = Client::new(options, cap);
         let incoming_buf = connection.eventloop.state.incoming_buf.clone();

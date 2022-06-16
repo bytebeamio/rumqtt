@@ -14,7 +14,7 @@ use crate::v5::{
     UnsubscribeProperties,
 };
 
-/// `AsyncClient` to communicate with MQTT `Eventloop`
+/// `AsyncClient` to communicate with an MQTT `Eventloop`
 /// This is cloneable and can be used to asynchronously Publish, Subscribe.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
@@ -37,6 +37,7 @@ impl AsyncClient {
         (client, eventloop)
     }
 
+    /// Create an `AsyncClient` and it's associated [`Notifier`]
     pub async fn connect(options: MqttOptions, cap: usize) -> (AsyncClient, Notifier) {
         let (client, mut eventloop) = AsyncClient::new(options, cap);
         let incoming_buf = eventloop.state.incoming_buf.clone();
