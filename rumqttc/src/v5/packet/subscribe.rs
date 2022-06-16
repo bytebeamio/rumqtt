@@ -190,7 +190,7 @@ impl SubscribeProperties {
                     // TODO: Validate 1 +. Tests are working either way
                     cursor += 1 + id_len;
                     bytes.advance(id_len);
-                    id = Some(sub_id)
+                    id = Some(sub_id);
                 }
                 PropertyType::UserProperty => {
                     let key = read_mqtt_string(&mut bytes)?;

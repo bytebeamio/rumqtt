@@ -10,7 +10,7 @@ use crate::v5::{
     client::get_ack_req,
     outgoing_buf::OutgoingBuf,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    ClientError, EventLoop, MqttOptions, Notifier, QoS, Request,
+    ClientError, EventLoop, MqttOptions, Notifier, QoS, Request, SubscribeProperties, UnsubscribeProperties,
 };
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
@@ -151,16 +151,56 @@ impl AsyncClient {
 
     /// Sends a MQTT Subscribe to the eventloop
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<u16, ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-        let pkid = self.make_request(Request::Subscribe(subscribe), qos != QoS::AtMostOnce)?;
+        self.subscribe_with(topic, qos, None).await
+    }
+
+    /// Sends a MQTT Subscribe to the eventloop with options
+    pub async fn subscribe_with<S: Into<String>, P: Into<Option<SubscribeProperties>>>(
+        &self,
+        topic: S,
+        qos: QoS,
+        props: P,
+    ) -> Result<u16, ClientError> {
+        let mut subscribe = Subscribe::new(topic.into(), qos);
+        subscribe.properties = props.into();
+        let pkid = {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            subscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Subscribe(subscribe));
+            pkid
+        };
         self.notify_async().await?;
         Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe to the eventloop
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<u16, ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-        let pkid = self.make_request(Request::Subscribe(subscribe), qos != QoS::AtMostOnce)?;
+        self.try_subscribe_with(topic, qos, None)
+    }
+
+    /// Sends a MQTT Subscribe to the eventloop
+    pub fn try_subscribe_with<S: Into<String>, P: Into<Option<SubscribeProperties>>>(
+        &self,
+        topic: S,
+        qos: QoS,
+        props: P,
+    ) -> Result<u16, ClientError> {
+        let mut subscribe = Subscribe::new(topic.into(), qos);
+        subscribe.properties = props.into();
+        let pkid = {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            subscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Subscribe(subscribe));
+            pkid
+        };
         self.try_notify()?;
         Ok(pkid)
     }
@@ -170,8 +210,30 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics)?;
-        let pkid = self.make_request(Request::Subscribe(subscribe), true)?;
+        self.subscribe_with_many(None, topics).await
+    }
+
+    /// Sends a MQTT Subscribe for multiple topics to the eventloop, with properties
+    pub async fn subscribe_with_many<P: Into<Option<SubscribeProperties>>, T>(
+        &self,
+        props: P,
+        topics: T,
+    ) -> Result<u16, ClientError>
+    where
+        T: IntoIterator<Item = SubscribeFilter>,
+    {
+        let mut subscribe = Subscribe::new_many(topics)?;
+        subscribe.properties = props.into();
+        let pkid = {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            subscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Subscribe(subscribe));
+            pkid
+        };
         self.notify_async().await?;
         Ok(pkid)
     }
@@ -181,24 +243,81 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics)?;
-        let pkid = self.make_request(Request::Subscribe(subscribe), true)?;
+        self.try_subscribe_with_many(None, topics)
+    }
+
+    /// Sends a MQTT Subscribe for multiple topics to the eventloop
+    pub fn try_subscribe_with_many<P, T>(&self, props: P, topics: T) -> Result<u16, ClientError>
+    where
+        P: Into<Option<SubscribeProperties>>,
+        T: IntoIterator<Item = SubscribeFilter>,
+    {
+        let mut subscribe = Subscribe::new_many(topics)?;
+        subscribe.properties = props.into();
+        let pkid = {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            subscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Subscribe(subscribe));
+            pkid
+        };
         self.try_notify()?;
         Ok(pkid)
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<u16, ClientError> {
-        let unsubscribe = Unsubscribe::new(topic.into());
-        let pkid = self.make_request(Request::Unsubscribe(unsubscribe), true)?;
+        self.unsubscribe_with(topic, None).await
+    }
+
+    /// Sends a MQTT Unsubscribe to the eventloop, with properties
+    pub async fn unsubscribe_with<S: Into<String>, P: Into<Option<UnsubscribeProperties>>>(
+        &self,
+        topic: S,
+        props: P,
+    ) -> Result<u16, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        unsubscribe.properties = props.into();
+        let pkid = {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            unsubscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Unsubscribe(unsubscribe));
+            pkid
+        };
         self.notify_async().await?;
         Ok(pkid)
     }
 
     /// Sends a MQTT Unsubscribe to the eventloop
     pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<u16, ClientError> {
-        let unsubscribe = Unsubscribe::new(topic.into());
-        let pkid = self.make_request(Request::Unsubscribe(unsubscribe), true)?;
+        self.try_unsubscribe_with(topic, None)
+    }
+
+    /// Sends a MQTT Unsubscribe to the eventloop, with properties
+    pub fn try_unsubscribe_with<S: Into<String>, P: Into<Option<UnsubscribeProperties>>>(
+        &self,
+        topic: S,
+        props: P,
+    ) -> Result<u16, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        unsubscribe.properties = props.into();
+        let pkid = {
+            let mut request_buf = self.outgoing_buf.lock().unwrap();
+            if request_buf.buf.len() == request_buf.capacity {
+                return Err(ClientError::RequestsFull);
+            }
+            let pkid = request_buf.increment_pkid();
+            unsubscribe.pkid = pkid;
+            request_buf.buf.push_back(Request::Unsubscribe(unsubscribe));
+            pkid
+        };
         self.try_notify()?;
         Ok(pkid)
     }
