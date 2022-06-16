@@ -10,7 +10,8 @@ use crate::v5::{
     client::get_ack_req,
     outgoing_buf::OutgoingBuf,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    ClientError, EventLoop, MqttOptions, Notifier, QoS, Request, SubscribeProperties, UnsubscribeProperties,
+    ClientError, EventLoop, MqttOptions, Notifier, QoS, Request, SubscribeProperties,
+    UnsubscribeProperties,
 };
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
