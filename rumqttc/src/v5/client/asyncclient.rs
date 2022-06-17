@@ -10,8 +10,8 @@ use crate::v5::{
     client::get_ack_req,
     outgoing_buf::OutgoingBuf,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    ClientError, EventLoop, MqttOptions, Notifier, QoS, Request, SubscribeProperties,
-    UnsubscribeProperties,
+    ClientError, ConnectionError, EventLoop, MqttOptions, Notifier, QoS, Request,
+    SubscribeProperties, UnsubscribeProperties,
 };
 
 /// `AsyncClient` to communicate with an MQTT `Eventloop`
@@ -49,8 +49,12 @@ impl AsyncClient {
             loop {
                 // TODO: maybe do something like retries for some specific errors? or maybe give user
                 // options to configure these retries?
-                if let Err(e) = eventloop.poll().await {
+                let event = eventloop.poll().await;
+                if let Err(e) = &event {
                     println!("{}", e);
+                }
+
+                if let Err(ConnectionError::Disconnected) = event {
                     break;
                 }
             }

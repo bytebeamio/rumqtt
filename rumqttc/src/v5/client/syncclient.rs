@@ -5,7 +5,7 @@ use tokio::runtime;
 use crate::v5::{
     client::get_ack_req,
     packet::{Publish, Subscribe, SubscribeFilter, Unsubscribe},
-    AsyncClient, ClientError, Connection, MqttOptions, Notifier, QoS, Request,
+    AsyncClient, ClientError, Connection, ConnectionError, MqttOptions, Notifier, QoS, Request,
 };
 
 /// `Client` to communicate with MQTT eventloop `Connection`.
@@ -42,8 +42,11 @@ impl Client {
             for event in connection.iter() {
                 // TODO: maybe do something like retries for some specific errors? or maybe give user
                 // options to configure these retries?
-                if let Err(e) = event {
+                if let Err(e) = &event {
                     println!("{}", e);
+                }
+
+                if let Err(ConnectionError::Disconnected) = event {
                     break;
                 }
             }
