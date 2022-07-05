@@ -27,7 +27,7 @@ log = "0.4"
 pollster = "0.2"
 rustls-pemfile = { version = "0.3", optional = true }
 thiserror = "1"
-tokio = { version = "=1.17.0", features = ["rt", "macros", "io-util", "net", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "io-util", "net", "time"] }
 tokio-rustls = { version = "=0.23.3", optional = true }
 url = { version = "2", default-features = false, optional = true }
 ws_stream_tungstenite = { version = "0.7", default-features = false, features = ["tokio_io"], optional = true }
@@ -43,4 +43,4 @@ pretty_env_logger = "0.4"
 rustls = "0.20"
 rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "=1.17.0", features = ["full", "macros"] }
+tokio = { version = "1", features = ["full", "macros"] }
