@@ -268,19 +268,15 @@ impl Disconnect {
 
         let mut length = 0;
 
-        match &self.properties {
-            Some(properties) => {
-                length += 1; // Disconnect Reason Code
+        if let Some(properties) = &self.properties {
+            length += 1; // Disconnect Reason Code
 
-                let properties_len = properties.len();
-                let properties_len_len = len_len(properties_len);
-                length += properties_len_len + properties_len;
-            }
-            None if self.reason_code == DisconnectReasonCode::NormalDisconnection => {}
-            None => {
-                length += 1; // Disconnect Reason Code
-            }
-        };
+            let properties_len = properties.len();
+            let properties_len_len = len_len(properties_len);
+            length += properties_len_len + properties_len;
+        } else {
+            length += 1; // Disconnect Reason Code
+        }
 
         length
     }
@@ -320,7 +316,6 @@ impl Disconnect {
 
         if length == 2 {
             buffer.put_u8(0x00);
-
             return Ok(length);
         }
 
@@ -330,6 +325,8 @@ impl Disconnect {
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         Ok(1 + len_len + length)

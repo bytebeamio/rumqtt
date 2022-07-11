@@ -48,12 +48,14 @@ impl ConnAck {
 
     fn len(&self) -> usize {
         let mut len = 1  // session present
-                        + 1; // code
+                    + 1; // code
 
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            len += 1;
         }
 
         len
@@ -87,6 +89,8 @@ impl ConnAck {
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         Ok(1 + count + len)

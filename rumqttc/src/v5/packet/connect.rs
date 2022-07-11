@@ -45,20 +45,17 @@ impl Connect {
 
     pub fn len(&self) -> usize {
         let mut len = 2 + "MQTT".len() // protocol name
-                              + 1            // protocol version
-                              + 1            // connect flags
-                              + 2; // keep alive
+                        + 1            // protocol version
+                        + 1            // connect flags
+                        + 2; // keep alive
 
-        match &self.properties {
-            Some(properties) => {
-                let properties_len = properties.len();
-                let properties_len_len = len_len(properties_len);
-                len += properties_len_len + properties_len;
-            }
-            None => {
-                // just 1 byte representing 0 len
-                len += 1;
-            }
+        if let Some(properties) = &self.properties {
+            let properties_len = properties.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
         }
 
         len += 2 + self.client_id.len();
@@ -141,12 +138,11 @@ impl Connect {
         buffer.put_u8(connect_flags);
         buffer.put_u16(self.keep_alive);
 
-        match &self.properties {
-            Some(properties) => properties.write(buffer)?,
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
-        };
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
 
         write_mqtt_string(buffer, &self.client_id);
 
@@ -193,17 +189,14 @@ impl LastWill {
     fn len(&self) -> usize {
         let mut len = 0;
 
-        match &self.properties {
-            Some(properties) => {
-                let properties_len = properties.len();
-                let properties_len_len = len_len(properties_len);
-                len += properties_len_len + properties_len;
-            }
-            None => {
-                // just 1 byte representing 0 len
-                len += 1;
-            }
-        };
+        if let Some(properties) = &self.properties {
+            let properties_len = properties.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
+        }
 
         len += 2 + self.topic.len() + 2 + self.message.len();
         len
@@ -243,12 +236,11 @@ impl LastWill {
             connect_flags |= 0x20;
         }
 
-        match &self.properties {
-            Some(properties) => properties.write(buffer)?,
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
-        };
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
 
         write_mqtt_string(buffer, &self.topic);
         write_mqtt_bytes(buffer, &self.message);
