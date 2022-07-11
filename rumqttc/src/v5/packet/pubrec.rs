@@ -45,10 +45,10 @@ impl PubRec {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            len += 1;
         }
 
-        // Unlike other packets, property length can be ignored if there are
-        // no properties in acks
         len
     }
 
@@ -97,6 +97,8 @@ impl PubRec {
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         Ok(1 + count + len)
