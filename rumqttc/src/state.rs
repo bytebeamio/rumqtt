@@ -204,6 +204,7 @@ impl MqttState {
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
                 self.incoming_pub[pkid as usize] = Some(pkid);
+
                 if !self.manual_acks {
                     let pubrec = PubRec::new(pkid);
                     self.outgoing_pubrec(pubrec)?;
