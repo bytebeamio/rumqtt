@@ -15,9 +15,9 @@ use log::{error, trace, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
-    #[error("Unexpected router message")]
+    #[error("Unexpected router message: {0:?}")]
     NotConnectionAck(Notification),
-    #[error("Connack error {0}")]
+    #[error("Connack error: {0}")]
     ConnectionAck(String),
     #[error("Channel send error")]
     Send(#[from] SendError<(Id, Event)>),
@@ -175,7 +175,7 @@ pub fn construct_broker(
         async {
             // `ConsoleLink::new` won't terminate until router is running
             let console = ConsoleLink::new(config, router_tx).into();
-            consolelink::start(console).await
+            consolelink::start(console).await;
         }
     };
 

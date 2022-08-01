@@ -3,8 +3,8 @@
 use crate::mqttbytes::{v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
-use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
+use flume::{SendError, Sender, TrySendError};
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
@@ -67,7 +67,7 @@ impl AsyncClient {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        self.request_tx.send(publish).await?;
+        self.request_tx.send_async(publish).await?;
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_tx.send(ack).await?;
+            self.request_tx.send_async(ack).await?;
         }
         Ok(())
     }
@@ -123,7 +123,7 @@ impl AsyncClient {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        self.request_tx.send(publish).await?;
+        self.request_tx.send_async(publish).await?;
         Ok(())
     }
 
@@ -131,7 +131,7 @@ impl AsyncClient {
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -148,9 +148,9 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics)?;
         let request = Request::Subscribe(subscribe);
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -159,7 +159,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics)?;
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())
@@ -169,7 +169,7 @@ impl AsyncClient {
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -184,7 +184,7 @@ impl AsyncClient {
     /// Sends a MQTT disconnect to the eventloop
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -197,7 +197,7 @@ impl AsyncClient {
 
     /// Stops the eventloop right away
     pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx.send(()).await?;
+        self.cancel_tx.send_async(()).await?;
         Ok(())
     }
 }

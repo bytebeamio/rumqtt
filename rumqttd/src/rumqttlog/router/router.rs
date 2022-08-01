@@ -44,7 +44,7 @@ pub struct Router {
     /// Connections with more pending requests and ready to make progress
     readyqueue: ReadyQueue,
     /// Waiter on a topic. These are used to wake connections/replicators
-    /// which are caught up all the data on a topic. Map[topic]List[Connections Ids]
+    /// which are caught up all the data on a topic. Map: topic -> List[Connection Ids]
     data_waiters: DataWaiters,
     /// Waiters on new topics
     topics_waiters: TopicsWaiters,
