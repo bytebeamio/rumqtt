@@ -27,7 +27,7 @@ impl Acks {
     }
 
     pub fn register_pending_acks_request(&mut self) {
-        self.pending_acks_request = Some(())
+        self.pending_acks_request = Some(());
     }
 
     pub fn take_pending_acks_request(&mut self) -> Option<()> {
@@ -45,13 +45,13 @@ impl Acks {
     pub fn push_subscribe_ack(&mut self, pkid: u16, return_codes: Vec<SubscribeReasonCode>) {
         let suback = SubAck::new(pkid, return_codes);
         let suback = Packet::SubAck(suback);
-        self.acks.push(suback)
+        self.acks.push(suback);
     }
 
     pub fn push_unsubscribe_ack(&mut self, pkid: u16) {
         let unsuback = UnsubAck::new(pkid);
         let unsuback = Packet::UnsubAck(unsuback);
-        self.acks.push(unsuback)
+        self.acks.push(unsuback);
     }
 
     /// Returns committed acks by take

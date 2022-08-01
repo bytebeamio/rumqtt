@@ -7,8 +7,8 @@ use tokio::net::TcpListener;
 use tokio::select;
 use tokio::{task, time};
 
-use async_channel::{bounded, Receiver, Sender};
 use bytes::BytesMut;
+use flume::{bounded, Receiver, Sender};
 use rumqttc::{Event, Incoming, Outgoing, Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -95,7 +95,7 @@ impl Broker {
         time::timeout(Duration::from_secs(30), async {
             let p = self.framed.readb(&mut self.incoming).await;
             // println!("Broker read = {:?}", p);
-            p.unwrap()
+            p.unwrap();
         })
         .await
         .unwrap();
@@ -106,7 +106,7 @@ impl Broker {
     /// Reads next packet from the stream
     pub async fn blackhole(&mut self) -> Packet {
         loop {
-            let _packet = self.framed.readb(&mut self.incoming).await.unwrap();
+            self.framed.readb(&mut self.incoming).await.unwrap();
         }
     }
 
@@ -136,7 +136,7 @@ impl Broker {
                 }
 
                 let packet = Packet::Publish(publish);
-                tx.send(packet).await.unwrap();
+                tx.send_async(packet).await.unwrap();
                 time::sleep(Duration::from_secs(delay)).await;
             }
         });
@@ -145,7 +145,7 @@ impl Broker {
     /// Selects between outgoing and incoming packets
     pub async fn tick(&mut self) -> Event {
         select! {
-            request = self.outgoing_rx.recv() => {
+            request = self.outgoing_rx.recv_async() => {
                 let request = request.unwrap();
                 let outgoing = self.framed.write(request).await.unwrap();
                 Event::Outgoing(outgoing)

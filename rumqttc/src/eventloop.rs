@@ -1,11 +1,14 @@
-use crate::{framed::Network, Transport};
-use crate::{tls, Incoming, MqttState, Packet, Request, StateError};
-use crate::{MqttOptions, Outgoing};
+use crate::framed::Network;
+#[cfg(feature = "use-rustls")]
+use crate::tls;
+use crate::{Incoming, MqttOptions, MqttState, Outgoing, Packet, Request, StateError, Transport};
 
 use crate::mqttbytes::v4::*;
-use async_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "websocket")]
-use async_tungstenite::tokio::{connect_async, connect_async_with_tls_connector};
+use async_tungstenite::tokio::connect_async;
+#[cfg(all(feature = "use-rustls", feature = "websocket"))]
+use async_tungstenite::tokio::connect_async_with_tls_connector;
+use flume::{bounded, Receiver, Sender};
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -31,6 +34,10 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket Connect: {0}")]
+    WsConnect(#[from] http::Error),
+    #[cfg(feature = "use-rustls")]
     #[error("TLS: {0}")]
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -194,7 +201,7 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.recv(), if !inflight_full && !pending && !collision => match o {
+            o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
@@ -220,7 +227,7 @@ impl EventLoop {
                 Ok(self.state.events.pop_front().unwrap())
             }
             // cancellation requests to stop the polling
-            _ = self.cancel_rx.recv() => {
+            _ = self.cancel_rx.recv_async() => {
                 Err(ConnectionError::Cancel)
             }
         }
@@ -232,10 +239,10 @@ async fn connect_or_cancel(
     cancel_rx: &Receiver<()>,
 ) -> Result<(Network, Incoming), ConnectionError> {
     // select here prevents cancel request from being blocked until connection request is
-    // resolved. Returns with an error if connections fail continuously
+    // resolved. Returns with an error if connections fail continuously or is timedout.
     select! {
-        o = connect(options) => o,
-        _ = cancel_rx.recv() => {
+        o = time::timeout(Duration::from_secs(options.connection_timeout()), connect(options)) => o?,
+        _ = cancel_rx.recv_async() => {
             Err(ConnectionError::Cancel)
         }
     }
@@ -248,18 +255,10 @@ async fn connect_or_cancel(
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = match network_connect(options).await {
-        Ok(network) => network,
-        Err(e) => {
-            return Err(e);
-        }
-    };
+    let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = match mqtt_connect(options, &mut network).await {
-        Ok(p) => p,
-        Err(e) => return Err(e),
-    };
+    let packet = mqtt_connect(options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
@@ -277,6 +276,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = TcpStream::connect((addr, port)).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
+        #[cfg(feature = "use-rustls")]
         Transport::Tls(tls_config) => {
             let socket = tls::tls_connect(options, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
@@ -293,21 +293,19 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .method(http::Method::GET)
                 .uri(options.broker_addr.as_str())
                 .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())
-                .unwrap();
+                .body(())?;
 
             let (socket, _) = connect_async(request).await?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
-        #[cfg(feature = "websocket")]
+        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
             let request = http::Request::builder()
                 .method(http::Method::GET)
                 .uri(options.broker_addr.as_str())
                 .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())
-                .unwrap();
+                .body(())?;
 
             let connector = tls::tls_connector(&tls_config).await?;
 
@@ -338,26 +336,17 @@ async fn mqtt_connect(
         connect.login = Some(login);
     }
 
-    // mqtt connection with timeout
-    time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        network.connect(connect).await?;
-        Ok::<_, ConnectionError>(())
-    })
-    .await??;
+    // send mqtt connect packet
+    network.connect(connect).await?;
 
-    // wait for 'timeout' time to validate connack
-    let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        match network.read().await? {
-            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-                Ok(Packet::ConnAck(connack))
-            }
-            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-            packet => Err(ConnectionError::NotConnAck(packet)),
+    // validate connack
+    match network.read().await? {
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+            Ok(Packet::ConnAck(connack))
         }
-    })
-    .await??;
-
-    Ok(packet)
+        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        packet => Err(ConnectionError::NotConnAck(packet)),
+    }
 }
 
 /// Returns the next pending packet asynchronously to be used in select!
