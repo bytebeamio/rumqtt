@@ -1,6 +1,6 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
-use crate::mqttbytes::{self, v4::*, QoS};
+use crate::mqttbytes::{v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use async_channel::{SendError, Sender, TrySendError};
@@ -18,8 +18,6 @@ pub enum ClientError {
     Request(#[from] SendError<Request>),
     #[error("Failed to send mqtt requests to eventloop")]
     TryRequest(#[from] TrySendError<Request>),
-    #[error("Serialization error")]
-    Mqtt4(mqttbytes::Error),
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
