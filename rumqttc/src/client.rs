@@ -27,31 +27,23 @@ pub enum ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
-    cancel_tx: Sender<()>,
 }
 
 impl AsyncClient {
     /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let mut eventloop = EventLoop::new(options, cap);
+        let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.cancel_handle();
 
-        let client = AsyncClient {
-            request_tx,
-            cancel_tx,
-        };
+        let client = AsyncClient { request_tx };
 
         (client, eventloop)
     }
 
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
-    pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
-        AsyncClient {
-            request_tx,
-            cancel_tx,
-        }
+    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
+        AsyncClient { request_tx }
     }
 
     /// Sends a MQTT Publish to the eventloop
@@ -196,12 +188,6 @@ impl AsyncClient {
         self.request_tx.try_send(request)?;
         Ok(())
     }
-
-    /// Stops the eventloop right away
-    pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx.send(()).await?;
-        Ok(())
-    }
 }
 
 fn get_ack_req(publish: &Publish) -> Option<Request> {
@@ -331,12 +317,6 @@ impl Client {
     /// Sends a MQTT disconnect to the eventloop
     pub fn try_disconnect(&mut self) -> Result<(), ClientError> {
         self.client.try_disconnect()?;
-        Ok(())
-    }
-
-    /// Stops the eventloop right away
-    pub fn cancel(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.cancel())?;
         Ok(())
     }
 }

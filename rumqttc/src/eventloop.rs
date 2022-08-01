@@ -63,6 +63,7 @@ pub struct EventLoop {
     pub(crate) keepalive_timeout: Option<Pin<Box<Sleep>>>,
     /// Handle to read cancellation requests
     pub(crate) cancel_rx: Receiver<()>,
+    #[allow(dead_code)]
     /// Handle to send cancellation requests (and drops)
     pub(crate) cancel_tx: Sender<()>,
 }
@@ -109,7 +110,7 @@ impl EventLoop {
     ///
     /// Can be useful in cases when connection should be halted immediately
     /// between half-open connection detections or (re)connection timeouts
-    pub(crate) fn cancel_handle(&mut self) -> Sender<()> {
+    pub(crate) fn _cancel_handle(&mut self) -> Sender<()> {
         self.cancel_tx.clone()
     }
 
