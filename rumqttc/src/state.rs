@@ -190,30 +190,28 @@ impl MqttState {
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
     fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<(), StateError> {
-        match publish.qos {
+        let qos = publish.qos;
+
+        match qos {
+            QoS::AtMostOnce => Ok(()),
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
                     let puback = PubAck::new(publish.pkid);
                     self.outgoing_puback(puback)?;
                 }
+                Ok(())
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
-                let incoming = self
-                    .incoming_pub
-                    .get_mut(pkid as usize)
-                    .ok_or(StateError::Unsolicited(pkid))?;
-                *incoming = Some(pkid);
+                self.incoming_pub[pkid as usize] = Some(pkid);
 
                 if !self.manual_acks {
                     let pubrec = PubRec::new(pkid);
                     self.outgoing_pubrec(pubrec)?;
                 }
+                Ok(())
             }
-            _ => {}
         }
-
-        Ok(())
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
