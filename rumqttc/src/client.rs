@@ -12,8 +12,6 @@ use tokio::runtime::Runtime;
 /// Client Error
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("Failed to send cancel request to eventloop")]
-    Cancel(#[from] SendError<()>),
     #[error("Failed to send mqtt requests to eventloop")]
     Request(#[from] SendError<Request>),
     #[error("Failed to send mqtt requests to eventloop")]
