@@ -48,8 +48,6 @@ pub enum ConnectionError {
     NotConnAck(Packet),
     #[error("Requests done")]
     RequestsDone,
-    #[error("Cancel request by the user")]
-    Cancel,
 }
 
 /// Eventloop with all the state of a connection

@@ -365,10 +365,6 @@ impl<'a> Iterator for Iter<'a> {
                 trace!("Done with requests");
                 None
             }
-            Err(ConnectionError::Cancel) => {
-                trace!("Cancellation request received");
-                None
-            }
             Err(e) => Some(Err(e)),
         }
     }
