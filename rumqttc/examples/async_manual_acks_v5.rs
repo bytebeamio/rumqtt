@@ -1,72 +1,62 @@
 #![allow(dead_code, unused_imports)]
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions, QoS};
+use rumqttc::v5::{AsyncClient, MqttOptions, Notifier, Packet, QoS};
 use std::error::Error;
 use std::time::Duration;
 
-fn create_conn() -> (AsyncClient, EventLoop) {
+async fn create_conn() -> (AsyncClient, Notifier) {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
         .set_clean_session(false);
 
-    AsyncClient::new(mqttoptions, 10)
+    AsyncClient::connect(mqttoptions, 10).await
 }
 
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
-    todo!("fix this example with new way of spawning clients")
-    // pretty_env_logger::init();
+    // todo!("fix this example with new way of spawning clients")
+    pretty_env_logger::init();
 
-    // // create mqtt connection with clean_session = false and manual_acks = true
-    // let (client, mut eventloop) = create_conn();
+    // create mqtt connection with clean_session = false and manual_acks = true
+    let (client, mut notifier) = create_conn().await;
 
-    // // subscribe example topic
-    // client
-    //     .subscribe("hello/world", QoS::AtLeastOnce)
-    //     .await
-    //     .unwrap();
+    // subscribe example topic
+    client
+        .subscribe("hello/world", QoS::AtLeastOnce)
+        .await
+        .unwrap();
 
-    // task::spawn(async move {
-    //     // send some messages to example topic and disconnect
-    //     requests(client.clone()).await;
-    //     client.disconnect().await.unwrap()
-    // });
+    task::spawn(async move {
+        // send some messages to example topic and disconnect
+        requests(&client).await;
+        client.disconnect().await.unwrap()
+    });
 
-    // loop {
-    //     // get subscribed messages without acking
-    //     let event = eventloop.poll().await;
-    //     println!("{:?}", event);
-    //     if let Err(_err) = event {
-    //         // break loop on disconnection
-    //         break;
-    //     }
-    // }
+    // get subscribed messages without acking
+    for event in notifier.iter() {
+        println!("{:?}", event);
+    }
 
-    // // create new broker connection
-    // let (_client, mut eventloop) = create_conn();
+    // create new broker connection
+    let (client, mut notifier) = create_conn().await;
 
-    // loop {
-    //     // previously published messages should be republished after reconnection.
-    //     let event = eventloop.poll().await;
-    //     println!("{:?}", event);
+    for event in notifier.iter() {
+        println!("{:?}", event);
 
-    //     todo!("fix the commented out code below")
+        if let Packet::Publish(publish) = event {
+            // this time we will ack incoming publishes.
+            // Its important not to block notifier as this can cause deadlock.
+            let c = client.clone();
+            tokio::spawn(async move {
+                c.ack(&publish).await.unwrap();
+            });
+        }
+    }
 
-    //     // match event {
-    //     //     Ok(Event::Incoming(Incoming::Publish(publish))) => {
-    //     //         // this time we will ack incoming publishes.
-    //     //         // Its important not to block eventloop as this can cause deadlock.
-    //     //         let c = client.clone();
-    //     //         tokio::spawn(async move {
-    //     //             c.ack(&publish).await.unwrap();
-    //     //         });
-    //     //     }
-    //     //     _ => {}
-    //     // }
-    // }
+    Ok(())
 }
 
 async fn requests(client: &AsyncClient) {

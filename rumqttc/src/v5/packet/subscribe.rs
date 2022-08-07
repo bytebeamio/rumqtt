@@ -130,12 +130,11 @@ impl Subscribe {
         // write packet id
         buffer.put_u16(self.pkid);
 
-        match &self.properties {
-            Some(properties) => properties.write(buffer)?,
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
-        };
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
 
         // write filters
         for filter in self.filters.iter() {

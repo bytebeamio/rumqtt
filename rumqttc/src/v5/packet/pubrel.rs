@@ -38,6 +38,8 @@ impl PubRel {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            len += 1;
         }
 
         len
@@ -88,6 +90,8 @@ impl PubRel {
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         Ok(1 + count + len)

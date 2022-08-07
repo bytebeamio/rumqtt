@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     mem,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::v5::Incoming;
@@ -10,6 +10,7 @@ use crate::v5::Incoming;
 pub struct Notifier {
     incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
     incoming_buf_cache: VecDeque<Incoming>,
+    disconnected: Arc<RwLock<bool>>,
 }
 
 impl Notifier {
@@ -17,11 +18,18 @@ impl Notifier {
     pub(crate) fn new(
         incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
         incoming_buf_cache: VecDeque<Incoming>,
+        disconnected: Arc<RwLock<bool>>,
     ) -> Self {
         Self {
             incoming_buf,
             incoming_buf_cache,
+            disconnected,
         }
+    }
+
+    #[inline]
+    pub fn is_disconnected(&self) -> bool {
+        *self.disconnected.read().unwrap()
     }
 
     #[inline]
@@ -35,15 +43,27 @@ impl Iterator for Notifier {
 
     #[inline]
     fn next(&mut self) -> Option<Incoming> {
-        match self.incoming_buf_cache.pop_front() {
-            None => {
-                mem::swap(
-                    &mut self.incoming_buf_cache,
-                    &mut *self.incoming_buf.lock().unwrap(),
-                );
-                self.incoming_buf_cache.pop_front()
+        loop {
+            let next = match self.incoming_buf_cache.pop_front() {
+                None => {
+                    let mut incoming_buf = self.incoming_buf.lock().unwrap();
+                    if incoming_buf.is_empty() {
+                        None
+                    } else {
+                        mem::swap(&mut self.incoming_buf_cache, &mut *incoming_buf);
+                        drop(incoming_buf);
+                        self.incoming_buf_cache.pop_front()
+                    }
+                }
+                val => val,
+            };
+
+            // Retrun None only if disconnected, else block and retry
+            match next {
+                Some(p) => return Some(p),
+                None if self.is_disconnected() => return None,
+                _ => {}
             }
-            val => val,
         }
     }
 }
