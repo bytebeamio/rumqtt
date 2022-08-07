@@ -361,42 +361,6 @@ impl From<ClientId> for String {
 /// # Ok(())
 /// # }
 /// ```
-///
-/// # Parsing from URL
-///
-/// When the [`url`] feature is enabled the [`MqttOptions`] can be parsed from an [`Url`](url::Url) or `str`.
-///
-/// ```
-/// // Requires feature: url
-/// # use rumqttc::MqttOptions;
-/// # #[cfg(feature = "url")]
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let options = "mqtt://example.com:1883?client_id=123".parse::<MqttOptions>()?;
-/// # Ok(())
-/// # }
-/// # #[cfg(not(feature = "url"))]
-/// # fn main() {}
-/// ```
-///
-/// You can also go from an [`Url`](url::Url) directly:
-///
-/// ```
-/// // Requires feature: url
-/// # use rumqttc::MqttOptions;
-/// use std::convert::TryFrom;
-/// # #[cfg(feature = "url")]
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # use url::Url;
-/// let url = Url::parse("mqtt://example.com:1883?client_id=123")?;
-/// let options = MqttOptions::try_from(url)?;
-/// # Ok(())
-/// # }
-/// # #[cfg(not(feature = "url"))]
-/// # fn main() {}
-/// ```
-///
-/// NOTE: An URL must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
-/// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
 #[derive(Clone, TypedBuilder)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
@@ -466,9 +430,23 @@ impl MqttOptions {
     }
 
     #[cfg(feature = "url")]
-    #[deprecated = "use url.parse::<MqttOptions>()"]
-    pub fn parse_url<S: Into<String>>(url: S) -> Result<Self, OptionError> {
-        url.into().parse()
+    /// Creates an [`MqttOptions`] object by parsing provided string with the [url] crate's
+    /// [`Url::parse(url)`](url::Url::parse) method and is only enabled when run using the "url" feature.
+    ///
+    /// ```
+    /// # use rumqttc::MqttOptions;
+    /// let options = MqttOptions::parse_url("mqtt://example.com:1883?client_id=123").unwrap();
+    /// ```
+    ///
+    /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+    /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
+    pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
+        use std::convert::TryFrom;
+
+        let url = url::Url::parse(&url.into())?;
+        let options = MqttOptions::try_from(url)?;
+
+        Ok(options)
     }
 }
 
@@ -513,15 +491,6 @@ pub enum OptionError {
 
     #[error("Couldn't parse option from url: {0}")]
     Parse(#[from] url::ParseError),
-}
-
-#[cfg(feature = "url")]
-impl FromStr for MqttOptions {
-    type Err = OptionError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use std::convert::TryFrom;
-        Self::try_from(url::Url::parse(s)?)
-    }
 }
 
 #[cfg(feature = "url")]
