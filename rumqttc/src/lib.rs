@@ -698,7 +698,7 @@ mod test {
     #[cfg(feature = "url")]
     fn from_url() {
         fn opt(s: &str) -> Result<MqttOptions, OptionError> {
-            s.parse()
+            MqttOptions::parse_url(s)
         }
         fn ok(s: &str) -> MqttOptions {
             opt(s).expect("valid options")
