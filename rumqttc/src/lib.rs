@@ -111,7 +111,6 @@
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
-use std::str::FromStr;
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::time::Duration;
@@ -327,7 +326,7 @@ pub enum ClientIdError {
 #[repr(transparent)]
 pub struct ClientId(String);
 
-impl FromStr for ClientId {
+impl std::str::FromStr for ClientId {
     type Err = ClientIdError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
