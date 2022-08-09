@@ -1,3 +1,10 @@
+----------------
+rumqttc
+-----------
+- Revert erroring out when Subscription filter list is empty (#422).
+
+-----------
+
 ### R13
 ----------------
 rumqttc v0.13.0
