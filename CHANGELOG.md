@@ -1,7 +1,8 @@
 ----------------
 rumqttc
 -----------
-- Change variants in `ClientError` to not expose dependence on flume/`SendError`.
+- Change variants in `ClientError` to not expose dependence on flume/`SendError` (#420)
+- Remove the ability to cancel `EventLoop.poll()` mid execution (#421)
 
 -----------
 
