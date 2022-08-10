@@ -1,3 +1,10 @@
+----------------
+rumqttc
+-----------
+- Change variants in `ClientError` to not expose dependence on flume/`SendError`.
+
+-----------
+
 ### R13
 ----------------
 rumqttc v0.13.0
