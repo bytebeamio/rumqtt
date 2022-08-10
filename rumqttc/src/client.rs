@@ -13,13 +13,31 @@ use tokio::runtime::Runtime;
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("Failed to send cancel request to eventloop")]
-    Cancel(#[from] SendError<()>),
+    Cancel,
     #[error("Failed to send mqtt requests to eventloop")]
-    Request(#[from] SendError<Request>),
+    Request(Request),
     #[error("Failed to send mqtt requests to eventloop")]
-    TryRequest(#[from] TrySendError<Request>),
+    TryRequest(Request),
     #[error("Serialization error: {0}")]
     Mqtt4(#[from] mqttbytes::Error),
+}
+
+impl From<SendError<()>> for ClientError {
+    fn from(_: SendError<()>) -> Self {
+        Self::Cancel
+    }
+}
+
+impl From<SendError<Request>> for ClientError {
+    fn from(e: SendError<Request>) -> Self {
+        Self::Request(e.into_inner())
+    }
+}
+
+impl From<TrySendError<Request>> for ClientError {
+    fn from(e: TrySendError<Request>) -> Self {
+        Self::TryRequest(e.into_inner())
+    }
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
