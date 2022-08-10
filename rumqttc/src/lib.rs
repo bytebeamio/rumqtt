@@ -307,43 +307,6 @@ impl From<ClientConfig> for TlsConfiguration {
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
 /// Options to configure the behaviour of MQTT connection
-/// 
-/// # Example: Use TLS transport
-/// ```ignore
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn Error>> {
-///     use rumqttc::{self, AsyncClient, Key, MqttOptions, TlsConfiguration, Transport};
-/// 
-///     let mut mqtt_options = MqttOptions::new("test-1", "localhost", 8883);
-///     mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
-/// 
-///     let ca = include_bytes!("../tlsfiles/ca.cert.pem");
-///     let client_cert = include_bytes!("../tlsfiles/device-1.cert.pem");
-///     let client_key = include_bytes!("../tlsfiles/device-1.key.pem");
-/// 
-///     let transport = Transport::Tls(TlsConfiguration::Simple {
-///         ca: ca.to_vec(),
-///         alpn: None,
-///         client_auth: Some((client_cert.to_vec(), Key::RSA(client_key.to_vec()))),
-///     });
-/// 
-///     mqtt_options.set_transport(transport);
-/// 
-///     let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
-/// 
-///     client
-///         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
-///         .await
-///         .unwrap();
-/// 
-///     loop {
-///         let event = eventloop.poll().await;
-///         println!("{:?}", event.unwrap());
-///     }
-/// 
-///     Ok(())
-/// }
-/// ```
 #[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
