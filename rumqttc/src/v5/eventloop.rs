@@ -49,8 +49,6 @@ pub enum ConnectionError {
     StreamDone,
     #[error("Requests done")]
     RequestsDone,
-    #[error("Cancel request by the user")]
-    Cancel,
     #[error("MQTT connection has been disconnected")]
     Disconnected,
 }

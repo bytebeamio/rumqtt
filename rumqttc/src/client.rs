@@ -1,6 +1,6 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
-use crate::mqttbytes::{self, v4::*, QoS};
+use crate::mqttbytes::{v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
@@ -12,14 +12,22 @@ use tokio::runtime::Runtime;
 /// Client Error
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("Failed to send cancel request to eventloop")]
-    Cancel(#[from] SendError<()>),
     #[error("Failed to send mqtt requests to eventloop")]
-    Request(#[from] SendError<Request>),
+    Request(Request),
     #[error("Failed to send mqtt requests to eventloop")]
-    TryRequest(#[from] TrySendError<Request>),
-    #[error("Serialization error: {0}")]
-    Mqtt4(#[from] mqttbytes::Error),
+    TryRequest(Request),
+}
+
+impl From<SendError<Request>> for ClientError {
+    fn from(e: SendError<Request>) -> Self {
+        Self::Request(e.into_inner())
+    }
+}
+
+impl From<TrySendError<Request>> for ClientError {
+    fn from(e: TrySendError<Request>) -> Self {
+        Self::TryRequest(e.into_inner())
+    }
 }
 
 /// `AsyncClient` to communicate with MQTT `Eventloop`
@@ -27,31 +35,23 @@ pub enum ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
-    cancel_tx: Sender<()>,
 }
 
 impl AsyncClient {
     /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let mut eventloop = EventLoop::new(options, cap);
+        let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.cancel_handle();
 
-        let client = AsyncClient {
-            request_tx,
-            cancel_tx,
-        };
+        let client = AsyncClient { request_tx };
 
         (client, eventloop)
     }
 
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
-    pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
-        AsyncClient {
-            request_tx,
-            cancel_tx,
-        }
+    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
+        AsyncClient { request_tx }
     }
 
     /// Sends a MQTT Publish to the eventloop
@@ -150,7 +150,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics)?;
+        let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
@@ -161,7 +161,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics)?;
+        let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())
@@ -194,12 +194,6 @@ impl AsyncClient {
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
         self.request_tx.try_send(request)?;
-        Ok(())
-    }
-
-    /// Stops the eventloop right away
-    pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx.send_async(()).await?;
         Ok(())
     }
 }
@@ -333,12 +327,6 @@ impl Client {
         self.client.try_disconnect()?;
         Ok(())
     }
-
-    /// Stops the eventloop right away
-    pub fn cancel(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.cancel())?;
-        Ok(())
-    }
 }
 
 ///  MQTT connection. Maintains all the necessary state
@@ -385,10 +373,6 @@ impl<'a> Iterator for Iter<'a> {
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");
-                None
-            }
-            Err(ConnectionError::Cancel) => {
-                trace!("Cancellation request received");
                 None
             }
             Err(e) => Some(Err(e)),

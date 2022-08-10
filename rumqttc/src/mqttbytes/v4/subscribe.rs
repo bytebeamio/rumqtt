@@ -21,16 +21,13 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many<T>(topics: T) -> Result<Subscribe, Error>
+    pub fn new_many<T>(topics: T) -> Subscribe
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
 
-        match filters.len() {
-            0 => Err(Error::EmptySubscription),
-            _ => Ok(Subscribe { pkid: 0, filters }),
-        }
+        Subscribe { pkid: 0, filters }
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
