@@ -1,6 +1,7 @@
 ----------------
 rumqttc
------------
+----------
+- Change variants in `ClientError` to not expose dependence on flume/`SendError` (#420)
 - Revert erroring out when Subscription filter list is empty (#422).
 
 -----------
