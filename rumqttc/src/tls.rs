@@ -34,7 +34,7 @@ pub enum Error {
     #[error("TLS error")]
     TLS(#[from] rustls::Error),
     /// No valid certificate in chain
-    #[error("No valid cert in chain")]
+    #[error("No valid certificate in chain")]
     NoValidCertInChain,
 }
 
