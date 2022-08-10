@@ -1,10 +1,10 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
-use crate::mqttbytes::{self, v4::*, QoS};
+use crate::mqttbytes::{v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
-use async_channel::{SendError, Sender, TrySendError};
 use bytes::Bytes;
+use flume::{SendError, Sender, TrySendError};
 use std::mem;
 use tokio::runtime;
 use tokio::runtime::Runtime;
@@ -12,14 +12,22 @@ use tokio::runtime::Runtime;
 /// Client Error
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("Failed to send cancel request to eventloop")]
-    Cancel(#[from] SendError<()>),
     #[error("Failed to send mqtt requests to eventloop")]
-    Request(#[from] SendError<Request>),
+    Request(Request),
     #[error("Failed to send mqtt requests to eventloop")]
-    TryRequest(#[from] TrySendError<Request>),
-    #[error("Serialization error")]
-    Mqtt4(mqttbytes::Error),
+    TryRequest(Request),
+}
+
+impl From<SendError<Request>> for ClientError {
+    fn from(e: SendError<Request>) -> Self {
+        Self::Request(e.into_inner())
+    }
+}
+
+impl From<TrySendError<Request>> for ClientError {
+    fn from(e: TrySendError<Request>) -> Self {
+        Self::TryRequest(e.into_inner())
+    }
 }
 
 /// An asynchronous client, communicates with MQTT `EventLoop`.
@@ -29,7 +37,6 @@ pub enum ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
-    cancel_tx: Sender<()>,
 }
 
 impl AsyncClient {
@@ -37,25 +44,18 @@ impl AsyncClient {
     /// 
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let mut eventloop = EventLoop::new(options, cap);
+        let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.cancel_handle();
 
-        let client = AsyncClient {
-            request_tx,
-            cancel_tx,
-        };
+        let client = AsyncClient { request_tx };
 
         (client, eventloop)
     }
 
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
-    pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
-        AsyncClient {
-            request_tx,
-            cancel_tx,
-        }
+    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
+        AsyncClient { request_tx }
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
@@ -73,7 +73,7 @@ impl AsyncClient {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        self.request_tx.send(publish).await?;
+        self.request_tx.send_async(publish).await?;
         Ok(())
     }
 
@@ -101,7 +101,7 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_tx.send(ack).await?;
+            self.request_tx.send_async(ack).await?;
         }
         Ok(())
     }
@@ -129,7 +129,7 @@ impl AsyncClient {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        self.request_tx.send(publish).await?;
+        self.request_tx.send_async(publish).await?;
         Ok(())
     }
 
@@ -137,7 +137,7 @@ impl AsyncClient {
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -156,7 +156,7 @@ impl AsyncClient {
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -175,7 +175,7 @@ impl AsyncClient {
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -190,7 +190,7 @@ impl AsyncClient {
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.send(request).await?;
+        self.request_tx.send_async(request).await?;
         Ok(())
     }
 
@@ -198,12 +198,6 @@ impl AsyncClient {
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
         self.request_tx.try_send(request)?;
-        Ok(())
-    }
-
-    /// Stops the `EventLoop` right away
-    pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx.send(()).await?;
         Ok(())
     }
 }
@@ -341,12 +335,6 @@ impl Client {
         self.client.try_disconnect()?;
         Ok(())
     }
-
-    /// Stops the `EventLoop` right away
-    pub fn cancel(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.cancel())?;
-        Ok(())
-    }
 }
 
 ///  MQTT connection. Maintains all the necessary state
@@ -393,10 +381,6 @@ impl<'a> Iterator for Iter<'a> {
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");
-                None
-            }
-            Err(ConnectionError::Cancel) => {
-                trace!("Cancellation request received");
                 None
             }
             Err(e) => Some(Err(e)),

@@ -25,17 +25,9 @@ impl Subscribe {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        Subscribe {
-            pkid: 0,
-            filters: topics.into_iter().collect(),
-        }
-    }
+        let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
 
-    pub fn empty_subscribe() -> Subscribe {
-        Subscribe {
-            pkid: 0,
-            filters: Vec::new(),
-        }
+        Subscribe { pkid: 0, filters }
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
@@ -70,9 +62,10 @@ impl Subscribe {
             });
         }
 
-        let subscribe = Subscribe { pkid, filters };
-
-        Ok(subscribe)
+        match filters.len() {
+            0 => Err(Error::EmptySubscription),
+            _ => Ok(Subscribe { pkid, filters }),
+        }
     }
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {

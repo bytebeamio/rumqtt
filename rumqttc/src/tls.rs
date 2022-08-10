@@ -22,16 +22,16 @@ pub enum Error {
     #[error("Addr")]
     Addr(#[from] AddrParseError),
     /// I/O related error
-    #[error("I/O")]
+    #[error("I/O: {0}")]
     Io(#[from] io::Error),
     /// Certificate/Name validation error
-    #[error("Web Pki")]
+    #[error("Web Pki: {0}")]
     WebPki(#[from] webpki::Error),
     /// Invalid DNS name
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
     /// Error from rustls module
-    #[error("TLS error")]
+    #[error("TLS error: {0}")]
     TLS(#[from] rustls::Error),
     /// No valid certificate in chain
     #[error("No valid certificate in chain")]

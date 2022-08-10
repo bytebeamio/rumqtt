@@ -9,10 +9,10 @@ use std::vec::IntoIter;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Received unsolicited ack from the device. {0}")]
+    #[error("Received unsolicited ack from the device: {0}")]
     Unsolicited(u16),
-    #[error("Collision with an unacked packet")]
-    Serialization(mqttbytes::Error),
+    #[error("Collision with an unacked packet: {0}")]
+    Serialization(#[from] mqttbytes::Error),
     #[error("Collision with an unacked packet")]
     Collision,
     #[error("Duplicate connect")]
@@ -21,12 +21,6 @@ pub enum Error {
     ClientConnAck,
     #[error("Client disconnect")]
     Disconnect,
-}
-
-impl From<mqttbytes::Error> for Error {
-    fn from(e: mqttbytes::Error) -> Error {
-        Error::Serialization(e)
-    }
 }
 
 #[derive(Debug)]
@@ -164,7 +158,7 @@ impl State {
         while let Some(payload) = self.pending.next() {
             let mut publish = Publish::from_bytes(&self.pending.topic, self.pending.qos, payload);
 
-            if let QoS::AtMostOnce = publish.qos {
+            if publish.qos == QoS::AtMostOnce {
                 debug!("Publish. Qos 0. Payload size = {:?}", publish.payload.len());
                 publish.write(&mut self.write)?;
                 continue;

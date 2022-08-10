@@ -135,16 +135,16 @@ pub(crate) mod connect {
             len
         }
 
-        fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
+        fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
             let last_will = match connect_flags & 0b100 {
                 0 if (connect_flags & 0b0011_1000) != 0 => {
                     return Err(Error::IncorrectPacketFormat);
                 }
                 0 => None,
                 _ => {
-                    let will_topic = read_mqtt_bytes(&mut bytes)?;
+                    let will_topic = read_mqtt_bytes(bytes)?;
                     let will_topic = std::str::from_utf8(&will_topic)?.to_owned();
-                    let will_message = read_mqtt_bytes(&mut bytes)?;
+                    let will_message = read_mqtt_bytes(bytes)?;
                     let will_qos = qos((connect_flags & 0b11000) >> 3)?;
                     Some(LastWill {
                         topic: will_topic,
@@ -173,11 +173,11 @@ pub(crate) mod connect {
             }
         }
 
-        fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<Login>, Error> {
+        fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<Login>, Error> {
             let username = match connect_flags & 0b1000_0000 {
                 0 => String::new(),
                 _ => {
-                    let username = read_mqtt_bytes(&mut bytes)?;
+                    let username = read_mqtt_bytes(bytes)?;
                     std::str::from_utf8(&username)?.to_owned()
                 }
             };
@@ -185,7 +185,7 @@ pub(crate) mod connect {
             let password = match connect_flags & 0b0100_0000 {
                 0 => String::new(),
                 _ => {
-                    let password = read_mqtt_bytes(&mut bytes)?;
+                    let password = read_mqtt_bytes(bytes)?;
                     std::str::from_utf8(&password)?.to_owned()
                 }
             };
@@ -247,7 +247,7 @@ pub(crate) mod connect {
             }
         }
 
-        fn read(mut bytes: &mut Bytes) -> Result<Option<ConnectProperties>, Error> {
+        fn read(bytes: &mut Bytes) -> Result<Option<ConnectProperties>, Error> {
             let mut session_expiry_interval = None;
             let mut receive_maximum = None;
             let mut max_packet_size = None;
@@ -267,49 +267,49 @@ pub(crate) mod connect {
             let mut cursor = 0;
             // read until cursor reaches property length. properties_len = 0 will skip this loop
             while cursor < properties_len {
-                let prop = read_u8(&mut bytes)?;
+                let prop = read_u8(bytes)?;
                 cursor += 1;
                 match property(prop)? {
                     PropertyType::SessionExpiryInterval => {
-                        session_expiry_interval = Some(read_u32(&mut bytes)?);
+                        session_expiry_interval = Some(read_u32(bytes)?);
                         cursor += 4;
                     }
                     PropertyType::ReceiveMaximum => {
-                        receive_maximum = Some(read_u16(&mut bytes)?);
+                        receive_maximum = Some(read_u16(bytes)?);
                         cursor += 2;
                     }
                     PropertyType::MaximumPacketSize => {
-                        max_packet_size = Some(read_u32(&mut bytes)?);
+                        max_packet_size = Some(read_u32(bytes)?);
                         cursor += 4;
                     }
                     PropertyType::TopicAliasMaximum => {
-                        topic_alias_max = Some(read_u16(&mut bytes)?);
+                        topic_alias_max = Some(read_u16(bytes)?);
                         cursor += 2;
                     }
                     PropertyType::RequestResponseInformation => {
-                        request_response_info = Some(read_u8(&mut bytes)?);
+                        request_response_info = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::RequestProblemInformation => {
-                        request_problem_info = Some(read_u8(&mut bytes)?);
+                        request_problem_info = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::UserProperty => {
-                        let key = read_mqtt_bytes(&mut bytes)?;
+                        let key = read_mqtt_bytes(bytes)?;
                         let key = std::str::from_utf8(&key)?.to_owned();
-                        let value = read_mqtt_bytes(&mut bytes)?;
+                        let value = read_mqtt_bytes(bytes)?;
                         let value = std::str::from_utf8(&value)?.to_owned();
                         cursor += 2 + key.len() + 2 + value.len();
                         user_properties.push((key, value));
                     }
                     PropertyType::AuthenticationMethod => {
-                        let method = read_mqtt_bytes(&mut bytes)?;
+                        let method = read_mqtt_bytes(bytes)?;
                         let method = std::str::from_utf8(&method)?.to_owned();
                         cursor += 2 + method.len();
                         authentication_method = Some(method);
                     }
                     PropertyType::AuthenticationData => {
-                        let data = read_mqtt_bytes(&mut bytes)?;
+                        let data = read_mqtt_bytes(bytes)?;
                         cursor += 2 + data.len();
                         authentication_data = Some(data);
                     }
@@ -541,23 +541,23 @@ pub(crate) mod connack {
         pub fn len(&self) -> usize {
             let mut len = 0;
 
-            if let Some(_) = &self.session_expiry_interval {
+            if self.session_expiry_interval.is_some() {
                 len += 1 + 4;
             }
 
-            if let Some(_) = &self.receive_max {
+            if self.receive_max.is_some() {
                 len += 1 + 2;
             }
 
-            if let Some(_) = &self.max_qos {
+            if self.max_qos.is_some() {
                 len += 1 + 1;
             }
 
-            if let Some(_) = &self.retain_available {
+            if self.retain_available.is_some() {
                 len += 1 + 1;
             }
 
-            if let Some(_) = &self.max_packet_size {
+            if self.max_packet_size.is_some() {
                 len += 1 + 4;
             }
 
@@ -565,7 +565,7 @@ pub(crate) mod connack {
                 len += 1 + 2 + id.len();
             }
 
-            if let Some(_) = &self.topic_alias_max {
+            if self.topic_alias_max.is_some() {
                 len += 1 + 2;
             }
 
@@ -577,19 +577,19 @@ pub(crate) mod connack {
                 len += 1 + 2 + key.len() + 2 + value.len();
             }
 
-            if let Some(_) = &self.wildcard_subscription_available {
+            if self.wildcard_subscription_available.is_some() {
                 len += 1 + 1;
             }
 
-            if let Some(_) = &self.subscription_identifiers_available {
+            if self.subscription_identifiers_available.is_some() {
                 len += 1 + 1;
             }
 
-            if let Some(_) = &self.shared_subscription_available {
+            if self.shared_subscription_available.is_some() {
                 len += 1 + 1;
             }
 
-            if let Some(_) = &self.server_keep_alive {
+            if self.server_keep_alive.is_some() {
                 len += 1 + 2;
             }
 
@@ -612,7 +612,7 @@ pub(crate) mod connack {
             len
         }
 
-        pub fn extract(mut bytes: &mut Bytes) -> Result<Option<ConnAckProperties>, Error> {
+        pub fn extract(bytes: &mut Bytes) -> Result<Option<ConnAckProperties>, Error> {
             let mut session_expiry_interval = None;
             let mut receive_max = None;
             let mut max_qos = None;
@@ -640,90 +640,90 @@ pub(crate) mod connack {
             let mut cursor = 0;
             // read until cursor reaches property length. properties_len = 0 will skip this loop
             while cursor < properties_len {
-                let prop = read_u8(&mut bytes)?;
+                let prop = read_u8(bytes)?;
                 cursor += 1;
 
                 match property(prop)? {
                     PropertyType::SessionExpiryInterval => {
-                        session_expiry_interval = Some(read_u32(&mut bytes)?);
+                        session_expiry_interval = Some(read_u32(bytes)?);
                         cursor += 4;
                     }
                     PropertyType::ReceiveMaximum => {
-                        receive_max = Some(read_u16(&mut bytes)?);
+                        receive_max = Some(read_u16(bytes)?);
                         cursor += 2;
                     }
                     PropertyType::MaximumQos => {
-                        max_qos = Some(read_u8(&mut bytes)?);
+                        max_qos = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::RetainAvailable => {
-                        retain_available = Some(read_u8(&mut bytes)?);
+                        retain_available = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::AssignedClientIdentifier => {
-                        let bytes = read_mqtt_bytes(&mut bytes)?;
+                        let bytes = read_mqtt_bytes(bytes)?;
                         let id = std::str::from_utf8(&bytes)?.to_owned();
                         cursor += 2 + id.len();
                         assigned_client_identifier = Some(id);
                     }
                     PropertyType::MaximumPacketSize => {
-                        max_packet_size = Some(read_u32(&mut bytes)?);
+                        max_packet_size = Some(read_u32(bytes)?);
                         cursor += 4;
                     }
                     PropertyType::TopicAliasMaximum => {
-                        topic_alias_max = Some(read_u16(&mut bytes)?);
+                        topic_alias_max = Some(read_u16(bytes)?);
                         cursor += 2;
                     }
                     PropertyType::ReasonString => {
-                        let reason = read_mqtt_bytes(&mut bytes)?;
+                        let reason = read_mqtt_bytes(bytes)?;
                         let reason = std::str::from_utf8(&reason)?.to_owned();
                         cursor += 2 + reason.len();
                         reason_string = Some(reason);
                     }
                     PropertyType::UserProperty => {
-                        let key = read_mqtt_bytes(&mut bytes)?;
+                        let key = read_mqtt_bytes(bytes)?;
                         let key = std::str::from_utf8(&key)?.to_owned();
-                        let value = read_mqtt_bytes(&mut bytes)?;
+                        let value = read_mqtt_bytes(bytes)?;
                         let value = std::str::from_utf8(&value)?.to_owned();
                         cursor += 2 + key.len() + 2 + value.len();
                         user_properties.push((key, value));
                     }
                     PropertyType::WildcardSubscriptionAvailable => {
-                        wildcard_subscription_available = Some(read_u8(&mut bytes)?);
+                        wildcard_subscription_available = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::SubscriptionIdentifierAvailable => {
-                        subscription_identifiers_available = Some(read_u8(&mut bytes)?);
+                        subscription_identifiers_available = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::SharedSubscriptionAvailable => {
-                        shared_subscription_available = Some(read_u8(&mut bytes)?);
+                        shared_subscription_available = Some(read_u8(bytes)?);
                         cursor += 1;
                     }
                     PropertyType::ServerKeepAlive => {
-                        server_keep_alive = Some(read_u16(&mut bytes)?);
+                        server_keep_alive = Some(read_u16(bytes)?);
                         cursor += 2;
                     }
                     PropertyType::ResponseInformation => {
-                        let info = read_mqtt_bytes(&mut bytes)?;
+                        let info = read_mqtt_bytes(bytes)?;
                         let info = std::str::from_utf8(&info)?.to_owned();
                         cursor += 2 + info.len();
                         response_information = Some(info);
                     }
                     PropertyType::ServerReference => {
-                        let bytes = read_mqtt_bytes(&mut bytes)?;
+                        let bytes = read_mqtt_bytes(bytes)?;
                         let reference = std::str::from_utf8(&bytes)?.to_owned();
                         cursor += 2 + reference.len();
                         server_reference = Some(reference);
                     }
                     PropertyType::AuthenticationMethod => {
-                        let bytes = read_mqtt_bytes(&mut bytes)?;
+                        let bytes = read_mqtt_bytes(bytes)?;
                         let method = std::str::from_utf8(&bytes)?.to_owned();
                         cursor += 2 + method.len();
                         authentication_method = Some(method);
                     }
                     PropertyType::AuthenticationData => {
-                        let data = read_mqtt_bytes(&mut bytes)?;
+                        let data = read_mqtt_bytes(bytes)?;
                         cursor += 2 + data.len();
                         authentication_data = Some(data);
                     }
@@ -926,7 +926,7 @@ pub(crate) mod publish {
 
             // FIXME: Remove indexes and use get method
             let stream = &self.raw[self.fixed_header.fixed_header_len..];
-            let topic_len = view_u16(&stream)? as usize;
+            let topic_len = view_u16(stream)? as usize;
 
             let stream = &stream[2..];
             let topic = view_str(stream, topic_len)?;
@@ -935,8 +935,7 @@ pub(crate) mod publish {
                 0 => 0,
                 1 => {
                     let stream = &stream[topic_len..];
-                    let pkid = view_u16(stream)?;
-                    pkid
+                    view_u16(stream)?
                 }
                 v => return Err(Error::InvalidQoS(v)),
             };
@@ -951,7 +950,7 @@ pub(crate) mod publish {
         pub fn view_topic(&self) -> Result<&str, Error> {
             // FIXME: Remove indexes
             let stream = &self.raw[self.fixed_header.fixed_header_len..];
-            let topic_len = view_u16(&stream)? as usize;
+            let topic_len = view_u16(stream)? as usize;
 
             let stream = &stream[2..];
             let topic = view_str(stream, topic_len)?;
@@ -1030,7 +1029,7 @@ pub(crate) mod publish {
             buffer.put_u16(pkid);
         }
 
-        buffer.extend_from_slice(&payload);
+        buffer.extend_from_slice(payload);
 
         // TODO: Returned length is wrong in other packets. Fix it
         Ok(1 + count + len)
@@ -1164,7 +1163,7 @@ pub(crate) mod puback {
             len
         }
 
-        pub fn extract(mut bytes: &mut Bytes) -> Result<Option<PubAckProperties>, Error> {
+        pub fn extract(bytes: &mut Bytes) -> Result<Option<PubAckProperties>, Error> {
             let mut reason_string = None;
             let mut user_properties = Vec::new();
 
@@ -1177,20 +1176,20 @@ pub(crate) mod puback {
             let mut cursor = 0;
             // read until cursor reaches property length. properties_len = 0 will skip this loop
             while cursor < properties_len {
-                let prop = read_u8(&mut bytes)?;
+                let prop = read_u8(bytes)?;
                 cursor += 1;
 
                 match property(prop)? {
                     PropertyType::ReasonString => {
-                        let bytes = read_mqtt_bytes(&mut bytes)?;
+                        let bytes = read_mqtt_bytes(bytes)?;
                         let reason = std::str::from_utf8(&bytes)?.to_owned();
                         cursor += 2 + reason.len();
                         reason_string = Some(reason);
                     }
                     PropertyType::UserProperty => {
-                        let key = read_mqtt_bytes(&mut bytes)?;
+                        let key = read_mqtt_bytes(bytes)?;
                         let key = std::str::from_utf8(&key)?.to_owned();
-                        let value = read_mqtt_bytes(&mut bytes)?;
+                        let value = read_mqtt_bytes(bytes)?;
                         let value = std::str::from_utf8(&value)?.to_owned();
                         cursor += 2 + key.len() + 2 + value.len();
                         user_properties.push((key, value));
@@ -1264,8 +1263,7 @@ pub(crate) mod subscribe {
                 retain_forward_rule: RetainForwardRule::OnEverySubscribe,
             };
 
-            let mut filters = Vec::new();
-            filters.push(filter);
+            let filters = vec![filter];
             Subscribe {
                 pkid: 0,
                 filters,
@@ -1318,10 +1316,10 @@ pub(crate) mod subscribe {
                 let requested_qos = options & 0b0000_0011;
 
                 let nolocal = options >> 2 & 0b0000_0001;
-                let nolocal = if nolocal == 0 { false } else { true };
+                let nolocal = nolocal != 0;
 
                 let preserve_retain = options >> 3 & 0b0000_0001;
-                let preserve_retain = if preserve_retain == 0 { false } else { true };
+                let preserve_retain = preserve_retain != 0;
 
                 let retain_forward_rule = (options >> 4) & 0b0000_0011;
                 let retain_forward_rule = match retain_forward_rule {
@@ -1461,7 +1459,7 @@ pub(crate) mod subscribe {
             len
         }
 
-        pub fn extract(mut bytes: &mut Bytes) -> Result<Option<SubscribeProperties>, Error> {
+        pub fn extract(bytes: &mut Bytes) -> Result<Option<SubscribeProperties>, Error> {
             let mut id = None;
             let mut user_properties = Vec::new();
 
@@ -1475,7 +1473,7 @@ pub(crate) mod subscribe {
             let mut cursor = 0;
             // read until cursor reaches property length. properties_len = 0 will skip this loop
             while cursor < properties_len {
-                let prop = read_u8(&mut bytes)?;
+                let prop = read_u8(bytes)?;
                 cursor += 1;
 
                 match property(prop)? {
@@ -1487,9 +1485,9 @@ pub(crate) mod subscribe {
                         id = Some(sub_id)
                     }
                     PropertyType::UserProperty => {
-                        let key = read_mqtt_bytes(&mut bytes)?;
+                        let key = read_mqtt_bytes(bytes)?;
                         let key = std::str::from_utf8(&key)?.to_owned();
-                        let value = read_mqtt_bytes(&mut bytes)?;
+                        let value = read_mqtt_bytes(bytes)?;
                         let value = std::str::from_utf8(&value)?.to_owned();
                         cursor += 2 + key.len() + 2 + value.len();
                         user_properties.push((key, value));
@@ -1679,7 +1677,7 @@ pub(crate) mod suback {
             len
         }
 
-        pub fn extract(mut bytes: &mut Bytes) -> Result<Option<SubAckProperties>, Error> {
+        pub fn extract(bytes: &mut Bytes) -> Result<Option<SubAckProperties>, Error> {
             let mut reason_string = None;
             let mut user_properties = Vec::new();
 
@@ -1692,20 +1690,20 @@ pub(crate) mod suback {
             let mut cursor = 0;
             // read until cursor reaches property length. properties_len = 0 will skip this loop
             while cursor < properties_len {
-                let prop = read_u8(&mut bytes)?;
+                let prop = read_u8(bytes)?;
                 cursor += 1;
 
                 match property(prop)? {
                     PropertyType::ReasonString => {
-                        let bytes = read_mqtt_bytes(&mut bytes)?;
+                        let bytes = read_mqtt_bytes(bytes)?;
                         let reason = std::str::from_utf8(&bytes)?.to_owned();
                         cursor += 2 + reason.len();
                         reason_string = Some(reason);
                     }
                     PropertyType::UserProperty => {
-                        let key = read_mqtt_bytes(&mut bytes)?;
+                        let key = read_mqtt_bytes(bytes)?;
                         let key = std::str::from_utf8(&key)?.to_owned();
-                        let value = read_mqtt_bytes(&mut bytes)?;
+                        let value = read_mqtt_bytes(bytes)?;
                         let value = std::str::from_utf8(&value)?.to_owned();
                         cursor += 2 + key.len() + 2 + value.len();
                         user_properties.push((key, value));

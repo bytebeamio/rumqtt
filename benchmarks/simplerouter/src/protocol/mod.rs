@@ -68,7 +68,7 @@ pub enum Error {
     InvalidReason(u8),
     #[error("Invalid protocol used")]
     InvalidProtocol,
-    #[error("Invalid protocol level")]
+    #[error("Invalid protocol level = {0}")]
     InvalidProtocolLevel(u8),
     #[error("Invalid packet format")]
     IncorrectPacketFormat,
@@ -318,7 +318,7 @@ pub fn read_u16(stream: &mut Bytes) -> Result<u16, Error> {
 }
 
 fn read_u8(stream: &mut Bytes) -> Result<u8, Error> {
-    if stream.len() < 1 {
+    if stream.is_empty() {
         return Err(Error::MalformedPacket);
     }
 

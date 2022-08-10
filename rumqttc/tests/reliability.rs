@@ -14,7 +14,7 @@ async fn start_requests(count: u8, qos: QoS, delay: u64, requests_tx: Sender<Req
 
         let publish = Publish::new(topic, qos, payload);
         let request = Request::Publish(publish);
-        let _ = requests_tx.send(request).await;
+        drop(requests_tx.send_async(request).await);
         time::sleep(Duration::from_secs(delay)).await;
     }
 }
@@ -143,7 +143,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
     loop {
         let event = broker.tick().await;
 
-        if let Event::Incoming(Incoming::PingReq) = event {
+        if event == Event::Incoming(Incoming::PingReq) {
             // wait for 3 pings
             count += 1;
             if count == 3 {
@@ -182,7 +182,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     loop {
         let event = broker.tick().await;
 
-        if let Event::Incoming(Incoming::PingReq) = event {
+        if event == Event::Incoming(Incoming::PingReq) {
             // wait for 3 pings
             count += 1;
             if count == 3 {
@@ -360,7 +360,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
                 if ack == 1 {
                     let elapsed = start.elapsed().as_millis() as i64;
                     let deviation_millis: i64 = (5000 - elapsed).abs();
-                    assert!(deviation_millis < 75);
+                    assert!(deviation_millis < 100);
                     break;
                 }
             }
