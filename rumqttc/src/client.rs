@@ -20,12 +20,6 @@ pub enum ClientError {
     Mqtt4(#[from] mqttbytes::Error),
 }
 
-impl From<SendError<()>> for ClientError {
-    fn from(_: SendError<()>) -> Self {
-        Self::Cancel
-    }
-}
-
 impl From<SendError<Request>> for ClientError {
     fn from(e: SendError<Request>) -> Self {
         Self::Request(e.into_inner())
