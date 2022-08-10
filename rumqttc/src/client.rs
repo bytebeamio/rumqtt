@@ -1,6 +1,6 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
-use crate::mqttbytes::{self, v4::*, QoS};
+use crate::mqttbytes::{v4::*, QoS};
 use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
@@ -16,8 +16,6 @@ pub enum ClientError {
     Request(Request),
     #[error("Failed to send mqtt requests to eventloop")]
     TryRequest(Request),
-    #[error("Serialization error: {0}")]
-    Mqtt4(#[from] mqttbytes::Error),
 }
 
 impl From<SendError<Request>> for ClientError {
@@ -152,7 +150,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics)?;
+        let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
@@ -163,7 +161,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics)?;
+        let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())
