@@ -217,7 +217,7 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
     Some(ack)
 }
 
-/// A synchonous client, commuinicates with MQTTT `EventLoop`.
+/// A synchronous client, communicates with MQTT `EventLoop`.
 ///
 /// This is cloneable and can be used to synchronously [`publish`](`Client::publish`) and
 /// [`subscribe`](`Client::subscribe`).
