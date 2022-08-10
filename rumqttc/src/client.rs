@@ -12,18 +12,10 @@ use tokio::runtime::Runtime;
 /// Client Error
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("Failed to send cancel request to eventloop")]
-    Cancel,
     #[error("Failed to send mqtt requests to eventloop")]
     Request(Request),
     #[error("Failed to send mqtt requests to eventloop")]
     TryRequest(Request),
-}
-
-impl From<SendError<()>> for ClientError {
-    fn from(_: SendError<()>) -> Self {
-        Self::Cancel
-    }
 }
 
 impl From<SendError<Request>> for ClientError {
@@ -43,31 +35,23 @@ impl From<TrySendError<Request>> for ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
-    cancel_tx: Sender<()>,
 }
 
 impl AsyncClient {
     /// Create a new `AsyncClient`
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let mut eventloop = EventLoop::new(options, cap);
+        let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.handle();
-        let cancel_tx = eventloop.cancel_handle();
 
-        let client = AsyncClient {
-            request_tx,
-            cancel_tx,
-        };
+        let client = AsyncClient { request_tx };
 
         (client, eventloop)
     }
 
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
-    pub fn from_senders(request_tx: Sender<Request>, cancel_tx: Sender<()>) -> AsyncClient {
-        AsyncClient {
-            request_tx,
-            cancel_tx,
-        }
+    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
+        AsyncClient { request_tx }
     }
 
     /// Sends a MQTT Publish to the eventloop
@@ -212,12 +196,6 @@ impl AsyncClient {
         self.request_tx.try_send(request)?;
         Ok(())
     }
-
-    /// Stops the eventloop right away
-    pub async fn cancel(&self) -> Result<(), ClientError> {
-        self.cancel_tx.send_async(()).await?;
-        Ok(())
-    }
 }
 
 fn get_ack_req(publish: &Publish) -> Option<Request> {
@@ -349,12 +327,6 @@ impl Client {
         self.client.try_disconnect()?;
         Ok(())
     }
-
-    /// Stops the eventloop right away
-    pub fn cancel(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.cancel())?;
-        Ok(())
-    }
 }
 
 ///  MQTT connection. Maintains all the necessary state
@@ -401,10 +373,6 @@ impl<'a> Iterator for Iter<'a> {
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");
-                None
-            }
-            Err(ConnectionError::Cancel) => {
-                trace!("Cancellation request received");
                 None
             }
             Err(e) => Some(Err(e)),

@@ -2,7 +2,6 @@
 //! async eventloop.
 use crate::v5::{packet::*, ConnectionError, EventLoop, Request};
 
-use flume::SendError;
 use std::mem;
 use tokio::runtime::{self, Runtime};
 
@@ -14,8 +13,6 @@ pub use syncclient::Client;
 /// Client Error
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("Failed to send cancel request to eventloop")]
-    Cancel(SendError<()>),
     #[error("Failed to send mqtt request to eventloop, the evenloop has been closed")]
     EventloopClosed,
     #[error("Failed to send mqtt request to evenloop, to requests buffer is full right now")]
@@ -77,10 +74,6 @@ impl<'a> Iterator for Iter<'a> {
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
                 trace!("Done with requests");
-                None
-            }
-            Err(ConnectionError::Cancel) => {
-                trace!("Cancellation request received");
                 None
             }
             Err(e) => Some(Err(e)),

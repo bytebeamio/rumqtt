@@ -1,8 +1,9 @@
 ----------------
 rumqttc
-----------
+-----------
 - Change variants in `ClientError` to not expose dependence on flume/`SendError` (#420)
-- Revert erroring out when Subscription filter list is empty (#422).
+- Revert erroring out when Subscription filter list is empty (#422)
+- Remove the ability to cancel `EventLoop.poll()` mid execution (#421)
 
 -----------
 

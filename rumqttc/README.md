@@ -65,7 +65,6 @@ Quick overview of features
 - Queue size based flow control on outgoing packets
 - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop
 - Natural backpressure to client APIs during bad network
-- Immediate cancellation with `client.cancel()`
 
 In short, everything necessary to maintain a robust connection
 
