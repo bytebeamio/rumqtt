@@ -195,6 +195,7 @@ impl From<Unsubscribe> for Request {
     }
 }
 
+/// Transport methods. Defaults to TCP.
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
@@ -279,6 +280,7 @@ impl Transport {
     }
 }
 
+/// TLS configuration method
 #[derive(Clone)]
 #[cfg(feature = "use-rustls")]
 pub enum TlsConfiguration {
@@ -304,7 +306,7 @@ impl From<ClientConfig> for TlsConfiguration {
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
-/// Options to configure the behaviour of mqtt connection
+/// Options to configure the behaviour of MQTT connection
 #[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
