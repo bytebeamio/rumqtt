@@ -1,9 +1,14 @@
+### R14
 ----------------
-rumqttc
+rumqttc v0.14.0
 -----------
+- Timeouts moved up to `connect()` call (#408)
+- Tokio dependency `version = "1"` (#412)
+- Fix empty property serialization (#413)
 - Change variants in `ClientError` to not expose dependence on flume/`SendError` (#420)
 - Revert erroring out when Subscription filter list is empty (#422)
 - Remove the ability to cancel `EventLoop.poll()` mid execution (#421)
+- Improve documentation and fix examples (#380, #401, #416, #417)
 
 -----------
 
