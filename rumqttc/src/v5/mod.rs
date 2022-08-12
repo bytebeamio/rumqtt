@@ -25,7 +25,9 @@ pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error;
 #[cfg(feature = "use-rustls")]
-pub use tokio_rustls::rustls::ClientConfig;
+pub use tokio_rustls;
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
