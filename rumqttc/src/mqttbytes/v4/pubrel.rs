@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// QoS2 Publish release, in response to PUBREC packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRel {
     pub pkid: u16,
 }
