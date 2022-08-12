@@ -1,3 +1,10 @@
+### Unreleased
+
+---
+rumqttc
+---
+- Derive standard like `Eq` and `Clone` traits on some types where required (#429)
+
 ### R14
 ----------------
 rumqttc v0.14.0
