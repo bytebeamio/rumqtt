@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 //// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum UnsubAckReason {
     Success = 0x00,
@@ -15,7 +15,7 @@ pub enum UnsubAckReason {
 }
 
 /// Acknowledgement to unsubscribe
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubAck {
     pub pkid: u16,
     pub reasons: Vec<UnsubAckReason>,
@@ -91,7 +91,7 @@ impl UnsubAck {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,

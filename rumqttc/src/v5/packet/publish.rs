@@ -3,7 +3,7 @@ use bytes::{Buf, Bytes};
 use core::fmt;
 
 /// Publish packet
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
@@ -122,7 +122,7 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishProperties {
     pub payload_format_indicator: Option<u8>,
     pub message_expiry_interval: Option<u32>,

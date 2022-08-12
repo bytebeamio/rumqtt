@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to QoS2 publish
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRec {
     pub pkid: u16,
 }

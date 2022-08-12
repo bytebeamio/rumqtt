@@ -6,7 +6,7 @@ use super::*;
 
 use super::{property, PropertyType};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DisconnectReasonCode {
     /// Close the connection normally. Do not send the Will Message.
@@ -110,7 +110,7 @@ impl TryFrom<u8> for DisconnectReasonCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisconnectProperties {
     /// Session Expiry Interval in seconds
     pub session_expiry_interval: Option<u32>,
@@ -125,7 +125,7 @@ pub struct DisconnectProperties {
     pub server_reference: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disconnect {
     /// Disconnect Reason Code
     pub reason_code: DisconnectReasonCode,

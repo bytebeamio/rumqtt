@@ -29,7 +29,7 @@ pub use unsuback::*;
 pub use unsubscribe::*;
 
 /// Encapsulates all MQTT packet types
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Packet {
     Connect(Connect),
     ConnAck(ConnAck),

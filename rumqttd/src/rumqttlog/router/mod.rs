@@ -35,7 +35,7 @@ pub enum Event {
 }
 
 /// Requests for pull operations
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum Request {
     /// Data request
     Data(DataRequest),
@@ -66,7 +66,7 @@ pub enum Notification {
 /// NOTE Connection can make one sweep request to get data from multiple topics
 /// but we'll keep it simple for now as multiple requests in one message can
 /// makes constant extraction size harder
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DataRequest {
     /// Log to sweep
     pub(crate) topic: String,
@@ -192,7 +192,7 @@ impl fmt::Debug for Data {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TopicsRequest {
     /// Start from this offset
     offset: usize,
@@ -234,7 +234,7 @@ impl<'a> Topics<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcksRequest;
 
 impl AcksRequest {
