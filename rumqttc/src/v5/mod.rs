@@ -31,7 +31,7 @@ pub type Incoming = Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Publish(Publish),
     PubAck(PubAck),
@@ -48,7 +48,7 @@ pub enum Request {
 }
 
 /// Key type for TLS authentication
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
     RSA(Vec<u8>),
     ECC(Vec<u8>),

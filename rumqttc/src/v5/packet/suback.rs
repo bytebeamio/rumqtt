@@ -3,7 +3,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::{TryFrom, TryInto};
 
 /// Acknowledgement to subscribe
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAck {
     pub pkid: u16,
     pub return_codes: Vec<SubscribeReasonCode>,
@@ -79,7 +79,7 @@ impl SubAck {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
