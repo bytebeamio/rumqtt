@@ -397,7 +397,7 @@ impl MqttOptions {
 }
 
 #[cfg(feature = "url")]
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
