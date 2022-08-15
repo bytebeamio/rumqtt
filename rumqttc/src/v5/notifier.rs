@@ -1,8 +1,6 @@
-use std::{
-    collections::VecDeque,
-    mem,
-    sync::{Arc, Mutex, RwLock},
-};
+use std::collections::VecDeque;
+use std::mem;
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::v5::Incoming;
 
@@ -36,30 +34,34 @@ impl Notifier {
     pub fn iter(&mut self) -> NotifierIter<'_> {
         NotifierIter(self)
     }
+
+    #[inline]
+    /// Retruns None immediately even if not disconnected, use when expecting non-blocking interface
+    pub fn try_next(&mut self) -> Option<Incoming> {
+        match self.incoming_buf_cache.pop_front() {
+            None => {
+                let mut incoming_buf = self.incoming_buf.lock().unwrap();
+                if incoming_buf.is_empty() {
+                    None
+                } else {
+                    mem::swap(&mut self.incoming_buf_cache, &mut *incoming_buf);
+                    drop(incoming_buf);
+                    self.incoming_buf_cache.pop_front()
+                }
+            }
+            val => val,
+        }
+    }
 }
 
 impl Iterator for Notifier {
     type Item = Incoming;
 
     #[inline]
+    /// Retrun None only if disconnected, else block and retry till resolves as Some
     fn next(&mut self) -> Option<Incoming> {
         loop {
-            let next = match self.incoming_buf_cache.pop_front() {
-                None => {
-                    let mut incoming_buf = self.incoming_buf.lock().unwrap();
-                    if incoming_buf.is_empty() {
-                        None
-                    } else {
-                        mem::swap(&mut self.incoming_buf_cache, &mut *incoming_buf);
-                        drop(incoming_buf);
-                        self.incoming_buf_cache.pop_front()
-                    }
-                }
-                val => val,
-            };
-
-            // Retrun None only if disconnected, else block and retry
-            match next {
+            match self.try_next() {
                 Some(p) => return Some(p),
                 None if self.is_disconnected() => return None,
                 _ => {}
