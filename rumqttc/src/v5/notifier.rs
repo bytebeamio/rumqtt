@@ -4,9 +4,12 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::v5::Incoming;
 
-/// Returnes by
+/// Error type to denote if Notifier failed to resolve due to empty buffer or due to disconnection
+#[derive(Debug, Eq, PartialEq)]
 pub enum TryRecvError {
+    /// [`EventLoop`] is disconnected from broker
     Disconnected,
+    /// [`EventLoop`] is connected to broker
     Waiting,
 }
 
@@ -60,7 +63,7 @@ impl Notifier {
 
         match next {
             Some(p) => Ok(p),
-            None if self.is_disconnected() => Err(TryRecvError::Waiting),
+            None if self.is_disconnected() => Err(TryRecvError::Disconnected),
             None => Err(TryRecvError::Waiting),
         }
     }
@@ -90,5 +93,28 @@ impl<'a> Iterator for NotifierIter<'a> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex, RwLock},
+    };
+
+    use super::{Notifier, TryRecvError};
+
+    #[test]
+    fn when_disconnected() {
+        let mut notifier = Notifier::new(
+            Arc::new(Mutex::new(VecDeque::new())),
+            VecDeque::new(),
+            Arc::new(RwLock::new(true)),
+        );
+
+        assert_eq!(notifier.try_recv(), Err(TryRecvError::Disconnected));
+
+        assert_eq!(notifier.next(), None);
     }
 }
