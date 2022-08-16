@@ -4,6 +4,12 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::v5::Incoming;
 
+/// Returnes by
+pub enum TryRecvError {
+    Disconnected,
+    Waiting,
+}
+
 #[derive(Debug)]
 pub struct Notifier {
     incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
@@ -36,9 +42,9 @@ impl Notifier {
     }
 
     #[inline]
-    /// Retruns None immediately even if not disconnected, use when expecting non-blocking interface
-    pub fn try_next(&mut self) -> Option<Incoming> {
-        match self.incoming_buf_cache.pop_front() {
+    /// Returns None immediately even if not disconnected, use when expecting non-blocking interface
+    pub fn try_recv(&mut self) -> Result<Incoming, TryRecvError> {
+        let next = match self.incoming_buf_cache.pop_front() {
             None => {
                 let mut incoming_buf = self.incoming_buf.lock().unwrap();
                 if incoming_buf.is_empty() {
@@ -50,6 +56,12 @@ impl Notifier {
                 }
             }
             val => val,
+        };
+
+        match next {
+            Some(p) => Ok(p),
+            None if self.is_disconnected() => Err(TryRecvError::Waiting),
+            None => Err(TryRecvError::Waiting),
         }
     }
 }
@@ -58,12 +70,12 @@ impl Iterator for Notifier {
     type Item = Incoming;
 
     #[inline]
-    /// Retrun None only if disconnected, else block and retry till resolves as Some
+    /// Return None only if disconnected, else block and retry till resolves as Some
     fn next(&mut self) -> Option<Incoming> {
         loop {
-            match self.try_next() {
-                Some(p) => return Some(p),
-                None if self.is_disconnected() => return None,
+            match self.try_recv() {
+                Ok(p) => return Some(p),
+                Err(TryRecvError::Disconnected) => return None,
                 _ => {}
             }
         }
