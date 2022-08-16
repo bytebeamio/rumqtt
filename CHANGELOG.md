@@ -1,9 +1,10 @@
-----------------
-rumqttc
------------
-- Create non-blocking interface for `Notifier` (#431)
+### Unreleased
 
------------
+---
+rumqttc
+---
+- Derive standard like `Eq` and `Clone` traits on some types where required (#429)
+- Create non-blocking interface for `Notifier` (#431)
 
 ### R14
 ----------------

@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ConnectReturnCode {
     Success = 0,
@@ -30,7 +30,7 @@ pub enum ConnectReturnCode {
 }
 
 /// Acknowledgement to connect packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnAck {
     pub session_present: bool,
     pub code: ConnectReturnCode,
@@ -97,7 +97,7 @@ impl ConnAck {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnAckProperties {
     pub session_expiry_interval: Option<u32>,
     pub receive_max: Option<u16>,

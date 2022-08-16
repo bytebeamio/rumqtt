@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Unsubscribe packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unsubscribe {
     pub pkid: u16,
     pub filters: Vec<String>,
@@ -82,7 +82,7 @@ impl Unsubscribe {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubscribeProperties {
     pub user_properties: Vec<(String, String)>,
 }

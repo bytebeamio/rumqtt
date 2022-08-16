@@ -3,7 +3,7 @@ use bytes::{Buf, Bytes};
 use core::fmt;
 
 /// Subscription packet
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<SubscribeFilter>,
@@ -145,7 +145,7 @@ impl Subscribe {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeProperties {
     pub id: Option<usize>,
     pub user_properties: Vec<(String, String)>,
@@ -227,7 +227,7 @@ impl SubscribeProperties {
 }
 
 ///  Subscription filter
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SubscribeFilter {
     pub path: String,
     pub qos: QoS,
@@ -290,7 +290,7 @@ impl SubscribeFilter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetainForwardRule {
     OnEverySubscribe,
     OnNewSubscribe,

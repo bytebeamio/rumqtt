@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Connection packet initiated by the client
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connect {
     /// Mqtt protocol version
     pub protocol: Protocol,
@@ -135,7 +135,7 @@ impl Connect {
 }
 
 /// LastWill that broker forwards on behalf of the client
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastWill {
     pub topic: String,
     pub message: Bytes,
@@ -200,7 +200,7 @@ impl LastWill {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Login {
     pub username: String,
     pub password: String,

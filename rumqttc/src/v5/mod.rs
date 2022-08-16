@@ -25,13 +25,15 @@ pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error;
 #[cfg(feature = "use-rustls")]
-pub use tokio_rustls::rustls::ClientConfig;
+pub use tokio_rustls;
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Publish(Publish),
     PubAck(PubAck),
@@ -48,7 +50,7 @@ pub enum Request {
 }
 
 /// Key type for TLS authentication
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
     RSA(Vec<u8>),
     ECC(Vec<u8>),
@@ -397,7 +399,7 @@ impl MqttOptions {
 }
 
 #[cfg(feature = "url")]
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
