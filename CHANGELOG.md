@@ -1,3 +1,10 @@
+----------------
+rumqttc
+-----------
+- Create non-blocking interface for `Notifier` (#431)
+
+-----------
+
 ### R14
 ----------------
 rumqttc v0.14.0
