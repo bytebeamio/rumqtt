@@ -3,7 +3,7 @@
 ---
 rumqttc
 ---
-- BREAKING: Changed the way we re-export `ClientConfig` struct (#428)
+- Ensure re-export of `ClientConfig` is clearly from the `tokio_rustls` crate (#428)
 - Derive standard like `Eq` and `Clone` traits on some types where required (#429)
 - Create non-blocking interface for `Notifier` (#431)
 
