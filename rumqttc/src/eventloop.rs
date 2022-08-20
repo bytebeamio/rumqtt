@@ -48,8 +48,6 @@ pub enum ConnectionError {
     NotConnAck(Packet),
     #[error("Requests done")]
     RequestsDone,
-    #[error("Cancel request by the user")]
-    Cancel,
 }
 
 /// Eventloop with all the state of a connection
@@ -68,14 +66,10 @@ pub struct EventLoop {
     pub(crate) network: Option<Network>,
     /// Keep alive time
     pub(crate) keepalive_timeout: Option<Pin<Box<Sleep>>>,
-    /// Handle to read cancellation requests
-    pub(crate) cancel_rx: Receiver<()>,
-    /// Handle to send cancellation requests (and drops)
-    pub(crate) cancel_tx: Sender<()>,
 }
 
 /// Events which can be yielded by the event loop
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Incoming(Incoming),
     Outgoing(Outgoing),
@@ -87,7 +81,6 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let (cancel_tx, cancel_rx) = bounded(5);
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
@@ -102,22 +95,12 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
-            cancel_rx,
-            cancel_tx,
         }
     }
 
     /// Returns a handle to communicate with this eventloop
     pub fn handle(&self) -> Sender<Request> {
         self.requests_tx.clone()
-    }
-
-    /// Handle for cancelling the eventloop.
-    ///
-    /// Can be useful in cases when connection should be halted immediately
-    /// between half-open connection detections or (re)connection timeouts
-    pub(crate) fn cancel_handle(&mut self) -> Sender<()> {
-        self.cancel_tx.clone()
     }
 
     fn clean(&mut self) {
@@ -133,7 +116,11 @@ impl EventLoop {
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
-            let (network, connack) = connect_or_cancel(&self.options, &self.cancel_rx).await?;
+            let (network, connack) = time::timeout(
+                Duration::from_secs(self.options.connection_timeout()),
+                connect(&self.options),
+            )
+            .await??;
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
@@ -225,24 +212,6 @@ impl EventLoop {
                 network.flush(&mut self.state.write).await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
-            // cancellation requests to stop the polling
-            _ = self.cancel_rx.recv_async() => {
-                Err(ConnectionError::Cancel)
-            }
-        }
-    }
-}
-
-async fn connect_or_cancel(
-    options: &MqttOptions,
-    cancel_rx: &Receiver<()>,
-) -> Result<(Network, Incoming), ConnectionError> {
-    // select here prevents cancel request from being blocked until connection request is
-    // resolved. Returns with an error if connections fail continuously
-    select! {
-        o = connect(options) => o,
-        _ = cancel_rx.recv_async() => {
-            Err(ConnectionError::Cancel)
         }
     }
 }
@@ -254,18 +223,10 @@ async fn connect_or_cancel(
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = match network_connect(options).await {
-        Ok(network) => network,
-        Err(e) => {
-            return Err(e);
-        }
-    };
+    let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = match mqtt_connect(options, &mut network).await {
-        Ok(p) => p,
-        Err(e) => return Err(e),
-    };
+    let packet = mqtt_connect(options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
@@ -343,26 +304,17 @@ async fn mqtt_connect(
         connect.login = Some(login);
     }
 
-    // mqtt connection with timeout
-    time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        network.connect(connect).await?;
-        Ok::<_, ConnectionError>(())
-    })
-    .await??;
+    // send mqtt connect packet
+    network.connect(connect).await?;
 
-    // wait for 'timeout' time to validate connack
-    let packet = time::timeout(Duration::from_secs(options.connection_timeout()), async {
-        match network.read().await? {
-            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-                Ok(Packet::ConnAck(connack))
-            }
-            Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-            packet => Err(ConnectionError::NotConnAck(packet)),
+    // validate connack
+    match network.read().await? {
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+            Ok(Packet::ConnAck(connack))
         }
-    })
-    .await??;
-
-    Ok(packet)
+        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        packet => Err(ConnectionError::NotConnAck(packet)),
+    }
 }
 
 /// Returns the next pending packet asynchronously to be used in select!

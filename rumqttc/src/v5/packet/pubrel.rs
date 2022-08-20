@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PubRelReason {
     Success = 0,
@@ -10,7 +10,7 @@ pub enum PubRelReason {
 }
 
 /// Acknowledgement to QoS1 publish
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRel {
     pub pkid: u16,
     pub reason: PubRelReason,
@@ -38,6 +38,8 @@ impl PubRel {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            len += 1;
         }
 
         len
@@ -88,13 +90,15 @@ impl PubRel {
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         Ok(1 + count + len)
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRelProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,

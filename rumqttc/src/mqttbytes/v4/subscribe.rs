@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Subscription packet
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<SubscribeFilter>,
@@ -21,16 +21,13 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many<T>(topics: T) -> Result<Subscribe, Error>
+    pub fn new_many<T>(topics: T) -> Subscribe
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
 
-        match filters.len() {
-            0 => Err(Error::EmptySubscription),
-            _ => Ok(Subscribe { pkid: 0, filters }),
-        }
+        Subscribe { pkid: 0, filters }
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
@@ -92,7 +89,7 @@ impl Subscribe {
 }
 
 ///  Subscription filter
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SubscribeFilter {
     pub path: String,
     pub qos: QoS,
@@ -117,7 +114,7 @@ impl SubscribeFilter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetainForwardRule {
     OnEverySubscribe,
     OnNewSubscribe,

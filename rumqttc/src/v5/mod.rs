@@ -1,7 +1,6 @@
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 use std::{
-    collections::VecDeque,
     fmt::{self, Debug, Formatter},
     time::Duration,
 };
@@ -17,7 +16,7 @@ mod state;
 #[cfg(feature = "use-rustls")]
 mod tls;
 
-pub use client::{AsyncClient, Client, ClientError, Connection};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
 pub use notifier::Notifier;
@@ -26,13 +25,15 @@ pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error;
 #[cfg(feature = "use-rustls")]
-pub use tokio_rustls::rustls::ClientConfig;
+pub use tokio_rustls;
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Publish(Publish),
     PubAck(PubAck),
@@ -49,7 +50,7 @@ pub enum Request {
 }
 
 /// Key type for TLS authentication
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
     RSA(Vec<u8>),
     ECC(Vec<u8>),
@@ -398,7 +399,7 @@ impl MqttOptions {
 }
 
 #[cfg(feature = "url")]
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
@@ -587,29 +588,6 @@ impl Debug for MqttOptions {
             .field("manual_acks", &self.manual_acks)
             .finish()
     }
-}
-
-pub async fn connect(options: MqttOptions, cap: usize) -> Result<(AsyncClient, Notifier), ()> {
-    let mut eventloop = EventLoop::new(options, cap);
-    let outgoing_buf = eventloop.state.outgoing_buf.clone();
-    let incoming_buf = eventloop.state.incoming_buf.clone();
-    let incoming_buf_cache = VecDeque::with_capacity(cap);
-    let request_tx = eventloop.handle();
-
-    let client = AsyncClient {
-        outgoing_buf,
-        request_tx,
-    };
-
-    tokio::spawn(async move {
-        loop {
-            // TODO: maybe do something like retries for some specific errors? or maybe give user
-            // options to configure these retries?
-            eventloop.poll().await.unwrap();
-        }
-    });
-
-    Ok((client, Notifier::new(incoming_buf, incoming_buf_cache)))
 }
 
 #[cfg(test)]

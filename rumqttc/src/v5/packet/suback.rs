@@ -3,7 +3,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::{TryFrom, TryInto};
 
 /// Acknowledgement to subscribe
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAck {
     pub pkid: u16,
     pub return_codes: Vec<SubscribeReasonCode>,
@@ -22,16 +22,13 @@ impl SubAck {
     pub fn len(&self) -> usize {
         let mut len = 2 + self.return_codes.len();
 
-        match &self.properties {
-            Some(properties) => {
-                let properties_len = properties.len();
-                let properties_len_len = len_len(properties_len);
-                len += properties_len_len + properties_len;
-            }
-            None => {
-                // just 1 byte representing 0 len
-                len += 1;
-            }
+        if let Some(properties) = &self.properties {
+            let properties_len = properties.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
         }
 
         len
@@ -70,12 +67,11 @@ impl SubAck {
 
         buffer.put_u16(self.pkid);
 
-        match &self.properties {
-            Some(properties) => properties.write(buffer)?,
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
-        };
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
 
         let p: Vec<u8> = self.return_codes.iter().map(|code| *code as u8).collect();
         buffer.extend_from_slice(&p);
@@ -83,7 +79,7 @@ impl SubAck {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,

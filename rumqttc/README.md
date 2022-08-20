@@ -65,7 +65,8 @@ Quick overview of features
 - Queue size based flow control on outgoing packets
 - Automatic reconnections by just continuing the `eventloop.poll()/connection.iter()` loop
 - Natural backpressure to client APIs during bad network
-- Immediate cancellation with `client.cancel()`
+- Support for WebSockets
+- Secure transport using TLS
 
 In short, everything necessary to maintain a robust connection
 
@@ -90,7 +91,7 @@ out side the library and `Eventloop` is accessible, users can
 
 You cannot create a TLS connection to a bare IP address with a self-signed
 certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
-One workaround, which only works under *nix/BSD-like systems, is to add an
+One workaround, which only works on certain systems, is to add an
 entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
 address and use that name in your code.
 </details>

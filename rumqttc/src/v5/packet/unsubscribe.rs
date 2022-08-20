@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Unsubscribe packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unsubscribe {
     pub pkid: u16,
     pub filters: Vec<String>,
@@ -67,12 +67,11 @@ impl Unsubscribe {
         // write packet id
         buffer.put_u16(self.pkid);
 
-        match &self.properties {
-            Some(properties) => properties.write(buffer)?,
-            None => {
-                write_remaining_length(buffer, 0)?;
-            }
-        };
+        if let Some(properties) = &self.properties {
+            properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
 
         // write filters
         for filter in self.filters.iter() {
@@ -83,7 +82,7 @@ impl Unsubscribe {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubscribeProperties {
     pub user_properties: Vec<(String, String)>,
 }

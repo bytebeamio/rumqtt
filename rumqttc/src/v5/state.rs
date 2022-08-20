@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io, mem,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Instant,
 };
 
@@ -34,6 +34,8 @@ pub enum StateError {
     CollisionTimeout,
     #[error("Mqtt serialization/deserialization error")]
     Deserialization(Error),
+    #[error("Couldn't get write lock")]
+    WriteLock,
 }
 
 impl From<Error> for StateError {
@@ -76,6 +78,7 @@ pub struct MqttState {
     pub manual_acks: bool,
     pub(crate) incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
     pub(crate) outgoing_buf: Arc<Mutex<OutgoingBuf>>,
+    pub(crate) disconnected: Arc<RwLock<bool>>,
 }
 
 impl MqttState {
@@ -99,6 +102,7 @@ impl MqttState {
             manual_acks,
             incoming_buf: Arc::new(Mutex::new(VecDeque::with_capacity(cap))),
             outgoing_buf: OutgoingBuf::new(max_inflight as usize),
+            disconnected: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -140,6 +144,11 @@ impl MqttState {
     #[inline]
     pub fn cur_pkid(&self) -> u16 {
         self.outgoing_buf.lock().unwrap().pkid_counter
+    }
+
+    #[inline]
+    pub fn is_disconnected(&self) -> bool {
+        *self.disconnected.read().unwrap()
     }
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
@@ -200,24 +209,25 @@ impl MqttState {
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
     fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<(), StateError> {
-        let qos = publish.qos;
-
-        match qos {
-            QoS::AtMostOnce => {}
-            QoS::AtLeastOnce => {
-                if !self.manual_acks {
-                    let puback = PubAck::new(publish.pkid);
-                    self.outgoing_puback(puback)?
-                }
+        match publish.qos {
+            QoS::AtLeastOnce if !self.manual_acks => {
+                let puback = PubAck::new(publish.pkid);
+                self.outgoing_puback(puback)?
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
-                self.incoming_pub[pkid as usize] = Some(pkid);
+                let incoming = self
+                    .incoming_pub
+                    .get_mut(pkid as usize)
+                    .ok_or(StateError::Unsolicited(pkid))?;
+                *incoming = Some(pkid);
+
                 if !self.manual_acks {
                     let pubrec = PubRec::new(pkid);
                     self.outgoing_pubrec(pubrec)?;
                 }
             }
+            _ => {}
         }
 
         Ok(())
@@ -412,6 +422,12 @@ impl MqttState {
     #[inline]
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
+
+        let mut disconnected = self
+            .disconnected
+            .write()
+            .map_err(|_| StateError::WriteLock)?;
+        *disconnected = true;
 
         Disconnect::new().write(&mut self.write)?;
         Ok(())

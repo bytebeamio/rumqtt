@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ConnectReturnCode {
     Success = 0,
@@ -30,7 +30,7 @@ pub enum ConnectReturnCode {
 }
 
 /// Acknowledgement to connect packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnAck {
     pub session_present: bool,
     pub code: ConnectReturnCode,
@@ -48,12 +48,14 @@ impl ConnAck {
 
     fn len(&self) -> usize {
         let mut len = 1  // session present
-                        + 1; // code
+                    + 1; // code
 
         if let Some(properties) = &self.properties {
             let properties_len = properties.len();
             let properties_len_len = len_len(properties_len);
             len += properties_len_len + properties_len;
+        } else {
+            len += 1;
         }
 
         len
@@ -87,13 +89,15 @@ impl ConnAck {
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
         }
 
         Ok(1 + count + len)
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnAckProperties {
     pub session_expiry_interval: Option<u32>,
     pub receive_max: Option<u16>,

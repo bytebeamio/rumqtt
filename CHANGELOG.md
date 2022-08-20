@@ -1,3 +1,37 @@
+### Unreleased
+
+---
+rumqttc
+---
+- Ensure re-export of `ClientConfig` is clearly from the `tokio_rustls` crate (#428)
+- Derive standard like `Eq` and `Clone` traits on some types where required (#429)
+- Create non-blocking interface for `Notifier` (#431)
+
+### R14
+----------------
+rumqttc v0.14.0
+-----------
+- Timeouts moved up to `connect()` call (#408)
+- Tokio dependency `version = "1"` (#412)
+- Fix empty property serialization (#413)
+- Change variants in `ClientError` to not expose dependence on flume/`SendError` (#420)
+- Revert erroring out when Subscription filter list is empty (#422)
+- Remove the ability to cancel `EventLoop.poll()` mid execution (#421)
+- Improve documentation and fix examples (#380, #401, #416, #417)
+
+-----------
+
+### R13
+----------------
+rumqttc v0.13.0
+-----------
+- Add code in `rumqttc::v5`, moving towards support for operating the client with MQTT 5 (#351, #393, #398)
+- Add missing `self.inflight += 1` in `MqttState.save_pubrel()` (#389)
+- Error out when Subscription filter list is empty (#392)
+- Make public `rumqttc::client::Iter` (#402)
+
+-----------
+
 ### R12
 ----------------
 rumqttc v0.12.0

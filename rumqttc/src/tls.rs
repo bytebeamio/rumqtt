@@ -15,19 +15,26 @@ use std::io::{BufReader, Cursor};
 use std::net::AddrParseError;
 use std::sync::Arc;
 
+/// TLS backend error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Error parsing IP address
     #[error("Addr")]
     Addr(#[from] AddrParseError),
+    /// I/O related error
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
+    /// Certificate/Name validation error
     #[error("Web Pki: {0}")]
     WebPki(#[from] webpki::Error),
+    /// Invalid DNS name
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
+    /// Error from rustls module
     #[error("TLS error: {0}")]
     TLS(#[from] rustls::Error),
-    #[error("No valid cert in chain")]
+    /// No valid certificate in chain
+    #[error("No valid certificate in chain")]
     NoValidCertInChain,
 }
 

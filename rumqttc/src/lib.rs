@@ -67,7 +67,6 @@
 //! - Queue size based flow control on outgoing packets
 //! - Automatic reconnections by just continuing the `eventloop.poll()`/`connection.iter()` loop
 //! - Natural backpressure to client APIs during bad network
-//! - Immediate cancellation with `client.cancel()`
 //!
 //! In short, everything necessary to maintain a robust connection
 //!
@@ -113,7 +112,7 @@ mod state;
 mod tls;
 pub mod v5;
 
-pub use client::{AsyncClient, Client, ClientError, Connection};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
 pub use mqttbytes::v4::*;
@@ -121,13 +120,16 @@ pub use mqttbytes::*;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error as TlsError;
+
 #[cfg(feature = "use-rustls")]
-pub use tokio_rustls::rustls::ClientConfig;
+pub use tokio_rustls;
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::ClientConfig;
 
 pub type Incoming = Packet;
 
 /// Current outgoing activity on the eventloop
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outgoing {
     /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
@@ -155,7 +157,7 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Publish(Publish),
     PubAck(PubAck),
@@ -172,7 +174,7 @@ pub enum Request {
 }
 
 /// Key type for TLS authentication
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
     RSA(Vec<u8>),
     ECC(Vec<u8>),
@@ -196,6 +198,7 @@ impl From<Unsubscribe> for Request {
     }
 }
 
+/// Transport methods. Defaults to TCP.
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
@@ -280,6 +283,7 @@ impl Transport {
     }
 }
 
+/// TLS configuration method
 #[derive(Clone)]
 #[cfg(feature = "use-rustls")]
 pub enum TlsConfiguration {
@@ -305,7 +309,7 @@ impl From<ClientConfig> for TlsConfiguration {
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
-/// Options to configure the behaviour of mqtt connection
+/// Options to configure the behaviour of MQTT connection
 #[derive(Clone)]
 pub struct MqttOptions {
     /// broker address that you want to connect to
@@ -435,7 +439,7 @@ impl MqttOptions {
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
-        assert!(duration.as_secs() >= 5, "Keep alives should be >= 5  secs");
+        assert!(duration.as_secs() >= 5, "Keep alives should be >= 5 secs");
 
         self.keep_alive = duration;
         self
@@ -553,7 +557,7 @@ impl MqttOptions {
 }
 
 #[cfg(feature = "url")]
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
