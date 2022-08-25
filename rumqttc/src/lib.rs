@@ -399,8 +399,25 @@ impl MqttOptions {
     /// let options = MqttOptions::parse_url("mqtt://example.com:1883?client_id=123").unwrap();
     /// ```
     ///
-    /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+    /// **NOTE:** A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
     /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
+    ///
+    /// **NOTE:** Though encrypted connections(i.e. `mqtts://`, `ssl://`, `wss://`) are supported, they
+    /// require explicit TLS configuration. This is why we fall back to the unencrypted transport layer,
+    /// so that [`set_transport`](MqttOptions::set_transport) can be used to configure the encrypted
+    /// transport layer with the provided TLS configuration.
+    ///
+    /// ```
+    /// # use rumqttc::{MqttOptions, Transport};
+    /// # use tokio_rustls::rustls::ClientConfig;
+    /// # let root_cert_store = rustls::RootCertStore::empty();
+    /// # let client_config = ClientConfig::builder()
+    /// #    .with_safe_defaults()
+    /// #    .with_root_certificates(root_cert_store)
+    /// #    .with_no_client_auth();
+    /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
+    /// options.set_transport(Transport::tls_with_config(client_config.into()));
+    /// ```
     pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
         use std::convert::TryFrom;
 
