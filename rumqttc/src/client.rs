@@ -33,7 +33,7 @@ impl From<TrySendError<Request>> for ClientError {
 /// An asynchronous client, communicates with MQTT `EventLoop`.
 /// 
 /// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
-/// [`subscribe`](`AsynClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
+/// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
 ///
 /// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets 
 /// from the broker, i.e. move ahead.
@@ -217,7 +217,7 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 /// A synchronous client, communicates with MQTT `EventLoop`.
 ///
 /// This is cloneable and can be used to synchronously [`publish`](`AsyncClient::publish`),
-/// [`subscribe`](`AsynClient::subscribe`) through the `EventLoop`/`Connection`, which is to be polled in parallel
+/// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`/`Connection`, which is to be polled in parallel
 /// by iterating over the object returned by [`Connection.iter()`](Connection::iter) in a separate thread.
 ///
 /// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order 
