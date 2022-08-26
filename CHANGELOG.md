@@ -1,11 +1,11 @@
-### Unreleased
-
+### R15
 ---
-rumqttc
+rumqttc v0.15.0
 ---
 - Ensure re-export of `ClientConfig` is clearly from the `tokio_rustls` crate (#428)
 - Derive standard like `Eq` and `Clone` traits on some types where required (#429)
 - Create non-blocking interface for `Notifier` (#431)
+- Use native certificates for encrypted transports in `MqttOptions::parse_url` (#436)
 
 ### R14
 ----------------
