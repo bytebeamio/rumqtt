@@ -433,10 +433,9 @@ impl MqttOptions {
     /// **NOTE:** A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
     /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
     ///
-    /// **NOTE:** Though encrypted connections(i.e. `mqtts://`, `ssl://`, `wss://`) are supported, they
-    /// require explicit TLS configuration. This is why we fall back to the unencrypted transport layer,
-    /// so that [`set_transport`](MqttOptions::set_transport) can be used to configure the encrypted
-    /// transport layer with the provided TLS configuration.
+    /// **NOTE:** Encrypted connections(i.e. `mqtts://`, `ssl://`, `wss://`) by default use the
+    /// system's root certificates. To configure with custom certificates, one may use the
+    /// [`set_transport`](MqttOptions::set_transport) method.
     ///
     /// ```
     /// # use rumqttc::{MqttOptions, Transport};
