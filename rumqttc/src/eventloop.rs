@@ -328,7 +328,6 @@ pub(crate) async fn next_pending(
     pending.next()
 }
 
-#[allow(dead_code)]
 #[cfg(test)]
 mod tests {
     use crate::broker::Broker;
