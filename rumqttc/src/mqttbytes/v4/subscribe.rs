@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Subscription packet
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<SubscribeFilter>,
@@ -89,7 +89,7 @@ impl Subscribe {
 }
 
 ///  Subscription filter
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SubscribeFilter {
     pub path: String,
     pub qos: QoS,
@@ -114,7 +114,7 @@ impl SubscribeFilter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetainForwardRule {
     OnEverySubscribe,
     OnNewSubscribe,

@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PubCompReason {
     Success = 0,
@@ -10,7 +10,7 @@ pub enum PubCompReason {
 }
 
 /// Acknowledgement to QoS1 publish
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubComp {
     pub pkid: u16,
     pub reason: PubCompReason,
@@ -99,7 +99,7 @@ impl PubComp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubCompProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
