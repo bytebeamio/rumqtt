@@ -123,7 +123,7 @@ pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
-pub use tokio_rustls::rustls::ClientConfig;
+pub use tokio_rustls::rustls::{Certificate, ClientConfig, RootCertStore};
 
 pub type Incoming = Packet;
 
@@ -312,11 +312,9 @@ pub enum TlsConfiguration {
 #[cfg(feature = "use-rustls")]
 impl Default for TlsConfiguration {
     fn default() -> Self {
-        let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
+        let mut root_cert_store = RootCertStore::empty();
         for cert in load_native_certs().expect("could not load platform certs") {
-            root_cert_store
-                .add(&tokio_rustls::rustls::Certificate(cert.0))
-                .unwrap();
+            root_cert_store.add(&Certificate(cert.0)).unwrap();
         }
         let tls_config = ClientConfig::builder()
             .with_safe_defaults()
