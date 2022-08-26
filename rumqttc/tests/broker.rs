@@ -61,35 +61,6 @@ impl Broker {
         }
     }
 
-    // Reads a publish packet from the stream with 2 second timeout
-    pub async fn read_publish(&mut self) -> Option<Publish> {
-        loop {
-            let packet = if !self.incoming.is_empty() {
-                self.incoming.pop_front().unwrap()
-            } else {
-                let packet = time::timeout(Duration::from_secs(2), async {
-                    self.framed.readb(&mut self.incoming).await.unwrap();
-                    self.incoming.pop_front().unwrap()
-                })
-                .await;
-
-                match packet {
-                    Ok(packet) => packet,
-                    Err(_e) => return None,
-                }
-            };
-
-            match packet {
-                Packet::Publish(publish) => return Some(publish),
-                Packet::PingReq => {
-                    self.framed.write(Packet::PingResp).await.unwrap();
-                    continue;
-                }
-                packet => panic!("Expecting a publish. Received = {:?}", packet),
-            }
-        }
-    }
-
     /// Reads next packet from the stream
     pub async fn read_packet(&mut self) -> Packet {
         time::timeout(Duration::from_secs(30), async {
@@ -108,12 +79,6 @@ impl Broker {
         loop {
             self.framed.readb(&mut self.incoming).await.unwrap();
         }
-    }
-
-    /// Sends an acknowledgement
-    pub async fn ack(&mut self, pkid: u16) {
-        let packet = Packet::PubAck(PubAck::new(pkid));
-        self.framed.write(packet).await.unwrap();
     }
 
     /// Sends an acknowledgement
