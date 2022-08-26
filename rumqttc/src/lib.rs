@@ -117,6 +117,8 @@ pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
+#[cfg(feature = "use-rustls")]
+pub use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error as TlsError;
@@ -124,7 +126,7 @@ pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls::ClientConfig;
+use tokio_rustls::rustls::{Certificate, ClientConfig, RootCertStore};
 
 pub type Incoming = Packet;
 
@@ -226,6 +228,11 @@ impl Transport {
         Self::Tcp
     }
 
+    #[cfg(feature = "use-rustls")]
+    pub fn tls_with_default_config() -> Self {
+        Self::tls_with_config(Default::default())
+    }
+
     /// Use secure tcp with tls as transport
     #[cfg(feature = "use-rustls")]
     pub fn tls(
@@ -281,6 +288,12 @@ impl Transport {
     pub fn wss_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Wss(tls_config)
     }
+
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
+    pub fn wss_with_default_config() -> Self {
+        Self::Wss(Default::default())
+    }
 }
 
 /// TLS configuration method
@@ -297,6 +310,22 @@ pub enum TlsConfiguration {
     },
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     Rustls(Arc<ClientConfig>),
+}
+
+#[cfg(feature = "use-rustls")]
+impl Default for TlsConfiguration {
+    fn default() -> Self {
+        let mut root_cert_store = RootCertStore::empty();
+        for cert in load_native_certs().expect("could not load platform certs") {
+            root_cert_store.add(&Certificate(cert.0)).unwrap();
+        }
+        let tls_config = ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_cert_store)
+            .with_no_client_auth();
+
+        Self::Rustls(Arc::new(tls_config))
+    }
 }
 
 #[cfg(feature = "use-rustls")]
@@ -402,8 +431,24 @@ impl MqttOptions {
     /// let options = MqttOptions::parse_url("mqtt://example.com:1883?client_id=123").unwrap();
     /// ```
     ///
-    /// NOTE: A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+    /// **NOTE:** A url must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
     /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
+    ///
+    /// **NOTE:** Encrypted connections(i.e. `mqtts://`, `ssl://`, `wss://`) by default use the
+    /// system's root certificates. To configure with custom certificates, one may use the
+    /// [`set_transport`](MqttOptions::set_transport) method.
+    ///
+    /// ```
+    /// # use rumqttc::{MqttOptions, Transport};
+    /// # use tokio_rustls::rustls::ClientConfig;
+    /// # let root_cert_store = rustls::RootCertStore::empty();
+    /// # let client_config = ClientConfig::builder()
+    /// #    .with_safe_defaults()
+    /// #    .with_root_certificates(root_cert_store)
+    /// #    .with_no_client_auth();
+    /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
+    /// options.set_transport(Transport::tls_with_config(client_config.into()));
+    /// ```
     pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
         use std::convert::TryFrom;
 
@@ -612,10 +657,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             // Encrypted connections are supported, but require explicit TLS configuration. We fall
             // back to the unencrypted transport layer, so that `set_transport` can be used to
             // configure the encrypted transport layer with the provided TLS configuration.
-            "mqtts" | "ssl" => (Transport::Tcp, 8883),
+            "mqtts" | "ssl" => (Transport::tls_with_default_config(), 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
             #[cfg(feature = "websocket")]
-            "ws" | "wss" => (Transport::Ws, 8000),
+            "ws" => (Transport::Ws, 8000),
+            #[cfg(feature = "websocket")]
+            "wss" => (Transport::wss_with_default_config(), 8000),
             _ => return Err(OptionError::Scheme),
         };
 
