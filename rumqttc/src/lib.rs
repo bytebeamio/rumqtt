@@ -657,11 +657,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             // Encrypted connections are supported, but require explicit TLS configuration. We fall
             // back to the unencrypted transport layer, so that `set_transport` can be used to
             // configure the encrypted transport layer with the provided TLS configuration.
+            #[cfg(feature = "use-rustls")]
             "mqtts" | "ssl" => (Transport::tls_with_default_config(), 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
             #[cfg(feature = "websocket")]
             "ws" => (Transport::Ws, 8000),
-            #[cfg(feature = "websocket")]
+            #[cfg(all(feature = "use-rustls", feature = "websocket"))]
             "wss" => (Transport::wss_with_default_config(), 8000),
             _ => return Err(OptionError::Scheme),
         };
