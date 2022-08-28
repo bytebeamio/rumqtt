@@ -16,7 +16,7 @@ path = "src/lib.rs"
 [features]
 default = ["use-rustls"]
 prof = ["pprof"]
-use-rustls = ["tokio-rustls"]
+use-rustls = ["tokio-rustls", "rustls-pemfile"]
 use-native-tls = ["tokio-native-tls"]
 
 [dependencies]
@@ -27,7 +27,6 @@ futures-util = "0.3"
 jackiechan = "0.0.4"
 log = "0.4"
 pretty_env_logger = "0.4"
-rustls-pemfile = "0.3"
 segments = "0.1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
@@ -35,6 +34,7 @@ tokio = { version = "1", features = ["full"] }
 warp = "0.3"
 
 # Optional
+rustls-pemfile = { version = "0.3", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 tokio-rustls = { version = "0.23", optional = true }
 
