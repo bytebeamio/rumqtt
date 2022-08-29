@@ -2,10 +2,8 @@ use matches::assert_matches;
 use std::time::{Duration, Instant};
 use tokio::{task, time};
 
-mod broker;
-
-use broker::*;
 use rumqttc::*;
+use broker::Broker;
 
 async fn run(eventloop: &mut EventLoop, reconnect: bool) -> Result<(), ConnectionError> {
     'reconnect: loop {

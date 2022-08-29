@@ -1710,6 +1710,7 @@ dependencies = [
  "pollster",
  "pretty_assertions 1.2.0",
  "pretty_env_logger",
+ "rumqttc",
  "rustls",
  "rustls-native-certs",
  "rustls-pemfile 0.3.0",

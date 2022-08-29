@@ -17,6 +17,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["use-rustls"]
 websocket = ["async-tungstenite", "ws_stream_tungstenite"]
 use-rustls = ["tokio-rustls", "rustls-pemfile"]
+test-utils = []
 
 [dependencies]
 async-tungstenite = { version = "0.16", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
@@ -45,3 +46,4 @@ rustls = "0.20"
 rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full", "macros"] }
+rumqttc = { path = ".", features = ["test-utils"] }

@@ -330,8 +330,8 @@ pub(crate) async fn next_pending(
 
 #[cfg(test)]
 mod tests {
-    use crate::broker::Broker;
     use crate::*;
+    use broker::Broker;
     use flume::Sender;
     use std::time::{Duration, Instant};
     use tokio::{task, time};
