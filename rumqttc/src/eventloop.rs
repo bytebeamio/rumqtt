@@ -57,15 +57,15 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    pub requests_rx: Receiver<Request>,
+    requests_rx: Receiver<Request>,
     /// Requests handle to send requests
-    pub requests_tx: Sender<Request>,
+    pub(crate) requests_tx: Sender<Request>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
-    pub(crate) network: Option<Network>,
+    network: Option<Network>,
     /// Keep alive time
-    pub(crate) keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    keepalive_timeout: Option<Pin<Box<Sleep>>>,
 }
 
 /// Events which can be yielded by the event loop
@@ -96,11 +96,6 @@ impl EventLoop {
             network: None,
             keepalive_timeout: None,
         }
-    }
-
-    /// Returns a handle to communicate with this eventloop
-    pub fn handle(&self) -> Sender<Request> {
-        self.requests_tx.clone()
     }
 
     fn clean(&mut self) {
