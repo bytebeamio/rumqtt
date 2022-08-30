@@ -114,15 +114,13 @@ pub mod v5;
 
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use flume::{SendError, Sender, TrySendError};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 #[cfg(feature = "use-rustls")]
-pub use rustls_native_certs::load_native_certs;
+use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
 pub use tls::Error as TlsError;
-
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
