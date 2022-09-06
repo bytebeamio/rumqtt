@@ -404,9 +404,7 @@ mod test {
             .set_last_will(will);
 
         let (_, mut connection) = Client::new(mqttoptions, 10);
-        let iter1 = connection.iter();
-        drop(iter1);
-        let iter2 = connection.iter();
-        drop(iter2);
+        let _ = connection.iter();
+        let _ = connection.iter();
     }
 }
