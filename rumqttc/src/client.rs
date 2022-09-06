@@ -347,14 +347,11 @@ impl Client {
 ///  MQTT connection. Maintains all the necessary state
 pub struct Connection {
     pub eventloop: EventLoop,
-    runtime: Option<Runtime>,
+    runtime: Runtime,
 }
 impl Connection {
     fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
-        Connection {
-            eventloop,
-            runtime: Some(runtime),
-        }
+        Connection { eventloop, runtime }
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
@@ -379,7 +376,7 @@ impl Iterator for Iter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.connection.eventloop.poll();
-        let r = self.connection.runtime.as_ref().unwrap();
+        let r = &self.connection.runtime;
         match r.block_on(f) {
             Ok(v) => Some(Ok(v)),
             // closing of request channel should stop the iterator
