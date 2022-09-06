@@ -31,11 +31,11 @@ impl From<TrySendError<Request>> for ClientError {
 }
 
 /// An asynchronous client, communicates with MQTT `EventLoop`.
-/// 
+///
 /// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
 /// [`subscribe`](`AsynClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
 ///
-/// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets 
+/// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
@@ -44,7 +44,7 @@ pub struct AsyncClient {
 
 impl AsyncClient {
     /// Create a new `AsyncClient`.
-    /// 
+    ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
@@ -220,9 +220,9 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 /// [`subscribe`](`AsynClient::subscribe`) through the `EventLoop`/`Connection`, which is to be polled in parallel
 /// by iterating over the object returned by [`Connection.iter()`](Connection::iter) in a separate thread.
 ///
-/// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order 
+/// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order
 /// to send, receive and process packets from the broker, i.e. move ahead.
-/// 
+///
 /// An asynchronous channel handle can also be extracted if necessary.
 #[derive(Clone)]
 pub struct Client {
@@ -231,7 +231,7 @@ pub struct Client {
 
 impl Client {
     /// Create a new `Client`
-    /// 
+    ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
@@ -349,7 +349,6 @@ pub struct Connection {
     pub eventloop: EventLoop,
     runtime: Option<Runtime>,
 }
-
 impl Connection {
     fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
         Connection {
@@ -362,28 +361,25 @@ impl Connection {
     /// necessary to make connection progress and maintain a robust connection.
     /// Just continuing to loop will reconnect
     /// **NOTE** Don't block this while iterating
+    // ideally this should be named iter_mut because it requires a mutable reference
+    // Also we can implement IntoIter for this to make it easy to iterate over it
     #[must_use = "Connection should be iterated over a loop to make progress"]
-    pub fn iter(&mut self) -> Iter {
-        let runtime = self.runtime.take().unwrap();
-        Iter {
-            connection: self,
-            runtime: Some(runtime),
-        }
+    pub fn iter(&mut self) -> Iter<'_> {
+        Iter { connection: self }
     }
 }
 
 /// Iterator which polls the `EventLoop` for connection progress
 pub struct Iter<'a> {
     connection: &'a mut Connection,
-    runtime: Option<runtime::Runtime>,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = Result<Event, ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.connection.eventloop.poll();
-        let r = self.runtime.as_ref().unwrap();
+        let r = self.connection.runtime.as_ref().unwrap();
         match r.block_on(f) {
             Ok(v) => Some(Ok(v)),
             // closing of request channel should stop the iterator
@@ -393,12 +389,6 @@ impl<'a> Iterator for Iter<'a> {
             }
             Err(e) => Some(Err(e)),
         }
-    }
-}
-
-impl<'a> Drop for Iter<'a> {
-    fn drop(&mut self) {
-        self.connection.runtime = self.runtime.take();
     }
 }
 
