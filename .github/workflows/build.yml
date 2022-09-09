@@ -22,8 +22,12 @@ jobs:
           - windows-latest
         features:
           - --no-default-features
+          - --features url
           - --features use-rustls
-          - --no-default-features --features use-native-tls
+          - --features websocket
+          - --no-default-features --features url
+          - --no-default-features --features use-rustls
+          - --no-default-features --features websocket
           - --all-features
     steps:
       - uses: actions/checkout@v2
