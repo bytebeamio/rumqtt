@@ -1,7 +1,7 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -31,11 +31,11 @@ impl From<TrySendError<Request>> for ClientError {
 }
 
 /// An asynchronous client, communicates with MQTT `EventLoop`.
-/// 
+///
 /// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
 /// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
 ///
-/// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets 
+/// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
@@ -44,7 +44,7 @@ pub struct AsyncClient {
 
 impl AsyncClient {
     /// Create a new `AsyncClient`.
-    /// 
+    ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
@@ -70,12 +70,15 @@ impl AsyncClient {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String>,
+        S: Into<String> + Clone,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, qos, payload);
+        let mut publish = Publish::new(topic.clone(), qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
+        if !valid_topic(topic.into().as_ref()) {
+            return Err(ClientError::Request(publish));
+        }
         self.request_tx.send_async(publish).await?;
         Ok(())
     }
@@ -89,12 +92,15 @@ impl AsyncClient {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String>,
+        S: Into<String> + Clone,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, qos, payload);
+        let mut publish = Publish::new(topic.clone(), qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
+        if !valid_topic(topic.into().as_ref()) {
+            return Err(ClientError::TryRequest(publish));
+        }
         self.request_tx.try_send(publish)?;
         Ok(())
     }
@@ -220,9 +226,9 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 /// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`/`Connection`, which is to be polled in parallel
 /// by iterating over the object returned by [`Connection.iter()`](Connection::iter) in a separate thread.
 ///
-/// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order 
+/// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order
 /// to send, receive and process packets from the broker, i.e. move ahead.
-/// 
+///
 /// An asynchronous channel handle can also be extracted if necessary.
 #[derive(Clone)]
 pub struct Client {
@@ -231,7 +237,7 @@ pub struct Client {
 
 impl Client {
     /// Create a new `Client`
-    /// 
+    ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
@@ -254,7 +260,7 @@ impl Client {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String>,
+        S: Into<String> + Clone,
         V: Into<Vec<u8>>,
     {
         pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
@@ -269,7 +275,7 @@ impl Client {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String>,
+        S: Into<String> + Clone,
         V: Into<Vec<u8>>,
     {
         self.client.try_publish(topic, qos, retain, payload)?;
