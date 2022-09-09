@@ -1,9 +1,9 @@
 on:
   push:
     branches:
-      - master
+      - main
 
-name: master
+name: main
 
 env:
   PROJECT_ID: ${{ secrets.GCE_PROJECT }}
@@ -14,7 +14,7 @@ jobs:
   test:
     name: Source test
     # runs-on: [self-hosted, linux, X64, rumqtt]
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -58,7 +58,7 @@ jobs:
     #   run: |-
     #     gcloud --quiet auth configure-docker
 
-    # # Copy rumqttd and config files 
+    # # Copy rumqttd and config files
     # - name: Prepare config and binary
     #   run: |-
     #     cp -r target/release/rumqttd docker/stage/
