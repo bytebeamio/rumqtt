@@ -5,7 +5,7 @@ use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
-use std::mem;
+
 use tokio::runtime;
 use tokio::runtime::Runtime;
 
@@ -31,11 +31,11 @@ impl From<TrySendError<Request>> for ClientError {
 }
 
 /// An asynchronous client, communicates with MQTT `EventLoop`.
-/// 
+///
 /// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
 /// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
 ///
-/// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets 
+/// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
@@ -44,7 +44,7 @@ pub struct AsyncClient {
 
 impl AsyncClient {
     /// Create a new `AsyncClient`.
-    /// 
+    ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
@@ -220,9 +220,9 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 /// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`/`Connection`, which is to be polled in parallel
 /// by iterating over the object returned by [`Connection.iter()`](Connection::iter) in a separate thread.
 ///
-/// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order 
+/// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order
 /// to send, receive and process packets from the broker, i.e. move ahead.
-/// 
+///
 /// An asynchronous channel handle can also be extracted if necessary.
 #[derive(Clone)]
 pub struct Client {
@@ -231,7 +231,7 @@ pub struct Client {
 
 impl Client {
     /// Create a new `Client`
-    /// 
+    ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
@@ -347,43 +347,37 @@ impl Client {
 ///  MQTT connection. Maintains all the necessary state
 pub struct Connection {
     pub eventloop: EventLoop,
-    runtime: Option<Runtime>,
+    runtime: Runtime,
 }
-
 impl Connection {
     fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
-        Connection {
-            eventloop,
-            runtime: Some(runtime),
-        }
+        Connection { eventloop, runtime }
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
     /// necessary to make connection progress and maintain a robust connection.
     /// Just continuing to loop will reconnect
     /// **NOTE** Don't block this while iterating
+    // ideally this should be named iter_mut because it requires a mutable reference
+    // Also we can implement IntoIter for this to make it easy to iterate over it
     #[must_use = "Connection should be iterated over a loop to make progress"]
-    pub fn iter(&mut self) -> Iter {
-        let runtime = self.runtime.take().unwrap();
-        Iter {
-            connection: self,
-            runtime,
-        }
+    pub fn iter(&mut self) -> Iter<'_> {
+        Iter { connection: self }
     }
 }
 
 /// Iterator which polls the `EventLoop` for connection progress
 pub struct Iter<'a> {
     connection: &'a mut Connection,
-    runtime: runtime::Runtime,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = Result<Event, ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let f = self.connection.eventloop.poll();
-        match self.runtime.block_on(f) {
+        let r = &self.connection.runtime;
+        match r.block_on(f) {
             Ok(v) => Some(Ok(v)),
             // closing of request channel should stop the iterator
             Err(ConnectionError::RequestsDone) => {
@@ -395,10 +389,22 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl<'a> Drop for Iter<'a> {
-    fn drop(&mut self) {
-        // TODO: Don't create new runtime in drop
-        let runtime = runtime::Builder::new_current_thread().build().unwrap();
-        self.connection.runtime = Some(mem::replace(&mut self.runtime, runtime));
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn calling_iter_twice_on_connection_shouldnt_panic() {
+        use std::time::Duration;
+
+        let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+        let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+        mqttoptions
+            .set_keep_alive(Duration::from_secs(5))
+            .set_last_will(will);
+
+        let (_, mut connection) = Client::new(mqttoptions, 10);
+        let _ = connection.iter();
+        let _ = connection.iter();
     }
 }
