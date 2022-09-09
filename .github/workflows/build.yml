@@ -38,6 +38,12 @@ jobs:
           profile: minimal
           toolchain: stable
 
+      - name: Fetch dependencies
+        uses: actions-rs/cargo@v1
+        with:
+          command: fetch
+          args: --verbose
+
       - name: Check benchmarks
         uses: actions-rs/cargo@v1
         env:
@@ -55,6 +61,13 @@ jobs:
         with:
           command: clippy
           args: --verbose --all-targets ${{ matrix.features }} -p rumqttc -p rumqttd
+
+      - name: Check docs
+        if: ${{ matrix.os != 'windows-latest' }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --verbose --no-deps ${{ matrix.features }}
 
         # NOTE: Tests for rumqttc and rumqttd
       - name: Run tests
