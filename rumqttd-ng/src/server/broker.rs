@@ -7,9 +7,8 @@ use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
-use crate::server::{
-    create_nativetls_acceptor, create_rustls_accpetor, extract_tenant_id, TLSAcceptor,
-};
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+use crate::server::tls::{self, TLSAcceptor};
 use crate::ConnectionSettings;
 use flume::{RecvError, SendError, Sender};
 use log::*;
@@ -22,12 +21,11 @@ use std::{io, thread};
 use crate::link::console;
 use crate::link::local::{self, Link, LinkRx, LinkTx};
 use crate::router::{Disconnection, Event, Router};
-use crate::{server, Config, ConnectionId, ServerSettings, TlsConfig};
+use crate::{Config, ConnectionId, ServerSettings};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
 
-// All requirements for `native-tls`
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
 pub enum Error {
@@ -39,12 +37,11 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Channel send error")]
     Send(#[from] SendError<(ConnectionId, Event)>),
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     #[error("Certs error = {0}")]
-    Certs(#[from] server::Error),
+    Certs(#[from] tls::Error),
     #[error("Accept error = {0}")]
     Accept(String),
-    #[error("No peer certificate")]
-    NoPeerCertificate,
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
 }
@@ -244,49 +241,16 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
     // Depending on TLS or not create a new Network
     async fn tls_accept(&self, stream: TcpStream) -> Result<(Box<dyn N>, Option<String>), Error> {
-        let acceptor = match &self.config.tls {
-            Some(c) => match c {
-                TlsConfig::Rustls {
-                    capath: ca_path,
-                    certpath: cert_path,
-                    keypath: key_path,
-                } => create_rustls_accpetor(cert_path, key_path, ca_path)?,
-                TlsConfig::NativeTls {
-                    pkcs12path: pkcs12_path,
-                    pkcs12pass: pkcs12_pass,
-                } => create_nativetls_acceptor(pkcs12_path, pkcs12_pass)?,
-            },
-            None => {
-                let network = Box::new(stream);
-                return Ok((network, None));
+        #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+        match &self.config.tls {
+            Some(c) => {
+                let (tenant_id, network) = TLSAcceptor::new(c)?.accept(stream).await?;
+                Ok((network, Some(tenant_id)))
             }
-        };
-
-        let (tenant_id, network) = match acceptor {
-            TLSAcceptor::Rustls { acceptor } => {
-                let stream = acceptor.accept(stream).await?;
-                let (_, session) = stream.get_ref();
-                let peer_certificates = session
-                    .peer_certificates()
-                    .ok_or(Error::NoPeerCertificate)?;
-                let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
-                let network = Box::new(stream);
-                (tenant_id, network)
-            }
-            #[cfg(feature = "native-tls")]
-            TLSAcceptor::NativeTLS { acceptor } => match acceptor.accept(stream).await {
-                Ok(stream) => {
-                    let session = stream.get_ref();
-                    let peer_certificate = session.peer_certificate()?;
-                    let tenant_id = extract_tenant_id(peer_certificate)?;
-                    let network = Box::new(stream);
-                    (tenant_id, network)
-                }
-                Err(e) => return Err(Error::Certs(server::Error::NativeTls(e))),
-            },
-        };
-
-        Ok((network, Some(tenant_id)))
+            None => Ok((Box::new(stream), None)),
+        }
+        #[cfg(not(any(feature = "use-rustls", feature = "use-native-tls")))]
+        Ok((Box::new(stream), None))
     }
 
     async fn start(&self, shadow: bool) -> Result<(), Error> {

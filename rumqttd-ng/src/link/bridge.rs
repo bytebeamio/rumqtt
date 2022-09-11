@@ -127,7 +127,7 @@ pub enum BridgeError {
     #[error("I/O - {0}")]
     Io(#[from] io::Error),
     #[error("Web Pki - {0}")]
-    WebPki(#[from] webpki::Error),
+    WebPki(#[from] tokio_rustls::webpki::Error),
     #[error("DNS name - {0}")]
     DNSName(#[from] InvalidDNSNameError),
     #[error("TLS error - {0}")]

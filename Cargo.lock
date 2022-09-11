@@ -2460,7 +2460,6 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util 0.7.3",
  "vergen",
- "webpki",
  "websocket-codec",
  "ws_stream_tungstenite 0.8.0",
  "x509-parser",
