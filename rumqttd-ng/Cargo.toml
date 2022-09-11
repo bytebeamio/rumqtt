@@ -1,5 +1,5 @@
 [package]
-name = "broker"
+name = "rumqttd-ng"
 version = "0.3.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
