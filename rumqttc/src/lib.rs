@@ -436,7 +436,7 @@ impl MqttOptions {
     /// system's root certificates. To configure with custom certificates, one may use the
     /// [`set_transport`](MqttOptions::set_transport) method.
     ///
-    /// ```
+    /// ```ignore
     /// # use rumqttc::{MqttOptions, Transport};
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();

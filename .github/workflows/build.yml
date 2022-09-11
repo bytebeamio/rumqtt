@@ -1,7 +1,7 @@
 on:
   pull_request:
     branches:
-      - master
+      - main
     paths:
       - '**.rs'
       - 'Cargo.*'
@@ -22,8 +22,12 @@ jobs:
           - windows-latest
         features:
           - --no-default-features
+          - --features url
           - --features use-rustls
-          - --no-default-features --features use-native-tls
+          - --features websocket
+          - --no-default-features --features url
+          - --no-default-features --features use-rustls
+          - --no-default-features --features websocket
           - --all-features
     steps:
       - uses: actions/checkout@v2
@@ -34,16 +38,22 @@ jobs:
           profile: minimal
           toolchain: stable
 
+      - name: Fetch dependencies
+        uses: actions-rs/cargo@v1
+        with:
+          command: fetch
+          args: --verbose
+
       - name: Check benchmarks
         uses: actions-rs/cargo@v1
         env:
           RUSTFLAGS: "-D warnings"
-        # NOTE: benchmarks are limited to compiling only on non windows systems, without any features enabled. 
+        # NOTE: benchmarks are limited to compiling only on non windows systems, without any features enabled.
         if: ${{ matrix.os != 'windows-latest' && matrix.features == '--no-default-features' }}
         with:
           command: clippy
           args: --verbose --all-targets -p benchmarks
-      
+
       - name: Check rumqttc and rumqttd
         uses: actions-rs/cargo@v1
         env:
@@ -51,6 +61,13 @@ jobs:
         with:
           command: clippy
           args: --verbose --all-targets ${{ matrix.features }} -p rumqttc -p rumqttd
+
+      - name: Check docs
+        if: ${{ matrix.os != 'windows-latest' }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --verbose --no-deps ${{ matrix.features }}
 
         # NOTE: Tests for rumqttc and rumqttd
       - name: Run tests
