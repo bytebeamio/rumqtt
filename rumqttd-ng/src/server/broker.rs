@@ -2,9 +2,11 @@
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, RemoteLink};
+#[cfg(feature = "websockets")]
 use crate::link::shadow::{self, ShadowLink};
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
+#[cfg(feature = "websockets")]
 use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
@@ -13,6 +15,7 @@ use crate::ConnectionSettings;
 use flume::{RecvError, SendError, Sender};
 use log::*;
 use std::sync::Arc;
+#[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
 use std::time::Duration;
@@ -175,6 +178,7 @@ impl Broker {
             })?;
         }
 
+        #[cfg(feature = "websockets")]
         for (_, config) in self.config.ws.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
             let server = Server::new(
@@ -292,8 +296,9 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
             let protocol = self.protocol.clone();
             match shadow {
-                false => task::spawn(remote(config, tenant_id, router_tx, network, protocol)),
+                #[cfg(feature = "websockets")]
                 true => task::spawn(shadow_connection(config, router_tx, network)),
+                _ => task::spawn(remote(config, tenant_id, router_tx, network, protocol)),
             };
 
             time::sleep(delay).await;
@@ -354,6 +359,7 @@ async fn remote<P: Protocol>(
     router_tx.send(message).ok();
 }
 
+#[cfg(feature = "websockets")]
 async fn shadow_connection(
     config: Arc<ConnectionSettings>,
     router_tx: Sender<(ConnectionId, Event)>,
