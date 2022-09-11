@@ -145,7 +145,10 @@ impl Outgoing {
         let inflight_count = self.inflight_buffer.len();
 
         if inflight_count > MAX_INFLIGHT {
-            error!("inflight_count = {:<2} MAX_INFLIGHT = {:<2}", inflight_count, MAX_INFLIGHT);
+            error!(
+                "inflight_count = {:<2} MAX_INFLIGHT = {:<2}",
+                inflight_count, MAX_INFLIGHT
+            );
         }
 
         (buffer_count, inflight_count)

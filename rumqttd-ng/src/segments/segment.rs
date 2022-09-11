@@ -49,9 +49,9 @@ impl Segment {
 
         match &self.inner {
             SegmentType::Memory(segment) => match segment.readv(idx, len, out) {
-                Some(relative_offset) => {
-                    Ok(SegmentPosition::Next(self.absolute_offset + relative_offset))
-                }
+                Some(relative_offset) => Ok(SegmentPosition::Next(
+                    self.absolute_offset + relative_offset,
+                )),
                 None => Ok(SegmentPosition::Done(self.next_absolute_offset())),
             },
         }

@@ -63,7 +63,12 @@ impl Scheduler {
     pub fn reschedule(&mut self, id: ConnectionId, reason: ScheduleReason) {
         let tracker = self.trackers.get_mut(id).unwrap();
         if let Some(v) = tracker.try_ready(reason) {
-            trace!("{:15.15}[S] {:20} {:?} -> Ready", tracker.id, "reschedule", v);
+            trace!(
+                "{:15.15}[S] {:20} {:?} -> Ready",
+                tracker.id,
+                "reschedule",
+                v
+            );
             self.readyqueue.push_back(id);
         }
     }
@@ -72,7 +77,13 @@ impl Scheduler {
         assert_eq!(self.readyqueue.pop_back(), Some(id));
         let tracker = self.trackers.get_mut(id).unwrap();
 
-        trace!("{:15.15}[S] {:20} {:?} -> {:?}", tracker.id, "pause", tracker.status, reason);
+        trace!(
+            "{:15.15}[S] {:20} {:?} -> {:?}",
+            tracker.id,
+            "pause",
+            tracker.status,
+            reason
+        );
         tracker.pause(reason);
     }
 }

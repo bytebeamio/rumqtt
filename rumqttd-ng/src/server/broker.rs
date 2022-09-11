@@ -317,7 +317,10 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 }
             };
 
-            info!("{:15.15}[I] {:20} addr = {} count {}", self.config.name, "accept", addr, count);
+            info!(
+                "{:15.15}[I] {:20} addr = {} count {}",
+                self.config.name, "accept", addr, count
+            );
 
             let config = config.clone();
             let router_tx = self.router_tx.clone();

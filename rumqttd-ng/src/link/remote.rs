@@ -90,8 +90,14 @@ impl<P: Protocol> RemoteLink<P> {
             return Err(Error::InvalidClientId);
         }
 
-        let (link_tx, link_rx, notification) =
-            Link::new(tenant_id, &client_id, router_tx, clean_session, lastwill, dynamic_filters)?;
+        let (link_tx, link_rx, notification) = Link::new(
+            tenant_id,
+            &client_id,
+            router_tx,
+            clean_session,
+            lastwill,
+            dynamic_filters,
+        )?;
         let id = link_rx.id();
 
         network.write(notification).await?;
