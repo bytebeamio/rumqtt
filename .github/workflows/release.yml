@@ -1,26 +1,71 @@
+name: Releaser
 on:
-  release:
-    types: [published]
-
-name: Publish to crates.io
+  push:
+    tags:
+      - 'v*.*.*'
 
 jobs:
-  publish:
-    name: Publish crates
-    runs-on: ubuntu-latest
+  build-release:
+    name: Build release for ${{ matrix.target }}
+    needs: ['create-release']
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [linux-musl, linux-gnu]
+        include:
+          - build: linux-musl
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-unknown-linux-musl
+          - build: linux-gnu
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-unknown-linux-gnu
+
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
           override: true
-      - uses: katyo/publish-crates@v1
-        name: Publish rumqttc
+          target: ${{ matrix.target }}
+
+      - name: Use Cross
+        shell: bash
+        run: |
+          cargo install cross
+          echo "CARGO=cross" >> $GITHUB_ENV
+          echo "TARGET_FLAGS=--target ${{ matrix.target }}" >> $GITHUB_ENV
+          echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
+
+      - name: Build release binary
+        run: cross build --verbose --release ${{ env.TARGET_FLAGS }} -p rumqttd-ng
+
+      - name: Strip release binary (linux)
+        if: matrix.build == 'linux-gnu' || matrix.build == 'linux-musl'
+        run: strip "${{ env.TARGET_DIR }}/release/rumqttd-ng"
+
+      - name: Upload release archive
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path: './rumqttc'
-          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - uses: katyo/publish-crates@v1
-        name: Publish rumqttd
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ${{ env.TARGET_DIR }}/release/rumqttd-ng
+          asset_name: rumqttd-ng-${{matrix.target}}
+          asset_content_type: application/octet-stream
+
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: create_release
+        id: create_release
+        uses: softprops/action-gh-release@v1
         with:
-          path: './rumqttd'
-          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          prerelease: false
