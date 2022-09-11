@@ -43,3 +43,14 @@ openssl pkcs12 -export -out identity.pfx -inkey ~/pki/private/test.key -in ~/pki
 ```
 
 Make sure if you use a password it matches the entry in `pkcs12_pass`. If no password, use an empty string `""`.
+
+
+### Build and run as Docker image
+------------------
+
+```
+./build.sh
+docker run -it -p 1883:1883 --name rumqttd rumqttd                      # run foreground
+docker run -d -p 1883:1883 --name rumqttd rumqttd                       # run background
+docker run -d -p 1883:1883 -e "RUST_LOG=debug" --name rumqttd rumqttd   # override loglevel
+```
