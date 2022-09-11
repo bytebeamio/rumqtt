@@ -314,41 +314,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "broker"
-version = "0.3.0"
-dependencies = [
- "bytes 1.2.1",
- "config",
- "figment",
- "flume",
- "futures-util",
- "jemallocator",
- "log",
- "mqttbytes",
- "parking_lot 0.11.2",
- "pretty_env_logger",
- "reqwest",
- "rouille",
- "rustls-pemfile 0.3.0",
- "serde",
- "serde_json",
- "simplelog",
- "slab",
- "structopt",
- "thiserror",
- "tokio",
- "tokio-native-tls",
- "tokio-rustls",
- "tokio-tungstenite",
- "tokio-util 0.7.3",
- "vergen",
- "webpki",
- "websocket-codec",
- "ws_stream_tungstenite 0.8.0",
- "x509-parser",
-]
-
-[[package]]
 name = "brotli"
 version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2464,6 +2429,41 @@ dependencies = [
  "tokio-native-tls",
  "tokio-rustls",
  "warp",
+]
+
+[[package]]
+name = "rumqttd-ng"
+version = "0.3.0"
+dependencies = [
+ "bytes 1.2.1",
+ "config",
+ "figment",
+ "flume",
+ "futures-util",
+ "jemallocator",
+ "log",
+ "mqttbytes",
+ "parking_lot 0.11.2",
+ "pretty_env_logger",
+ "reqwest",
+ "rouille",
+ "rustls-pemfile 0.3.0",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "slab",
+ "structopt",
+ "thiserror",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "tokio-util 0.7.3",
+ "vergen",
+ "webpki",
+ "websocket-codec",
+ "ws_stream_tungstenite 0.8.0",
+ "x509-parser",
 ]
 
 [[package]]

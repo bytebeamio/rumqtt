@@ -1,4 +1,4 @@
-use broker::Broker;
+use rumqttd_ng::Broker;
 use config;
 use simplelog::{
     Color, ColorChoice, CombinedLogger, Level, LevelFilter, LevelPadding, TargetPadding,
