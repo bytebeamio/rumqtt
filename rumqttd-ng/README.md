@@ -36,6 +36,14 @@ Example config file is provided on the root of the repo.
 
 ## Running with docker
 
+In order to run rumqttd-ng within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqtt-ng binary file and copy it into the `stage/` directory before building the docker image. The docker image contains a `demo.toml` with default broker configurations, one can use this config by running the following command:
+
+```bash
+docker run -it -p 1883:1883 -p 8883:8883 rumqttd-ng -c demo.toml
+```
+
+**NOTE:** in order to use your own config, edit the `COPY` statement inside the `Dockerfile` and pass the filename instead of demo.toml in the above command.
+
 # How to use with TLS
 
 To connect an MQTT client to rumqttd-ng over TLS, create relevant certificates for the broker and client using [provision](https://github.com/bytebeamio/provision) as follows:
