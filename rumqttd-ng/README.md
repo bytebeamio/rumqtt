@@ -39,10 +39,10 @@ Example config file is provided on the root of the repo.
 In order to run rumqttd-ng within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqtt-ng binary file and copy it into the `stage/` directory before building the docker image. The docker image contains a `demo.toml` with default broker configurations, one can use this config by running the following command:
 
 ```bash
-docker run -it -p 1883:1883 -p 8883:8883 rumqttd-ng -c demo.toml
+docker run -it -p 1883:1883 -p 8883:8883 rumqttd-ng
 ```
 
-**NOTE:** in order to use your own config, edit the `COPY` statement inside the `Dockerfile` and pass the filename instead of demo.toml in the above command.
+**NOTE:** in order to use your own config, edit the `COPY` statement inside the `Dockerfile`;
 
 # How to use with TLS
 
