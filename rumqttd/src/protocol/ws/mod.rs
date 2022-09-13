@@ -7,7 +7,7 @@ use crate::protocol::Error;
 
 use super::Protocol;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum Outgoing {
     #[serde(alias = "connack")]
@@ -18,7 +18,7 @@ pub enum Outgoing {
     Pong { pong: bool },
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type")]
 pub enum Incoming {
     #[serde(alias = "connect")]
@@ -47,7 +47,7 @@ impl Protocol for Ws {
             Ok(None) => return Err(Error::InsufficientBytes(1)),
             Err(e) => {
                 dbg!(e);
-                return Err(unimplemented!());
+                unimplemented!();
             }
         };
 

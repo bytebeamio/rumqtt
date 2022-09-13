@@ -111,7 +111,7 @@ impl ShadowLink {
 
                         }
                         Message::Close(..) => {
-                            let error = format!("Connection closed");
+                            let error = "Connection closed".to_string();
                             let error = io::Error::new(io::ErrorKind::ConnectionAborted, error);
                             return Err(Error::Io(error));
                         }
@@ -205,8 +205,8 @@ impl ShadowLink {
 /// Validates that the fields `tenant_id` and `device_id` are the same as that of device connected
 /// for a topic filter of format "/tenant/tenant_id/device/device_id/..."
 /// Note: Tenant not checked, but could be, in the future
-fn validate_shadow(client_id: &String, filter: &String) -> Result<(), Error> {
-    let tokens: Vec<&str> = filter.split("/").collect();
+fn validate_shadow(client_id: &String, filter: &str) -> Result<(), Error> {
+    let tokens: Vec<&str> = filter.split('/').collect();
     let id = tokens.get(4).ok_or(Error::InvalidFilter)?.to_owned();
 
     match id == client_id {
@@ -227,24 +227,24 @@ fn close(e: &Error) -> Message {
     }))
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Connect {
     client_id: String,
     tenant_id: Option<String>,
     body: Option<Jwt>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Headers {
     authorization: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Jwt {
     headers: Headers,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum Outgoing {
     #[serde(alias = "connack")]
@@ -255,7 +255,7 @@ pub enum Outgoing {
     Pong { pong: bool },
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type")]
 pub enum Incoming {
     #[serde(alias = "shadow")]
@@ -285,7 +285,7 @@ impl Network {
             let message = match self.socket.next().await {
                 Some(v) => v?,
                 None => {
-                    let error = format!("Connection closed");
+                    let error = "Connection closed".to_string();
                     let error = io::Error::new(io::ErrorKind::ConnectionAborted, error);
                     return Err(Error::Io(error));
                 }
@@ -298,7 +298,7 @@ impl Network {
         let connect: Connect = match message {
             Message::Text(m) => serde_json::from_str(&m)?,
             Message::Close(..) => {
-                let error = format!("Connection closed");
+                let error = "Connection closed".to_string();
                 let error = io::Error::new(io::ErrorKind::ConnectionAborted, error);
                 return Err(Error::Io(error));
             }
@@ -320,7 +320,7 @@ impl Network {
         let message = match self.socket.next().await {
             Some(v) => v?,
             None => {
-                let error = format!("Connection closed");
+                let error = "Connection closed".to_string();
                 let error = io::Error::new(io::ErrorKind::ConnectionAborted, error);
                 return Err(Error::Io(error));
             }
