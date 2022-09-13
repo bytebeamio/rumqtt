@@ -70,13 +70,14 @@ impl AsyncClient {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String> + Clone,
+        S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic.clone(), qos, payload);
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(topic.into().as_ref()) {
+        if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -92,13 +93,14 @@ impl AsyncClient {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String> + Clone,
+        S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic.clone(), qos, payload);
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(topic.into().as_ref()) {
+        if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
@@ -260,7 +262,7 @@ impl Client {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String> + Clone,
+        S: Into<String>,
         V: Into<Vec<u8>>,
     {
         pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
@@ -275,7 +277,7 @@ impl Client {
         payload: V,
     ) -> Result<(), ClientError>
     where
-        S: Into<String> + Clone,
+        S: Into<String>,
         V: Into<Vec<u8>>,
     {
         self.client.try_publish(topic, qos, retain, payload)?;
