@@ -271,7 +271,7 @@ dependencies = [
  "pretty_env_logger",
  "prost 0.6.1",
  "rumqttc",
- "rumqttd",
+ "rumqttd-old",
  "serde",
  "serde_json",
  "tokio",
@@ -2408,30 +2408,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rumqttd"
-version = "0.11.0"
-dependencies = [
- "argh",
- "bytes 1.2.1",
- "confy",
- "futures-util",
- "jackiechan",
- "jemallocator",
- "log",
- "pprof 0.4.5",
- "pretty_assertions 0.6.1",
- "pretty_env_logger",
- "rustls-pemfile 0.3.0",
- "segments",
- "serde",
- "thiserror",
- "tokio",
- "tokio-native-tls",
- "tokio-rustls",
- "warp",
-]
-
-[[package]]
 name = "rumqttd-ng"
 version = "0.3.0"
 dependencies = [
@@ -2463,6 +2439,30 @@ dependencies = [
  "websocket-codec",
  "ws_stream_tungstenite 0.8.0",
  "x509-parser",
+]
+
+[[package]]
+name = "rumqttd-old"
+version = "0.11.0"
+dependencies = [
+ "argh",
+ "bytes 1.2.1",
+ "confy",
+ "futures-util",
+ "jackiechan",
+ "jemallocator",
+ "log",
+ "pprof 0.4.5",
+ "pretty_assertions 0.6.1",
+ "pretty_env_logger",
+ "rustls-pemfile 0.3.0",
+ "segments",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-rustls",
+ "warp",
 ]
 
 [[package]]
