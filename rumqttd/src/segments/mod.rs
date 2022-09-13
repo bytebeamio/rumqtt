@@ -1,9 +1,10 @@
+use log::warn;
+use std::usize;
 use std::{collections::VecDeque, io};
-
-use bytes::Bytes;
 
 mod memory;
 mod segment;
+pub mod utils;
 
 use memory::MemorySegment;
 use segment::{Segment, SegmentPosition, SegmentType};
@@ -14,8 +15,12 @@ pub enum Position {
     Done { start: (u64, u64), end: (u64, u64) },
 }
 
-/// The log which can store commits in memory, and push them onto disk when needed.
-///
+pub trait Persistant {
+    fn serialize(self) -> Vec<u8>;
+    fn deserialize(input: &[u8]) -> Self;
+    fn size(&self) -> usize;
+}
+
 /// There are 3 limits which are enforced:
 /// - limit on size of each segment created by this log in bytes (this will not be enforced on
 ///   logs which are already existing in the directory provided for disk persistence)
@@ -47,7 +52,7 @@ pub enum Position {
 ///    - `segment` - abstracts away the disk and memory segments for ease of access.
 ///    - 'disk_handle' - hold onto the things needed when dealing with disk, for example the
 ///      hashing struct, path, files with invalid names etc.
-pub struct CommitLog {
+pub struct CommitLog<T> {
     /// The index at which segments start.
     head: u64,
     /// The index at which the current active segment is, and also marks the last valid segment as
@@ -58,10 +63,13 @@ pub struct CommitLog {
     /// Maximum number of segments in memory, apart from the active segment.
     max_mem_segments: usize,
     /// Total size of active segment, used for enforcing the contraints.
-    segments: VecDeque<Segment>,
+    segments: VecDeque<Segment<T>>,
 }
 
-impl CommitLog {
+impl<T> CommitLog<T>
+where
+    T: Persistant + Clone,
+{
     /// Create a new `CommitLog` with the given contraints. If `None` if passed in for `disk`
     /// parameter, no disk persistence is provided. If `max_mem_segments` is 0, then only the
     /// active segment is maintained.
@@ -99,7 +107,7 @@ impl CommitLog {
     #[inline]
     pub fn next_offset(&self) -> (u64, u64) {
         // `unwrap` fine as we are guaranteed that active segment always exist and is at the end
-        (self.tail, self.active_segment().next_absolute_offset())
+        (self.tail, self.active_segment().next_offset())
     }
 
     #[inline]
@@ -112,7 +120,6 @@ impl CommitLog {
         self.segments.len()
     }
 
-    #[allow(dead_code)]
     /// Size of data in all the segments
     pub fn size(&self) -> u64 {
         let mut size = 0;
@@ -122,52 +129,44 @@ impl CommitLog {
         size
     }
 
-    #[allow(dead_code)]
     /// Number of segments
     #[inline]
     pub fn len(&self) -> usize {
         self.segments.len() as usize
     }
 
-    #[allow(dead_code)]
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.segments.is_empty()
-    }
-
-    #[allow(dead_code)]
     /// Number of packets
     #[inline]
     pub fn entries(&self) -> u64 {
-        self.active_segment().next_absolute_offset()
+        self.active_segment().next_offset()
     }
 
     #[inline]
-    fn active_segment(&self) -> &Segment {
+    fn active_segment(&self) -> &Segment<T> {
         self.segments.back().unwrap()
     }
 
     #[inline]
-    fn active_segment_mut(&mut self) -> &mut MemorySegment {
+    fn active_segment_mut(&mut self) -> &mut MemorySegment<T> {
         match self.segments.back_mut().unwrap().inner {
             SegmentType::Memory(ref mut segment) => segment,
         }
     }
 
     #[inline]
-    fn active_segment_ref(&self) -> &MemorySegment {
+    fn active_segment_ref(&self) -> &MemorySegment<T> {
         match self.segments.back().unwrap().inner {
             SegmentType::Memory(ref segment) => segment,
         }
     }
 
-    /// Append a new [`Bytes`] to the active segment.
+    /// Append a new [`T`] to the active segment.
     #[inline]
-    pub fn append(&mut self, bytes: Bytes) -> (u64, u64) {
+    pub fn append(&mut self, inner_type: T) -> (u64, u64) {
         self.apply_retention();
         let active_segment = self.active_segment_mut();
-        active_segment.push(bytes);
-        let absolute_offset = self.active_segment().next_absolute_offset();
+        active_segment.push(inner_type);
+        let absolute_offset = self.active_segment().next_offset();
         (self.tail, absolute_offset)
     }
 
@@ -175,14 +174,13 @@ impl CommitLog {
         if self.active_segment().size() >= self.max_segment_size as u64 {
             // If active segment is full and segments are full, apply retention policy
             if self.memory_segments_count() >= self.max_mem_segments {
-                // Flush to disk if disk retention is enables or else remove head from memory
                 self.segments.pop_front();
                 self.head += 1;
             }
 
             // Pushing a new segment into segments and updating tail automatically changes active
             // segment to new empty one.
-            let absolute_offset = self.active_segment().next_absolute_offset();
+            let absolute_offset = self.active_segment().next_offset();
             self.segments.push_back(Segment {
                 inner: SegmentType::Memory(MemorySegment::with_capacity(self.max_segment_size)),
                 absolute_offset,
@@ -192,21 +190,21 @@ impl CommitLog {
     }
 
     #[inline]
-    pub fn last(&self) -> Option<Bytes> {
+    pub fn last(&self) -> Option<T> {
         self.active_segment_ref().last()
     }
 
-    /// Read `len` packets at once. More efficient that reading 1 at a time usize `read`. Returns
-    /// the next offset to read data from. The Position::start returned need not be a valid index
-    /// if the start given is not valid either.
+    /// Read `len` Ts at once. More efficient that reading 1 at a time. Returns
+    /// the next offset to read data from. The Position::start returned need not
+    /// be a valid index if the start given is not valid either.
     pub fn readv(
         &self,
         mut start: (u64, u64),
         mut len: u64,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<T>,
     ) -> io::Result<Position> {
         let mut cursor = start;
-        // let orig_cursor = cursor;
+        let _orig_cursor = cursor;
 
         if cursor.0 > self.tail {
             return Ok(Position::Done { start, end: start });
@@ -235,8 +233,9 @@ impl CommitLog {
         }
 
         while cursor.0 < self.tail {
-            // the requests come in absolute cursor, but `Segment::readv` handles that, and itself
-            // returns the absolute offset
+            // `Segment::readv` handles conversion from absolute index to relative
+            // index and it returns the absolute offset.
+            // absolute cursor not to be confused with absolute offset
             match curr_segment.readv(cursor.1, len, out)? {
                 // an offset returned -> we didn't read till end -> len fulfilled -> return
                 SegmentPosition::Next(offset) => {
@@ -269,7 +268,7 @@ impl CommitLog {
             curr_segment = &self.segments[idx];
         }
 
-        if curr_segment.next_absolute_offset() <= cursor.1 {
+        if curr_segment.next_offset() <= cursor.1 {
             return Ok(Position::Done { start, end: cursor });
         }
 
@@ -297,8 +296,10 @@ impl CommitLog {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{Position::*, *};
+    use bytes::Bytes;
+    use pretty_assertions::assert_eq;
 
     fn random_payload(id: u8, size: u64) -> Bytes {
         Bytes::from(vec![id; size as usize])
@@ -313,7 +314,7 @@ mod test {
     #[test]
     fn reading_at_invalid_cursor_returns_none() {
         // 1 as active only
-        let log = CommitLog::new(1024, 1).unwrap();
+        let log: CommitLog<Bytes> = CommitLog::new(1024, 1).unwrap();
         let mut out = Vec::new();
 
         assert_eq!(log.head, 0);
@@ -339,7 +340,7 @@ mod test {
         let max_segment_size = 1024 * 100; // 100K
         let packet_size = 1024;
         // 1 as active 1 as inactive but in mem
-        let mut log = CommitLog::new(max_segment_size, 2).unwrap();
+        let mut log: CommitLog<Bytes> = CommitLog::new(max_segment_size, 2).unwrap();
 
         // Fill the active segment
         for i in 0..100 {

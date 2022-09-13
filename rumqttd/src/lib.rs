@@ -7,6 +7,7 @@ extern crate rouille;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use segments::Persistant;
 use serde::{Deserialize, Serialize};
 
 use std::net::SocketAddr;

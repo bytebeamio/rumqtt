@@ -904,7 +904,7 @@ fn append_to_commitlog(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let (offset, filter) = datalog.append(publish.serialize(), notifications);
+        let (offset, filter) = datalog.append(publish.clone(), notifications);
         debug!(
             "{:15.15}[I] {:20} append = {}[{}, {}), pkid = {}",
             // map client id from connection id
@@ -1047,8 +1047,7 @@ fn forward_device_data(
         publishes.len()
     );
 
-    let forwards = publishes.into_iter().map(|raw| {
-        let mut publish = Publish::deserialize(raw);
+    let forwards = publishes.into_iter().map(|mut publish| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
             cursor: next,
@@ -1083,7 +1082,7 @@ fn forward_device_data(
 
 fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: ShadowRequest) {
     if let Some(reply) = datalog.shadow(&shadow.filter) {
-        let publish = Publish::deserialize(reply);
+        let publish = reply;
         let shadow_reply = router::ShadowReply {
             topic: publish.topic,
             payload: publish.payload,
@@ -1109,11 +1108,7 @@ fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsReque
         MetricsRequest::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
                 let c = router.connections.get(*v).map(|v| v.meter.clone()).unwrap();
-                let t = router
-                    .scheduler
-                    .trackers
-                    .get(*v).cloned()
-                    .unwrap();
+                let t = router.scheduler.trackers.get(*v).cloned().unwrap();
                 (c, t)
             });
 

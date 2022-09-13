@@ -58,7 +58,7 @@ impl Broker {
     pub fn new(config: Config) -> Broker {
         let config = Arc::new(config);
         let router_config = config.router.clone();
-        let router = Router::new(config.id, router_config);
+        let router: Router = Router::new(config.id, router_config);
 
         // Setup cluster if cluster settings are configured
         match config.cluster.clone() {

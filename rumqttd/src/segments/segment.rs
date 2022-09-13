@@ -1,12 +1,10 @@
+use super::memory::MemorySegment;
+use super::Persistant;
 use std::io;
 
-use bytes::Bytes;
-
-use super::memory::MemorySegment;
-
-pub(crate) struct Segment {
+pub(crate) struct Segment<T> {
     /// Holds the actual segment.
-    pub(crate) inner: SegmentType,
+    pub(crate) inner: SegmentType<T>,
     /// The absolute offset at which the `inner` starts at. All reads will return the absolute
     /// offset as the offset of the cursor.
     ///
@@ -15,8 +13,8 @@ pub(crate) struct Segment {
 }
 
 #[derive(Debug)]
-pub(crate) enum SegmentType {
-    Memory(MemorySegment),
+pub(crate) enum SegmentType<T> {
+    Memory(MemorySegment<T>),
 }
 
 pub(crate) enum SegmentPosition {
@@ -28,10 +26,13 @@ pub(crate) enum SegmentPosition {
     Done(u64),
 }
 
-impl Segment {
+impl<T> Segment<T>
+where
+    T: Persistant + Clone,
+{
     #[inline]
-    pub(crate) fn next_absolute_offset(&self) -> u64 {
-        self.len() + self.absolute_offset
+    pub(crate) fn next_offset(&self) -> u64 {
+        self.absolute_offset + self.len()
     }
 
     #[inline]
@@ -41,7 +42,7 @@ impl Segment {
         &self,
         absolute_index: u64,
         len: u64,
-        out: &mut Vec<Bytes>,
+        out: &mut Vec<T>,
     ) -> io::Result<SegmentPosition> {
         // this substraction can never overflow as checking of offset happens at
         // `CommitLog::readv`.
@@ -52,7 +53,7 @@ impl Segment {
                 Some(relative_offset) => Ok(SegmentPosition::Next(
                     self.absolute_offset + relative_offset,
                 )),
-                None => Ok(SegmentPosition::Done(self.next_absolute_offset())),
+                None => Ok(SegmentPosition::Done(self.next_offset())),
             },
         }
     }
