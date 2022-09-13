@@ -2381,7 +2381,7 @@ dependencies = [
 
 [[package]]
 name = "rumqttc"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "async-tungstenite 0.16.1",
  "bytes 1.2.1",

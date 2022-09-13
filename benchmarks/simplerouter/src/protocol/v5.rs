@@ -11,7 +11,7 @@ pub(crate) mod connect {
     use bytes::Bytes;
 
     /// Connection packet initiated by the client
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Connect {
         /// Mqtt keep alive time
         pub keep_alive: u16,
@@ -106,7 +106,7 @@ pub(crate) mod connect {
     }
 
     /// LastWill that broker forwards on behalf of the client
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct LastWill {
         pub topic: String,
         pub message: Bytes,
@@ -159,7 +159,7 @@ pub(crate) mod connect {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Login {
         username: String,
         password: String,
@@ -212,7 +212,7 @@ pub(crate) mod connect {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ConnectProperties {
         /// Expiry interval property after loosing connection
         pub session_expiry_interval: Option<u32>,
@@ -379,7 +379,7 @@ pub(crate) mod connack {
     use bytes::{Buf, BufMut, Bytes, BytesMut};
 
     /// Return code in connack
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(u8)]
     pub enum ConnectReturnCode {
         Success = 0x00,
@@ -407,7 +407,7 @@ pub(crate) mod connack {
     }
 
     /// Acknowledgement to connect packet
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ConnAck {
         pub session_present: bool,
         pub code: ConnectReturnCode,
@@ -494,7 +494,7 @@ pub(crate) mod connack {
         Ok(1 + count + len)
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ConnAckProperties {
         pub session_expiry_interval: Option<u32>,
         pub receive_max: Option<u16>,
@@ -880,7 +880,7 @@ pub(crate) mod publish {
     use super::*;
     use bytes::{BufMut, Bytes, BytesMut};
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Publish {
         pub fixed_header: FixedHeader,
         pub raw: Bytes,
@@ -1041,7 +1041,7 @@ pub(crate) mod puback {
     use bytes::{Buf, BufMut, Bytes, BytesMut};
 
     /// Acknowledgement to QoS1 publish
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PubAck {
         pub pkid: u16,
         pub reason: PubAckReason,
@@ -1127,14 +1127,14 @@ pub(crate) mod puback {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PubAckProperties {
         pub reason_string: Option<String>,
         pub user_properties: Vec<(String, String)>,
     }
 
     /// Return code in connack
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(u8)]
     pub enum PubAckReason {
         Success = 0,
@@ -1246,7 +1246,7 @@ pub(crate) mod subscribe {
     use bytes::{Buf, Bytes};
 
     /// Subscription packet
-    #[derive(Clone, PartialEq)]
+    #[derive(Clone, PartialEq, Eq)]
     pub struct Subscribe {
         pub pkid: u16,
         pub filters: Vec<SubscribeFilter>,
@@ -1390,7 +1390,7 @@ pub(crate) mod subscribe {
     }
 
     ///  Subscription filter
-    #[derive(Clone, PartialEq)]
+    #[derive(Clone, PartialEq, Eq)]
     pub struct SubscribeFilter {
         pub path: String,
         pub qos: QoS,
@@ -1438,7 +1438,7 @@ pub(crate) mod subscribe {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct SubscribeProperties {
         pub id: Option<usize>,
         pub user_properties: Vec<(String, String)>,
@@ -1521,7 +1521,7 @@ pub(crate) mod subscribe {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum RetainForwardRule {
         OnEverySubscribe,
         OnNewSubscribe,
@@ -1556,7 +1556,7 @@ pub(crate) mod suback {
     use bytes::{Buf, Bytes};
 
     /// Acknowledgement to subscribe
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct SubAck {
         pub pkid: u16,
         pub return_codes: Vec<SubscribeReasonCode>,
@@ -1656,7 +1656,7 @@ pub(crate) mod suback {
         Ok(1 + remaining_len_bytes + remaining_len)
     }
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct SubAckProperties {
         pub reason_string: Option<String>,
         pub user_properties: Vec<(String, String)>,
@@ -1869,7 +1869,7 @@ pub fn read(stream: &mut Bytes, max_size: usize) -> Result<Packet, Error> {
     Ok(packet)
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
     Connect(connect::Connect),
     Publish(publish::Publish),
