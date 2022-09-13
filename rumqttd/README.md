@@ -36,24 +36,24 @@ Example config file is provided on the root of the repo.
 
 ## Running with docker
 
-In order to run rumqttd-ng within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqtt-ng binary file and copy it into the `stage/` directory before building the docker image. The docker image contains a `demo.toml` with default broker configurations, one can use this config by running the following command:
+In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. The docker image contains a `demo.toml` with default broker configurations, one can use this config by running the following command:
 
 ```bash
-docker run -it -p 1883:1883 -p 8883:8883 rumqttd-ng
+docker run -it -p 1883:1883 -p 8883:8883 rumqttd
 ```
 
 **NOTE:** in order to use your own config, edit the `COPY` statement inside the `Dockerfile`;
 
 # How to use with TLS
 
-To connect an MQTT client to rumqttd-ng over TLS, create relevant certificates for the broker and client using [provision](https://github.com/bytebeamio/provision) as follows:
+To connect an MQTT client to rumqttd over TLS, create relevant certificates for the broker and client using [provision](https://github.com/bytebeamio/provision) as follows:
 ```bash
 provision ca // generates ca.cert.pem and ca.key.pem
 provision server --ca ca.cert.pem --cakey ca.key.pem --domain localhost // generates localhost.cert.pem and localhost.key.pem
 provision client --ca ca.cert.pem --cakey ca.key.pem --device 1 --tenant a // generates 1.cert.pem and 1.key.pem
 ```
 
-Update config files for rumqttd-ng and rumqttc with the generated certificates:
+Update config files for rumqttd and rumqttc with the generated certificates:
 ```toml
 [v4.2.tls]
     certpath = "path/to/localhost.cert.pem"
