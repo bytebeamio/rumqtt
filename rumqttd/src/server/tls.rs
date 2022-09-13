@@ -138,7 +138,7 @@ impl TLSAcceptor {
     }
 
     #[cfg(feature = "use-native-tls")]
-    fn native_tls(pkcs12_path: &String, pkcs12_pass: &String) -> Result<Self, Error> {
+    fn native_tls(pkcs12_path: &String, pkcs12_pass: &str) -> Result<Self, Error> {
         // Get certificates
         let cert_file = File::open(&pkcs12_path);
         let mut cert_file =
@@ -151,7 +151,7 @@ impl TLSAcceptor {
             .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
 
         // Get the identity
-        let identity = native_tls::Identity::from_pkcs12(&buf, &pkcs12_pass)
+        let identity = native_tls::Identity::from_pkcs12(&buf, pkcs12_pass)
             .map_err(|_| Error::InvalidServerCert(pkcs12_path.clone()))?;
 
         // Builder
