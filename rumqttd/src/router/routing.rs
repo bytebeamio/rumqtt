@@ -894,7 +894,7 @@ fn append_to_commitlog(
         Some(v) => v,
         None if connections[id].dynamic_filters => {
             let mut filter_idxs = vec![];
-            let (idx, _cursor) = datalog.next_native_offset(&topic);
+            let (idx, _cursor) = datalog.next_native_offset(topic);
             filter_idxs.push(idx);
             filter_idxs
         }
@@ -1112,8 +1112,7 @@ fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsReque
                 let t = router
                     .scheduler
                     .trackers
-                    .get(*v)
-                    .map(|v| v.clone())
+                    .get(*v).cloned()
                     .unwrap();
                 (c, t)
             });
@@ -1184,7 +1183,7 @@ fn validate_subscription(
         return Err(RouterError::UnsupportedQoS(filter.qos));
     }
 
-    if filter.path.starts_with("test") || filter.path.starts_with("$") {
+    if filter.path.starts_with("test") || filter.path.starts_with('$') {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
     }
 

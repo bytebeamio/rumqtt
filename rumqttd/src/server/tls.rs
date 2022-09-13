@@ -60,7 +60,7 @@ pub enum Error {
 }
 
 /// Extract uid from certificate's subject organization field
-fn extract_tenant_id(der: &Vec<u8>) -> Result<String, Error> {
+fn extract_tenant_id(der: &[u8]) -> Result<String, Error> {
     let (_, cert) =
         x509_parser::parse_x509_certificate(der).map_err(|_| Error::CertificateParse)?;
     let tenant_id = match cert.subject().iter_organization().next() {
@@ -203,7 +203,7 @@ impl TLSAcceptor {
             let ca_cert = ca_certs
                 .first()
                 .map(|c| Certificate(c.to_owned()))
-                .ok_or(Error::InvalidCACert(ca_path.to_string()))?;
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
 
             let mut store = RootCertStore::empty();
             store

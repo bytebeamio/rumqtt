@@ -108,7 +108,7 @@ impl Outgoing {
         filter_idx: usize,
     ) -> (usize, usize) {
         let mut buffer = self.data_buffer.lock();
-        let publishes = publishes.into_iter();
+        let publishes = publishes;
 
         if qos == 0 {
             for p in publishes {

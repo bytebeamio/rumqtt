@@ -1,5 +1,5 @@
 use rumqttd::Broker;
-use config;
+
 use simplelog::{
     Color, ColorChoice, CombinedLogger, Level, LevelFilter, LevelPadding, TargetPadding,
     TermLogger, TerminalMode, ThreadPadding,

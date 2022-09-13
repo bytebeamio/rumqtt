@@ -18,7 +18,7 @@ use crate::Notification;
 // TODO: Handle the cases when there are no properties using Inner struct, so
 // handling of properties can be made simplier internally
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
     Connect(Connect, Option<Login>, Option<LastWill>),
     ConnectWithProperties(
@@ -51,14 +51,14 @@ pub enum Packet {
 }
 
 //--------------------------- Connect packet -------------------------------
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PingReq;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PingResp;
 
 /// Connection packet initiated by the client
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connect {
     /// Mqtt keep alive time
     pub keep_alive: u16,
@@ -68,7 +68,7 @@ pub struct Connect {
     pub clean_session: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectProperties {
     /// Expiry interval property after loosing connection
     pub session_expiry_interval: Option<u32>,
@@ -89,7 +89,7 @@ pub struct ConnectProperties {
 }
 
 /// LastWill that broker forwards on behalf of the client
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastWill {
     pub topic: Bytes,
     pub message: Bytes,
@@ -97,7 +97,7 @@ pub struct LastWill {
     pub retain: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastWillProperties {
     pub delay_interval: Option<u32>,
     pub payload_format_indicator: Option<u8>,
@@ -108,7 +108,7 @@ pub struct LastWillProperties {
     pub user_properties: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Login {
     pub username: String,
     pub password: String,
@@ -118,7 +118,7 @@ pub struct Login {
 
 /// Return code in connack
 // This contains return codes for both MQTT v311 and v5
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectReturnCode {
     Success,
     RefusedProtocolVersion,
@@ -148,13 +148,13 @@ pub enum ConnectReturnCode {
 }
 
 /// Acknowledgement to connect packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnAck {
     pub session_present: bool,
     pub code: ConnectReturnCode,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnAckProperties {
     pub session_expiry_interval: Option<u32>,
     pub receive_max: Option<u16>,
@@ -178,7 +178,7 @@ pub struct ConnAckProperties {
 //--------------------------- Publish packet -------------------------------
 
 /// Publish packet
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
@@ -237,7 +237,7 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishProperties {
     pub payload_format_indicator: Option<u8>,
     pub message_expiry_interval: Option<u32>,
@@ -252,7 +252,7 @@ pub struct PublishProperties {
 //--------------------------- PublishAck packet -------------------------------
 
 /// Return code in puback
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PubAckReason {
     Success,
     NoMatchingSubscribers,
@@ -266,13 +266,13 @@ pub enum PubAckReason {
 }
 
 /// Acknowledgement to QoS1 publish
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubAck {
     pub pkid: u16,
     pub reason: PubAckReason,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
@@ -281,14 +281,14 @@ pub struct PubAckProperties {
 //--------------------------- Subscribe packet -------------------------------
 
 /// Subscription packet
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<Filter>,
 }
 
 ///  Subscription filter
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Filter {
     pub path: String,
     pub qos: QoS,
@@ -297,14 +297,14 @@ pub struct Filter {
     pub retain_forward_rule: RetainForwardRule,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetainForwardRule {
     OnEverySubscribe,
     OnNewSubscribe,
     Never,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeProperties {
     pub id: Option<usize>,
     pub user_properties: Vec<(String, String)>,
@@ -313,7 +313,7 @@ pub struct SubscribeProperties {
 //--------------------------- SubscribeAck packet -------------------------------
 
 /// Acknowledgement to subscribe
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAck {
     pub pkid: u16,
     pub return_codes: Vec<SubscribeReasonCode>,
@@ -321,8 +321,7 @@ pub struct SubAck {
 
 impl SubAck {
     pub fn len(&self) -> usize {
-        let len = 2 + self.return_codes.len();
-        len
+        2 + self.return_codes.len()
     }
 }
 
@@ -344,7 +343,7 @@ pub enum SubscribeReasonCode {
     WildcardSubscriptionsNotSupported,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
@@ -353,26 +352,26 @@ pub struct SubAckProperties {
 //--------------------------- Unsubscribe packet -------------------------------
 
 /// Unsubscribe packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unsubscribe {
     pub pkid: u16,
     pub filters: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubscribeProperties {
     pub user_properties: Vec<(String, String)>,
 }
 //--------------------------- UnsubscribeAck packet -------------------------------
 
 /// Acknowledgement to unsubscribe
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubAck {
     pub pkid: u16,
     pub reasons: Vec<UnsubAckReason>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum UnsubAckReason {
     Success,
@@ -384,14 +383,14 @@ pub enum UnsubAckReason {
     PacketIdentifierInUse,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubAckProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
 }
 
 //--------------------------- Disconnect packet -------------------------------
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisconnectReasonCode {
     /// Close the connection normally. Do not send the Will Message.
     NormalDisconnection,
@@ -463,7 +462,7 @@ struct PingResponse;
 //--------------------------- PubRec packet -------------------------------
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PubRecReason {
     Success,
@@ -478,13 +477,13 @@ pub enum PubRecReason {
 }
 
 /// Acknowledgement to QoS1 publish
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRec {
     pub pkid: u16,
     pub reason: PubRecReason,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRecProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
@@ -495,7 +494,7 @@ pub struct PubRecProperties {
 //--------------------------- PubComp packet -------------------------------
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PubCompReason {
     Success,
@@ -503,13 +502,13 @@ pub enum PubCompReason {
 }
 
 /// QoS2 Assured publish complete, in response to PUBREL packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubComp {
     pub pkid: u16,
     pub reason: PubCompReason,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubCompProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
@@ -520,7 +519,7 @@ pub struct PubCompProperties {
 //--------------------------- PubRel packet -------------------------------
 
 /// Return code in connack
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PubRelReason {
     Success,
@@ -528,13 +527,13 @@ pub enum PubRelReason {
 }
 
 /// QoS2 Publish release, in response to PUBREC packet
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRel {
     pub pkid: u16,
     pub reason: PubRelReason,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubRelProperties {
     pub reason_string: Option<String>,
     pub user_properties: Vec<(String, String)>,
@@ -545,6 +544,7 @@ pub struct PubRelProperties {
 /// Quality of service
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum QoS {
     AtMostOnce = 0,
     AtLeastOnce = 1,

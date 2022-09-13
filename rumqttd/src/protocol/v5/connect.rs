@@ -3,6 +3,7 @@ use crate::protocol::Connect;
 use super::*;
 use bytes::{Buf, Bytes};
 
+#[allow(clippy::type_complexity)]
 pub fn read(
     fixed_header: FixedHeader,
     mut bytes: Bytes,
@@ -76,7 +77,7 @@ pub fn write(
 
         // last will len
         if let Some(w) = will {
-            len += will::len(&w, will_properties);
+            len += will::len(w, will_properties);
         }
 
         // username and password len
@@ -154,10 +155,10 @@ mod will {
             0 => (None, None),
             _ => {
                 // Properties in variable header
-                let properties = willproperties::read(&mut bytes)?;
+                let properties = willproperties::read(bytes)?;
 
-                let will_topic = read_mqtt_bytes(&mut bytes)?;
-                let will_message = read_mqtt_bytes(&mut bytes)?;
+                let will_topic = read_mqtt_bytes(bytes)?;
+                let will_message = read_mqtt_bytes(bytes)?;
                 let qos_num = (connect_flags & 0b11000) >> 3;
                 let will_qos = qos(qos_num).ok_or(Error::InvalidQoS(qos_num))?;
                 let will = Some(LastWill {
@@ -253,40 +254,40 @@ mod willproperties {
         let mut cursor = 0;
         // read until cursor reaches property length. properties_len = 0 will skip this loop
         while cursor < properties_len {
-            let prop = read_u8(&mut bytes)?;
+            let prop = read_u8(bytes)?;
             cursor += 1;
 
             match property(prop)? {
                 PropertyType::WillDelayInterval => {
-                    delay_interval = Some(read_u32(&mut bytes)?);
+                    delay_interval = Some(read_u32(bytes)?);
                     cursor += 4;
                 }
                 PropertyType::PayloadFormatIndicator => {
-                    payload_format_indicator = Some(read_u8(&mut bytes)?);
+                    payload_format_indicator = Some(read_u8(bytes)?);
                     cursor += 1;
                 }
                 PropertyType::MessageExpiryInterval => {
-                    message_expiry_interval = Some(read_u32(&mut bytes)?);
+                    message_expiry_interval = Some(read_u32(bytes)?);
                     cursor += 4;
                 }
                 PropertyType::ContentType => {
-                    let typ = read_mqtt_string(&mut bytes)?;
+                    let typ = read_mqtt_string(bytes)?;
                     cursor += 2 + typ.len();
                     content_type = Some(typ);
                 }
                 PropertyType::ResponseTopic => {
-                    let topic = read_mqtt_string(&mut bytes)?;
+                    let topic = read_mqtt_string(bytes)?;
                     cursor += 2 + topic.len();
                     response_topic = Some(topic);
                 }
                 PropertyType::CorrelationData => {
-                    let data = read_mqtt_bytes(&mut bytes)?;
+                    let data = read_mqtt_bytes(bytes)?;
                     cursor += 2 + data.len();
                     correlation_data = Some(data);
                 }
                 PropertyType::UserProperty => {
-                    let key = read_mqtt_string(&mut bytes)?;
-                    let value = read_mqtt_string(&mut bytes)?;
+                    let key = read_mqtt_string(bytes)?;
+                    let value = read_mqtt_string(bytes)?;
                     cursor += 2 + key.len() + 2 + value.len();
                     user_properties.push((key, value));
                 }
@@ -362,12 +363,12 @@ mod login {
     pub fn read(connect_flags: u8, mut bytes: &mut Bytes) -> Result<Option<Login>, Error> {
         let username = match connect_flags & 0b1000_0000 {
             0 => String::new(),
-            _ => read_mqtt_string(&mut bytes)?,
+            _ => read_mqtt_string(bytes)?,
         };
 
         let password = match connect_flags & 0b0100_0000 {
             0 => String::new(),
-            _ => read_mqtt_string(&mut bytes)?,
+            _ => read_mqtt_string(bytes)?,
         };
 
         if username.is_empty() && password.is_empty() {
@@ -430,46 +431,46 @@ mod properties {
         let mut cursor = 0;
         // read until cursor reaches property length. properties_len = 0 will skip this loop
         while cursor < properties_len {
-            let prop = read_u8(&mut bytes)?;
+            let prop = read_u8(bytes)?;
             cursor += 1;
             match property(prop)? {
                 PropertyType::SessionExpiryInterval => {
-                    session_expiry_interval = Some(read_u32(&mut bytes)?);
+                    session_expiry_interval = Some(read_u32(bytes)?);
                     cursor += 4;
                 }
                 PropertyType::ReceiveMaximum => {
-                    receive_maximum = Some(read_u16(&mut bytes)?);
+                    receive_maximum = Some(read_u16(bytes)?);
                     cursor += 2;
                 }
                 PropertyType::MaximumPacketSize => {
-                    max_packet_size = Some(read_u32(&mut bytes)?);
+                    max_packet_size = Some(read_u32(bytes)?);
                     cursor += 4;
                 }
                 PropertyType::TopicAliasMaximum => {
-                    topic_alias_max = Some(read_u16(&mut bytes)?);
+                    topic_alias_max = Some(read_u16(bytes)?);
                     cursor += 2;
                 }
                 PropertyType::RequestResponseInformation => {
-                    request_response_info = Some(read_u8(&mut bytes)?);
+                    request_response_info = Some(read_u8(bytes)?);
                     cursor += 1;
                 }
                 PropertyType::RequestProblemInformation => {
-                    request_problem_info = Some(read_u8(&mut bytes)?);
+                    request_problem_info = Some(read_u8(bytes)?);
                     cursor += 1;
                 }
                 PropertyType::UserProperty => {
-                    let key = read_mqtt_string(&mut bytes)?;
-                    let value = read_mqtt_string(&mut bytes)?;
+                    let key = read_mqtt_string(bytes)?;
+                    let value = read_mqtt_string(bytes)?;
                     cursor += 2 + key.len() + 2 + value.len();
                     user_properties.push((key, value));
                 }
                 PropertyType::AuthenticationMethod => {
-                    let method = read_mqtt_string(&mut bytes)?;
+                    let method = read_mqtt_string(bytes)?;
                     cursor += 2 + method.len();
                     authentication_method = Some(method);
                 }
                 PropertyType::AuthenticationData => {
-                    let data = read_mqtt_bytes(&mut bytes)?;
+                    let data = read_mqtt_bytes(bytes)?;
                     cursor += 2 + data.len();
                     authentication_data = Some(data);
                 }

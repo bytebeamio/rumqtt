@@ -24,7 +24,7 @@ pub fn write(subscribe: &Subscribe, buffer: &mut BytesMut) -> Result<usize, Erro
     buffer.put_u8(0x82);
 
     // write remaining length
-    let remaining_len = len(&subscribe);
+    let remaining_len = len(subscribe);
     let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
 
     // write packet id

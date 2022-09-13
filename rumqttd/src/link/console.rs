@@ -16,7 +16,7 @@ impl ConsoleLink {
     pub fn new(config: ConsoleSettings, router_tx: Sender<(ConnectionId, Event)>) -> ConsoleLink {
         let tx = router_tx.clone();
         let (link_tx, link_rx, _ack) =
-            Link::new(None, "console", tx.clone(), true, None, true).unwrap();
+            Link::new(None, "console", tx, true, None, true).unwrap();
         let connection_id = link_tx.connection_id;
         ConsoleLink {
             config,
@@ -69,7 +69,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::json(&v)
             },
             (GET) (/subscription/{filter: String}) => {
-                let filter = filter.replace(".", "/");
+                let filter = filter.replace('.', "/");
                 let event = Event::Metrics(MetricsRequest::Subscription(filter));
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
@@ -80,7 +80,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::json(&v)
             },
             (GET) (/waiters/{filter: String}) => {
-                let filter = filter.replace(".", "/");
+                let filter = filter.replace('.', "/");
                 let event = Event::Metrics(MetricsRequest::Waiters(filter));
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {

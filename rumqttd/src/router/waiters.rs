@@ -41,14 +41,10 @@ impl<T> Waiters<T> {
     /// Remove a connection from waiters
     pub fn remove(&mut self, id: ConnectionId) -> Vec<T> {
         let mut requests = Vec::new();
-        loop {
-            match self.current.iter().position(|x| x.0 == id) {
-                Some(index) => {
-                    let request = self.current.swap_remove_back(index).map(|v| v.1).unwrap();
-                    requests.push(request)
-                }
-                None => break,
-            }
+
+        while let Some(index) = self.current.iter().position(|x| x.0 == id) {
+            let request = self.current.swap_remove_back(index).map(|v| v.1).unwrap();
+            requests.push(request)
         }
 
         requests

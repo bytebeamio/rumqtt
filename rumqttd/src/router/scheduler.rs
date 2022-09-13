@@ -25,8 +25,8 @@ impl Scheduler {
     }
 
     pub fn add(&mut self, tracker: Tracker) -> ConnectionId {
-        let id = self.trackers.insert(tracker);
-        id
+        
+        self.trackers.insert(tracker)
     }
 
     pub fn remove(&mut self, id: ConnectionId) -> Tracker {
@@ -223,7 +223,7 @@ impl Scheduler {
         let no_duplicates = tracker
             .get_data_requests()
             .iter()
-            .all(move |x| uniq.insert(x.filter_idx.clone()));
+            .all(move |x| uniq.insert(x.filter_idx));
 
         if !no_duplicates {
             dbg!(&tracker.data_requests);

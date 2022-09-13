@@ -83,8 +83,8 @@ impl DataLog {
         let waiters = data.waiters.get_mut();
         return match waiters.iter().position(|x| x.0 == id) {
             Some(index) => {
-                let request = waiters.swap_remove_back(index).map(|v| v.1);
-                request
+                
+                waiters.swap_remove_back(index).map(|v| v.1)
             }
             None => None,
         };
@@ -103,7 +103,7 @@ impl DataLog {
                     }
                 }
 
-                if v.len() != 0 {
+                if !v.is_empty() {
                     self.publish_filters.insert(topic.to_owned(), v.clone());
                 }
 
@@ -246,7 +246,7 @@ impl Data {
         notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     ) -> (Offset, &Filter) {
         let size = raw.len();
-        let offset = self.log.append(raw.clone());
+        let offset = self.log.append(raw);
         if let Some(mut parked) = self.waiters.take() {
             notifications.append(&mut parked);
         }

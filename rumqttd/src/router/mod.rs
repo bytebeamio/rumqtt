@@ -34,6 +34,8 @@ pub const MAX_CHANNEL_CAPACITY: usize = 200;
 pub(crate) type FilterIdx = usize;
 
 #[derive(Debug)]
+// TODO: Fix this
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
     /// Client id and connection handle
     Connect {
@@ -88,6 +90,7 @@ pub struct Forward {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::enum_variant_names)]
 pub enum Ack {
     ConnAck(ConnectionId, ConnAck),
     PubAck(PubAck),

@@ -111,8 +111,8 @@ mod will {
             }
             0 => None,
             _ => {
-                let will_topic = read_mqtt_bytes(&mut bytes)?;
-                let will_message = read_mqtt_bytes(&mut bytes)?;
+                let will_topic = read_mqtt_bytes(bytes)?;
+                let will_message = read_mqtt_bytes(bytes)?;
                 let qos_num = (connect_flags & 0b11000) >> 3;
                 let will_qos = qos(qos_num).ok_or(Error::InvalidQoS(qos_num))?;
                 Some(LastWill {
@@ -148,7 +148,7 @@ mod login {
         let username = match connect_flags & 0b1000_0000 {
             0 => String::new(),
             _ => {
-                let username = read_mqtt_bytes(&mut bytes)?;
+                let username = read_mqtt_bytes(bytes)?;
                 std::str::from_utf8(&username)?.to_owned()
             }
         };
@@ -156,7 +156,7 @@ mod login {
         let password = match connect_flags & 0b0100_0000 {
             0 => String::new(),
             _ => {
-                let password = read_mqtt_bytes(&mut bytes)?;
+                let password = read_mqtt_bytes(bytes)?;
                 std::str::from_utf8(&password)?.to_owned()
             }
         };

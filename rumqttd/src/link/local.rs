@@ -38,6 +38,7 @@ pub enum LinkError {
 pub struct Link;
 
 impl Link {
+    #[allow(clippy::type_complexity)]
     fn prepare(
         tenant_id: Option<String>,
         client_id: &str,
@@ -78,6 +79,7 @@ impl Link {
         )
     }
 
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(
         tenant_id: Option<String>,
         client_id: &str,
@@ -412,8 +414,8 @@ mod test {
         }
 
         // Every connection has expected number of messages
-        for i in 0..CONNECTIONS {
-            assert_eq!(buffers[i].lock().len(), MESSAGES_PER_CONNECTION);
+        for item in buffers.iter().take(CONNECTIONS) {
+            assert_eq!(item.lock().len(), MESSAGES_PER_CONNECTION);
         }
 
         // TODO: Write a similar test to benchmark buffer vs channels

@@ -42,7 +42,7 @@ impl Connection {
         let (client_id, tenant_prefix) = match tenant_id {
             Some(tenant_id) => {
                 let tenant_prefix = Some("/tenants/".to_owned() + &tenant_id + "/");
-                let client_id = tenant_id.to_owned() + "." + &client_id;
+                let client_id = tenant_id + "." + &client_id;
                 (client_id, tenant_prefix)
             }
             None => (client_id, None),

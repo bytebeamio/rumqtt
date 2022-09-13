@@ -1,5 +1,5 @@
 use rumqttd::{Broker, Config, Notification};
-use config;
+
 use std::thread;
 
 #[global_allocator]
