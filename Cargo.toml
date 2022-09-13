@@ -3,7 +3,7 @@
 members = [
   "rumqttc",
   "rumqttd-old",
-  "rumqttd-ng",
+  "rumqttd",
   "benchmarks",
   "benchmarks/simplerouter",
 ]
