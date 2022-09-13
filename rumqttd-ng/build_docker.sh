@@ -4,14 +4,14 @@ set -ex
 
 cargo build --release
 
-docker stop rumqttd-ng || true
-docker rm rumqttd-ng || true
+docker stop rumqttd || true
+docker rm rumqttd || true
 
 mkdir -p stage
-cp -r ../target/release/rumqttd-ng stage/
+cp -r ../target/release/rumqttd stage/
 
-docker build -t rumqttd-ng .
+docker build -t rumqttd .
 
 version=`awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' ../rumqttd-ng/Cargo.toml`
-docker tag rumqttd-ng:latest asia.gcr.io/bytebeam/rumqttd-ng:$version
-docker tag rumqttd-ng:latest asia.gcr.io/bytebeam/rumqttd-ng:latest
+docker tag rumqttd:latest rumqtt/rumqttd:$version
+docker tag rumqttd:latest rumqtt/rumqttd:latest

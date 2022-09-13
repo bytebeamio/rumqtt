@@ -1,4 +1,4 @@
-use rumqttd_ng::{Broker, Config, Notification};
+use rumqttd::{Broker, Config, Notification};
 use config;
 use std::thread;
 

@@ -2408,8 +2408,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "rumqttd-ng"
-version = "0.3.0"
+name = "rumqttd"
+version = "0.12.0-alpha.1"
 dependencies = [
  "bytes 1.2.1",
  "config",

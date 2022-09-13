@@ -1,4 +1,4 @@
-// use rumqttd_ng::{Link, LinkTx, Router, RouterConfig};
+// use rumqttd::{Link, LinkTx, Router, RouterConfig};
 // use bytes::BytesMut;
 // use mqttbytes::v4::Publish;
 // use mqttbytes::QoS;
