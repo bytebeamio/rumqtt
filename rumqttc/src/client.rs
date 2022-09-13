@@ -1,7 +1,7 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -73,9 +73,13 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, qos, payload);
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
+        if !valid_topic(&topic) {
+            return Err(ClientError::Request(publish));
+        }
         self.request_tx.send_async(publish).await?;
         Ok(())
     }
@@ -92,9 +96,13 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let mut publish = Publish::new(topic, qos, payload);
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
+        if !valid_topic(&topic) {
+            return Err(ClientError::TryRequest(publish));
+        }
         self.request_tx.try_send(publish)?;
         Ok(())
     }
