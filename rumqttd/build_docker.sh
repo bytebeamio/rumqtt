@@ -13,5 +13,5 @@ cp -r ../target/release/rumqttd stage/
 docker build -t rumqttd .
 
 version=`awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' Cargo.toml`
-docker tag rumqttd:latest rumqtt/rumqttd:$version
-docker tag rumqttd:latest rumqtt/rumqttd:latest
+docker tag rumqttd:latest bytebeamio/rumqttd:$version
+docker tag rumqttd:latest bytebeamio/rumqttd:latest
