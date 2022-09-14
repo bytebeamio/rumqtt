@@ -121,6 +121,7 @@ where
     }
 
     /// Size of data in all the segments
+    #[allow(dead_code)]
     pub fn size(&self) -> u64 {
         let mut size = 0;
         for segment in self.segments.iter() {
@@ -130,6 +131,7 @@ where
     }
 
     /// Number of segments
+    #[allow(dead_code)]
     #[inline]
     pub fn len(&self) -> usize {
         self.segments.len() as usize
@@ -137,6 +139,7 @@ where
 
     /// Number of packets
     #[inline]
+    #[allow(dead_code)]
     pub fn entries(&self) -> u64 {
         self.active_segment().next_offset()
     }
