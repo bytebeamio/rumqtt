@@ -69,7 +69,7 @@ fn initialize_logging(commandline: &CommandLine) {
         .set_level_color(Level::Trace, Some(Color::Cyan))
         .set_level_padding(LevelPadding::Right);
 
-    config.add_filter_allow_str("broker");
+    config.add_filter_allow_str("rumqttd");
 
     let loggers = TermLogger::new(
         level,
