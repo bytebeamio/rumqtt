@@ -2,12 +2,10 @@ use log::warn;
 use std::usize;
 use std::{collections::VecDeque, io};
 
-mod memory;
 mod segment;
 pub mod utils;
 
-use memory::MemorySegment;
-use segment::{Segment, SegmentPosition, SegmentType};
+use segment::{Segment, SegmentPosition};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Position {
@@ -15,9 +13,7 @@ pub enum Position {
     Done { start: (u64, u64), end: (u64, u64) },
 }
 
-pub trait Persistant {
-    fn serialize(self) -> Vec<u8>;
-    fn deserialize(input: &[u8]) -> Self;
+pub trait Storage {
     fn size(&self) -> usize;
 }
 
@@ -68,7 +64,7 @@ pub struct CommitLog<T> {
 
 impl<T> CommitLog<T>
 where
-    T: Persistant + Clone,
+    T: Storage + Clone,
 {
     /// Create a new `CommitLog` with the given contraints. If `None` if passed in for `disk`
     /// parameter, no disk persistence is provided. If `max_mem_segments` is 0, then only the
@@ -90,10 +86,7 @@ where
         }
 
         let mut segments = VecDeque::with_capacity(max_mem_segments);
-        segments.push_back(Segment {
-            inner: SegmentType::Memory(MemorySegment::with_capacity(max_segment_size)),
-            absolute_offset: 0,
-        });
+        segments.push_back(Segment::with_capacity(max_segment_size));
 
         Ok(Self {
             head: 0,
@@ -150,17 +143,8 @@ where
     }
 
     #[inline]
-    fn active_segment_mut(&mut self) -> &mut MemorySegment<T> {
-        match self.segments.back_mut().unwrap().inner {
-            SegmentType::Memory(ref mut segment) => segment,
-        }
-    }
-
-    #[inline]
-    fn active_segment_ref(&self) -> &MemorySegment<T> {
-        match self.segments.back().unwrap().inner {
-            SegmentType::Memory(ref segment) => segment,
-        }
+    fn active_segment_mut(&mut self) -> &mut Segment<T> {
+        self.segments.back_mut().unwrap()
     }
 
     /// Append a new [`T`] to the active segment.
@@ -184,17 +168,17 @@ where
             // Pushing a new segment into segments and updating tail automatically changes active
             // segment to new empty one.
             let absolute_offset = self.active_segment().next_offset();
-            self.segments.push_back(Segment {
-                inner: SegmentType::Memory(MemorySegment::with_capacity(self.max_segment_size)),
+            self.segments.push_back(Segment::with_capacity_and_offset(
+                self.max_segment_size,
                 absolute_offset,
-            });
+            ));
             self.tail += 1;
         }
     }
 
     #[inline]
     pub fn last(&self) -> Option<T> {
-        self.active_segment_ref().last()
+        self.active_segment().last()
     }
 
     /// Read `len` Ts at once. More efficient that reading 1 at a time. Returns

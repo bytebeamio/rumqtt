@@ -8,7 +8,7 @@ use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
 use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
-use crate::Persistant;
+use crate::Storage;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 
@@ -223,7 +223,7 @@ pub struct Data<T> {
 
 impl<T> Data<T>
 where
-    T: Persistant + Clone,
+    T: Storage + Clone,
 {
     fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data<T> {
         let log = CommitLog::new(max_segment_size, max_mem_segments).unwrap();
