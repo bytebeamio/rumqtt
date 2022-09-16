@@ -58,8 +58,6 @@ jobs:
         uses: actions-rs/cargo@v1
         env:
           RUSTFLAGS: "-D warnings"
-        # NOTE: rumqttd doesn't compile on windows
-        if: ${{ matrix.os != 'windows-latest' }}
         with:
           command: clippy
           args: --verbose --all-targets ${{ matrix.features }} -p rumqttc -p rumqttd
@@ -71,28 +69,9 @@ jobs:
           command: doc
           args: --verbose --no-deps ${{ matrix.features }}
 
-        # NOTE: Tests for rumqttc and rumqttd
-      - name: Run tests
-        uses: actions-rs/cargo@v1
-        env:
-          RUSTFLAGS: "-D warnings"
-        if: ${{ matrix.os == 'windows-latest' }}
-        with:
-          command: clippy
-          args: --verbose --all-targets ${{ matrix.features }} -p rumqttc
-
-        # NOTE: Tests for rumqttc and rumqttd on all platforms but windows
+        # NOTE: Tests for rumqttc and rumqttd on all platforms
       - name: Test rumqttc and rumqttd
         uses: actions-rs/cargo@v1
-        if: ${{ matrix.os != 'windows-latest' }}
         with:
           command: test
           args: --verbose --release ${{ matrix.features }} -p rumqttc -p rumqttd
-      
-        # NOTE: Tests for rumqttc on windows
-      - name: Test rumqttc
-        uses: actions-rs/cargo@v1
-        if: ${{ matrix.os == 'windows-latest' }}
-        with:
-          command: test
-          args: --verbose --release ${{ matrix.features }} -p rumqttc
