@@ -43,9 +43,11 @@ websockets = ["tokio-tungstenite", "ws_stream_tungstenite", "websocket-codec"]
 
 [dev-dependencies]
 pretty_env_logger = "0.4.0"
-jemallocator = "0.3.2"
 mqttbytes = "0.6"
 config = "0.13"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+jemallocator = "0.3"
 
 [build-dependencies]
 vergen = "7.4.2"
