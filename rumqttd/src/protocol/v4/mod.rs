@@ -308,22 +308,24 @@ impl Protocol for V4 {
         let packet = match packet_type {
             PacketType::Connect => {
                 let (connect, login, lastwill) = connect::read(fixed_header, packet)?;
-                Packet::Connect(connect, login, lastwill)
+                Packet::Connect(connect, None, lastwill, None, login)
             }
             PacketType::ConnAck => Packet::ConnAck(connack::read(fixed_header, packet)?),
-            PacketType::Publish => Packet::Publish(publish::read(fixed_header, packet)?),
-            PacketType::PubAck => Packet::PubAck(puback::read(fixed_header, packet)?),
-            PacketType::Subscribe => Packet::Subscribe(subscribe::read(fixed_header, packet)?),
-            PacketType::SubAck => Packet::SubAck(suback::read(fixed_header, packet)?),
+            PacketType::Publish => Packet::Publish(publish::read(fixed_header, packet)?, None),
+            PacketType::PubAck => Packet::PubAck(puback::read(fixed_header, packet)?, None),
+            PacketType::Subscribe => {
+                Packet::Subscribe(subscribe::read(fixed_header, packet)?, None)
+            }
+            PacketType::SubAck => Packet::SubAck(suback::read(fixed_header, packet)?, None),
             PacketType::Unsubscribe => {
                 Packet::Unsubscribe(unsubscribe::read(fixed_header, packet)?)
             }
             PacketType::UnsubAck => Packet::UnsubAck(unsuback::read(fixed_header, packet)?),
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
-            PacketType::PubRec => Packet::PubRec(pubrec::read(fixed_header, packet)?),
-            PacketType::PubRel => Packet::PubRel(pubrel::read(fixed_header, packet)?),
-            PacketType::PubComp => Packet::PubComp(pubcomp::read(fixed_header, packet)?),
+            PacketType::PubRec => Packet::PubRec(pubrec::read(fixed_header, packet)?, None),
+            PacketType::PubRel => Packet::PubRel(pubrel::read(fixed_header, packet)?, None),
+            PacketType::PubComp => Packet::PubComp(pubcomp::read(fixed_header, packet)?, None),
             PacketType::Disconnect => Packet::Disconnect,
             _ => unreachable!(),
         };

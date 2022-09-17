@@ -71,8 +71,7 @@ impl<P: Protocol> RemoteLink<P> {
         .await??;
 
         let (connect, lastwill) = match packet {
-            Packet::Connect(connect, _login, lastwill) => (connect, lastwill),
-            Packet::ConnectWithProperties(connect, _, lastwill, ..) => (connect, lastwill),
+            Packet::Connect(connect, _, lastwill, ..) => (connect, lastwill),
             packet => return Err(Error::NotConnectPacket(packet)),
         };
 
