@@ -8,7 +8,7 @@ use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
 use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
-use bytes::Bytes;
+use crate::Storage;
 use std::collections::{HashMap, VecDeque};
 use std::io;
 
@@ -24,7 +24,7 @@ pub struct DataLog {
     /// Also has waiters used to wake connections/replicator tracker
     /// which are caught up with all the data on 'Filter' and waiting
     /// for new data
-    pub native: Slab<Data>,
+    pub native: Slab<Data<Publish>>,
     /// Map of subscription filter name to filter index
     filter_indexes: HashMap<Filter, FilterIdx>,
     retained_publishes: HashMap<Topic, Publish>,
@@ -41,7 +41,7 @@ impl DataLog {
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
-                let data = Data::new(&filter, config.max_segment_size, config.max_mem_segments);
+                let data = Data::new(&filter, config.max_segment_size, config.max_segments);
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map
@@ -82,10 +82,7 @@ impl DataLog {
             .unwrap();
         let waiters = data.waiters.get_mut();
         return match waiters.iter().position(|x| x.0 == id) {
-            Some(index) => {
-                
-                waiters.swap_remove_back(index).map(|v| v.1)
-            }
+            Some(index) => waiters.swap_remove_back(index).map(|v| v.1),
             None => None,
         };
     }
@@ -122,7 +119,7 @@ impl DataLog {
                 let data = Data::new(
                     filter,
                     self.config.max_segment_size,
-                    self.config.max_mem_segments,
+                    self.config.max_segments,
                 );
 
                 // Add commitlog to datalog and add datalog index to filter to
@@ -149,7 +146,7 @@ impl DataLog {
         filter_idx: FilterIdx,
         offset: Offset,
         len: u64,
-    ) -> io::Result<(Position, Vec<Bytes>)> {
+    ) -> io::Result<(Position, Vec<Publish>)> {
         // unwrap to get index of `self.native` is fine here, because when a new subscribe packet
         // arrives in `Router::handle_device_payload`, it first calls the function
         // `next_native_offset` which creates a new commitlog if one doesn't exist. So any new
@@ -160,7 +157,7 @@ impl DataLog {
         Ok((next, o))
     }
 
-    pub fn shadow(&mut self, filter: &str) -> Option<Bytes> {
+    pub fn shadow(&mut self, filter: &str) -> Option<Publish> {
         let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
         data.log.last()
     }
@@ -211,21 +208,24 @@ impl DataLog {
 
         for (topic, publish) in self.retained_publishes.iter_mut() {
             if matches(topic, filter) {
-                datalog.append(publish.serialize(), notifications);
+                datalog.append(publish.clone(), notifications);
             }
         }
     }
 }
 
-pub struct Data {
+pub struct Data<T> {
     filter: Filter,
-    log: CommitLog,
+    log: CommitLog<T>,
     waiters: Waiters<DataRequest>,
     meter: SubscriptionMeter,
 }
 
-impl Data {
-    fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data {
+impl<T> Data<T>
+where
+    T: Storage + Clone,
+{
+    fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data<T> {
         let log = CommitLog::new(max_segment_size, max_mem_segments).unwrap();
 
         let waiters = Waiters::with_capacity(10);
@@ -242,11 +242,11 @@ impl Data {
     /// and wakes up consumers that are matching this topic (if they exist)
     pub fn append(
         &mut self,
-        raw: Bytes,
+        item: T,
         notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     ) -> (Offset, &Filter) {
-        let size = raw.len();
-        let offset = self.log.append(raw);
+        let size = item.size();
+        let offset = self.log.append(item);
         if let Some(mut parked) = self.waiters.take() {
             notifications.append(&mut parked);
         }
@@ -336,8 +336,7 @@ mod test {
             instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
-            max_mem_segments: 10,
-            max_disk_segments: 0,
+            max_segments: 10,
             max_read_len: 1024,
             initialized_filters: None,
         };
@@ -356,8 +355,7 @@ mod test {
             instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
-            max_mem_segments: 10,
-            max_disk_segments: 0,
+            max_segments: 10,
             max_read_len: 1024,
             initialized_filters: None,
         };

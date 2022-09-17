@@ -7,6 +7,7 @@ extern crate rouille;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use segments::Storage;
 use serde::{Deserialize, Serialize};
 
 use std::net::SocketAddr;
@@ -92,8 +93,7 @@ pub struct ClusterSettings {
 pub struct RouterConfig {
     pub instant_ack: bool,
     pub max_segment_size: usize,
-    pub max_mem_segments: usize,
-    pub max_disk_segments: usize,
+    pub max_segments: usize,
     pub max_read_len: u64,
     pub max_connections: usize,
     pub initialized_filters: Option<Vec<Filter>>,
