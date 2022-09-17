@@ -656,6 +656,146 @@ impl Router {
                     execute_will = false;
                     break;
                 }
+                Packet::PublishWithProperties(publish, _) => {
+                    trace!(
+                        "{:15.15}[I] {:20} {:?}",
+                        client_id,
+                        "publish",
+                        publish.topic
+                    );
+
+                    let size = publish.len();
+                    let qos = publish.qos;
+                    let pkid = publish.pkid;
+
+                    // Prepare acks for the above publish
+                    // If any of the publish in the batch results in force flush,
+                    // set global force flush flag. Force flush is triggered when the
+                    // router is in instant ack more or connection data is from a replica
+                    //
+                    // TODO: handle multiple offsets
+                    //
+                    // The problem with multiple offsets is that when using replication with the current
+                    // architecture, a single publish might get appended to multiple commit logs, resulting in
+                    // multiple offsets (see `append_to_commitlog` function), meaning replicas will need to
+                    // coordinate using multiple offsets, and we don't have any idea how to do so right now.
+                    // Currently as we don't have replication, we just use a single offset, even when appending to
+                    // multiple commit logs.
+
+                    match qos {
+                        QoS::AtLeastOnce => {
+                            let puback = PubAck {
+                                pkid,
+                                reason: PubAckReason::Success,
+                            };
+
+                            let ackslog = self.ackslog.get_mut(id).unwrap();
+                            ackslog.puback(puback);
+                            force_ack = true;
+                        }
+                        QoS::ExactlyOnce => {
+                            let pubrec = PubRec {
+                                pkid,
+                                reason: PubRecReason::Success,
+                            };
+
+                            let ackslog = self.ackslog.get_mut(id).unwrap();
+                            ackslog.pubrec(publish, pubrec);
+                            force_ack = true;
+                            continue;
+                        }
+                        QoS::AtMostOnce => {
+                            // Do nothing
+                        }
+                    };
+
+                    self.router_metrics.total_publishes += 1;
+
+                    // Try to append publish to commitlog
+                    match append_to_commitlog(
+                        id,
+                        publish,
+                        &mut self.datalog,
+                        &mut self.notifications,
+                        &mut self.connections,
+                    ) {
+                        Ok(_offset) => {
+                            // Even if one of the data in the batch is appended to commitlog,
+                            // set new data. This triggers notifications to wake waiters.
+                            // Don't overwrite this flag to false if it is already true.
+                            new_data = true;
+                        }
+                        Err(e) => {
+                            // Disconnect on bad publishes
+                            error!(
+                                "{:15.15}[E] {:20} error = {:?}",
+                                client_id, "append-fail", e
+                            );
+                            self.router_metrics.failed_publishes += 1;
+                            disconnect = true;
+                            break;
+                        }
+                    };
+
+                    // Update metrics
+                    if let Some(metrics) = self.connections.get_mut(id).map(|v| &mut v.meter) {
+                        metrics.increment_publish_count();
+                        metrics.add_publish_size(size);
+                    }
+
+                    let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
+                    meter.publish_count += 1;
+                    meter.total_size += size;
+
+                    // println!("{}, {}", self.router_metrics.total_publishes, pkid);
+                }
+                Packet::SubscribeWithProperties(s, _) => {
+                    let mut return_codes = Vec::new();
+                    let pkid = s.pkid;
+                    // let len = s.len();
+
+                    for f in s.filters {
+                        info!(
+                            "{:15.15}[I] {:20} filter = {}",
+                            client_id, "subscribe", f.path
+                        );
+                        let connection = self.connections.get_mut(id).unwrap();
+
+                        if let Err(e) = validate_subscription(connection, &f) {
+                            let id = &self.ibufs[id].client_id;
+                            error!("{:15.15}[E] {:20} error = {:?}", id, "bad-subscription", e);
+                            disconnect = true;
+                            break;
+                        }
+
+                        let filter = f.path;
+                        let qos = f.qos;
+
+                        // Update metrics
+                        connection.meter.push_subscription(filter.clone());
+
+                        let (idx, cursor) = self.datalog.next_native_offset(&filter);
+                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
+                        self.datalog
+                            .handle_retained_messages(&filter, &mut self.notifications);
+
+                        let code = match qos {
+                            QoS::AtMostOnce => SubscribeReasonCode::QoS0,
+                            QoS::AtLeastOnce => SubscribeReasonCode::QoS1,
+                            QoS::ExactlyOnce => SubscribeReasonCode::QoS2,
+                        };
+
+                        return_codes.push(code);
+                    }
+
+                    // let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
+                    // meter.total_size += len;
+
+                    let suback = SubAck { pkid, return_codes };
+                    let ackslog = self.ackslog.get_mut(id).unwrap();
+                    ackslog.suback(suback);
+                    force_ack = true;
+                }
                 incoming => {
                     warn!("Packet = {:?} not supported by router yet", incoming);
                 }
