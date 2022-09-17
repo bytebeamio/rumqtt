@@ -149,10 +149,10 @@ where
 
     /// Append a new [`T`] to the active segment.
     #[inline]
-    pub fn append(&mut self, inner_type: T) -> (u64, u64) {
+    pub fn append(&mut self, message: T) -> (u64, u64) {
         self.apply_retention();
         let active_segment = self.active_segment_mut();
-        active_segment.push(inner_type);
+        active_segment.push(message);
         let absolute_offset = self.active_segment().next_offset();
         (self.tail, absolute_offset)
     }
