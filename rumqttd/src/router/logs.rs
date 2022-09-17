@@ -337,7 +337,6 @@ mod test {
             max_segment_size: 1024,
             max_connections: 10,
             max_segments: 10,
-            max_disk_segments: 0,
             max_read_len: 1024,
             initialized_filters: None,
         };
@@ -357,7 +356,6 @@ mod test {
             max_segment_size: 1024,
             max_connections: 10,
             max_segments: 10,
-            max_disk_segments: 0,
             max_read_len: 1024,
             initialized_filters: None,
         };

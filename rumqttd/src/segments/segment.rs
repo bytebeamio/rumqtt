@@ -65,7 +65,23 @@ where
         // `CommitLog::readv`.
         let idx = absolute_index - self.absolute_offset;
 
-        match self.readv_helper(idx, len, out) {
+        let mut ret: Option<u64>;
+
+        if idx >= self.len() {
+            ret = None;
+        } else {
+            let mut limit = idx + len;
+
+            ret = Some(limit);
+
+            if limit >= self.len() {
+                ret = None;
+                limit = self.len();
+            }
+            out.extend(self.data[idx as usize..limit as usize].iter().cloned());
+        }
+
+        match ret {
             Some(relative_offset) => Ok(SegmentPosition::Next(
                 self.absolute_offset + relative_offset,
             )),
@@ -88,23 +104,6 @@ where
     #[inline]
     pub fn last(&self) -> Option<T> {
         self.data.last().cloned()
-    }
-
-    /// Read a range of data into `out`. Returns the next read offset if possible else `None`.
-    #[inline]
-    pub(crate) fn readv_helper(&self, index: u64, len: u64, out: &mut Vec<T>) -> Option<u64> {
-        if index >= self.len() {
-            return None;
-        }
-
-        let mut limit = index + len;
-        let mut ret = Some(limit);
-        if limit >= self.len() {
-            ret = None;
-            limit = self.len();
-        }
-        out.extend(self.data[index as usize..limit as usize].iter().cloned());
-        ret
     }
 }
 
@@ -137,8 +136,7 @@ mod tests {
         assert_eq!(segment.len(), 9);
 
         let mut out: Vec<Bytes> = Vec::new();
-        let index = segment.readv_helper(0, 2, &mut out).unwrap();
-        assert_eq!(index, 2);
+        let _ = segment.readv(0, 2, &mut out).unwrap();
         assert_eq!(
             out,
             vec![Bytes::from_static(b"test1"), Bytes::from_static(b"test2")]
@@ -160,8 +158,7 @@ mod tests {
         assert_eq!(segment.len(), 9);
 
         let mut out: Vec<Vec<u8>> = Vec::new();
-        let index = segment.readv_helper(0, 2, &mut out).unwrap();
-        assert_eq!(index, 2);
+        let _ = segment.readv(0, 2, &mut out).unwrap();
         assert_eq!(out, vec![vec![1u8], vec![2u8]]);
     }
 }
