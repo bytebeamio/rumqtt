@@ -382,7 +382,7 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(publish) => {
+                Packet::Publish(publish, _) => {
                     trace!(
                         "{:15.15}[I] {:20} {:?}",
                         client_id,
@@ -475,7 +475,7 @@ impl Router {
 
                     // println!("{}, {}", self.router_metrics.total_publishes, pkid);
                 }
-                Packet::Subscribe(s) => {
+                Packet::Subscribe(s, _) => {
                     let mut return_codes = Vec::new();
                     let pkid = s.pkid;
                     // let len = s.len();
@@ -568,7 +568,7 @@ impl Router {
                         }
                     }
                 }
-                Packet::PubAck(puback) => {
+                Packet::PubAck(puback, _) => {
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = puback.pkid;
                     if outgoing.register_ack(pkid).is_none() {
@@ -582,7 +582,7 @@ impl Router {
 
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
-                Packet::PubRec(pubrec) => {
+                Packet::PubRec(pubrec, _) => {
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = pubrec.pkid;
                     if outgoing.register_ack(pkid).is_none() {
@@ -603,7 +603,7 @@ impl Router {
                     ackslog.pubrel(pubrel);
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
-                Packet::PubRel(pubrel) => {
+                Packet::PubRel(pubrel, None) => {
                     let ackslog = self.ackslog.get_mut(id).unwrap();
                     let pubcomp = PubComp {
                         pkid: pubrel.pkid,
@@ -644,7 +644,7 @@ impl Router {
                         }
                     };
                 }
-                Packet::PubComp(_pubcomp) => {}
+                Packet::PubComp(_pubcomp, _) => {}
                 Packet::PingReq(_) => {
                     let ackslog = self.ackslog.get_mut(id).unwrap();
                     ackslog.pingresp(PingResp);

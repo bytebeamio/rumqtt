@@ -43,7 +43,17 @@ next_connection_delay_ms = 10
     max_inflight_count = 100
     max_inflight_size = 1024
 
-[v5]
+[v5.1]
+name = "v5-1"
+listen = "0.0.0.0:1884"
+next_connection_delay_ms = 1
+    [v5.1.connections]
+    timeout_ms = 60000
+    max_client_id_len = 256
+    throttle_delay_ms = 0
+    max_payload_size = 20480
+    max_inflight_count = 500
+    max_inflight_size = 1024
 [ws]
 
 [console]

@@ -371,6 +371,7 @@ impl Protocol for V5 {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
+                PacketType::Disconnect => Ok(Packet::Disconnect),
                 _ => Err(Error::PayloadRequired),
             };
         }
@@ -380,23 +381,23 @@ impl Protocol for V5 {
             PacketType::Connect => {
                 let (connect, properties, will, willproperties, login) =
                     connect::read(fixed_header, packet)?;
-                Packet::ConnectWithProperties(connect, properties, will, willproperties, login)
+                Packet::Connect(connect, properties, will, willproperties, login)
             }
             PacketType::Publish => {
                 let (publish, properties) = publish::read(fixed_header, packet)?;
-                Packet::PublishWithProperties(publish, properties)
+                Packet::Publish(publish, properties)
             }
             PacketType::PubAck => {
                 let (puback, properties) = puback::read(fixed_header, packet)?;
-                Packet::PubAckWithProperties(puback, properties)
+                Packet::PubAck(puback, properties)
             }
             PacketType::Subscribe => {
                 let (subscribe, properties) = subscribe::read(fixed_header, packet)?;
-                Packet::SubscribeWithProperties(subscribe, properties)
+                Packet::Subscribe(subscribe, properties)
             }
             PacketType::SubAck => {
                 let (suback, properties) = suback::read(fixed_header, packet)?;
-                Packet::SubAckWithProperties(suback, properties)
+                Packet::SubAck(suback, properties)
             }
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),

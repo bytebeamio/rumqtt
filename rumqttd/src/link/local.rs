@@ -212,7 +212,7 @@ impl LinkTx {
             payload: payload.into(),
         };
 
-        let len = self.push(Packet::Publish(publish))?;
+        let len = self.push(Packet::Publish(publish, None))?;
         Ok(len)
     }
 
@@ -231,7 +231,7 @@ impl LinkTx {
             payload: payload.into(),
         };
 
-        let len = self.try_push(Packet::Publish(publish))?;
+        let len = self.try_push(Packet::Publish(publish, None))?;
         // TODO: Remote item in buffer after failure and write unittest
         Ok(len)
     }
@@ -248,7 +248,7 @@ impl LinkTx {
 
         let subscribe = Subscribe { pkid: 0, filters };
 
-        let len = self.push(Packet::Subscribe(subscribe))?;
+        let len = self.push(Packet::Subscribe(subscribe, None))?;
         Ok(len)
     }
 
@@ -264,7 +264,7 @@ impl LinkTx {
 
         let subscribe = Subscribe { pkid: 0, filters };
 
-        let len = self.try_push(Packet::Subscribe(subscribe))?;
+        let len = self.try_push(Packet::Subscribe(subscribe, None))?;
         Ok(len)
     }
 
