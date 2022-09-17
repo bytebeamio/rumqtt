@@ -7,8 +7,7 @@ id = 0
 id = 0
 instant_ack = true
 max_segment_size = 10240
-max_mem_segments = 10
-max_disk_segments = 0
+max_segments = 10
 max_read_len = 10240
 max_connections = 10001
 
