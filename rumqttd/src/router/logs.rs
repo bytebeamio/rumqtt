@@ -41,7 +41,7 @@ impl DataLog {
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
-                let data = Data::new(&filter, config.max_segment_size, config.max_segments);
+                let data = Data::new(&filter, config.max_segment_size, config.max_segment_count);
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map
@@ -119,7 +119,7 @@ impl DataLog {
                 let data = Data::new(
                     filter,
                     self.config.max_segment_size,
-                    self.config.max_segments,
+                    self.config.max_segment_count,
                 );
 
                 // Add commitlog to datalog and add datalog index to filter to
@@ -336,7 +336,7 @@ mod test {
             instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
-            max_segments: 10,
+            max_segment_count: 10,
             max_read_len: 1024,
             initialized_filters: None,
         };
@@ -355,7 +355,7 @@ mod test {
             instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
-            max_segments: 10,
+            max_segment_count: 10,
             max_read_len: 1024,
             initialized_filters: None,
         };

@@ -70,7 +70,7 @@ pub struct ServerSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
-    pub timeout_ms: u16,
+    pub connection_timeout_ms: u16,
     pub throttle_delay_ms: u64,
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
@@ -93,7 +93,7 @@ pub struct ClusterSettings {
 pub struct RouterConfig {
     pub instant_ack: bool,
     pub max_segment_size: usize,
-    pub max_segments: usize,
+    pub max_segment_count: usize,
     pub max_read_len: u64,
     pub max_connections: usize,
     pub initialized_filters: Option<Vec<Filter>>,

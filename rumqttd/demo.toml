@@ -7,7 +7,7 @@ id = 0
 id = 0
 instant_ack = true
 max_segment_size = 10240
-max_segments = 10
+max_segment_count = 10
 max_read_len = 10240
 max_connections = 10001
 
@@ -17,7 +17,7 @@ name = "v4-1"
 listen = "0.0.0.0:1883"
 next_connection_delay_ms = 1
     [v4.1.connections]
-    timeout_ms = 60000
+    connection_timeout_ms = 60000
     max_client_id_len = 256
     throttle_delay_ms = 0
     max_payload_size = 20480
@@ -37,7 +37,7 @@ next_connection_delay_ms = 10
     capath = "./ca.cert.pem"
     # settings for all the connections on this server
     [v4.2.connections]
-    timeout_ms = 60000
+    connection_timeout_ms = 60000
     throttle_delay_ms = 0
     max_payload_size = 20480
     max_inflight_count = 100

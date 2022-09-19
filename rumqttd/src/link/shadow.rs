@@ -67,7 +67,7 @@ impl ShadowLink {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
         // DOS attacks by filling total connections that the server can handle with idle open
         // connections which results in server rejecting new connections
-        let connect = network.read_connect(config.timeout_ms).await?;
+        let connect = network.read_connect(config.connection_timeout_ms).await?;
         let subscriptions = HashSet::new();
         let client_id = connect.client_id.clone();
 
