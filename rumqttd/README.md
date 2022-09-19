@@ -34,15 +34,24 @@ cargo run --release -- -c demo.toml
 Example config file is provided on the root of the repo.
 
 
-## Running with docker
+### Using Docker
 
-In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. The docker image contains a `demo.toml` with default broker configurations, one can use this config by running the following command:
-
+rumqttd can be used with docker by pulling the image from docker hub as follows:
 ```bash
-docker run -it -p 1883:1883 -p 8883:8883 rumqttd
+docker pull bytebeamio/rumqttd
+```
+One can mount the local directory containing configs as a volume and expose the necessary ports to interact with the broker as follows:
+```bash
+docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
 ```
 
-**NOTE:** in order to use your own config, edit the `COPY` statement inside the `Dockerfile`;
+#### Building the docker image
+
+In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. You can then run the `rumqttd` with `demo.toml` as follows:
+```bash
+./build_docker.sh
+docker run -v /path/to/configs:/configs -p 1883:1883 -p 8883:8883 -it rumqttd -c /configs/demo.toml
+```
 
 # How to use with TLS
 

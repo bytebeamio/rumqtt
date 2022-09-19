@@ -2409,7 +2409,7 @@ dependencies = [
 
 [[package]]
 name = "rumqttd"
-version = "0.12.0-alpha.1"
+version = "0.12.0-alpha.2"
 dependencies = [
  "bytes 1.2.1",
  "config",
