@@ -8,11 +8,19 @@ use crate::v5::Incoming;
 #[derive(Debug, Eq, PartialEq)]
 pub enum TryRecvError {
     /// [`EventLoop`] is disconnected from broker
+    ///
+    /// [`EventLoop`]: super::EventLoop
     Disconnected,
     /// [`EventLoop`] is connected to broker
+    ///
+    /// [`EventLoop`]: super::EventLoop
     Waiting,
 }
 
+/// Interface to receive incoming [`Packet`]s from the [`EventLoop`]
+///
+/// [`Packet`]: super::Packet
+/// [`EventLoop`]: super::EventLoop
 #[derive(Debug)]
 pub struct Notifier {
     incoming_buf: Arc<Mutex<VecDeque<Incoming>>>,
