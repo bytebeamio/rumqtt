@@ -3,43 +3,79 @@
 [![crates.io page](https://img.shields.io/crates/v/rumqttd.svg)](https://crates.io/crates/rumqttd)
 [![docs.rs page](https://docs.rs/rumqttd/badge.svg)](https://docs.rs/rumqttd)
 
-## `native-tls` support
+Rumqttd is a high performance MQTT broker written in Rust. It's light weight and embeddable, meaning
+you can use it as a library in your code and extend functionality
 
-This crate, by default uses the `tokio-rustls` crate. There's also support for the `tokio-native-tls` crate.
-Add it to your Cargo.toml like so:
+## Currently supported features
+
+- MQTT 3.1.1
+- QoS 0 and 1
+- Retained messages
+- Connection via TLS
+- Last will
+- All MQTT 3.1.1 packets
+
+## Upcoming features
+
+- QoS 2
+- Retransmission after reconnect
+- MQTT 5
+
+
+## Getting started
+
+You can directly run the broker by running the binary with a config file with:
 
 ```
-rumqttd = { version = "0.5", default-features = false, features = ["use-native-tls"] }
+cargo run --release -- -c demo.toml
+
 ```
 
-Then in your config file make sure that you use the `pkcs12` entries under `certs` for your cert instead of `cert_path`, `key_path`, etc.
+Example config file is provided on the root of the repo.
 
+
+### Using Docker
+
+rumqttd can be used with docker by pulling the image from docker hub as follows:
+```bash
+docker pull bytebeamio/rumqttd
+```
+
+To use the rumqttd docker image with the included `demo.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
+```bash
+docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c demo.toml
+```
+
+One can also mount the local directory containing configs as a volume and use the appropriate config file as follows:
+```bash
+docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
+```
+
+#### Building the docker image
+
+In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. You can then run `rumqttd` with the included `demo.toml` as follows:
+```bash
+./build_docker.sh
+docker run -p 1883:1883 -p 1884:1884 -it rumqttd -c demo.toml
+```
+
+# How to use with TLS
+
+To connect an MQTT client to rumqttd over TLS, create relevant certificates for the broker and client using [provision](https://github.com/bytebeamio/provision) as follows:
+```bash
+provision ca // generates ca.cert.pem and ca.key.pem
+provision server --ca ca.cert.pem --cakey ca.key.pem --domain localhost // generates localhost.cert.pem and localhost.key.pem
+provision client --ca ca.cert.pem --cakey ca.key.pem --device 1 --tenant a // generates 1.cert.pem and 1.key.pem
+```
+
+Update config files for rumqttd and rumqttc with the generated certificates:
 ```toml
-[rumqtt.servers.1]
-port = 8883
-
-[servers.1.cert]
-pkcs12_path = "/root/identity.pfx"
-pkcs12_pass = "<your password>"
+[v4.2.tls]
+    certpath = "path/to/localhost.cert.pem"
+    keypath = "path/to/localhost.key.pem"
+    capath = "path/to/ca.cert.pem"
 ```
 
-Here's what a Rustls config looks like:
+You may also use [certgen](https://github.com/minio/certgen), [tls-gen](https://github.com/rabbitmq/tls-gen) or [openssl](https://www.baeldung.com/openssl-self-signed-cert) to generate self-signed certificates, though we recommend using provision.
 
-```toml
-[servers.1]
-port = 8883
-
-[servers.1.cert]
-cert_path = "tlsfiles/server.cert.pem"
-key_path = "tlsfiles/server.key.pem"
-ca_path = "tlsfiles/ca.cert.pem"
-```
-
-
-You can generate the `.p12`/`.pfx` file using `openssl`:
-
-```
-openssl pkcs12 -export -out identity.pfx -inkey ~/pki/private/test.key -in ~/pki/issued/test.crt -certfile ~/pki/ca.crt
-```
-
-Make sure if you use a password it matches the entry in `pkcs12_pass`. If no password, use an empty string `""`.
+**NOTE:** Mount the folders containing the generated tls certificates and the proper config file(with absolute paths to the certificate) to enable tls connections with rumqttd running inside docker.

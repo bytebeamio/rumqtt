@@ -15,7 +15,7 @@ pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
 pretty_env_logger = "0.4"
 prost = "0.6"
 rumqttc = { path = "../rumqttc" }
-rumqttd = { path = "../rumqttd" }
+rumqttd-old = { path = "../rumqttd-old" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

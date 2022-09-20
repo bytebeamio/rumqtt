@@ -69,8 +69,8 @@ jobs:
           command: doc
           args: --verbose --no-deps ${{ matrix.features }}
 
-        # NOTE: Tests for rumqttc and rumqttd
-      - name: Run tests
+        # NOTE: Tests for rumqttc and rumqttd on all platforms
+      - name: Test rumqttc and rumqttd
         uses: actions-rs/cargo@v1
         with:
           command: test
