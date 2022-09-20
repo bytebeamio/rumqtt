@@ -25,35 +25,36 @@ next_connection_delay_ms = 1
     max_inflight_size = 1024
     dynamic_filters = true
 
-# Configuration of server and connections that it accepts
-[v4.2]
-name = "v4-2"
-listen = "0.0.0.0:8883"
-next_connection_delay_ms = 10
-    # tls config for rustls
-    [v4.2.tls]
-    certpath = "./localhost.cert.pem"
-    keypath = "./localhost.key.pem"
-    capath = "./ca.cert.pem"
-    # settings for all the connections on this server
-    [v4.2.connections]
-    connection_timeout_ms = 60000
-    throttle_delay_ms = 0
-    max_payload_size = 20480
-    max_inflight_count = 100
-    max_inflight_size = 1024
+# Example configuration for a TLS enabled server
+# [v4.2]
+# name = "v4-2"
+# listen = "0.0.0.0:8883"
+# next_connection_delay_ms = 10
+#     # tls config for rustls
+#     [v4.2.tls]
+#     certpath = "./localhost.cert.pem"
+#     keypath = "./localhost.key.pem"
+#     capath = "./ca.cert.pem"
+#     # settings for all the connections on this server
+#     [v4.2.connections]
+#     connection_timeout_ms = 60000
+#     throttle_delay_ms = 0
+#     max_payload_size = 20480
+#     max_inflight_count = 100
+#     max_inflight_size = 1024
 
 [v5.1]
 name = "v5-1"
 listen = "0.0.0.0:1884"
 next_connection_delay_ms = 1
     [v5.1.connections]
-    timeout_ms = 60000
+    connection_timeout_ms = 60000
     max_client_id_len = 256
     throttle_delay_ms = 0
     max_payload_size = 20480
     max_inflight_count = 500
     max_inflight_size = 1024
+
 [ws]
 
 [console]

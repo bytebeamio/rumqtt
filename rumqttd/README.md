@@ -40,17 +40,23 @@ rumqttd can be used with docker by pulling the image from docker hub as follows:
 ```bash
 docker pull bytebeamio/rumqttd
 ```
-One can mount the local directory containing configs as a volume and expose the necessary ports to interact with the broker as follows:
+
+To use the rumqttd docker image with the included `demo.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
+```bash
+docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c demo.toml
+```
+
+One can also mount the local directory containing configs as a volume and use the appropriate config file as follows:
 ```bash
 docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
 ```
 
 #### Building the docker image
 
-In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. You can then run the `rumqttd` with `demo.toml` as follows:
+In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. You can then run `rumqttd` with the included `demo.toml` as follows:
 ```bash
 ./build_docker.sh
-docker run -v /path/to/configs:/configs -p 1883:1883 -p 8883:8883 -it rumqttd -c /configs/demo.toml
+docker run -p 1883:1883 -p 1884:1884 -it rumqttd -c demo.toml
 ```
 
 # How to use with TLS
@@ -71,3 +77,5 @@ Update config files for rumqttd and rumqttc with the generated certificates:
 ```
 
 You may also use [certgen](https://github.com/minio/certgen), [tls-gen](https://github.com/rabbitmq/tls-gen) or [openssl](https://www.baeldung.com/openssl-self-signed-cert) to generate self-signed certificates, though we recommend using provision.
+
+**NOTE:** Mount the folders containing the generated tls certificates and the proper config file(with absolute paths to the certificate) to enable tls connections with rumqttd running inside docker.
