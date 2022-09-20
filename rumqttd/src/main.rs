@@ -7,8 +7,8 @@ use simplelog::{
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
-#[structopt(name = "beamd")]
-#[structopt(about = "Bytebeam's distributed stream processing gateway")]
+#[structopt(name = "rumqttd")]
+#[structopt(about = "A high performance, lightweight and embeddable MQTT broker written in Rust.")]
 #[structopt(author = "tekjar <raviteja@bytebeam.io>")]
 struct CommandLine {
     /// Binary version
