@@ -19,7 +19,7 @@ mod tls;
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, EventLoop};
 pub use flume::{SendError, Sender, TrySendError};
-pub use notifier::Notifier;
+pub use notifier::{Notifier, TryRecvError};
 pub use packet::*;
 pub use state::{MqttState, StateError};
 #[cfg(feature = "use-rustls")]
