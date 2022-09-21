@@ -399,6 +399,8 @@ impl Connection {
 
     /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
     /// if all clients/users have closed requests channel.
+    /// 
+    /// [`EvenLoop`]: super::EventLoop
     pub fn recv(&mut self) -> Result<Result<Event, ConnectionError>, RecvError> {
         let f = self.eventloop.poll();
         let event = self.runtime.block_on(f);
@@ -408,6 +410,8 @@ impl Connection {
 
     /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
     /// if none immediately present or all clients/users have closed requests channel.
+    /// 
+    /// [`EvenLoop`]: super::EventLoop
     pub fn try_recv(&mut self) -> Result<Result<Event, ConnectionError>, TryRecvError> {
         let f = self.eventloop.poll();
         let event = f.now_or_never().ok_or(TryRecvError::Empty)?;
@@ -417,6 +421,8 @@ impl Connection {
 
     /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
     /// if all clients/users have closed requests channel or the timeout has expired.
+    /// 
+    /// [`EvenLoop`]: super::EventLoop
     pub fn recv_timeout(
         &mut self,
         duration: Duration,
