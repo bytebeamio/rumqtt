@@ -22,6 +22,7 @@ use-rustls = ["tokio-rustls", "rustls-pemfile", "rustls-native-certs"]
 async-tungstenite = { version = "0.16", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
 bytes = "1"
 flume = "0.10"
+futures = "0.3"
 http = "0.2"
 log = "0.4"
 pollster = "0.2"
