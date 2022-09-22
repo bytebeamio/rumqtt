@@ -2389,6 +2389,7 @@ dependencies = [
  "crossbeam-channel",
  "envy",
  "flume",
+ "futures 0.3.24",
  "http",
  "jsonwebtoken",
  "log",

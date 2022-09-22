@@ -1,15 +1,23 @@
 ### Unreleased
 ---
 rumqttc
+-------
+- Implement `recv`, `try_recv`, `recv_timeout` for `Connection` (#458)
+
+rumqttd
+-------
+- Make dependency on `rustls-pemfile` optional (#439)
+-----------
+
+### R16
+---
+
+rumqttc v0.16.0
 ---
 - Remove `Eventloop::handle`, and stop re-exporting `flume` constructs (#441)
 - Unchain features `url` and `url-rustls` (#440)
 - Make dependency on `rustls-native-certs` optional (#438)
 -----------
-
-rumqttd
----
-- Make dependency on `rustls-pemfile` optional (#439)
 
 ### R15
 ---

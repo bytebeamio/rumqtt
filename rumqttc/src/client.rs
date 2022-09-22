@@ -1,13 +1,15 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
+use std::time::Duration;
+
 use crate::mqttbytes::{v4::*, QoS};
 use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
-
-use tokio::runtime;
-use tokio::runtime::Runtime;
+use futures::FutureExt;
+use tokio::runtime::{self, Runtime};
+use tokio::time::timeout;
 
 /// Client Error
 #[derive(Debug, thiserror::Error)]
@@ -352,6 +354,28 @@ impl Client {
     }
 }
 
+/// Error type returned by [`Connection::recv`]
+#[derive(Debug, Eq, PartialEq)]
+pub struct RecvError;
+
+/// Error type returned by [`Connection::try_recv`]
+#[derive(Debug, Eq, PartialEq)]
+pub enum TryRecvError {
+    /// User has closed requests channel
+    Disconnected,
+    /// Did not resolve
+    Empty,
+}
+
+/// Error type returned by [`Connection::recv_timeout`]
+#[derive(Debug, Eq, PartialEq)]
+pub enum RecvTimeoutError {
+    /// User has closed requests channel
+    Disconnected,
+    /// Recv request timedout
+    Timeout,
+}
+
 ///  MQTT connection. Maintains all the necessary state
 pub struct Connection {
     pub eventloop: EventLoop,
@@ -372,6 +396,57 @@ impl Connection {
     pub fn iter(&mut self) -> Iter<'_> {
         Iter { connection: self }
     }
+
+    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
+    /// if all clients/users have closed requests channel.
+    /// 
+    /// [`EvenLoop`]: super::EventLoop
+    pub fn recv(&mut self) -> Result<Result<Event, ConnectionError>, RecvError> {
+        let f = self.eventloop.poll();
+        let event = self.runtime.block_on(f);
+
+        resolve_event(event).ok_or(RecvError)
+    }
+
+    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
+    /// if none immediately present or all clients/users have closed requests channel.
+    /// 
+    /// [`EvenLoop`]: super::EventLoop
+    pub fn try_recv(&mut self) -> Result<Result<Event, ConnectionError>, TryRecvError> {
+        let f = self.eventloop.poll();
+        let event = f.now_or_never().ok_or(TryRecvError::Empty)?;
+
+        resolve_event(event).ok_or(TryRecvError::Disconnected)
+    }
+
+    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
+    /// if all clients/users have closed requests channel or the timeout has expired.
+    /// 
+    /// [`EvenLoop`]: super::EventLoop
+    pub fn recv_timeout(
+        &mut self,
+        duration: Duration,
+    ) -> Result<Result<Event, ConnectionError>, RecvTimeoutError> {
+        let f = timeout(duration, self.eventloop.poll());
+        let event = self
+            .runtime
+            .block_on(f)
+            .map_err(|_| RecvTimeoutError::Timeout)?;
+
+        resolve_event(event).ok_or(RecvTimeoutError::Disconnected)
+    }
+}
+
+fn resolve_event(event: Result<Event, ConnectionError>) -> Option<Result<Event, ConnectionError>> {
+    match event {
+        Ok(v) => Some(Ok(v)),
+        // closing of request channel should stop the iterator
+        Err(ConnectionError::RequestsDone) => {
+            trace!("Done with requests");
+            None
+        }
+        Err(e) => Some(Err(e)),
+    }
 }
 
 /// Iterator which polls the `EventLoop` for connection progress
@@ -383,17 +458,7 @@ impl Iterator for Iter<'_> {
     type Item = Result<Event, ConnectionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let f = self.connection.eventloop.poll();
-        let r = &self.connection.runtime;
-        match r.block_on(f) {
-            Ok(v) => Some(Ok(v)),
-            // closing of request channel should stop the iterator
-            Err(ConnectionError::RequestsDone) => {
-                trace!("Done with requests");
-                None
-            }
-            Err(e) => Some(Err(e)),
-        }
+        self.connection.recv().ok()
     }
 }
 
