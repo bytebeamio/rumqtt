@@ -2,11 +2,17 @@
 ---
 rumqttc
 -------
-- Implement `recv`, `try_recv`, `recv_timeout` for `Connection` (#458)
 - Route `Incoming::ConnAck` onto `Notifier` (#460)
+- Implement `recv`, `try_recv`, `recv_timeout` for `Connection` (#458)
+- Export `v5::TryRecvError` (#457)
+- Improve filter validation (#453) 
+- Validate topic before sending a `Publish` (#449)
+- Don't create a new runtime in `Iter::drop` (#405)
+- Unpin exact version dependency on `tokio-rustls` (#448)
 
 rumqttd
 -------
+- MQTT5 support, StructOpt/Clap based CLI, change in config format (next generation broker) (#442)
 - Make dependency on `rustls-pemfile` optional (#439)
 -----------
 
