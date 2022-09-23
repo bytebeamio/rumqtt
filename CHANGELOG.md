@@ -14,6 +14,7 @@ rumqttd
 -------
 - MQTT5 support, StructOpt/Clap based CLI, change in config format (next generation broker) (#442)
 - Make dependency on `rustls-pemfile` optional (#439)
+- Build rumqttd docker image with alpine (#461)
 -----------
 
 ### R16
