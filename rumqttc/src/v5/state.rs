@@ -184,6 +184,7 @@ impl MqttState {
             Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
             Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
             Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
+            Incoming::ConnAck(_) => Ok(()),
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
                 return Err(StateError::WrongPacket);

@@ -126,11 +126,13 @@ impl EventLoop {
         }
 
         if self.network.is_none() {
-            let (network, _connack) = time::timeout(
+            let (network, connack) = time::timeout(
                 Duration::from_secs(self.options.connection_timeout()),
                 connect(&self.options),
             )
             .await??;
+
+            self.state.handle_incoming_packet(connack)?;
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {

@@ -3,6 +3,7 @@
 rumqttc
 -------
 - Implement `recv`, `try_recv`, `recv_timeout` for `Connection` (#458)
+- Route `Incoming::ConnAck` onto `Notifier` (#460)
 
 rumqttd
 -------
