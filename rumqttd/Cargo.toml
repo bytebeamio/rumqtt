@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.12.0-alpha.2"
+version = "0.12.0-alpha.3"
 license = "Apache-2.0"
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 authors = ["tekjar <raviteja@bytebeam.io>"]
@@ -47,7 +47,7 @@ mqttbytes = "0.6"
 config = "0.13"
 pretty_assertions = "1.3.0"
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(not(any(target_env = "msvc", target_env = "musl")))'.dependencies]
 jemallocator = "0.3"
 
 [build-dependencies]

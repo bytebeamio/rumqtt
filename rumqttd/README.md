@@ -53,9 +53,9 @@ docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /
 
 #### Building the docker image
 
-In order to run rumqttd within a docker container, build the image by running `build_docker.sh`. The shell script will build the rumqttd binary file and copy it into the `stage/` directory before building the docker image. You can then run `rumqttd` with the included `demo.toml` as follows:
+In order to run rumqttd within a docker container, build the image by running `build_rumqttd_docker.sh` from the project's root directory. The shell script will use docker to build rumqttd and package it along in an [alpine](https://hub.docker.com/_/alpine) image. You can then run `rumqttd` with the included `demo.toml` as follows(ensure you are in the project's root directory):
 ```bash
-./build_docker.sh
+./build_rumqttd_docker.sh
 docker run -p 1883:1883 -p 1884:1884 -it rumqttd -c demo.toml
 ```
 
