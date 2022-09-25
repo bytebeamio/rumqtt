@@ -48,7 +48,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while let Ok(event) = eventloop.poll().await {
         println!("{:?}", event);
 
-        if let Event::Incoming(Packet::Publish(publish, _)) = event {
+        if let Event::Incoming(packet) = event {
+            let publish = match *packet {
+                Packet::Publish(publish, _) => publish,
+                _ => continue,
+            };
             // this time we will ack incoming publishes.
             // Its important not to block notifier as this can cause deadlock.
             let c = client.clone();

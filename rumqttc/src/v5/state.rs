@@ -169,7 +169,7 @@ impl MqttState {
             Incoming::UnsubAck(_) => self.handle_incoming_unsuback(),
             Incoming::PubAck(puback, _) => self.handle_incoming_puback(puback),
             Incoming::PubRec(pubrec, _) => self.handle_incoming_pubrec(pubrec),
-            Incoming::PubRel(pubrel, __) => self.handle_incoming_pubrel(pubrel),
+            Incoming::PubRel(pubrel, _) => self.handle_incoming_pubrel(pubrel),
             Incoming::PubComp(pubcomp, _) => self.handle_incoming_pubcomp(pubcomp),
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
@@ -178,7 +178,7 @@ impl MqttState {
         };
 
         out?;
-        self.events.push_back(Event::Incoming(packet));
+        self.events.push_back(Event::Incoming(Box::new(packet)));
         self.last_incoming = Instant::now();
         Ok(())
     }

@@ -183,6 +183,10 @@ impl Publish {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Serialization which is independent of MQTT
     pub fn serialize(&self) -> Bytes {
         let mut o = BytesMut::with_capacity(self.len() + 5);
@@ -351,6 +355,10 @@ pub struct SubAck {
 impl SubAck {
     pub fn len(&self) -> usize {
         2 + self.return_codes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

@@ -126,13 +126,13 @@ impl Packet {
                 subscribe::write(subscription, properties, write)
             }
             Self::Unsubscribe(unsubscribe) => unsubscribe::write(unsubscribe, &None, write),
-            Self::ConnAck(ack) => connack::write(&ack, &None, write),
-            Self::PubAck(ack, properties) => puback::write(&ack, properties, write),
-            Self::SubAck(ack, properties) => suback::write(&ack, properties, write),
+            Self::ConnAck(ack) => connack::write(ack, &None, write),
+            Self::PubAck(ack, properties) => puback::write(ack, properties, write),
+            Self::SubAck(ack, properties) => suback::write(ack, properties, write),
             Self::UnsubAck(unsuback) => unsuback::write(unsuback, &None, write),
-            Self::PubRec(pubrec, properties) => pubrec::write(&pubrec, properties, write),
-            Self::PubRel(pubrel, properties) => pubrel::write(&pubrel, properties, write),
-            Self::PubComp(pubcomp, properties) => pubcomp::write(&pubcomp, properties, write),
+            Self::PubRec(pubrec, properties) => pubrec::write(pubrec, properties, write),
+            Self::PubRel(pubrel, properties) => pubrel::write(pubrel, properties, write),
+            Self::PubComp(pubcomp, properties) => pubcomp::write(pubcomp, properties, write),
             Self::Connect(connect, properties, will, will_properties, login) => {
                 connect::write(connect, will, will_properties, login, properties, write)
             }

@@ -47,7 +47,7 @@ pub enum ConnectionError {
     #[error("Connection refused, return code: {0:?}")]
     ConnectionRefused(ConnectReturnCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
-    NotConnAck(Packet),
+    NotConnAck(Box<Packet>),
     #[error("Requests done")]
     RequestsDone,
 }
@@ -73,7 +73,7 @@ pub struct EventLoop {
 /// Events which can be yielded by the event loop
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Incoming(Incoming),
+    Incoming(Box<Incoming>),
     Outgoing(Outgoing),
 }
 
@@ -124,7 +124,7 @@ impl EventLoop {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(connack));
+            return Ok(Event::Incoming(Box::new(connack)));
         }
 
         match self.select().await {
@@ -306,7 +306,7 @@ async fn mqtt_connect(
             Ok(Packet::ConnAck(connack))
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-        packet => Err(ConnectionError::NotConnAck(packet)),
+        packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
     }
 }
 
