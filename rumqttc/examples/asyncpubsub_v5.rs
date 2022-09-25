@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         time::sleep(Duration::from_secs(3)).await;
     });
 
-    for event in eventloop.poll().await {
+    while let Ok(event) = eventloop.poll().await {
         println!("{:?}", event);
     }
 
