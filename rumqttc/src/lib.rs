@@ -112,7 +112,9 @@ mod state;
 mod tls;
 pub mod v5;
 
-pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
+pub use client::{
+    AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
+};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;

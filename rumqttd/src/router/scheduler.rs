@@ -25,7 +25,6 @@ impl Scheduler {
     }
 
     pub fn add(&mut self, tracker: Tracker) -> ConnectionId {
-        
         self.trackers.insert(tracker)
     }
 
