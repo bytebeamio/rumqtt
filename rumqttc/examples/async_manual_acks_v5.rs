@@ -1,18 +1,20 @@
 #![allow(dead_code, unused_imports)]
+use rumqttc::v5::mqttbytes::v5::Packet;
+use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, MqttOptions, Notifier, Packet, QoS};
+use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
-async fn create_conn() -> (AsyncClient, Notifier) {
+fn create_conn() -> (AsyncClient, EventLoop) {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
         .set_clean_session(false);
 
-    AsyncClient::connect(mqttoptions, 10).await
+    AsyncClient::new(mqttoptions, 10)
 }
 
 #[tokio::main(worker_threads = 1)]
@@ -21,7 +23,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
     // create mqtt connection with clean_session = false and manual_acks = true
-    let (client, mut notifier) = create_conn().await;
+    let (client, mut eventloop) = create_conn();
 
     // subscribe example topic
     client
@@ -36,17 +38,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // get subscribed messages without acking
-    for event in notifier.iter() {
+    while let Ok(event) = eventloop.poll().await {
         println!("{:?}", event);
     }
 
     // create new broker connection
-    let (client, mut notifier) = create_conn().await;
+    let (client, mut eventloop) = create_conn();
 
-    for event in notifier.iter() {
+    while let Ok(event) = eventloop.poll().await {
         println!("{:?}", event);
 
-        if let Packet::Publish(publish) = event {
+        if let Event::Incoming(packet) = event {
+            let publish = match *packet {
+                Packet::Publish(publish, _) => publish,
+                _ => continue,
+            };
             // this time we will ack incoming publishes.
             // Its important not to block notifier as this can cause deadlock.
             let c = client.clone();

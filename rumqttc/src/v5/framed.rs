@@ -1,7 +1,9 @@
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::v5::{packet::*, Incoming, MqttState, StateError};
+use super::mqttbytes::v5::Packet;
+use super::mqttbytes::{self, Connect};
+use super::{Incoming, MqttState, StateError};
 use std::io;
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -57,9 +59,9 @@ impl Network {
 
     pub async fn read(&mut self) -> io::Result<Incoming> {
         loop {
-            let required = match read(&mut self.read, self.max_incoming_size) {
+            let required = match Packet::read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => return Ok(packet),
-                Err(Error::InsufficientBytes(required)) => required,
+                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
             };
 
@@ -74,7 +76,7 @@ impl Network {
     pub async fn readb(&mut self, state: &mut MqttState) -> Result<(), StateError> {
         let mut count = 0;
         loop {
-            match read(&mut self.read, self.max_incoming_size) {
+            match Packet::read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => {
                     state.handle_incoming_packet(packet)?;
 
@@ -84,9 +86,9 @@ impl Network {
                     }
                 }
                 // If some packets are already framed, return those
-                Err(Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
                 // Wait for more bytes until a frame can be created
-                Err(Error::InsufficientBytes(required)) => {
+                Err(mqttbytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
                 Err(e) => return Err(StateError::Deserialization(e)),
@@ -96,7 +98,7 @@ impl Network {
 
     pub async fn connect(&mut self, connect: Connect) -> io::Result<usize> {
         let mut write = BytesMut::new();
-        let len = match connect.write(&mut write) {
+        let len = match Packet::Connect(connect, None, None, None, None).write(&mut write) {
             Ok(size) => size,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };
