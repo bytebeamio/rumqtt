@@ -70,7 +70,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -78,12 +78,13 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        let pkid = publish.pkid;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
@@ -93,7 +94,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -101,12 +102,13 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        let pkid = publish.pkid;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -135,69 +137,76 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
+        let pkid = publish.pkid;
         let publish = Request::Publish(publish);
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<u16, ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
+        let pkid = subscribe.pkid;
         let request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<u16, ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
+        let pkid = subscribe.pkid;
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
+        let pkid = subscribe.pkid;
         let request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
+        let pkid = subscribe.pkid;
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<u16, ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
+        let pkid = unsubscribe.pkid;
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<u16, ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
+        let pkid = unsubscribe.pkid;
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
@@ -262,13 +271,14 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
-        Ok(())
+        Ok(pollster::block_on(
+            self.client.publish(topic, qos, retain, payload),
+        )?)
     }
 
     pub fn try_publish<S, V>(
@@ -277,13 +287,12 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.client.try_publish(topic, qos, retain, payload)?;
-        Ok(())
+        Ok(self.client.try_publish(topic, qos, retain, payload)?)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -299,9 +308,8 @@ impl Client {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        pollster::block_on(self.client.subscribe(topic, qos))?;
-        Ok(())
+    pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<u16, ClientError> {
+        Ok(pollster::block_on(self.client.subscribe(topic, qos))?)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -309,20 +317,19 @@ impl Client {
         &mut self,
         topic: S,
         qos: QoS,
-    ) -> Result<(), ClientError> {
-        self.client.try_subscribe(topic, qos)?;
-        Ok(())
+    ) -> Result<u16, ClientError> {
+        Ok(self.client.try_subscribe(topic, qos)?)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
+    pub fn subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         pollster::block_on(self.client.subscribe_many(topics))
     }
 
-    pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<u16, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -330,15 +337,13 @@ impl Client {
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
-        pollster::block_on(self.client.unsubscribe(topic))?;
-        Ok(())
+    pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+        Ok(pollster::block_on(self.client.unsubscribe(topic))?)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
-        self.client.try_unsubscribe(topic)?;
-        Ok(())
+    pub fn try_unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<u16, ClientError> {
+        Ok(self.client.try_unsubscribe(topic)?)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
