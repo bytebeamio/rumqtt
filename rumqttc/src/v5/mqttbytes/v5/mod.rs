@@ -1,5 +1,8 @@
 use std::slice::Iter;
 
+use self::{disconnect::Disconnect, ping::pingreq};
+
+use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 mod connack;
@@ -16,37 +19,128 @@ mod subscribe;
 mod unsuback;
 mod unsubscribe;
 
-pub use connack::*;
-pub use connect::*;
-pub use disconnect::*;
-pub use ping::*;
-pub use puback::*;
-pub use pubcomp::*;
-pub use publish::*;
-pub use pubrec::*;
-pub use pubrel::*;
-pub use suback::*;
-pub use subscribe::*;
-pub use unsuback::*;
-pub use unsubscribe::*;
-
-/// Encapsulates all MQTT packet types
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
-    Connect(Connect),
+    Connect(
+        Connect,
+        Option<ConnectProperties>,
+        Option<LastWill>,
+        Option<LastWillProperties>,
+        Option<Login>,
+    ),
     ConnAck(ConnAck),
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubRel(PubRel),
-    PubComp(PubComp),
-    Subscribe(Subscribe),
-    SubAck(SubAck),
+    Publish(Publish, Option<PublishProperties>),
+    PubAck(PubAck, Option<PubAckProperties>),
+    PingReq(PingReq),
+    PingResp(PingResp),
+    Subscribe(Subscribe, Option<SubscribeProperties>),
+    SubAck(SubAck, Option<SubAckProperties>),
+    PubRec(PubRec, Option<PubRecProperties>),
+    PubRel(PubRel, Option<PubRelProperties>),
+    PubComp(PubComp, Option<PubCompProperties>),
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
-    PingReq,
-    PingResp,
     Disconnect(Disconnect),
+}
+
+impl Packet {
+    /// Reads a stream of bytes and extracts next MQTT packet out of it
+    pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
+        let fixed_header = check(stream.iter(), max_size)?;
+
+        // Test with a stream with exactly the size to check border panics
+        let packet = stream.split_to(fixed_header.frame_length());
+        let packet_type = fixed_header.packet_type()?;
+
+        if fixed_header.remaining_len == 0 {
+            // no payload packets, Disconnect still has a bit more info
+            return match packet_type {
+                PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
+                PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
+                _ => Err(Error::PayloadRequired),
+            };
+        }
+
+        let packet = packet.freeze();
+        let packet = match packet_type {
+            PacketType::Connect => {
+                let (connect, properties, will, willproperties, login) =
+                    connect::read(fixed_header, packet)?;
+                Packet::Connect(connect, properties, will, willproperties, login)
+            }
+            PacketType::Publish => {
+                let (publish, properties) = publish::read(fixed_header, packet)?;
+                Packet::Publish(publish, properties)
+            }
+            PacketType::Subscribe => {
+                let (subscribe, properties) = subscribe::read(fixed_header, packet)?;
+                Packet::Subscribe(subscribe, properties)
+            }
+            PacketType::Unsubscribe => {
+                let (unsubscribe, _) = unsubscribe::read(fixed_header, packet)?;
+                Packet::Unsubscribe(unsubscribe)
+            }
+            PacketType::ConnAck => {
+                let (connack, _) = connack::read(fixed_header, packet)?;
+                Packet::ConnAck(connack)
+            }
+            PacketType::PubAck => {
+                let (puback, properties) = puback::read(fixed_header, packet)?;
+                Packet::PubAck(puback, properties)
+            }
+            PacketType::PubRec => {
+                let (pubrec, properties) = pubrec::read(fixed_header, packet)?;
+                Packet::PubRec(pubrec, properties)
+            }
+            PacketType::PubRel => {
+                let (pubrel, properties) = pubrel::read(fixed_header, packet)?;
+                Packet::PubRel(pubrel, properties)
+            }
+            PacketType::PubComp => {
+                let (pubcomp, properties) = pubcomp::read(fixed_header, packet)?;
+                Packet::PubComp(pubcomp, properties)
+            }
+            PacketType::SubAck => {
+                let (suback, properties) = suback::read(fixed_header, packet)?;
+                Packet::SubAck(suback, properties)
+            }
+            PacketType::UnsubAck => {
+                let (unsuback, _) = unsuback::read(fixed_header, packet)?;
+                Packet::UnsubAck(unsuback)
+            }
+            PacketType::PingReq => Packet::PingReq(PingReq),
+            PacketType::PingResp => Packet::PingResp(PingResp),
+            PacketType::Disconnect => {
+                let disconnect = Disconnect::read(fixed_header, packet)?;
+                Packet::Disconnect(disconnect)
+            }
+        };
+
+        Ok(packet)
+    }
+
+    pub fn write(&self, write: &mut BytesMut) -> Result<usize, Error> {
+        match self {
+            Self::Publish(publish, properties) => publish::write(publish, properties, write),
+            Self::Subscribe(subscription, properties) => {
+                subscribe::write(subscription, properties, write)
+            }
+            Self::Unsubscribe(unsubscribe) => unsubscribe::write(unsubscribe, &None, write),
+            Self::ConnAck(ack) => connack::write(ack, &None, write),
+            Self::PubAck(ack, properties) => puback::write(ack, properties, write),
+            Self::SubAck(ack, properties) => suback::write(ack, properties, write),
+            Self::UnsubAck(unsuback) => unsuback::write(unsuback, &None, write),
+            Self::PubRec(pubrec, properties) => pubrec::write(pubrec, properties, write),
+            Self::PubRel(pubrel, properties) => pubrel::write(pubrel, properties, write),
+            Self::PubComp(pubcomp, properties) => pubcomp::write(pubcomp, properties, write),
+            Self::Connect(connect, properties, will, will_properties, login) => {
+                connect::write(connect, will, will_properties, login, properties, write)
+            }
+            Self::PingReq(_) => pingreq::write(write),
+            Self::PingResp(_) => ping::pingresp::write(write),
+            Self::Disconnect(disconnect) => disconnect.write(write),
+        }
+    }
 }
 
 /// MQTT packet type
@@ -99,74 +193,6 @@ enum PropertyType {
     WildcardSubscriptionAvailable = 40,
     SubscriptionIdentifierAvailable = 41,
     SharedSubscriptionAvailable = 42,
-}
-
-/// Error during serialization and deserialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum Error {
-    #[error("Expected Connect, received: {0:?}")]
-    NotConnect(PacketType),
-    #[error("Unexpected Connect")]
-    UnexpectedConnect,
-    #[error("Invalid Connect return code: {0}")]
-    InvalidConnectReturnCode(u8),
-    #[error("Invalid protocol")]
-    InvalidProtocol,
-    #[error("Invalid protocol level: {0}")]
-    InvalidProtocolLevel(u8),
-    #[error("Incorrect packet format")]
-    IncorrectPacketFormat,
-    #[error("Invalid packet type: {0}")]
-    InvalidPacketType(u8),
-    #[error("Invalid property type: {0}")]
-    InvalidPropertyType(u8),
-    #[error("Invalid QoS level: {0}")]
-    InvalidQoS(u8),
-    #[error("Invalid retain forward rule: {0}")]
-    InvalidRetainForwardRule(u8),
-    #[error("Invalid subscribe reason code: {0}")]
-    InvalidSubscribeReasonCode(u8),
-    #[error("Packet id Zero")]
-    PacketIdZero,
-    #[error("Payload size is incorrect")]
-    PayloadSizeIncorrect,
-    #[error("payload is too long")]
-    PayloadTooLong,
-    #[error("payload size limit exceeded: {0}")]
-    PayloadSizeLimitExceeded(usize),
-    #[error("Payload required")]
-    PayloadRequired,
-    #[error("Topic is not UTF-8")]
-    TopicNotUtf8,
-    #[error("Promised boundary crossed: {0}")]
-    BoundaryCrossed(usize),
-    #[error("Malformed packet")]
-    MalformedPacket,
-    #[error("Malformed remaining length")]
-    MalformedRemainingLength,
-    #[error("A Subscribe packet must contain atleast one filter")]
-    EmptySubscription,
-    /// More bytes required to frame packet. Argument
-    /// implies minimum additional bytes required to
-    /// proceed further
-    #[error("At least {0} more bytes required to frame packet")]
-    InsufficientBytes(usize),
-}
-
-/// Protocol type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Protocol {
-    V4,
-    V5,
-}
-
-/// Quality of service
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
-pub enum QoS {
-    AtMostOnce = 0,
-    AtLeastOnce = 1,
-    ExactlyOnce = 2,
 }
 
 /// Packet type from a byte
@@ -350,44 +376,6 @@ fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
     Ok((len_len, len))
 }
 
-/// Reads a stream of bytes and extracts next MQTT packet out of it
-pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
-    let fixed_header = check(stream.iter(), max_size)?;
-
-    // Test with a stream with exactly the size to check border panics
-    let packet = stream.split_to(fixed_header.frame_length());
-    let packet_type = fixed_header.packet_type()?;
-
-    if fixed_header.remaining_len == 0 {
-        // no payload packets
-        return match packet_type {
-            PacketType::PingReq => Ok(Packet::PingReq),
-            PacketType::PingResp => Ok(Packet::PingResp),
-            _ => Err(Error::PayloadRequired),
-        };
-    }
-
-    let packet = packet.freeze();
-    let packet = match packet_type {
-        PacketType::Connect => Packet::Connect(Connect::read(fixed_header, packet)?),
-        PacketType::ConnAck => Packet::ConnAck(ConnAck::read(fixed_header, packet)?),
-        PacketType::Publish => Packet::Publish(Publish::read(fixed_header, packet)?),
-        PacketType::PubAck => Packet::PubAck(PubAck::read(fixed_header, packet)?),
-        PacketType::PubRec => Packet::PubRec(PubRec::read(fixed_header, packet)?),
-        PacketType::PubRel => Packet::PubRel(PubRel::read(fixed_header, packet)?),
-        PacketType::PubComp => Packet::PubComp(PubComp::read(fixed_header, packet)?),
-        PacketType::Subscribe => Packet::Subscribe(Subscribe::read(fixed_header, packet)?),
-        PacketType::SubAck => Packet::SubAck(SubAck::read(fixed_header, packet)?),
-        PacketType::Unsubscribe => Packet::Unsubscribe(Unsubscribe::read(fixed_header, packet)?),
-        PacketType::UnsubAck => Packet::UnsubAck(UnsubAck::read(fixed_header, packet)?),
-        PacketType::PingReq => Packet::PingReq,
-        PacketType::PingResp => Packet::PingResp,
-        PacketType::Disconnect => Packet::Disconnect(Disconnect::read(fixed_header, packet)?),
-    };
-
-    Ok(packet)
-}
-
 /// Reads a series of bytes with a length from a byte stream
 fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
     let len = read_u16(stream)? as usize;
@@ -458,16 +446,6 @@ fn len_len(len: usize) -> usize {
         2
     } else {
         1
-    }
-}
-
-/// Maps a number to QoS
-pub fn qos(num: u8) -> Result<QoS, Error> {
-    match num {
-        0 => Ok(QoS::AtMostOnce),
-        1 => Ok(QoS::AtLeastOnce),
-        2 => Ok(QoS::ExactlyOnce),
-        qos => Err(Error::InvalidQoS(qos)),
     }
 }
 
