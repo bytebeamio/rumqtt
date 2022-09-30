@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.12.0-alpha.3"
+version = "0.12.0-beta.1"
 license = "Apache-2.0"
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 authors = ["tekjar <raviteja@bytebeam.io>"]
@@ -26,7 +26,7 @@ tokio-tungstenite = { version = "0.15.0", optional = true }
 ws_stream_tungstenite = { version = "0.8", optional = true }
 websocket-codec = { version = "0.5.1", optional = true }
 rouille = "3.1.1"
-x509-parser = {version= "0.9.2", optional = true}
+# x509-parser = {version= "0.9.2", optional = true}
 futures-util = "0.3.16"
 parking_lot = "0.11.2"
 reqwest = { version = "0.11", features = ["json"] }
@@ -37,8 +37,8 @@ structopt = "0.3.26"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["tokio-rustls", "rustls-pemfile", "x509-parser"]
-use-native-tls = ["tokio-native-tls", "x509-parser"]
+use-rustls = ["tokio-rustls", "rustls-pemfile"] #, "x509-parser"]
+use-native-tls = ["tokio-native-tls"] #, "x509-parser"]
 websockets = ["tokio-tungstenite", "ws_stream_tungstenite", "websocket-codec"]
 
 [dev-dependencies]

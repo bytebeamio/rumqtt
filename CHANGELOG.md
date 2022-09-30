@@ -1,16 +1,15 @@
-### Unreleased
+### R17
 ---
-rumqttc
+rumqttc v0.17.0
 -------
-- Route `Incoming::ConnAck` onto `Notifier` (#460)
+- Reimplement v5 with old `EvenLoop` design (#464)
 - Implement `recv`, `try_recv`, `recv_timeout` for `Connection` (#458)
-- Export `v5::TryRecvError` (#457)
 - Improve filter validation (#453) 
 - Validate topic before sending a `Publish` (#449)
 - Don't create a new runtime in `Iter::drop` (#405)
 - Unpin exact version dependency on `tokio-rustls` (#448)
 
-rumqttd
+rumqttd v0.12.0-beta.1
 -------
 - MQTT5 support, StructOpt/Clap based CLI, change in config format (next generation broker) (#442)
 - Make dependency on `rustls-pemfile` optional (#439)
