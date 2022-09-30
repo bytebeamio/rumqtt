@@ -123,8 +123,13 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (link_tx, link_rx, _ack) =
-            Link::new(None, client_id, self.router_tx.clone(), true, None, false)?;
+        let (link_tx, link_rx, _ack) = Link::new(
+            /*None,*/ client_id,
+            self.router_tx.clone(),
+            true,
+            None,
+            false,
+        )?;
         Ok((link_tx, link_rx))
     }
 
@@ -244,17 +249,20 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
     }
 
     // Depending on TLS or not create a new Network
-    async fn tls_accept(&self, stream: TcpStream) -> Result<(Box<dyn N>, Option<String>), Error> {
+    async fn tls_accept(
+        &self,
+        stream: TcpStream,
+    ) -> Result</*(*/ Box<dyn N> /*, Option<String>)*/, Error> {
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         match &self.config.tls {
             Some(c) => {
-                let (tenant_id, network) = TLSAcceptor::new(c)?.accept(stream).await?;
-                Ok((network, Some(tenant_id)))
+                let /*(tenant_id,*/ network/*)*/ = TLSAcceptor::new(c)?.accept(stream).await?;
+                Ok(/*(*/ network /*, Some(tenant_id))*/)
             }
-            None => Ok((Box::new(stream), None)),
+            None => Ok(/*(*/ Box::new(stream) /*, None)*/),
         }
         #[cfg(not(any(feature = "use-rustls", feature = "use-native-tls")))]
-        Ok((Box::new(stream), None))
+        Ok(/*(*/Box::new(stream)/*, None)*/)
     }
 
     async fn start(&self, shadow: bool) -> Result<(), Error> {
@@ -277,7 +285,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 }
             };
 
-            let (network, tenant_id) = match self.tls_accept(stream).await {
+            let /*(*/network /*, tenant_id)*/ = match self.tls_accept(stream).await {
                 Ok(o) => o,
                 Err(e) => {
                     error!("Tls accept error = {:?}", e);
@@ -298,7 +306,9 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             match shadow {
                 #[cfg(feature = "websockets")]
                 true => task::spawn(shadow_connection(config, router_tx, network)),
-                _ => task::spawn(remote(config, tenant_id, router_tx, network, protocol)),
+                _ => task::spawn(remote(
+                    config, /*tenant_id,*/ router_tx, network, protocol,
+                )),
             };
 
             time::sleep(delay).await;
@@ -313,14 +323,14 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 /// mqtt connection packet to make make the server reach its concurrent connection limit)
 async fn remote<P: Protocol>(
     config: Arc<ConnectionSettings>,
-    tenant_id: Option<String>,
+    // tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
 ) {
     let network = Network::new(stream, config.max_payload_size, 100, protocol);
     // Start the link
-    let mut link = match RemoteLink::new(config, router_tx.clone(), tenant_id, network).await {
+    let mut link = match RemoteLink::new(config, router_tx.clone(), /*tenant_id,*/ network).await {
         Ok(l) => l,
         Err(e) => {
             error!("{:15.15}[E] Remote link error = {:?}", "", e);
