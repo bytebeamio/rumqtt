@@ -2,7 +2,7 @@ name: Releaser
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'R*'
 
 jobs:
   build-release:
@@ -43,11 +43,11 @@ jobs:
           echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
 
       - name: Build release binary
-        run: cross build --verbose --release ${{ env.TARGET_FLAGS }} -p rumqttd-ng
+        run: cross build --verbose --release ${{ env.TARGET_FLAGS }} -p rumqttd
 
       - name: Strip release binary (linux)
         if: matrix.build == 'linux-gnu' || matrix.build == 'linux-musl'
-        run: strip "${{ env.TARGET_DIR }}/release/rumqttd-ng"
+        run: strip "${{ env.TARGET_DIR }}/release/rumqttd"
 
       - name: Upload release archive
         uses: actions/upload-release-asset@v1.0.2
@@ -55,8 +55,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ env.TARGET_DIR }}/release/rumqttd-ng
-          asset_name: rumqttd-ng-${{matrix.target}}
+          asset_path: ${{ env.TARGET_DIR }}/release/rumqttd
+          asset_name: rumqttd-${{matrix.target}}
           asset_content_type: application/octet-stream
 
   create-release:
