@@ -1,0 +1,25 @@
+version: "3"
+
+services:
+    clickhouse:
+        image: clickhouse/clickhouse-server
+        ports:
+            - "8123:8123"
+    timescale:
+        image: timescale/timescaledb:latest-pg14
+        ports:
+            - "5432:5432"
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: password
+            POSTGRES_DB: demo
+        volumes:
+            - ./setup_timescale.sql:/docker-entrypoint-initdb.d/setup_timescale.sql
+    influx:
+    image: influxdb:1.8
+        ports:
+            - "8086:8086"
+        environment:
+            INFLUXDB_DB: demo
+        volumes:
+            - ./setup_influx.sql:/docker-entrypoint-initdb.d/setup_influx.sql
