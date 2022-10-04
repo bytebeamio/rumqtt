@@ -1,3 +1,7 @@
+### Unreleased
+
+- Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
+
 ### R17
 ---
 rumqttc v0.17.0
