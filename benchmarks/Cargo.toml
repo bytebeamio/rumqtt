@@ -6,14 +6,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-argh = "0.1"
-async-channel = "1"
 bytes = "1"
 futures = { version = "0.3", features = ["compat"] }
 itoa = "0.4"
-pprof = { version = "0.3", features = ["flamegraph", "protobuf"] }
+pprof = { version = "0.10", features = ["flamegraph", "prost-codec"] }
 pretty_env_logger = "0.4"
-prost = "0.6"
 rumqttc = { path = "../rumqttc" }
 rumqttd-old = { path = "../rumqttd-old" }
 serde = { version = "1", features = ["derive"] }

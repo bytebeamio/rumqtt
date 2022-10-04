@@ -15,7 +15,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-websocket = ["async-tungstenite", "ws_stream_tungstenite"]
+websocket = ["async-tungstenite", "ws_stream_tungstenite", "http"]
 use-rustls = ["tokio-rustls", "rustls-pemfile", "rustls-native-certs"]
 
 [dependencies]
@@ -23,7 +23,7 @@ async-tungstenite = { version = "0.16", default-features = false, features = ["t
 bytes = "1"
 flume = "0.10"
 futures = "0.3"
-http = "0.2"
+http = { version = "0.2", optional = true}
 log = "0.4"
 pollster = "0.2"
 rustls-pemfile = { version = "0.3", optional = true }
@@ -36,9 +36,6 @@ ws_stream_tungstenite = { version = "0.7", default-features = false, features = 
 
 [dev-dependencies]
 color-backtrace = "0.4"
-crossbeam-channel = "0.5"
-envy = "0.4"
-jsonwebtoken = "7"
 matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.4"
