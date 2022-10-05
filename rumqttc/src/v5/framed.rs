@@ -2,8 +2,8 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::mqttbytes::v5::Packet;
-use super::mqttbytes::{self, Connect};
-use super::{Incoming, MqttState, StateError};
+use super::mqttbytes::{self, Connect, Login};
+use super::{Incoming, MqttOptions, MqttState, StateError};
 use std::io;
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -96,9 +96,14 @@ impl Network {
         }
     }
 
-    pub async fn connect(&mut self, connect: Connect) -> io::Result<usize> {
+    pub async fn connect(&mut self, connect: Connect, options: &MqttOptions) -> io::Result<usize> {
         let mut write = BytesMut::new();
-        let len = match Packet::Connect(connect, None, None, None, None).write(&mut write) {
+        let last_will = options.last_will();
+        let login = options.credentials().map(|l| Login {
+            username: l.0,
+            password: l.1,
+        });
+        let len = match Packet::Connect(connect, None, last_will, None, login).write(&mut write) {
             Ok(size) => size,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };

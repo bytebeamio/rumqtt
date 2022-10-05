@@ -298,7 +298,7 @@ async fn mqtt_connect(
     };
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.connect(connect, options).await?;
 
     // validate connack
     match network.read().await? {
