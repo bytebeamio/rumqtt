@@ -651,7 +651,7 @@ impl Router {
 
                     force_ack = true;
                 }
-                Packet::Disconnect => {
+                Packet::Disconnect(_, _) => {
                     disconnect = true;
                     execute_will = false;
                     break;
