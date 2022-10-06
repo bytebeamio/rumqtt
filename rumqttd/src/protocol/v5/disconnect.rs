@@ -55,7 +55,7 @@ pub fn read(
     let reason_code = read_u8(&mut bytes)?;
 
     let disconnect = Disconnect {
-        reason_code: reason_code.try_into()?,
+        reason_code: reason(reason_code)?,
     };
     let properties = properties::read(&mut bytes)?;
 
@@ -78,7 +78,7 @@ pub fn write(
 
     let len_len = write_remaining_length(buffer, length)?;
 
-    buffer.put_u8(disconnect.reason_code as u8);
+    buffer.put_u8(code(disconnect.reason_code));
 
     if let Some(properties) = &properties {
         properties::write(properties, buffer)?;
@@ -296,5 +296,75 @@ mod test {
         write(&disconnect, &properties, &mut buffer).unwrap();
 
         assert_eq!(&buffer[..], &expected);
+    }
+}
+
+fn reason(code: u8) -> Result<DisconnectReasonCode, Error> {
+    let v = match code {
+        0x00 => DisconnectReasonCode::NormalDisconnection,
+        0x04 => DisconnectReasonCode::DisconnectWithWillMessage,
+        0x80 => DisconnectReasonCode::UnspecifiedError,
+        0x81 => DisconnectReasonCode::MalformedPacket,
+        0x82 => DisconnectReasonCode::ProtocolError,
+        0x83 => DisconnectReasonCode::ImplementationSpecificError,
+        0x87 => DisconnectReasonCode::NotAuthorized,
+        0x89 => DisconnectReasonCode::ServerBusy,
+        0x8B => DisconnectReasonCode::ServerShuttingDown,
+        0x8D => DisconnectReasonCode::KeepAliveTimeout,
+        0x8E => DisconnectReasonCode::SessionTakenOver,
+        0x8F => DisconnectReasonCode::TopicFilterInvalid,
+        0x90 => DisconnectReasonCode::TopicNameInvalid,
+        0x93 => DisconnectReasonCode::ReceiveMaximumExceeded,
+        0x94 => DisconnectReasonCode::TopicAliasInvalid,
+        0x95 => DisconnectReasonCode::PacketTooLarge,
+        0x96 => DisconnectReasonCode::MessageRateTooHigh,
+        0x97 => DisconnectReasonCode::QuotaExceeded,
+        0x98 => DisconnectReasonCode::AdministrativeAction,
+        0x99 => DisconnectReasonCode::PayloadFormatInvalid,
+        0x9A => DisconnectReasonCode::RetainNotSupported,
+        0x9B => DisconnectReasonCode::QoSNotSupported,
+        0x9C => DisconnectReasonCode::UseAnotherServer,
+        0x9D => DisconnectReasonCode::ServerMoved,
+        0x9E => DisconnectReasonCode::SharedSubscriptionNotSupported,
+        0x9F => DisconnectReasonCode::ConnectionRateExceeded,
+        0xA0 => DisconnectReasonCode::MaximumConnectTime,
+        0xA1 => DisconnectReasonCode::SubscriptionIdentifiersNotSupported,
+        0xA2 => DisconnectReasonCode::WildcardSubscriptionsNotSupported,
+        other => return Err(Error::InvalidConnectReturnCode(other)),
+    };
+    Ok(v)
+}
+
+fn code(reason: DisconnectReasonCode) -> u8 {
+    match reason {
+        DisconnectReasonCode::NormalDisconnection => 0x00,
+        DisconnectReasonCode::DisconnectWithWillMessage => 0x04,
+        DisconnectReasonCode::UnspecifiedError => 0x80,
+        DisconnectReasonCode::MalformedPacket => 0x81,
+        DisconnectReasonCode::ProtocolError => 0x82,
+        DisconnectReasonCode::ImplementationSpecificError => 0x83,
+        DisconnectReasonCode::NotAuthorized => 0x87,
+        DisconnectReasonCode::ServerBusy => 0x89,
+        DisconnectReasonCode::ServerShuttingDown => 0x8B,
+        DisconnectReasonCode::KeepAliveTimeout => 0x8D,
+        DisconnectReasonCode::SessionTakenOver => 0x8E,
+        DisconnectReasonCode::TopicFilterInvalid => 0x8F,
+        DisconnectReasonCode::TopicNameInvalid => 0x90,
+        DisconnectReasonCode::ReceiveMaximumExceeded => 0x93,
+        DisconnectReasonCode::TopicAliasInvalid => 0x94,
+        DisconnectReasonCode::PacketTooLarge => 0x95,
+        DisconnectReasonCode::MessageRateTooHigh => 0x96,
+        DisconnectReasonCode::QuotaExceeded => 0x97,
+        DisconnectReasonCode::AdministrativeAction => 0x98,
+        DisconnectReasonCode::PayloadFormatInvalid => 0x99,
+        DisconnectReasonCode::RetainNotSupported => 0x9A,
+        DisconnectReasonCode::QoSNotSupported => 0x9B,
+        DisconnectReasonCode::UseAnotherServer => 0x9C,
+        DisconnectReasonCode::ServerMoved => 0x9D,
+        DisconnectReasonCode::SharedSubscriptionNotSupported => 0x9E,
+        DisconnectReasonCode::ConnectionRateExceeded => 0x9F,
+        DisconnectReasonCode::MaximumConnectTime => 0xA0,
+        DisconnectReasonCode::SubscriptionIdentifiersNotSupported => 0xA1,
+        DisconnectReasonCode::WildcardSubscriptionsNotSupported => 0xA2,
     }
 }
