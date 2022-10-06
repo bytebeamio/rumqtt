@@ -1,3 +1,4 @@
+use flume::Sender;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 
@@ -22,20 +23,43 @@ use crate::Outgoing;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum Request {
-    Publish(Publish),
+    Publish(Publish, Option<Sender<u16>>),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
     PubRel(PubRel),
     PingReq,
     PingResp,
-    Subscribe(Subscribe),
+    Subscribe(Subscribe, Option<Sender<u16>>),
     SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
+    Unsubscribe(Unsubscribe, Option<Sender<u16>>),
     UnsubAck(UnsubAck),
     Disconnect,
+}
+
+impl Eq for Request {}
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Request::Publish(me, _), Request::Publish(other, _)) => me.eq(other),
+            (Request::PubAck(me), Request::PubAck(other)) => me.eq(other),
+            (Request::PubRec(me), Request::PubRec(other)) => me.eq(other),
+            (Request::PubComp(me), Request::PubComp(other)) => me.eq(other),
+            (Request::PubRel(me), Request::PubRel(other)) => me.eq(other),
+
+            (Request::PingReq, Request::PingReq) => true,
+            (Request::PingResp, Request::PingResp) => true,
+            (Request::Subscribe(me, _), Request::Subscribe(other, _)) => me.eq(other),
+            (Request::SubAck(me), Request::SubAck(other)) => me.eq(other),
+            (Request::Unsubscribe(me, _), Request::Unsubscribe(other, _)) => me.eq(other),
+            (Request::UnsubAck(me), Request::UnsubAck(other)) => me.eq(other),
+            (Request::Disconnect, Request::Disconnect) => true,
+            _ => false,
+        }
+    }
 }
 
 // TODO: Should all the options be exposed as public? Drawback
