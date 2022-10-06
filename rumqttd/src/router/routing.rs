@@ -522,7 +522,7 @@ impl Router {
                     ackslog.suback(suback);
                     force_ack = true;
                 }
-                Packet::Unsubscribe(unsubscribe) => {
+                Packet::Unsubscribe(unsubscribe, _) => {
                     debug!(
                         "{:11} {:14} Id = {} Filters = {:?}",
                         "data", "unsubscribe", id, unsubscribe.filters
@@ -651,7 +651,7 @@ impl Router {
 
                     force_ack = true;
                 }
-                Packet::Disconnect => {
+                Packet::Disconnect(_, _) => {
                     disconnect = true;
                     execute_will = false;
                     break;
