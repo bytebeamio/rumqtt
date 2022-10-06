@@ -291,6 +291,7 @@ async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
     assert!(broker.read_publish().await.is_none());
 }
 
+#[ignore]
 #[tokio::test]
 async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);

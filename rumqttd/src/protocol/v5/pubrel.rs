@@ -6,7 +6,7 @@ fn len(pubrel: &PubRel, properties: &Option<PubRelProperties>) -> usize {
 
     // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
     // and there are no Properties. In this case the PUBREL has a Remaining Length of 2.
-    // As mentioned in: https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901144
+    // <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901144>
     if pubrel.reason == PubRelReason::Success && properties.is_none() {
         return 2;
     }
