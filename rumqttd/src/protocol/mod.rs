@@ -27,7 +27,7 @@ pub enum Packet {
         Option<LastWillProperties>,
         Option<Login>,
     ),
-    ConnAck(ConnAck),
+    ConnAck(ConnAck, Option<ConnAckProperties>),
     Publish(Publish, Option<PublishProperties>),
     PubAck(PubAck, Option<PubAckProperties>),
     PingReq(PingReq),
@@ -37,8 +37,8 @@ pub enum Packet {
     PubRec(PubRec, Option<PubRecProperties>),
     PubRel(PubRel, Option<PubRelProperties>),
     PubComp(PubComp, Option<PubCompProperties>),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
+    Unsubscribe(Unsubscribe, Option<UnsubscribeProperties>),
+    UnsubAck(UnsubAck, Option<UnsubAckProperties>),
     Disconnect(Disconnect, Option<DisconnectProperties>),
 }
 

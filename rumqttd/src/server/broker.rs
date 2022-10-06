@@ -262,7 +262,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             None => Ok(/*(*/ Box::new(stream) /*, None)*/),
         }
         #[cfg(not(any(feature = "use-rustls", feature = "use-native-tls")))]
-        Ok(/*(*/Box::new(stream)/*, None)*/)
+        Ok(/*(*/ Box::new(stream) /*, None)*/)
     }
 
     async fn start(&self, shadow: bool) -> Result<(), Error> {
