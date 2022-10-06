@@ -124,7 +124,7 @@ impl TLSAcceptor {
             }
             #[cfg(feature = "use-native-tls")]
             TLSAcceptor::NativeTLS { acceptor } => {
-                // let stream = acceptor.accept(stream).await?;
+                let stream = acceptor.accept(stream).await?;
                 // let session = stream.get_ref();
                 // let peer_certificate = session
                 //     .peer_certificate()?
