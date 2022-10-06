@@ -133,7 +133,7 @@ impl<P: Protocol> Network<P> {
         let mut unscheduled = false;
         let packet_or_unscheduled = extract_packet_from_notification(notification);
         if let Some(packet) = packet_or_unscheduled {
-            _ = Protocol::write(&self.protocol, packet, &mut self.write)?;
+            Protocol::write(&self.protocol, packet, &mut self.write)?;
         } else {
             unscheduled = true;
         }
@@ -150,7 +150,7 @@ impl<P: Protocol> Network<P> {
         for notification in notifications.drain(..) {
             let packet_or_unscheduled = extract_packet_from_notification(notification);
             if let Some(packet) = packet_or_unscheduled {
-                _ = Protocol::write(&self.protocol, packet, &mut self.write)?;
+                Protocol::write(&self.protocol, packet, &mut self.write)?;
             } else {
                 o = true
             }
