@@ -52,10 +52,10 @@ pub fn read(
 
 pub fn write(
     connect: &Connect,
+    properties: &Option<ConnectProperties>,
     will: &Option<LastWill>,
     will_properties: &Option<LastWillProperties>,
     l: &Option<Login>,
-    properties: &Option<ConnectProperties>,
     buffer: &mut BytesMut,
 ) -> Result<usize, Error> {
     let len = {

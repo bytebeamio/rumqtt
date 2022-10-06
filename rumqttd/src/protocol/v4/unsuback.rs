@@ -17,8 +17,8 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<UnsubAck, Err
     Ok(unsuback)
 }
 
-pub fn write(unsuback: &UnsubAck, payload: &mut BytesMut) -> Result<usize, Error> {
-    payload.put_slice(&[0xB0, 0x02]);
-    payload.put_u16(unsuback.pkid);
+pub fn write(unsuback: &UnsubAck, buffer: &mut BytesMut) -> Result<usize, Error> {
+    buffer.put_slice(&[0xB0, 0x02]);
+    buffer.put_u16(unsuback.pkid);
     Ok(4)
 }
