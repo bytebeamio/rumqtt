@@ -7,6 +7,8 @@ extern crate rouille;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[cfg(feature = "rumqttdb")]
+use rumqttdb::DatabaseConfig;
 use segments::Storage;
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +43,8 @@ pub struct Config {
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
     pub bridge: Option<BridgeConfig>,
+    #[cfg(feature = "rumqttdb")]
+    pub database: Option<DatabaseConfig>,
 }
 
 // TODO: Change names without _ until config-rs issue is resolved

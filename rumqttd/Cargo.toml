@@ -34,6 +34,7 @@ figment = { version = "0.10.5", features = ["toml", "env"] }
 config = "0.13"
 simplelog = "0.12.0"
 structopt = "0.3.26"
+rumqttdb = { path = "../rumqttdb", optional = true }
 
 [features]
 default = ["use-rustls"]

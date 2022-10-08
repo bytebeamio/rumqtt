@@ -28,7 +28,7 @@ pub struct DatabaseConfig {
     pub password: Option<String>,
     pub secure: bool,
     pub flush_interval: u64,
-    // pub topic_mapping: Option<HashMap<String, String>>,
+    pub mapping: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
