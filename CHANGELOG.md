@@ -1,6 +1,7 @@
 ### Unreleased
 
 - Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
+- (rumqttd) Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
 
 ### R17
 ---
