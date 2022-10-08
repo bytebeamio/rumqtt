@@ -299,7 +299,12 @@ impl Protocol for V4 {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
-                PacketType::Disconnect => Ok(Packet::Disconnect),
+                PacketType::Disconnect => Ok(Packet::Disconnect(
+                    Disconnect {
+                        reason_code: DisconnectReasonCode::NormalDisconnection,
+                    },
+                    None,
+                )),
                 _ => Err(Error::PayloadRequired),
             };
         }
@@ -310,7 +315,7 @@ impl Protocol for V4 {
                 let (connect, login, lastwill) = connect::read(fixed_header, packet)?;
                 Packet::Connect(connect, None, lastwill, None, login)
             }
-            PacketType::ConnAck => Packet::ConnAck(connack::read(fixed_header, packet)?),
+            PacketType::ConnAck => Packet::ConnAck(connack::read(fixed_header, packet)?, None),
             PacketType::Publish => Packet::Publish(publish::read(fixed_header, packet)?, None),
             PacketType::PubAck => Packet::PubAck(puback::read(fixed_header, packet)?, None),
             PacketType::Subscribe => {
@@ -318,15 +323,17 @@ impl Protocol for V4 {
             }
             PacketType::SubAck => Packet::SubAck(suback::read(fixed_header, packet)?, None),
             PacketType::Unsubscribe => {
-                Packet::Unsubscribe(unsubscribe::read(fixed_header, packet)?)
+                Packet::Unsubscribe(unsubscribe::read(fixed_header, packet)?, None)
             }
-            PacketType::UnsubAck => Packet::UnsubAck(unsuback::read(fixed_header, packet)?),
+            PacketType::UnsubAck => Packet::UnsubAck(unsuback::read(fixed_header, packet)?, None),
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
             PacketType::PubRec => Packet::PubRec(pubrec::read(fixed_header, packet)?, None),
             PacketType::PubRel => Packet::PubRel(pubrel::read(fixed_header, packet)?, None),
             PacketType::PubComp => Packet::PubComp(pubcomp::read(fixed_header, packet)?, None),
-            PacketType::Disconnect => Packet::Disconnect,
+            // v4 Disconnect packet gets handled in the previous check, this branch gets hit when
+            // Disconnect packet has properties which is only valid for v5
+            PacketType::Disconnect => return Err(Error::InvalidProtocol),
             _ => unreachable!(),
         };
 
