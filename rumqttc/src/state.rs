@@ -3,6 +3,7 @@ use crate::{Event, Incoming, Outgoing, Request};
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
+use flume::Sender;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
 
@@ -106,7 +107,7 @@ impl MqttState {
         // remove and collect pending publishes
         for publish in self.outgoing_pub.iter_mut() {
             if let Some(publish) = publish.take() {
-                let request = Request::Publish(publish);
+                let request = Request::Publish(publish, None);
                 pending.push(request);
             }
         }
@@ -138,10 +139,14 @@ impl MqttState {
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
         match request {
-            Request::Publish(publish) => self.outgoing_publish(publish)?,
+            Request::Publish(publish, tx_pkid) => self.outgoing_publish(publish, tx_pkid)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
-            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
-            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
+            Request::Subscribe(subscribe, tx_pkid) => {
+                self.outgoing_subscribe(subscribe, tx_pkid)?
+            }
+            Request::Unsubscribe(unsubscribe, tx_pkid) => {
+                self.outgoing_unsubscribe(unsubscribe, tx_pkid)?
+            }
             Request::PingReq => self.outgoing_ping()?,
             Request::Disconnect => self.outgoing_disconnect()?,
             Request::PubAck(puback) => self.outgoing_puback(puback)?,
@@ -315,13 +320,22 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(
+        &mut self,
+        mut publish: Publish,
+        tx_pkid: Option<Sender<u16>>,
+    ) -> Result<(), StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
             }
 
             let pkid = publish.pkid;
+            if let Some(tx) = tx_pkid {
+                if let Err(_) = tx.send(pkid) {
+                    warn!("fail to send pkid");
+                }
+            }
             if self
                 .outgoing_pub
                 .get(publish.pkid as usize)
@@ -414,14 +428,22 @@ impl MqttState {
         Ok(())
     }
 
-    fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
+    fn outgoing_subscribe(
+        &mut self,
+        mut subscription: Subscribe,
+        tx_pkid: Option<Sender<u16>>,
+    ) -> Result<(), StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
         }
 
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
-
+        if let Some(tx) = tx_pkid {
+            if let Err(_) = tx.send(pkid) {
+                warn!("fail to send pkid");
+            }
+        }
         debug!(
             "Subscribe. Topics = {:?}, Pkid = {:?}",
             subscription.filters, subscription.pkid
@@ -433,10 +455,18 @@ impl MqttState {
         Ok(())
     }
 
-    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
+    fn outgoing_unsubscribe(
+        &mut self,
+        mut unsub: Unsubscribe,
+        tx_pkid: Option<Sender<u16>>,
+    ) -> Result<(), StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
-
+        if let Some(tx) = tx_pkid {
+            if let Err(_) = tx.send(pkid) {
+                warn!("fail to send pkid");
+            }
+        }
         debug!(
             "Unsubscribe. Topics = {:?}, Pkid = {:?}",
             unsub.topics, unsub.pkid
