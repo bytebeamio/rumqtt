@@ -81,7 +81,7 @@ enum PropertyType {
 ///          |         Remaining Bytes Len  (1/2/3/4 bytes)        |
 ///          +-----------------------------------------------------+
 ///
-/// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349207>
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct FixedHeader {
@@ -371,7 +371,12 @@ impl Protocol for V5 {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
-                PacketType::Disconnect => Ok(Packet::Disconnect),
+                PacketType::Disconnect => Ok(Packet::Disconnect(
+                    Disconnect {
+                        reason_code: DisconnectReasonCode::NormalDisconnection,
+                    },
+                    None,
+                )),
                 _ => Err(Error::PayloadRequired),
             };
         }
@@ -401,7 +406,10 @@ impl Protocol for V5 {
             }
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
-            PacketType::Disconnect => Packet::Disconnect,
+            PacketType::Disconnect => {
+                let (disconnect, properties) = disconnect::read(fixed_header, packet)?;
+                Packet::Disconnect(disconnect, properties)
+            }
             _ => unreachable!(),
         };
 
