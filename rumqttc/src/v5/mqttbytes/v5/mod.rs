@@ -205,7 +205,7 @@ enum PropertyType {
 ///          |         Remaining Bytes Len  (1/2/3/4 bytes)        |
 ///          +-----------------------------------------------------+
 ///
-/// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349207>
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct FixedHeader {

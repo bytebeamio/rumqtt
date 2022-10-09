@@ -27,7 +27,7 @@ pub enum Packet {
         Option<LastWillProperties>,
         Option<Login>,
     ),
-    ConnAck(ConnAck),
+    ConnAck(ConnAck, Option<ConnAckProperties>),
     Publish(Publish, Option<PublishProperties>),
     PubAck(PubAck, Option<PubAckProperties>),
     PingReq(PingReq),
@@ -37,9 +37,9 @@ pub enum Packet {
     PubRec(PubRec, Option<PubRecProperties>),
     PubRel(PubRel, Option<PubRelProperties>),
     PubComp(PubComp, Option<PubCompProperties>),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect,
+    Unsubscribe(Unsubscribe, Option<UnsubscribeProperties>),
+    UnsubAck(UnsubAck, Option<UnsubAckProperties>),
+    Disconnect(Disconnect, Option<DisconnectProperties>),
 }
 
 //--------------------------- Connect packet -------------------------------
@@ -381,69 +381,6 @@ pub struct UnsubAckProperties {
     pub user_properties: Vec<(String, String)>,
 }
 
-//--------------------------- Disconnect packet -------------------------------
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisconnectReasonCode {
-    /// Close the connection normally. Do not send the Will Message.
-    NormalDisconnection,
-    /// The Client wishes to disconnect but requires that the Server also publishes its Will Message.
-    DisconnectWithWillMessage,
-    /// The Connection is closed but the sender either does not wish to reveal the reason, or none of the other Reason Codes apply.
-    UnspecifiedError,
-    /// The received packet does not conform to this specification.
-    MalformedPacket,
-    /// An unexpected or out of order packet was received.
-    ProtocolError,
-    /// The packet received is valid but cannot be processed by this implementation.
-    ImplementationSpecificError,
-    /// The request is not authorized.
-    NotAuthorized,
-    /// The Server is busy and cannot continue processing requests from this Client.
-    ServerBusy,
-    /// The Server is shutting down.
-    ServerShuttingDown,
-    /// The Connection is closed because no packet has been received for 1.5 times the Keepalive time.
-    KeepAliveTimeout,
-    /// Another Connection using the same ClientID has connected causing this Connection to be closed.
-    SessionTakenOver,
-    /// The Topic Filter is correctly formed, but is not accepted by this Sever.
-    TopicFilterInvalid,
-    /// The Topic Name is correctly formed, but is not accepted by this Client or Server.
-    TopicNameInvalid,
-    /// The Client or Server has received more than Receive Maximum publication for which it has not sent PUBACK or PUBCOMP.
-    ReceiveMaximumExceeded,
-    /// The Client or Server has received a PUBLISH packet containing a Topic Alias which is greater than the Maximum Topic Alias it sent in the CONNECT or CONNACK packet.
-    TopicAliasInvalid,
-    /// The packet size is greater than Maximum Packet Size for this Client or Server.
-    PacketTooLarge,
-    /// The received data rate is too high.
-    MessageRateTooHigh,
-    /// An implementation or administrative imposed limit has been exceeded.
-    QuotaExceeded,
-    /// The Connection is closed due to an administrative action.
-    AdministrativeAction,
-    /// The payload format does not match the one specified by the Payload Format Indicator.
-    PayloadFormatInvalid,
-    /// The Server has does not support retained messages.
-    RetainNotSupported,
-    /// The Client specified a QoS greater than the QoS specified in a Maximum QoS in the CONNACK.
-    QoSNotSupported,
-    /// The Client should temporarily change its Server.
-    UseAnotherServer,
-    /// The Server is moved and the Client should permanently change its server location.
-    ServerMoved,
-    /// The Server does not support Shared Subscriptions.
-    SharedSubscriptionNotSupported,
-    /// This connection is closed because the connection rate is too high.
-    ConnectionRateExceeded,
-    /// The maximum connection time authorized for this connection has been exceeded.
-    MaximumConnectTime,
-    /// The Server does not support Subscription Identifiers; the subscription is not accepted.
-    SubscriptionIdentifiersNotSupported,
-    /// The Server does not support Wildcard subscription; the subscription is not accepted.
-    WildcardSubscriptionsNotSupported,
-}
-
 //--------------------------- Ping packet -------------------------------
 
 struct Ping;
@@ -531,6 +468,92 @@ pub struct PubRelProperties {
     pub user_properties: Vec<(String, String)>,
 }
 
+//------------------------------------------------------------------------
+
+//--------------------------- Disconnect packet -------------------------------
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Disconnect {
+    /// Disconnect Reason Code
+    pub reason_code: DisconnectReasonCode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DisconnectReasonCode {
+    /// Close the connection normally. Do not send the Will Message.
+    NormalDisconnection,
+    /// The Client wishes to disconnect but requires that the Server also publishes its Will Message.
+    DisconnectWithWillMessage,
+    /// The Connection is closed but the sender either does not wish to reveal the reason, or none of the other Reason Codes apply.
+    UnspecifiedError,
+    /// The received packet does not conform to this specification.
+    MalformedPacket,
+    /// An unexpected or out of order packet was received.
+    ProtocolError,
+    /// The packet received is valid but cannot be processed by this implementation.
+    ImplementationSpecificError,
+    /// The request is not authorized.
+    NotAuthorized,
+    /// The Server is busy and cannot continue processing requests from this Client.
+    ServerBusy,
+    /// The Server is shutting down.
+    ServerShuttingDown,
+    /// The Connection is closed because no packet has been received for 1.5 times the Keepalive time.
+    KeepAliveTimeout,
+    /// Another Connection using the same ClientID has connected causing this Connection to be closed.
+    SessionTakenOver,
+    /// The Topic Filter is correctly formed, but is not accepted by this Sever.
+    TopicFilterInvalid,
+    /// The Topic Name is correctly formed, but is not accepted by this Client or Server.
+    TopicNameInvalid,
+    /// The Client or Server has received more than Receive Maximum publication for which it has not sent PUBACK or PUBCOMP.
+    ReceiveMaximumExceeded,
+    /// The Client or Server has received a PUBLISH packet containing a Topic Alias which is greater than the Maximum Topic Alias it sent in the CONNECT or CONNACK packet.
+    TopicAliasInvalid,
+    /// The packet size is greater than Maximum Packet Size for this Client or Server.
+    PacketTooLarge,
+    /// The received data rate is too high.
+    MessageRateTooHigh,
+    /// An implementation or administrative imposed limit has been exceeded.
+    QuotaExceeded,
+    /// The Connection is closed due to an administrative action.
+    AdministrativeAction,
+    /// The payload format does not match the one specified by the Payload Format Indicator.
+    PayloadFormatInvalid,
+    /// The Server has does not support retained messages.
+    RetainNotSupported,
+    /// The Client specified a QoS greater than the QoS specified in a Maximum QoS in the CONNACK.
+    QoSNotSupported,
+    /// The Client should temporarily change its Server.
+    UseAnotherServer,
+    /// The Server is moved and the Client should permanently change its server location.
+    ServerMoved,
+    /// The Server does not support Shared Subscriptions.
+    SharedSubscriptionNotSupported,
+    /// This connection is closed because the connection rate is too high.
+    ConnectionRateExceeded,
+    /// The maximum connection time authorized for this connection has been exceeded.
+    MaximumConnectTime,
+    /// The Server does not support Subscription Identifiers; the subscription is not accepted.
+    SubscriptionIdentifiersNotSupported,
+    /// The Server does not support Wildcard subscription; the subscription is not accepted.
+    WildcardSubscriptionsNotSupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisconnectProperties {
+    /// Session Expiry Interval in seconds
+    pub session_expiry_interval: Option<u32>,
+
+    /// Human readable reason for the disconnect
+    pub reason_string: Option<String>,
+
+    /// List of user properties
+    pub user_properties: Vec<(String, String)>,
+
+    /// String which can be used by the Client to identify another Server to use.
+    pub server_reference: Option<String>,
+}
 //------------------------------------------------------------------------
 
 /// Quality of service
