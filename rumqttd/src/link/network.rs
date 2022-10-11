@@ -39,7 +39,7 @@ pub struct Network<P> {
     /// Keep alive timeout
     keepalive: Duration,
     /// Protocol
-    protocol: P,
+    pub(crate) protocol: P,
 }
 
 impl<P: Protocol> Network<P> {

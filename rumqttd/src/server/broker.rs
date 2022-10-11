@@ -235,6 +235,13 @@ struct Server<P> {
     protocol: P,
 }
 
+#[derive(Clone, Copy)]
+enum LinkType {
+    Shadow,
+    Remote,
+    Persistance,
+}
+
 impl<P: Protocol + Clone + Send + 'static> Server<P> {
     pub fn new(
         config: ServerSettings,
@@ -265,7 +272,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok(/*(*/ Box::new(stream) /*, None)*/)
     }
 
-    async fn start(&self, shadow: bool) -> Result<(), Error> {
+    async fn start(&self, link_type: LinkType) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -303,12 +310,13 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             count += 1;
 
             let protocol = self.protocol.clone();
-            match shadow {
+            match link_type {
                 #[cfg(feature = "websockets")]
-                true => task::spawn(shadow_connection(config, router_tx, network)),
-                _ => task::spawn(remote(
+                Shadow => task::spawn(shadow_connection(config, router_tx, network)),
+                Remote => task::spawn(remote(
                     config, /*tenant_id,*/ router_tx, network, protocol,
                 )),
+                Persistance => task::spawn(persistance(config, router_tx, network, protocol)),
             };
 
             time::sleep(delay).await;
@@ -402,6 +410,54 @@ async fn shadow_connection(
     let disconnect = Disconnection {
         id: client_id,
         execute_will: false,
+        pending: vec![],
+    };
+
+    let disconnect = Event::Disconnect(disconnect);
+    let message = (connection_id, disconnect);
+    router_tx.send(message).ok();
+}
+
+async fn persistance<P: Protocol>(
+    config: Arc<ConnectionSettings>,
+    // tenant_id: Option<String>,
+    router_tx: Sender<(ConnectionId, Event)>,
+    stream: Box<dyn N>,
+    protocol: P,
+) {
+    let network = Network::new(stream, config.max_payload_size, 100, protocol);
+    // Start the link
+    let mut link = match RemoteLink::new(config, router_tx.clone(), /*tenant_id,*/ network).await {
+        Ok(l) => l,
+        Err(e) => {
+            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+            return;
+        }
+    };
+
+    let client_id = link.client_id.clone();
+    let connection_id = link.connection_id;
+    let mut execute_will = false;
+
+    match link.start().await {
+        // Connection get close. This shouldn't usually happen
+        Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
+        // No need to send a disconnect message when disconnetion
+        // originated internally in the router
+        Err(remote::Error::Link(e)) => {
+            info!("{:15.15}[E] {:20} {:?}", client_id, "router-drop", e);
+            return;
+        }
+        // Any other error
+        Err(e) => {
+            error!("{:15.15}[E] Disconnected!! {:?}", client_id, e);
+            execute_will = true;
+        }
+    };
+
+    let disconnect = Disconnection {
+        id: client_id,
+        execute_will,
         pending: vec![],
     };
 

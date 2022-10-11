@@ -10,6 +10,8 @@ max_segment_size = 10240
 max_segment_count = 10
 max_read_len = 10240
 max_connections = 10001
+persistant_filters = []
+
 
 # Configuration of server and connections that it accepts
 [v4.1]
