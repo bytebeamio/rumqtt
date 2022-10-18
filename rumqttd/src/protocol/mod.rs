@@ -481,104 +481,63 @@ pub struct Disconnect {
 #[repr(u8)]
 pub enum DisconnectReasonCode {
     /// Close the connection normally. Do not send the Will Message.
-    NormalDisconnection = 0x00,
+    NormalDisconnection,
     /// The Client wishes to disconnect but requires that the Server also publishes its Will Message.
-    DisconnectWithWillMessage = 0x04,
+    DisconnectWithWillMessage,
     /// The Connection is closed but the sender either does not wish to reveal the reason, or none of the other Reason Codes apply.
-    UnspecifiedError = 0x80,
+    UnspecifiedError,
     /// The received packet does not conform to this specification.
-    MalformedPacket = 0x81,
+    MalformedPacket,
     /// An unexpected or out of order packet was received.
-    ProtocolError = 0x82,
+    ProtocolError,
     /// The packet received is valid but cannot be processed by this implementation.
-    ImplementationSpecificError = 0x83,
+    ImplementationSpecificError,
     /// The request is not authorized.
-    NotAuthorized = 0x87,
+    NotAuthorized,
     /// The Server is busy and cannot continue processing requests from this Client.
-    ServerBusy = 0x89,
+    ServerBusy,
     /// The Server is shutting down.
-    ServerShuttingDown = 0x8B,
+    ServerShuttingDown,
     /// The Connection is closed because no packet has been received for 1.5 times the Keepalive time.
-    KeepAliveTimeout = 0x8D,
+    KeepAliveTimeout,
     /// Another Connection using the same ClientID has connected causing this Connection to be closed.
-    SessionTakenOver = 0x8E,
+    SessionTakenOver,
     /// The Topic Filter is correctly formed, but is not accepted by this Sever.
-    TopicFilterInvalid = 0x8F,
+    TopicFilterInvalid,
     /// The Topic Name is correctly formed, but is not accepted by this Client or Server.
-    TopicNameInvalid = 0x90,
+    TopicNameInvalid,
     /// The Client or Server has received more than Receive Maximum publication for which it has not sent PUBACK or PUBCOMP.
-    ReceiveMaximumExceeded = 0x93,
+    ReceiveMaximumExceeded,
     /// The Client or Server has received a PUBLISH packet containing a Topic Alias which is greater than the Maximum Topic Alias it sent in the CONNECT or CONNACK packet.
-    TopicAliasInvalid = 0x94,
+    TopicAliasInvalid,
     /// The packet size is greater than Maximum Packet Size for this Client or Server.
-    PacketTooLarge = 0x95,
+    PacketTooLarge,
     /// The received data rate is too high.
-    MessageRateTooHigh = 0x96,
+    MessageRateTooHigh,
     /// An implementation or administrative imposed limit has been exceeded.
-    QuotaExceeded = 0x97,
+    QuotaExceeded,
     /// The Connection is closed due to an administrative action.
-    AdministrativeAction = 0x98,
+    AdministrativeAction,
     /// The payload format does not match the one specified by the Payload Format Indicator.
-    PayloadFormatInvalid = 0x99,
+    PayloadFormatInvalid,
     /// The Server has does not support retained messages.
-    RetainNotSupported = 0x9A,
+    RetainNotSupported,
     /// The Client specified a QoS greater than the QoS specified in a Maximum QoS in the CONNACK.
-    QoSNotSupported = 0x9B,
+    QoSNotSupported,
     /// The Client should temporarily change its Server.
-    UseAnotherServer = 0x9C,
+    UseAnotherServer,
     /// The Server is moved and the Client should permanently change its server location.
-    ServerMoved = 0x9D,
+    ServerMoved,
     /// The Server does not support Shared Subscriptions.
-    SharedSubscriptionNotSupported = 0x9E,
+    SharedSubscriptionNotSupported,
     /// This connection is closed because the connection rate is too high.
-    ConnectionRateExceeded = 0x9F,
+    ConnectionRateExceeded,
     /// The maximum connection time authorized for this connection has been exceeded.
-    MaximumConnectTime = 0xA0,
+    MaximumConnectTime,
     /// The Server does not support Subscription Identifiers; the subscription is not accepted.
-    SubscriptionIdentifiersNotSupported = 0xA1,
+    SubscriptionIdentifiersNotSupported,
     /// The Server does not support Wildcard subscription; the subscription is not accepted.
-    WildcardSubscriptionsNotSupported = 0xA2,
-}
-
-impl TryFrom<u8> for DisconnectReasonCode {
-    type Error = Error;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        let rc = match value {
-            0x00 => Self::NormalDisconnection,
-            0x04 => Self::DisconnectWithWillMessage,
-            0x80 => Self::UnspecifiedError,
-            0x81 => Self::MalformedPacket,
-            0x82 => Self::ProtocolError,
-            0x83 => Self::ImplementationSpecificError,
-            0x87 => Self::NotAuthorized,
-            0x89 => Self::ServerBusy,
-            0x8B => Self::ServerShuttingDown,
-            0x8D => Self::KeepAliveTimeout,
-            0x8E => Self::SessionTakenOver,
-            0x8F => Self::TopicFilterInvalid,
-            0x90 => Self::TopicNameInvalid,
-            0x93 => Self::ReceiveMaximumExceeded,
-            0x94 => Self::TopicAliasInvalid,
-            0x95 => Self::PacketTooLarge,
-            0x96 => Self::MessageRateTooHigh,
-            0x97 => Self::QuotaExceeded,
-            0x98 => Self::AdministrativeAction,
-            0x99 => Self::PayloadFormatInvalid,
-            0x9A => Self::RetainNotSupported,
-            0x9B => Self::QoSNotSupported,
-            0x9C => Self::UseAnotherServer,
-            0x9D => Self::ServerMoved,
-            0x9E => Self::SharedSubscriptionNotSupported,
-            0x9F => Self::ConnectionRateExceeded,
-            0xA0 => Self::MaximumConnectTime,
-            0xA1 => Self::SubscriptionIdentifiersNotSupported,
-            0xA2 => Self::WildcardSubscriptionsNotSupported,
-            other => return Err(Error::InvalidConnectReturnCode(other)),
-        };
-
-        Ok(rc)
-    }
+    WildcardSubscriptionsNotSupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
