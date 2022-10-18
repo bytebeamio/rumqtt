@@ -728,5 +728,5 @@ pub enum Error {
 
 pub trait Protocol {
     fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error>;
-    fn write(&self, packet: Packet, write: &mut BytesMut) -> Result<(), Error>;
+    fn write(&self, packet: Packet, write: &mut BytesMut) -> Result<usize, Error>;
 }

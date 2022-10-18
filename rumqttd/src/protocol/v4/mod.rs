@@ -340,8 +340,8 @@ impl Protocol for V4 {
         Ok(packet)
     }
 
-    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<(), Error> {
-        match packet {
+    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let size = match packet {
             Packet::Connect(connect, None, last_will, None, login) => {
                 connect::write(&connect, &login, &last_will, buffer)?
             }
@@ -362,6 +362,6 @@ impl Protocol for V4 {
                 "This branch only matches for packets with Properties, which is not possible in v4",
             ),
         };
-        Ok(())
+        Ok(size)
     }
 }

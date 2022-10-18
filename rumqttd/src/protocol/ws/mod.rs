@@ -55,7 +55,7 @@ impl Protocol for Ws {
         unimplemented!()
     }
 
-    fn write(&self, packet: Packet, write: &mut bytes::BytesMut) -> Result<(), super::Error> {
+    fn write(&self, packet: Packet, write: &mut bytes::BytesMut) -> Result<usize, super::Error> {
         todo!()
     }
 }

@@ -416,8 +416,8 @@ impl Protocol for V5 {
         Ok(packet)
     }
 
-    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<(), Error> {
-        match packet {
+    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let size = match packet {
             Packet::Connect(
                 connect,
                 connect_properties,
@@ -453,10 +453,8 @@ impl Protocol for V5 {
             }
             Packet::PingReq(pingreq) => ping::pingreq::write(buffer)?,
             Packet::PingResp(pingresp) => ping::pingresp::write(buffer)?,
-            _ => unreachable!(
-                "This branch only matches for packets with Properties, which is not possible in v4",
-            ),
+            _ => unreachable!(),
         };
-        Ok(())
+        Ok(size)
     }
 }
