@@ -29,15 +29,15 @@ rouille = "3.1.1"
 # x509-parser = {version= "0.9.2", optional = true}
 futures-util = "0.3.16"
 parking_lot = "0.11.2"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json"], default-features = false }
 config = "0.13"
 simplelog = "0.12.0"
 structopt = "0.3.26"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["tokio-rustls", "rustls-pemfile"] #, "x509-parser"]
-use-native-tls = ["tokio-native-tls"] #, "x509-parser"]
+use-rustls = ["tokio-rustls", "rustls-pemfile", "reqwest/rustls-tls"] #, "x509-parser"]
+use-native-tls = ["tokio-native-tls", "reqwest/native-tls"] #, "x509-parser"]
 websockets = ["tokio-tungstenite", "ws_stream_tungstenite", "websocket-codec"]
 
 [dev-dependencies]
