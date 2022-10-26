@@ -1,12 +1,13 @@
 use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
-use crate::protocol::{self, Connect, Packet, Protocol};
+use crate::protocol::{self, Connect, LastWill, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings, Filter, Link};
 
 use bytes::BytesMut;
-use flume::{RecvError, SendError, Sender, TrySendError};
+use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
+use futures_util::{FutureExt, StreamExt};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -45,7 +46,7 @@ pub enum Error {
 }
 
 /// Orchestrates between Router and Network.
-pub struct PersistanceLink<P> {
+pub struct PersistanceLink<P: Protocol + 'static> {
     connect: Connect,
     pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
@@ -54,7 +55,7 @@ pub struct PersistanceLink<P> {
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
     disk_handler: DiskHandler,
-    protocol: P,
+    network_rx: Receiver<Network<P>>,
 }
 
 pub(super) struct DiskHandler {
@@ -70,7 +71,7 @@ impl DiskHandler {
             map: HashMap::new(),
         }
     }
-    pub fn write(&self, notification: Notification) {
+    pub fn write(&mut self, notification: Notification) {
         match notification {
             Notification::Forward(forward) => {
                 let publish = forward.publish;
@@ -78,17 +79,17 @@ impl DiskHandler {
                     String::from_utf8(publish.topic.to_vec()).expect("should be a valid topic");
 
                 if !self.map.contains_key(&topic) {
-                    let path = self.dir.clone();
-                    path.push(topic);
+                    let mut path = self.dir.clone();
+                    path.push(topic.clone());
                     let file = fs::File::create(path).expect("cannot create file");
-                    self.map.insert(topic, file);
+                    self.map.insert(topic.clone(), file);
                 }
 
-                let buffer = BytesMut::new();
+                let mut buffer = BytesMut::new();
                 let len = protocol::v4::publish::write(&publish, &mut buffer)
                     .unwrap()
                     .to_string();
-                let file = self.map.get(&topic).unwrap();
+                let mut file = self.map.get(&topic).unwrap();
                 // This writes can be batch'ed by keeping a HashMap<Filter, Bytes> and writing to
                 // file after all the notifications are being itererated
                 file.write_all(len.as_bytes());
@@ -99,28 +100,19 @@ impl DiskHandler {
     }
 }
 
-impl<P: Protocol> PersistanceLink<P> {
+impl<P: Protocol + 'static> PersistanceLink<P> {
     pub async fn new(
         config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,
         // tenant_id: Option<String>,
+        connect: Connect,
+        lastwill: Option<LastWill>,
         mut network: Network<P>,
-    ) -> Result<PersistanceLink<P>, Error> {
+    ) -> Result<(Sender<Network<P>>, PersistanceLink<P>), Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
         // DOS attacks by filling total connections that the server can handle with idle open
         // connections which results in server rejecting new connections
-        let connection_timeout_ms = config.connection_timeout_ms.into();
         let dynamic_filters = config.dynamic_filters;
-        let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
-            let packet = network.read().await?;
-            Ok::<_, io::Error>(packet)
-        })
-        .await??;
-
-        let (connect, lastwill) = match packet {
-            Packet::Connect(connect, _, lastwill, ..) => (connect, lastwill),
-            packet => return Err(Error::NotConnectPacket(packet)),
-        };
 
         // When keep_alive feature is disabled client can live forever, which is not good in
         // distributed broker context so currenlty we don't allow it.
@@ -148,16 +140,43 @@ impl<P: Protocol> PersistanceLink<P> {
 
         network.write(notification).await?;
 
-        Ok(PersistanceLink {
-            connect,
-            client_id,
-            connection_id: id,
-            network,
-            link_tx,
-            link_rx,
-            notifications: VecDeque::with_capacity(100),
-            disk_handler: DiskHandler::new(),
+        let (tx, rx) = flume::bounded(10);
+
+        Ok((
+            tx,
+            PersistanceLink {
+                connect,
+                client_id,
+                connection_id: id,
+                network,
+                link_tx,
+                link_rx,
+                notifications: VecDeque::with_capacity(100),
+                disk_handler: DiskHandler::new(),
+                network_rx: rx,
+            },
+        ))
+    }
+
+    /// Read the first `Connect` packet from `Network`
+    pub async fn peek_first_connect(
+        config: Arc<ConnectionSettings>,
+        network: &mut Network<P>,
+    ) -> Result<(Connect, Option<LastWill>), Error> {
+        let connection_timeout_ms = config.connection_timeout_ms.into();
+
+        let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
+            let packet = network.read().await?;
+            Ok::<_, io::Error>(packet)
         })
+        .await??;
+
+        let (connect, lastwill) = match packet {
+            Packet::Connect(connect, _, lastwill, ..) => (connect, lastwill),
+            packet => return Err(Error::NotConnectPacket(packet)),
+        };
+
+        Ok((connect, lastwill))
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -165,6 +184,16 @@ impl<P: Protocol> PersistanceLink<P> {
 
         // Note:
         // Shouldn't result in bounded queue deadlocks because of blocking n/w send
+
+        // loop {
+        //     select! {
+        //         Ok(packet) = self.network.read() => {},
+        //         _ = self.link_rx.exchange(&mut self.notifications) => {},
+        //         _ = self.network_rx.stream().next() => {},
+        //         //
+        //     }
+        // }
+
         loop {
             select! {
                 o = self.network.read() => {

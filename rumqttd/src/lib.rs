@@ -38,6 +38,7 @@ pub struct Config {
     pub v4: HashMap<String, ServerSettings>,
     pub v5: HashMap<String, ServerSettings>,
     pub ws: HashMap<String, ServerSettings>,
+    pub persistent: HashMap<String, ServerSettings>,
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
     pub bridge: Option<BridgeConfig>,
