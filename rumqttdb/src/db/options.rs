@@ -1,7 +1,35 @@
-use crate::Compression;
 use std::collections::HashMap;
 
-pub struct ClientOptions {
+use crate::DatabaseConfig;
+
+#[non_exhaustive]
+pub enum Compression {
+    None,
+    #[cfg(feature = "lz4")]
+    Lz4,
+    #[cfg(feature = "gzip")]
+    Gzip,
+    #[cfg(feature = "zlib")]
+    Zlib,
+    #[cfg(feature = "brotli")]
+    Brotli,
+}
+
+impl Default for Compression {
+    #[cfg(feature = "lz4")]
+    #[inline]
+    fn default() -> Self {
+        Compression::Lz4
+    }
+
+    #[cfg(not(feature = "lz4"))]
+    #[inline]
+    fn default() -> Self {
+        Compression::None
+    }
+}
+
+pub struct ConnectOptions {
     pub(crate) url: String,
     pub(crate) database: String,
     pub(crate) user: Option<String>,
@@ -11,9 +39,9 @@ pub struct ClientOptions {
     options: HashMap<String, String>,
 }
 
-impl ClientOptions {
-    pub fn new(url: &str, database: &str) -> ClientOptions {
-        ClientOptions {
+impl ConnectOptions {
+    pub fn new(url: &str, database: &str) -> ConnectOptions {
+        ConnectOptions {
             url: url.to_owned(),
             database: database.to_owned(),
             user: None,
@@ -22,6 +50,22 @@ impl ClientOptions {
             secure: false,
             options: HashMap::new(),
         }
+    }
+
+    pub fn with_config(config: &DatabaseConfig) -> ConnectOptions {
+        let mut options = ConnectOptions::new(&config.server, &config.db_name);
+        if let Some(username) = &config.user {
+            options = options.with_user(username);
+        }
+        if let Some(password) = &config.password {
+            options = options.with_password(password);
+        }
+
+        if config.secure {
+            options = options.with_security(true);
+        };
+
+        options
     }
 
     pub fn with_user(mut self, user: impl Into<String>) -> Self {

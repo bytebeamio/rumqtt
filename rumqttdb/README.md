@@ -1,2 +1,8 @@
 # rumqttdb
-Database connectivity driver for serialized data
+
+A database connectivity driver for serialized data. 
+
+## Supported databases
+- Clickhouse
+- Timescale
+- Influx

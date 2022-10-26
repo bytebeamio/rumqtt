@@ -15,8 +15,7 @@ impl TestApp {
         let (db_tx, db_rx) = flume::bounded(10);
 
         let handle = thread::spawn(move || {
-            let mut db = DatabaseConnector::new(conf, db_rx);
-            if let Err(e) = db.start() {
+            if let Err(e) = DatabaseConnector::start(conf, db_rx) {
                 debug!("[Closing connection] {}", e);
             }
         });
@@ -24,12 +23,9 @@ impl TestApp {
         TestApp { handle, db_tx }
     }
 
-    pub fn insert(&self, database_name: &str, table_name: &str, insert_data: Vec<Value>) {
+    pub fn insert(&self, table_name: &str, insert_data: Vec<Value>) {
         self.db_tx
-            .send((
-                format!("{database_name}.{table_name}").to_string(),
-                insert_data.clone(),
-            ))
+            .send((table_name.to_string(), insert_data.clone()))
             .unwrap();
     }
 

@@ -1,20 +1,16 @@
 use std::sync::Arc;
 
-use crate::{conn::Record, ClientOptions, Error, Inserter};
+use crate::{config::Record, db::ConnectOptions, db::DatabaseWrite, Error};
 use rustls::version::{TLS12, TLS13};
 use ureq::Request;
 use url::Url;
 
-// TODO: Re-evaluate this since `buffer` type has changed
-const BUFFER_SIZE: usize = 128 * 1024;
-
 pub struct Clickhouse {
     request: Request,
-    buffer: Vec<Record>,
 }
 
 impl Clickhouse {
-    pub(crate) fn new(options: ClientOptions, table: &str) -> Clickhouse {
+    pub fn connect(options: ConnectOptions) -> Clickhouse {
         let agent = match options.secure {
             true => {
                 let mut root_store = rustls::RootCertStore::empty();
@@ -55,15 +51,11 @@ impl Clickhouse {
         };
 
         let mut url = Url::parse(&options.url).expect("TODO");
-        let query = format!("INSERT INTO {} FORMAT JSONEachRow", table);
 
         url.query_pairs_mut()
             .append_pair("database", &options.database);
 
-        url.query_pairs_mut().append_pair("query", &query);
-
         let mut request = agent.post(url.as_str());
-        // let mut request = ureq::post(url.as_str());
 
         if let Some(user) = &options.user {
             request = request.set("X-ClickHouse-User", user);
@@ -73,23 +65,24 @@ impl Clickhouse {
             request = request.set("X-ClickHouse-Key", password);
         }
 
-        Clickhouse {
-            request,
-            buffer: Vec::with_capacity(BUFFER_SIZE),
-        }
+        Clickhouse { request }
     }
 }
 
-impl Inserter for Clickhouse {
-    fn get_write_buffer(&mut self) -> &mut Vec<Record> {
-        &mut self.buffer
+impl DatabaseWrite for Clickhouse {
+    fn write(&mut self, table: &str, buffer: &mut Vec<Record>) -> Result<(), Error> {
+        let mut request = self.request.clone();
+
+        let query = format!("INSERT INTO {} FORMAT JSONEachRow", table);
+        request = request.query("query", &query);
+
+        let o = serde_json::to_vec::<Vec<Record>>(buffer.as_ref())?;
+        request.send_bytes(&o[..])?;
+
+        Ok(())
     }
 
-    fn end(&mut self) -> Result<(), Error> {
-        let request = self.request.clone();
-        let o = serde_json::to_vec::<Vec<Record>>(self.buffer.as_ref())?;
-        request.send_bytes(&o[..])?;
-        self.buffer.clear();
+    fn close(&mut self) -> Result<(), Error> {
         Ok(())
     }
 }

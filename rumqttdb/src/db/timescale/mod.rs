@@ -1,21 +1,18 @@
 use serde_json::Value;
-use sqlx::{Connection, PgConnection, Postgres, QueryBuilder};
+use sqlx::{PgPool, Postgres, QueryBuilder};
 use tokio::runtime::{self, Runtime};
 use url::Url;
 
-use crate::{conn::Record, ClientOptions, Error, Inserter};
-
-const BUFFER_SIZE: usize = 128 * 1024;
+use crate::{config::Record, db::ConnectOptions, db::DatabaseWrite, Error};
 
 pub struct Timescale {
-    buffer: Vec<Record>,
     runtime: Runtime,
-    conn: PgConnection,
+    conn: PgPool,
     query_builder: QueryBuilder<'static, Postgres>,
 }
 
 impl Timescale {
-    pub fn new(options: ClientOptions, table: &str) -> Timescale {
+    pub fn connect(options: ConnectOptions) -> Timescale {
         let runtime = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -40,23 +37,23 @@ impl Timescale {
         }
 
         let conn = runtime
-            .block_on(PgConnection::connect(url.as_str()))
+            .block_on(PgPool::connect(url.as_str()))
             .expect("unable to connect to postgres");
 
-        let query_builder: QueryBuilder<Postgres> =
-            QueryBuilder::new(format!("INSERT INTO {}(", table));
+        let query_builder: QueryBuilder<Postgres> = QueryBuilder::new("");
 
         Timescale {
-            buffer: Vec::with_capacity(BUFFER_SIZE),
             runtime,
             conn,
             query_builder,
         }
     }
 
-    fn build_query(&mut self) -> Result<(), Error> {
+    fn build_query(&mut self, table: &str, buffer: &mut Vec<Record>) -> Result<(), Error> {
+        self.query_builder.push(format!("INSERT INTO {}(", table));
+
         // extract column names from first json object
-        let first_obj = self.buffer.first().unwrap();
+        let first_obj = buffer.first().unwrap();
         let keys: Vec<String> = first_obj.keys();
 
         // add column names in query
@@ -68,7 +65,7 @@ impl Timescale {
 
         // add record values in query
         self.query_builder
-            .push_values(self.buffer.clone(), |mut b, mut obj| {
+            .push_values(buffer.clone(), |mut b, mut obj| {
                 b.push_bind(obj.id);
                 b.push_bind(obj.sequence);
                 b.push_bind(obj.timestamp);
@@ -107,24 +104,21 @@ impl Timescale {
 
     fn execute_query(&mut self) -> Result<(), Error> {
         let query = self.query_builder.build();
-        self.runtime
-            .block_on(query.execute(&mut self.conn))
-            .unwrap();
+        self.runtime.block_on(query.execute(&self.conn)).unwrap();
 
         Ok(())
     }
 }
 
-impl Inserter for Timescale {
-    fn get_write_buffer(&mut self) -> &mut Vec<Record> {
-        &mut self.buffer
-    }
-
-    fn end(&mut self) -> Result<(), crate::Error> {
-        self.build_query()?;
+impl DatabaseWrite for Timescale {
+    fn write(&mut self, table: &str, payload: &mut Vec<Record>) -> Result<(), Error> {
+        self.build_query(table, payload)?;
         self.execute_query()?;
         self.query_builder.reset();
-        self.buffer.clear();
+        Ok(())
+    }
+
+    fn close(&mut self) -> Result<(), Error> {
         Ok(())
     }
 }

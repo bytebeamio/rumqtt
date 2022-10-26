@@ -1,60 +1,46 @@
+use enum_dispatch::enum_dispatch;
+
 mod clickhouse;
 mod influx;
+mod options;
 mod timescale;
 
+use crate::config::{Record, Type};
+use crate::{DatabaseConfig, Error};
+
 use clickhouse::Clickhouse;
-use enum_dispatch::enum_dispatch;
-use influx::Influx;
-use serde::{Deserialize, Serialize};
+use influx::{Influx, InfluxV1, InfluxV2};
+use options::ConnectOptions;
 use timescale::Timescale;
 
-use crate::{conn::Record, ClientOptions, Error};
-
+/// A trait for writing into a Database
 #[enum_dispatch(Database)]
-pub trait Inserter {
-    fn get_write_buffer(&mut self) -> &mut Vec<Record>;
+pub trait DatabaseWrite {
+    /// Writes the `payload` to the `table`, returing whether write succeeded
+    fn write(&mut self, table: &str, payload: &mut Vec<Record>) -> Result<(), Error>;
 
-    fn len(&mut self) -> usize {
-        self.get_write_buffer().len()
-    }
-
-    fn write(&mut self, mut payload: Vec<Record>) -> Result<(), Error> {
-        self.get_write_buffer().append(&mut payload);
-        Ok(())
-    }
-
-    fn clear(&mut self) {
-        self.get_write_buffer().clear();
-    }
-
-    fn end(&mut self) -> Result<(), Error>;
+    /// Closes the connection the Database, returning whether close succeeded
+    fn close(&mut self) -> Result<(), Error>;
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum Type {
-    #[serde(rename = "clickhouse")]
-    Clickhouse,
-    #[serde(rename = "timescale")]
-    Timescale,
-    #[serde(rename = "influx1.8")]
-    Influx1,
-    #[serde(rename = "influx2")]
-    Influx2,
-}
-
+/// Rumqtt supported Databases
 #[enum_dispatch]
 pub enum Database {
-    Clickhouse,
-    Timescale,
-    Influx,
+    Clickhouse(Clickhouse),
+    Timescale(Timescale),
+    Influx(Influx),
 }
 
 impl Database {
-    pub fn new(db_type: &Type, options: ClientOptions, table: &str) -> Database {
-        match db_type {
-            Type::Clickhouse => Self::Clickhouse(Clickhouse::new(options, table)),
-            Type::Timescale => Self::Timescale(Timescale::new(options, table)),
-            Type::Influx1 | Type::Influx2 => Self::Influx(Influx::new(options, table, db_type)),
+    /// Create a new connection to Database
+    pub fn connect(config: &DatabaseConfig) -> Database {
+        let options = ConnectOptions::with_config(config);
+
+        match config.db_type {
+            Type::Clickhouse => Self::Clickhouse(Clickhouse::connect(options)),
+            Type::Timescale => Self::Timescale(Timescale::connect(options)),
+            Type::InfluxV1 => Self::Influx(InfluxV1::connect(options)),
+            Type::InfluxV2 => Self::Influx(InfluxV2::connect(options)),
         }
     }
 }

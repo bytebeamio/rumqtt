@@ -47,15 +47,17 @@ fn insert_runner(table_name: &str, insert_data: Vec<Value>) {
 
     // insert data in test table via test app
     let conf = DatabaseConfig {
-        db_type: Type::Influx1,
+        db_type: Type::InfluxV1,
+        db_name: DbConn::TEST_DB.to_string(),
         server: "http://localhost:8086".to_owned(),
         user: None,
         password: None,
         secure: false,
         flush_interval: 1,
+        mapping: None,
     };
     let app = common::TestApp::from(conf);
-    app.insert(DbConn::TEST_DB, table_name, insert_data.clone());
+    app.insert(table_name, insert_data.clone());
     app.finish();
 
     let res = db
@@ -83,34 +85,4 @@ fn insert() {
     ];
 
     insert_runner(table_name, insert_data);
-}
-
-fn insert_runner_cloud(table_name: &str, insert_data: Vec<Value>) {
-    // insert data in test table via test app
-    let conf = DatabaseConfig {
-        db_type: Type::Influx2,
-        server: "https://ap-southeast-2-1.aws.cloud2.influxdata.com".to_owned(),
-        user: None,
-        password: None,
-        secure: false,
-        flush_interval: 1,
-    };
-
-    let app = common::TestApp::from(conf);
-    app.insert(" ", table_name, insert_data.clone());
-    app.finish();
-}
-
-#[test]
-#[serial]
-fn insert_cloud() {
-    let table_name = "test";
-
-    let insert_data = vec![
-        json!({ "id": "A", "sequence": 1, "timestamp": 1664715032i64, "v1": 123, "v2": -123 }),
-        json!({ "id": "A-B", "sequence": 2, "timestamp": 1664715032i64, "v1": 123, "v2": -123 }),
-        json!({ "id": "A-B-C", "sequence": 3, "timestamp": 1664715032i64, "v1": -123, "v2": 123.321 }),
-    ];
-
-    insert_runner_cloud(table_name, insert_data);
 }

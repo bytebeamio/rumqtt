@@ -64,6 +64,7 @@ mod rumqttdb_processor {
     use flume::Sender;
     use log::{error, info};
     use rumqttd::{LinkError, LinkRx, LinkTx};
+    use rumqttdb::DatabaseConnector;
     use serde_json::Value;
     use std::time::{Duration, Instant};
 
@@ -76,8 +77,7 @@ mod rumqttdb_processor {
         let (database_tx, database_rx) = flume::bounded(10);
         let database_config = config.database.clone().unwrap();
         std::thread::spawn(move || {
-            let mut db_conn = rumqttdb::DatabaseConnector::new(database_config, database_rx);
-            db_conn.start().unwrap();
+            DatabaseConnector::start(database_config, database_rx).unwrap();
         });
 
         process(db_processor_link, database_tx, config);

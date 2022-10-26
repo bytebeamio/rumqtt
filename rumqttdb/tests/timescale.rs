@@ -59,14 +59,16 @@ fn insert_runner(table_name: &str, table_query: &str, insert_data: Vec<Value>) {
     // insert data in test table via test app
     let conf = DatabaseConfig {
         db_type: Type::Timescale,
+        db_name: DbConn::TEST_DB.to_string(),
         server: "postgres://localhost".to_owned(),
         user: Some("postgres".to_string()),
         password: Some("password".to_string()),
         secure: false,
         flush_interval: 1,
+        mapping: None,
     };
     let app = common::TestApp::from(conf);
-    app.insert(DbConn::TEST_DB, table_name, insert_data.clone());
+    app.insert(table_name, insert_data.clone());
     app.finish();
 
     let res = db
