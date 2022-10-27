@@ -40,8 +40,6 @@ pub enum Error {
     Ws(#[from] tungstenite::Error),
     #[error("Json error = {0}")]
     Json(#[from] serde_json::Error),
-    #[error("Reqwest Error = {0}")]
-    Reqwest(#[from] reqwest::Error),
     #[error("Shadow filter not set properly")]
     InvalidFilter,
 }
