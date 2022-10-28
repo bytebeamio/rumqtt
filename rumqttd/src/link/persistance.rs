@@ -7,7 +7,6 @@ use crate::{ConnectionId, ConnectionSettings, Filter, Link};
 
 use bytes::BytesMut;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
-use futures_util::{FutureExt, StreamExt};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -47,7 +46,7 @@ pub enum Error {
 
 /// Orchestrates between Router and Network.
 pub struct PersistanceLink<P: Protocol + 'static> {
-    connect: Connect,
+    _connect: Connect,
     pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
     pub(crate) network: Network<P>,
@@ -55,45 +54,56 @@ pub struct PersistanceLink<P: Protocol + 'static> {
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
     disk_handler: DiskHandler,
-    network_rx: Receiver<Network<P>>,
+    network_update_rx: Receiver<Network<P>>,
+    connack: Notification,
 }
 
 pub(super) struct DiskHandler {
     /// Directory in which to store files in.
-    pub(crate) dir: PathBuf,
-    map: HashMap<Filter, File>,
+    pub(crate) _dir: PathBuf,
+    _map: HashMap<Filter, File>,
+    pub buffer: VecDeque<Notification>,
 }
 
 impl DiskHandler {
     fn new() -> Self {
         DiskHandler {
-            dir: PathBuf::new(),
-            map: HashMap::new(),
+            _dir: PathBuf::new(),
+            _map: HashMap::new(),
+            buffer: VecDeque::new(),
         }
     }
-    pub fn write(&mut self, notification: Notification) {
+    pub async fn write(&mut self, notifications: &mut VecDeque<Notification>) {
+        self.buffer.append(notifications);
+    }
+
+    pub async fn read(&mut self, buffer: &mut VecDeque<Notification>) {
+        buffer.append(&mut self.buffer);
+    }
+
+    pub async fn _write(&mut self, notification: Notification) {
         match notification {
             Notification::Forward(forward) => {
                 let publish = forward.publish;
                 let topic =
                     String::from_utf8(publish.topic.to_vec()).expect("should be a valid topic");
 
-                if !self.map.contains_key(&topic) {
-                    let mut path = self.dir.clone();
+                if !self._map.contains_key(&topic) {
+                    let mut path = self._dir.clone();
                     path.push(topic.clone());
                     let file = fs::File::create(path).expect("cannot create file");
-                    self.map.insert(topic.clone(), file);
+                    self._map.insert(topic.clone(), file);
                 }
 
                 let mut buffer = BytesMut::new();
                 let len = protocol::v4::publish::write(&publish, &mut buffer)
                     .unwrap()
                     .to_string();
-                let mut file = self.map.get(&topic).unwrap();
+                let mut file = self._map.get(&topic).unwrap();
                 // This writes can be batch'ed by keeping a HashMap<Filter, Bytes> and writing to
                 // file after all the notifications are being itererated
-                file.write_all(len.as_bytes());
-                file.write_all(&buffer);
+                file.write_all(len.as_bytes()).unwrap();
+                file.write_all(&buffer).unwrap();
             }
             _ => unreachable!(),
         }
@@ -109,9 +119,6 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
         lastwill: Option<LastWill>,
         mut network: Network<P>,
     ) -> Result<(Sender<Network<P>>, PersistanceLink<P>), Error> {
-        // Wait for MQTT connect packet and error out if it's not received in time to prevent
-        // DOS attacks by filling total connections that the server can handle with idle open
-        // connections which results in server rejecting new connections
         let dynamic_filters = config.dynamic_filters;
 
         // When keep_alive feature is disabled client can live forever, which is not good in
@@ -138,14 +145,14 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
         )?;
         let id = link_rx.id();
 
-        network.write(notification).await?;
+        network.write(notification.clone()).await?;
 
-        let (tx, rx) = flume::bounded(10);
+        let (network_update_tx, network_update_rx) = flume::bounded(1);
 
         Ok((
-            tx,
+            network_update_tx,
             PersistanceLink {
-                connect,
+                _connect: connect,
                 client_id,
                 connection_id: id,
                 network,
@@ -153,7 +160,8 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
                 link_rx,
                 notifications: VecDeque::with_capacity(100),
                 disk_handler: DiskHandler::new(),
-                network_rx: rx,
+                network_update_rx,
+                connack: notification,
             },
         ))
     }
@@ -179,45 +187,105 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
         Ok((connect, lastwill))
     }
 
-    pub async fn start(&mut self) -> Result<(), Error> {
-        self.network.set_keepalive(self.connect.keep_alive);
-
-        // Note:
-        // Shouldn't result in bounded queue deadlocks because of blocking n/w send
-
-        // loop {
-        //     select! {
-        //         Ok(packet) = self.network.read() => {},
-        //         _ = self.link_rx.exchange(&mut self.notifications) => {},
-        //         _ = self.network_rx.stream().next() => {},
-        //         //
-        //     }
-        // }
+    async fn disconnected(&mut self) -> Result<State, Error> {
+        info!("{:15.15}[I] persistent mode: disconnected", self.client_id);
 
         loop {
             select! {
-                o = self.network.read() => {
-                    let packet = o?;
-                    let len = {
-                        let mut buffer = self.link_tx.buffer();
-                        // TODO: Detect subscribe packets and create a entry in disk_handler for
-                        // that file
-                        buffer.push_back(packet);
-                        self.network.readv(&mut buffer)?;
-                        buffer.len()
-                    };
-
-                    debug!("{:15.15}[I] {:20} buffercount = {}", self.client_id, "packets", len);
-                    self.link_tx.notify().await?;
-                }
-                // Receive from router and write to disk
+                // wait for reconnection
+                network = self.network_update_rx.recv_async() => {
+                    self.network = network?;
+                    // TODO: if network write throws an error then this means we again got network I/O error
+                    self.network.write(self.connack.clone()).await?;
+                    return Ok(State::Normal)
+                },
+                // write to disk
                 o = self.link_rx.exchange(&mut self.notifications) => {
-                    for notif in self.notifications.drain(..) {
-                        self.disk_handler.write(notif);
-                    }
+                    o?;
+                    self.disk_handler.write(&mut self.notifications).await;
                 }
-                // Read from disk and write to subscribers
             }
         }
     }
+
+    async fn write(&mut self) -> Result<(), Error> {
+        // write to disk
+        self.disk_handler.write(&mut self.notifications).await;
+
+        // read from disk_handler
+        let mut buffer = VecDeque::new();
+        self.disk_handler.read(&mut buffer).await;
+
+        // write to network
+        // TODO: if network write throws an error then this means we again got network I/O error
+        let unscheduled = self.network.writev(&mut buffer).await?;
+        if unscheduled {
+            self.link_rx.wake().await?;
+        };
+
+        Ok(())
+    }
+
+    async fn read(&mut self, packet: Packet) -> Result<(), Error> {
+        let len = {
+            let mut buffer = self.link_tx.buffer();
+            buffer.push_back(packet);
+            self.network.readv(&mut buffer)?;
+            buffer.len()
+        };
+        debug!(
+            "{:15.15}[I] {:20} buffercount = {}",
+            self.client_id, "packets", len
+        );
+        self.link_tx.notify().await?;
+        Ok(())
+    }
+
+    async fn run(&mut self) -> Result<State, Error> {
+        info!("{:15.15}[I] persistent mode: normal", self.client_id);
+        loop {
+            select! {
+                // read from remote client
+                o = self.network.read() => {
+                    match o {
+                        // this method reads from in memory buffer of MQTT packets,
+                        // hence any error returned from this method should drop the
+                        // persistence link
+                        Ok(packet) => self.read(packet).await?,
+                        // change state to disconnected on I/O connection errors and
+                        // wait for a reconnection
+                        Err(e) => match e.kind() {
+                            io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset => return Ok(State::Disconnected),
+                            _ => return Err(e.into())
+                        }
+                    };
+                }
+                // write to remote client
+                o = self.link_rx.exchange(&mut self.notifications) => {
+                    // exchange will through error if all senders to router are dropped
+                    // which is not possible since Persistent Link always lives
+                    o?;
+                    self.write().await?;
+                }
+            }
+        }
+    }
+
+    pub async fn start(&mut self) -> Result<(), Error> {
+        let mut state = State::Normal;
+
+        loop {
+            let next = match state {
+                State::Normal => self.run().await?,
+                State::Disconnected => self.disconnected().await?,
+            };
+
+            state = next;
+        }
+    }
+}
+
+pub enum State {
+    Normal,
+    Disconnected,
 }

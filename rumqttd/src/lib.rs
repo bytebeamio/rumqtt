@@ -38,7 +38,6 @@ pub struct Config {
     pub v4: HashMap<String, ServerSettings>,
     pub v5: HashMap<String, ServerSettings>,
     pub ws: HashMap<String, ServerSettings>,
-    pub persistent: HashMap<String, ServerSettings>,
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
     pub bridge: Option<BridgeConfig>,
@@ -67,6 +66,7 @@ pub struct ServerSettings {
     pub tls: Option<TlsConfig>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
+    pub persistence: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

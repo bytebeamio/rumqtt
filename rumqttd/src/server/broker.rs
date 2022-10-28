@@ -160,13 +160,20 @@ impl Broker {
         // spawn servers in a separate thread
         for (_, config) in self.config.v4.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
+            let link = match config.persistence {
+                true => {
+                    let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
+                    LinkType::Persistent(connection_map)
+                }
+                false => LinkType::Remote,
+            };
             let server = Server::new(config, self.router_tx.clone(), V4);
             server_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
+                    if let Err(e) = server.start(link).await {
                         error!("{:15.15}[I] Remote link error = {:?}", "", e);
                     }
                 });
@@ -175,13 +182,20 @@ impl Broker {
 
         for (_, config) in self.config.v5.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
+            let link = match config.persistence {
+                true => {
+                    let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
+                    LinkType::Persistent(connection_map)
+                }
+                false => LinkType::Remote,
+            };
             let server = Server::new(config, self.router_tx.clone(), V5);
             server_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
+                    if let Err(e) = server.start(link).await {
                         error!("{:15.15}[I] Remote link error = {:?}", "", e);
                     }
                 });
@@ -203,7 +217,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(true).await {
+                    if let Err(e) = server.start(LinkType::Shadow).await {
                         error!("{:15.15}[I] Remote link error = {:?}", "", e);
                     }
                 });
@@ -224,23 +238,6 @@ impl Broker {
         //         });
         //     })?;
         // }
-
-        // spawn servers in a separate thread
-        for (_, config) in self.config.persistent.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
-            let server = Server::new(config, self.router_tx.clone(), V5);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
-                let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
-
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Persistent(connection_map)).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
-                    }
-                });
-            })?;
-        }
 
         let console_link = ConsoleLink::new(self.config.console.clone(), self.router_tx.clone());
 
@@ -265,16 +262,12 @@ pub enum LinkType<P: Protocol> {
     Persistent(Arc<Mutex<PersistentConnectionMap<P>>>),
 }
 
-pub struct PersistentConnectionMap<P: Protocol>(HashMap<String, PersistentConnection<P>>);
+pub struct PersistentConnectionMap<P: Protocol>(HashMap<String, Sender<Network<P>>>);
 
 impl<P: Protocol> PersistentConnectionMap<P> {
     fn new() -> PersistentConnectionMap<P> {
         PersistentConnectionMap(HashMap::new())
     }
-}
-
-pub struct PersistentConnection<P> {
-    link_tx: Sender<Network<P>>,
 }
 
 impl<P: Protocol + Clone + Send + 'static> Server<P> {
@@ -475,32 +468,25 @@ async fn persistance<P: Protocol + Send + 'static>(
 
     let connection_map = &mut map.lock().await.0;
 
-    // connection_map
-    //     .entry(connect.client_id.clone())
-    //     .and_modify(|conn| {
-    //         conn.link_tx.send(network).unwrap();
-    //     })
-    //     .or_insert({
-    //         let tx = persistance_spawn(config, router_tx.clone(), connect, lastwill, network)
-    //             .await
-    //             .unwrap();
-
-    //         PersistentConnection { link_tx: tx }
-    //     });
     let existing = connection_map.contains_key(&connect.client_id);
     if existing {
-        connection_map
+        info!(
+            "Existing connection found! client id: {}",
+            connect.client_id
+        );
+        if let Err(e) = connection_map
             .get_mut(&connect.client_id)
             .unwrap()
-            .link_tx
-            .send(network);
+            .send(network)
+        {
+            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+        }
     } else {
+        info!("New connection found! client id: {}", connect.client_id);
         connection_map.insert(connect.client_id.clone(), {
-            let tx = persistance_spawn(config, router_tx.clone(), connect, lastwill, network)
+            persistance_spawn(config, router_tx.clone(), connect, lastwill, network)
                 .await
-                .unwrap();
-
-            PersistentConnection { link_tx: tx }
+                .unwrap()
         });
     }
 }
@@ -523,12 +509,15 @@ async fn persistance_spawn<P: Protocol + Send + 'static>(
             }
         };
 
-    task::spawn(async move {
+    tokio::spawn(async move {
         let client_id = link.client_id.clone();
         let connection_id = link.connection_id;
         let mut execute_will = false;
 
         match link.start().await {
+            // TODO: handle the connection map when the link drops -> we should remove
+            // client's entry from the connection map
+
             // Connection get close. This shouldn't usually happen
             Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
             // No need to send a disconnect message when disconnetion

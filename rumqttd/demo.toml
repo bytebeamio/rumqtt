@@ -10,13 +10,13 @@ max_segment_size = 10240
 max_segment_count = 10
 max_read_len = 10240
 max_connections = 10001
-persistant_filters = []
 
 
 # Configuration of server and connections that it accepts
 [v4.1]
 name = "v4-1"
 listen = "0.0.0.0:1883"
+persistence = true
 next_connection_delay_ms = 1
     [v4.1.connections]
     connection_timeout_ms = 60000
@@ -48,6 +48,7 @@ next_connection_delay_ms = 1
 [v5.1]
 name = "v5-1"
 listen = "0.0.0.0:1884"
+persistence = false
 next_connection_delay_ms = 1
     [v5.1.connections]
     connection_timeout_ms = 60000
