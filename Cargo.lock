@@ -578,6 +578,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "disk"
+version = "0.1.0"
+source = "git+https://github.com/bytebeamio/uplink#393a3c59e9c07659b0f67063d355453a7420873e"
+dependencies = [
+ "bytes",
+ "log",
+]
+
+[[package]]
 name = "dlv-list"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2093,6 +2102,7 @@ version = "0.12.0-beta.1"
 dependencies = [
  "bytes",
  "config",
+ "disk",
  "flume",
  "futures-util",
  "jemallocator",

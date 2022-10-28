@@ -9,7 +9,7 @@ use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 #[cfg(feature = "websockets")]
 use crate::protocol::ws::Ws;
-use crate::protocol::{Connect, LastWill, Protocol};
+use crate::protocol::{AsyncProtocol, Connect, LastWill, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
 use crate::ConnectionSettings;
@@ -255,22 +255,22 @@ struct Server<P> {
 }
 
 // #[derive(Clone, Copy)]
-pub enum LinkType<P: Protocol> {
+pub enum LinkType<P: AsyncProtocol> {
     #[cfg(feature = "websockets")]
     Shadow,
     Remote,
     Persistent(Arc<Mutex<PersistentConnectionMap<P>>>),
 }
 
-pub struct PersistentConnectionMap<P: Protocol>(HashMap<String, Sender<Network<P>>>);
+pub struct PersistentConnectionMap<P: AsyncProtocol>(HashMap<String, Sender<Network<P>>>);
 
-impl<P: Protocol> PersistentConnectionMap<P> {
+impl<P: AsyncProtocol> PersistentConnectionMap<P> {
     fn new() -> PersistentConnectionMap<P> {
         PersistentConnectionMap(HashMap::new())
     }
 }
 
-impl<P: Protocol + Clone + Send + 'static> Server<P> {
+impl<P: AsyncProtocol> Server<P> {
     pub fn new(
         config: ServerSettings,
         router_tx: Sender<(ConnectionId, Event)>,
@@ -452,7 +452,7 @@ async fn shadow_connection(
     router_tx.send(message).ok();
 }
 
-async fn persistance<P: Protocol + Send + 'static>(
+async fn persistance<P: AsyncProtocol>(
     config: Arc<ConnectionSettings>,
     // tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
@@ -491,7 +491,7 @@ async fn persistance<P: Protocol + Send + 'static>(
     }
 }
 
-async fn persistance_spawn<P: Protocol + Send + 'static>(
+async fn persistance_spawn<P: AsyncProtocol>(
     config: Arc<ConnectionSettings>,
     router_tx: Sender<(ConnectionId, Event)>,
     // tenant_id: Option<String>,

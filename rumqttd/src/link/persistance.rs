@@ -1,16 +1,14 @@
 use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
-use crate::protocol::{self, Connect, LastWill, Packet, Protocol};
+use crate::protocol::{AsyncProtocol, Connect, LastWill, Packet, self};
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings, Filter, Link};
+use crate::{ConnectionId, ConnectionSettings, Link};
 
-use bytes::BytesMut;
+use disk::Storage;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
-use std::collections::{HashMap, VecDeque};
-use std::fs::{self, File};
-use std::io::{self, Write};
-use std::path::PathBuf;
+use std::collections::{VecDeque};
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
@@ -45,7 +43,7 @@ pub enum Error {
 }
 
 /// Orchestrates between Router and Network.
-pub struct PersistanceLink<P: Protocol + 'static> {
+pub struct PersistanceLink<P: AsyncProtocol> {
     _connect: Connect,
     pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
@@ -53,64 +51,73 @@ pub struct PersistanceLink<P: Protocol + 'static> {
     link_tx: LinkTx,
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
-    disk_handler: DiskHandler,
+    disk_handler: DiskHandler<P>,
     network_update_rx: Receiver<Network<P>>,
     connack: Notification,
 }
 
-pub(super) struct DiskHandler {
-    /// Directory in which to store files in.
-    pub(crate) _dir: PathBuf,
-    _map: HashMap<Filter, File>,
-    pub buffer: VecDeque<Notification>,
+pub(super) struct DiskHandler<P: AsyncProtocol> {
+    storage: Storage,
+    protocol: P,
 }
 
-impl DiskHandler {
-    fn new() -> Self {
-        DiskHandler {
-            _dir: PathBuf::new(),
-            _map: HashMap::new(),
-            buffer: VecDeque::new(),
-        }
+impl<P: AsyncProtocol> DiskHandler<P> {
+    fn new(protocol: P) -> Result<Self, Error> {
+        // TODO: take storage params from config
+        // 100 mb x 3 backup files
+        Ok(DiskHandler {
+            storage: Storage::new("/tmp/rumqttd", 104857600, 3)?,
+            protocol,
+        })
     }
-    pub async fn write(&mut self, notifications: &mut VecDeque<Notification>) {
-        self.buffer.append(notifications);
-    }
-
-    pub async fn read(&mut self, buffer: &mut VecDeque<Notification>) {
-        buffer.append(&mut self.buffer);
-    }
-
-    pub async fn _write(&mut self, notification: Notification) {
-        match notification {
-            Notification::Forward(forward) => {
-                let publish = forward.publish;
-                let topic =
-                    String::from_utf8(publish.topic.to_vec()).expect("should be a valid topic");
-
-                if !self._map.contains_key(&topic) {
-                    let mut path = self._dir.clone();
-                    path.push(topic.clone());
-                    let file = fs::File::create(path).expect("cannot create file");
-                    self._map.insert(topic.clone(), file);
-                }
-
-                let mut buffer = BytesMut::new();
-                let len = protocol::v4::publish::write(&publish, &mut buffer)
-                    .unwrap()
-                    .to_string();
-                let mut file = self._map.get(&topic).unwrap();
-                // This writes can be batch'ed by keeping a HashMap<Filter, Bytes> and writing to
-                // file after all the notifications are being itererated
-                file.write_all(len.as_bytes()).unwrap();
-                file.write_all(&buffer).unwrap();
+    pub fn write(&mut self, notifications: &mut VecDeque<Notification>) {
+        // TODO: empty out notifs at the end of write
+        for notif in notifications.clone() {
+            // TODO: write only certain types of notifications   
+            if let Err(e) = self.protocol.write(notif, self.storage.writer()) {
+                error!("{:15.15} failed to write to storage: {e}", "");
             }
-            _ => unreachable!(),
+        }
+        if let Err(e) = self.storage.flush_on_overflow() {
+            error!("{:15.15} failed to flush storage: {e}", "");
+        }
+
+        notifications.clear();
+    }
+
+    pub fn read(&mut self, buffer: &mut VecDeque<Packet>) {
+        match self.storage.reload_on_eof() {
+            Ok(true) => info!("read buffer still has data"),
+            Ok(false) => info!("read buffer is loaded"),
+            Err(_) => error!("well this is embarrassing"),
+        }
+
+        // TODO: fix max incoming size of packet
+        // this is network::readv() code straight up
+        loop {
+            match self
+                .protocol
+                .read_mut(self.storage.reader(), 10240) //TODO: Don't hardcode max_incoming_size
+            {
+                Ok(packet) => {
+                    buffer.push_back(packet);
+                    let connection_buffer_length = buffer.len();
+                    //TODO: Don't hardcode max_connection_buffer_len
+                    if connection_buffer_length >= 100 {
+                        return 
+                    }
+                }
+                Err(protocol::Error::InsufficientBytes(_)) => return,
+                Err(e) => {
+                    error!("{:15.15} failed to read from storage: {e}", "");
+                    return
+                }
+            }
         }
     }
 }
 
-impl<P: Protocol + 'static> PersistanceLink<P> {
+impl<P: AsyncProtocol> PersistanceLink<P> {
     pub async fn new(
         config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,
@@ -146,7 +153,7 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
         let id = link_rx.id();
 
         network.write(notification.clone()).await?;
-
+        let protocol = network.protocol.clone();
         let (network_update_tx, network_update_rx) = flume::bounded(1);
 
         Ok((
@@ -159,7 +166,7 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
                 link_tx,
                 link_rx,
                 notifications: VecDeque::with_capacity(100),
-                disk_handler: DiskHandler::new(),
+                disk_handler: DiskHandler::new(protocol)?,
                 network_update_rx,
                 connack: notification,
             },
@@ -188,7 +195,7 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
     }
 
     async fn disconnected(&mut self) -> Result<State, Error> {
-        info!("{:15.15}[I] persistent mode: disconnected", self.client_id);
+        info!("{:15.15} persistent mode: disconnected", self.client_id);
 
         loop {
             select! {
@@ -202,23 +209,27 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
                 // write to disk
                 o = self.link_rx.exchange(&mut self.notifications) => {
                     o?;
-                    self.disk_handler.write(&mut self.notifications).await;
+                    self.disk_handler.write(&mut self.notifications);
                 }
             }
         }
     }
 
-    async fn write(&mut self) -> Result<(), Error> {
+    async fn write_to_client(&mut self) -> Result<(), Error> {
+        // take 1 packet, try to send it to client, if the future resolves too slowly then take more notifications and write them to the writer
+
         // write to disk
-        self.disk_handler.write(&mut self.notifications).await;
+        self.disk_handler.write(&mut self.notifications);
 
         // read from disk_handler
         let mut buffer = VecDeque::new();
-        self.disk_handler.read(&mut buffer).await;
+        self.disk_handler.read(&mut buffer);
 
         // write to network
         // TODO: if network write throws an error then this means we again got network I/O error
-        let unscheduled = self.network.writev(&mut buffer).await?;
+        // TODO: packet buffer from disk -> in memory notifs conversion
+        let mut notifs = VecDeque::new();
+        let unscheduled = self.network.writev(&mut notifs).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
@@ -226,7 +237,7 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
         Ok(())
     }
 
-    async fn read(&mut self, packet: Packet) -> Result<(), Error> {
+    async fn read_from_client(&mut self, packet: Packet) -> Result<(), Error> {
         let len = {
             let mut buffer = self.link_tx.buffer();
             buffer.push_back(packet);
@@ -251,7 +262,7 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
                         // this method reads from in memory buffer of MQTT packets,
                         // hence any error returned from this method should drop the
                         // persistence link
-                        Ok(packet) => self.read(packet).await?,
+                        Ok(packet) => self.read_from_client(packet).await?,
                         // change state to disconnected on I/O connection errors and
                         // wait for a reconnection
                         Err(e) => match e.kind() {
@@ -265,7 +276,7 @@ impl<P: Protocol + 'static> PersistanceLink<P> {
                     // exchange will through error if all senders to router are dropped
                     // which is not possible since Persistent Link always lives
                     o?;
-                    self.write().await?;
+                    self.write_to_client().await?;
                 }
             }
         }

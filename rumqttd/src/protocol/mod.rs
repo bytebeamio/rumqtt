@@ -730,3 +730,6 @@ pub trait Protocol {
     fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error>;
     fn write(&self, notification: Notification, write: &mut BytesMut) -> Result<bool, Error>;
 }
+
+pub trait AsyncProtocol: Protocol + Clone + Send + 'static {}
+impl<T> AsyncProtocol for T where T: Protocol + Clone + Send + 'static {}
