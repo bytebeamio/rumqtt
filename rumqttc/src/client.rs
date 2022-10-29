@@ -427,6 +427,9 @@ impl Connection {
         &mut self,
         duration: Duration,
     ) -> Result<Result<Event, ConnectionError>, RecvTimeoutError> {
+        // Enter the runtime so we can use Sleep, which is required by timeout.
+        // ref: https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#method.enter
+        let _guard = self.runtime.enter();
         let f = timeout(duration, self.eventloop.poll());
         let event = self
             .runtime
