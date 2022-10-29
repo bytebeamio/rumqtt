@@ -25,16 +25,16 @@ impl<T> Segment<T>
 where
     T: Storage + Clone,
 {
-    pub(crate) fn with_capacity_and_offset(capacity: usize, absolute_offset: u64) -> Self {
+    pub(crate) fn with_offset(absolute_offset: u64) -> Self {
         Self {
-            data: Vec::with_capacity(capacity),
+            data: Vec::with_capacity(1024),
             absolute_offset,
             total_size: 0,
         }
     }
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            data: Vec::with_capacity(capacity),
+            data: Vec::with_capacity(1024),
             absolute_offset: 0,
             total_size: 0,
         }
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn segment_works_for_bytes() {
-        let mut mem_segment: Segment<Bytes> = Segment::with_capacity(10);
+        let mut mem_segment: Segment<Bytes> = Segment::new();
         let test_byte = Bytes::from_static(b"test1");
         mem_segment.push(test_byte.clone());
         assert_eq!(mem_segment.len(), 1);
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn readv_works_for_bytes() {
-        let mut segment: Segment<Bytes> = Segment::with_capacity(10);
+        let mut segment: Segment<Bytes> = Segment::new();
         segment.push(Bytes::from_static(b"test1"));
         segment.push(Bytes::from_static(b"test2"));
         segment.push(Bytes::from_static(b"test3"));
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn readv_works_for_vec_of_u8() {
-        let mut segment: Segment<Vec<u8>> = Segment::with_capacity(10);
+        let mut segment: Segment<Vec<u8>> = Segment::new();
         segment.push(vec![1u8]);
         segment.push(vec![2u8]);
         segment.push(vec![3u8]);

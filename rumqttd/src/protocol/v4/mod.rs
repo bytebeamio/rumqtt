@@ -340,42 +340,28 @@ impl Protocol for V4 {
         Ok(packet)
     }
 
-    fn write(&self, notification: Notification, write: &mut BytesMut) -> Result<bool, Error> {
-        match notification {
-            Notification::Forward(forward) => {
-                publish::write(&forward.publish, write)?;
+    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let size = match packet {
+            Packet::Connect(connect, None, last_will, None, login) => {
+                connect::write(&connect, &login, &last_will, buffer)?
             }
-            Notification::DeviceAck(ack) => match ack {
-                Ack::ConnAck(_, ack) => {
-                    connack::write(&ack, write)?;
-                }
-                Ack::PubAck(puback) => {
-                    puback::write(&puback, write)?;
-                }
-                Ack::SubAck(suback) => {
-                    suback::write(&suback, write)?;
-                }
-                Ack::PingResp(pingresp) => {
-                    ping::pingresp::write(write)?;
-                }
-                Ack::PubRec(pubrec) => {
-                    pubrec::write(&pubrec, write)?;
-                }
-                Ack::PubRel(pubrel) => {
-                    pubrel::write(&pubrel, write)?;
-                }
-                Ack::PubComp(pubcomp) => {
-                    pubcomp::write(&pubcomp, write)?;
-                }
-                Ack::UnsubAck(unsuback) => {
-                    unsuback::write(&unsuback, write)?;
-                }
-                _ => unimplemented!(),
-            },
-            Notification::Unschedule => return Ok(true),
-            v => unreachable!("{:?}", v),
-        }
-
-        Ok(false)
+            Packet::ConnAck(connack, None) => connack::write(&connack, buffer)?,
+            Packet::Publish(publish, None) => publish::write(&publish, buffer)?,
+            Packet::PubAck(puback, None) => puback::write(&puback, buffer)?,
+            Packet::Subscribe(subscribe, None) => subscribe::write(&subscribe, buffer)?,
+            Packet::SubAck(suback, None) => suback::write(&suback, buffer)?,
+            Packet::PubRec(pubrec, None) => pubrec::write(&pubrec, buffer)?,
+            Packet::PubRel(pubrel, None) => pubrel::write(&pubrel, buffer)?,
+            Packet::PubComp(pubcomp, None) => pubcomp::write(&pubcomp, buffer)?,
+            Packet::Unsubscribe(unsubscribe, None) => unsubscribe::write(&unsubscribe, buffer)?,
+            Packet::UnsubAck(unsuback, None) => unsuback::write(&unsuback, buffer)?,
+            Packet::Disconnect(disconnect, None) => disconnect::write(&disconnect, buffer)?,
+            Packet::PingReq(pingreq) => ping::pingreq::write(buffer)?,
+            Packet::PingResp(pingresp) => ping::pingresp::write(buffer)?,
+            _ => unreachable!(
+                "This branch only matches for packets with Properties, which is not possible in v4",
+            ),
+        };
+        Ok(size)
     }
 }

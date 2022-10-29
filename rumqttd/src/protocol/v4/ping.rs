@@ -13,8 +13,8 @@ pub mod pingreq {
 pub mod pingresp {
     use super::*;
 
-    pub fn write(payload: &mut BytesMut) -> Result<usize, Error> {
-        payload.put_slice(&[0xD0, 0x00]);
+    pub fn write(buffer: &mut BytesMut) -> Result<usize, Error> {
+        buffer.put_slice(&[0xD0, 0x00]);
         Ok(2)
     }
 }
