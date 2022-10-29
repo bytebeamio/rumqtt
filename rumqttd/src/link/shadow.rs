@@ -69,8 +69,13 @@ impl ShadowLink {
         let subscriptions = HashSet::new();
         let client_id = connect.client_id.clone();
 
-        let (link_tx, link_rx, _ack) =
-            Link::new(/*None,*/ &client_id, router_tx, true, None, config.dynamic_filters)?;
+        let (link_tx, link_rx, _ack) = Link::new(
+            /*None,*/ &client_id,
+            router_tx,
+            true,
+            None,
+            config.dynamic_filters,
+        )?;
         let connection_id = link_rx.id();
 
         // Send connection acknowledgement back to the client

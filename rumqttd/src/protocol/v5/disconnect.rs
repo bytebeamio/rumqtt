@@ -12,10 +12,8 @@ fn len(disconnect: &Disconnect, properties: &Option<DisconnectProperties>) -> us
     }
 
     let mut length = 0;
-
     if let Some(properties) = &properties {
         length += 1; // Disconnect Reason Code
-
         let properties_len = properties::len(properties);
         let properties_len_len = len_len(properties_len);
         length += properties_len_len + properties_len;
@@ -77,8 +75,9 @@ pub fn write(
     }
 
     let len_len = write_remaining_length(buffer, length)?;
-
+    
     buffer.put_u8(code(disconnect.reason_code));
+
 
     if let Some(properties) = &properties {
         properties::write(properties, buffer)?;
