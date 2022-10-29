@@ -73,9 +73,12 @@ impl<P: AsyncProtocol> DiskHandler<P> {
     pub fn write(&mut self, notifications: &mut VecDeque<Notification>) {
         // TODO: empty out notifs at the end of write
         for notif in notifications.clone() {
-            // TODO: write only certain types of notifications   
-            if let Err(e) = self.protocol.write(notif, self.storage.writer()) {
-                error!("{:15.15} failed to write to storage: {e}", "");
+            // TODO: write only certain types of notifications  
+            let packet_or_unscheduled = notif.into();
+            if let Some(packet) = packet_or_unscheduled {
+                if let Err(e) = self.protocol.write(packet, self.storage.writer()) {
+                    error!("{:15.15} failed to write to storage: {e}", "");
+                }
             }
         }
         if let Err(e) = self.storage.flush_on_overflow() {
@@ -227,9 +230,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
 
         // write to network
         // TODO: if network write throws an error then this means we again got network I/O error
-        // TODO: packet buffer from disk -> in memory notifs conversion
-        let mut notifs = VecDeque::new();
-        let unscheduled = self.network.writev(&mut notifs).await?;
+        let unscheduled = self.network.writev(&mut buffer).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
