@@ -81,10 +81,15 @@ impl DataLog {
             .get_mut(*self.filter_indexes.get(filter)?)
             .unwrap();
         let waiters = data.waiters.get_mut();
-        return match waiters.iter().position(|x| x.0 == id) {
-            Some(index) => waiters.swap_remove_back(index).map(|v| v.1),
-            None => None,
-        };
+
+        waiters
+            .iter()
+            .position(|&(conn_id, _)| conn_id == id)
+            .and_then(|index| {
+                waiters
+                    .swap_remove_back(index)
+                    .map(|(_, data_req)| data_req)
+            })
     }
 
     // TODO: Currently returning a Option<Vec> instead of Option<&Vec> due to Rust borrow checker
@@ -93,12 +98,12 @@ impl DataLog {
         match &self.publish_filters.get(topic) {
             Some(v) => Some(v.to_vec()),
             None => {
-                let mut v = Vec::new();
-                for (filter, filter_idx) in self.filter_indexes.iter() {
-                    if matches(topic, filter) {
-                        v.push(*filter_idx);
-                    }
-                }
+                let v: Vec<usize> = self
+                    .filter_indexes
+                    .iter()
+                    .filter(|(filter, _)| matches(topic, filter))
+                    .map(|(_, filter_idx)| *filter_idx)
+                    .collect();
 
                 if !v.is_empty() {
                     self.publish_filters.insert(topic.to_owned(), v.clone());
