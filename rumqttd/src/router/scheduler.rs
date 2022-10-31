@@ -196,15 +196,8 @@ impl Tracker {
     }
 
     pub fn unregister_data_request(&mut self, filter: Filter) {
-        let mut idxs = Vec::<usize>::new();
-        for (i, data_req) in self.data_requests.iter().enumerate() {
-            if data_req.filter == filter {
-                idxs.push(i);
-            }
-        }
-        for idx in idxs {
-            self.data_requests.remove(idx);
-        }
+        self.data_requests
+            .retain(|data_req| data_req.filter != filter);
     }
 }
 
