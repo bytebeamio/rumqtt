@@ -13,7 +13,7 @@ use crate::protocol::Protocol;
 use crate::server::tls::{self, TLSAcceptor};
 use crate::ConnectionSettings;
 use flume::{RecvError, SendError, Sender};
-use log::*;
+use tracing::{error, info};
 use std::sync::Arc;
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;

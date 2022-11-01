@@ -4,6 +4,7 @@ use simplelog::{
     Color, ColorChoice, CombinedLogger, Level, LevelFilter, LevelPadding, TargetPadding,
     TermLogger, TerminalMode, ThreadPadding,
 };
+
 use structopt::StructOpt;
 
 #[derive(StructOpt)]

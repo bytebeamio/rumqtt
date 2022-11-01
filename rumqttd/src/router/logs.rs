@@ -1,5 +1,6 @@
 use super::Ack;
 use slab::Slab;
+use tracing::trace;
 
 use crate::protocol::{
     matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,

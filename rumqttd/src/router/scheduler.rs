@@ -5,6 +5,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use slab::Slab;
+use tracing::trace;
 
 use super::DataRequest;
 use crate::{ConnectionId, Filter};

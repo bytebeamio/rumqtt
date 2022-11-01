@@ -2,6 +2,7 @@ use std::{collections::VecDeque, sync::Arc, time::Instant};
 
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
+use tracing::error;
 
 use crate::{
     protocol::Packet,
