@@ -4,6 +4,7 @@
 - (rumqttd) Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
 - (rumqttd) Changed default segment size in demo config to 100MB (#484)
 - (rumqttc) Fixed panicking of `timeout` in `recv_timeout` by entering tokio runtime context (#492)
+- (rumqttd) Allow subscription on topic's starting with `test` (#494)
 
 ### R17
 ---
