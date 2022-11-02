@@ -216,7 +216,7 @@ impl Router {
         }
     }
 
-    #[tracing::instrument(skip_all, fields(client_id))]
+    #[tracing::instrument(skip_all, fields(client_idxx))]
     fn handle_new_connection(
         &mut self,
         mut connection: Connection,
@@ -224,6 +224,8 @@ impl Router {
         outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
+
+        tracing::Span::current().record("client_idxx", &client_id);
 
         if self.connections.len() >= self.config.max_connections {
             error!(client_id, "no space for new connection");
@@ -297,7 +299,7 @@ impl Router {
                 return;
             }
         };
-        
+
         if execute_last_will {
             self.handle_last_will(id, client_id.clone());
         }

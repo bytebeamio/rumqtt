@@ -1,9 +1,6 @@
 use rumqttd::Broker;
 
 use tracing::metadata::LevelFilter;
-// use tracing_subscriber::{self, fmt, prelude::*, EnvFilter};
-use tracing_subscriber::{filter::filter_fn, fmt, prelude::*, EnvFilter, Registry};
-
 use structopt::StructOpt;
 
 #[derive(StructOpt)]
@@ -42,7 +39,7 @@ fn main() {
         _ => LevelFilter::TRACE,
     };
 
-    /* FOR TREE VIEW 
+    /* FOR TREE VIEW
     let layer = tracing_tree::HierarchicalLayer::default()
         .with_writer(std::io::stdout)
         .with_indent_lines(true)
@@ -58,16 +55,19 @@ fn main() {
 
     */
 
+    let env_filter = tracing_subscriber::EnvFilter::builder()
+        .with_regex(false)
+        .with_env_var("FILTER")
+        .from_env()
+        .unwrap();
 
-    // let filter = filter_fn(|meta| meta.target().contains("rumqttd"));
-
-    // with filter layers
-    tracing_subscriber::registry()
-        .with(fmt::layer().compact())
-        // .with(filter)
-        .with(EnvFilter::from_default_env())
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        // .with_file(false)
+        // .with_thread_ids(false)
+        // .with_thread_names(false)
+        // .pretty()
         .init();
-
 
     let config = config::Config::builder()
         .add_source(config::File::with_name(&commandline.config))
