@@ -30,7 +30,8 @@ parking_lot = "0.11.2"
 config = "0.13"
 structopt = "0.3.26"
 tracing = { version="0.1", features=["log"] }
-simplelog = "0.12"
+tracing-subscriber = { version="0.3.16", features=["env-filter"] }
+tracing-tree = "0"
 
 [features]
 default = ["use-rustls"]

@@ -34,6 +34,7 @@ impl Scheduler {
     }
 
     /// Next connection which is ready to make progress
+    // #[tracing::instrument(skip_all)]
     pub fn poll(&mut self) -> Option<(ConnectionId, VecDeque<DataRequest>)> {
         let id = self.readyqueue.pop_front()?;
         let tracker = self.trackers.get_mut(id)?;
@@ -64,9 +65,9 @@ impl Scheduler {
         let tracker = self.trackers.get_mut(id).unwrap();
         if let Some(v) = tracker.try_ready(reason) {
             trace!(
-                "{:15.15}[S] {:20} {:?} -> Ready",
-                tracker.id,
-                "reschedule",
+                tracker_id = tracker.id,
+                info = "reschedule",
+                "{:?} -> Ready",
                 v
             );
             self.readyqueue.push_back(id);
@@ -78,9 +79,9 @@ impl Scheduler {
         let tracker = self.trackers.get_mut(id).unwrap();
 
         trace!(
-            "{:15.15}[S] {:20} {:?} -> {:?}",
-            tracker.id,
-            "pause",
+            tracker_id = tracker.id,
+            info = "pause",
+            "{:?} -> {:?}",
             tracker.status,
             reason
         );

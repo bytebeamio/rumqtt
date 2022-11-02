@@ -6,13 +6,13 @@ use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings, Link};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
-use tracing::debug;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
+use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -129,7 +129,7 @@ impl<P: Protocol> RemoteLink<P> {
                         buffer.len()
                     };
 
-                    debug!("{:15.15}[I] {:20} buffercount = {}", self.client_id, "packets", len);
+                    debug!(client_id=self.client_id, info="packets", buffercount=len);
                     self.link_tx.notify().await?;
                 }
                 // Receive from router when previous when state isn't in collision

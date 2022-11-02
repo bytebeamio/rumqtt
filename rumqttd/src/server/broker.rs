@@ -13,8 +13,8 @@ use crate::protocol::Protocol;
 use crate::server::tls::{self, TLSAcceptor};
 use crate::ConnectionSettings;
 use flume::{RecvError, SendError, Sender};
-use tracing::{error, info};
 use std::sync::Arc;
+use tracing::{error, info};
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
@@ -133,6 +133,7 @@ impl Broker {
         Ok((link_tx, link_rx))
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
         // spawn bridge in a separate thread
         // if let Some(bridge_config) = self.config.bridge.clone() {
@@ -162,7 +163,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(false).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
+                        error!(error=?e, "Remote link error");
                     }
                 });
             })?;
@@ -177,7 +178,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(false).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
+                        error!(error=?e, "Remote link error");
                     }
                 });
             })?;
@@ -199,7 +200,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(true).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
+                        error!(error=?e, "Remote link error");
                     }
                 });
             })?;
@@ -265,6 +266,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok(/*(*/ Box::new(stream) /*, None)*/)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn start(&self, shadow: bool) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
@@ -272,15 +274,16 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
         let config = Arc::new(self.config.connections.clone());
         info!(
-            "{:15.15}[>] waiting for remote connections > {}",
-            self.config.name, self.config.listen
+            config=self.config.name,
+            "[>] waiting for remote connections > {}",
+            self.config.listen
         );
         loop {
             // Await new network connection.
             let (stream, addr) = match listener.accept().await {
                 Ok((s, r)) => (s, r),
                 Err(e) => {
-                    error!("Unable to accept socket. Error = {:?}", e);
+                    error!(error=?e, "Unable to accept socket.");
                     continue;
                 }
             };
@@ -288,14 +291,13 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             let /*(*/network /*, tenant_id)*/ = match self.tls_accept(stream).await {
                 Ok(o) => o,
                 Err(e) => {
-                    error!("Tls accept error = {:?}", e);
+                    error!(error=?e, "Tls accept error");
                     continue;
                 }
             };
 
             info!(
-                "{:15.15}[I] {:20} addr = {} count {}",
-                self.config.name, "accept", addr, count
+                name=?self.config.name, info="accept", ?addr, count
             );
 
             let config = config.clone();
@@ -321,6 +323,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
 /// denial of service attacks (rogue clients which only does network connection without sending
 /// mqtt connection packet to make make the server reach its concurrent connection limit)
+#[tracing::instrument(skip_all)]
 async fn remote<P: Protocol>(
     config: Arc<ConnectionSettings>,
     // tenant_id: Option<String>,
@@ -333,7 +336,7 @@ async fn remote<P: Protocol>(
     let mut link = match RemoteLink::new(config, router_tx.clone(), /*tenant_id,*/ network).await {
         Ok(l) => l,
         Err(e) => {
-            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+            error!(error=?e, "Remote link error");
             return;
         }
     };
@@ -344,16 +347,16 @@ async fn remote<P: Protocol>(
 
     match link.start().await {
         // Connection get close. This shouldn't usually happen
-        Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
+        Ok(_) => error!(client_id, "connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(remote::Error::Link(e)) => {
-            info!("{:15.15}[E] {:20} {:?}", client_id, "router-drop", e);
+            error!(client_id, error=?e, "router-drop");
             return;
         }
         // Any other error
         Err(e) => {
-            error!("{:15.15}[E] Disconnected!! {:?}", client_id, e);
+            error!(client_id, error=?e,"Disconnected!!");
             execute_will = true;
         }
     };

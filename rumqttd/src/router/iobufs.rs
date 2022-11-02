@@ -146,10 +146,7 @@ impl Outgoing {
         let inflight_count = self.inflight_buffer.len();
 
         if inflight_count > MAX_INFLIGHT {
-            error!(
-                "inflight_count = {:<2} MAX_INFLIGHT = {:<2}",
-                inflight_count, MAX_INFLIGHT
-            );
+            error!(inflight_count, MAX_INFLIGHT);
         }
 
         (buffer_count, inflight_count)
@@ -165,7 +162,7 @@ impl Outgoing {
 
         // We don't support out of order acks
         if pkid != head {
-            error!("out of order ack. pkid = {}, head = {}", pkid, head);
+            error!(error = "out of order ack.", pkid, head);
             return None;
         }
 

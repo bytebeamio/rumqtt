@@ -1,9 +1,8 @@
 use rumqttd::Broker;
 
-use simplelog::{
-    Color, ColorChoice, CombinedLogger, Level, LevelFilter, LevelPadding, TargetPadding,
-    TermLogger, TerminalMode, ThreadPadding,
-};
+use tracing::metadata::LevelFilter;
+// use tracing_subscriber::{self, fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{filter::filter_fn, fmt, prelude::*, EnvFilter, Registry};
 
 use structopt::StructOpt;
 
@@ -36,7 +35,39 @@ fn main() {
     let commandline: CommandLine = CommandLine::from_args();
 
     banner(&commandline);
-    initialize_logging(&commandline);
+    let _level = match commandline.verbose {
+        0 => LevelFilter::WARN,
+        1 => LevelFilter::INFO,
+        2 => LevelFilter::DEBUG,
+        _ => LevelFilter::TRACE,
+    };
+
+    /* FOR TREE VIEW 
+    let layer = tracing_tree::HierarchicalLayer::default()
+        .with_writer(std::io::stdout)
+        .with_indent_lines(true)
+        .with_indent_amount(2)
+        .with_thread_names(false)
+        .with_thread_ids(false)
+        .with_verbose_exit(false)
+        .with_verbose_entry(false)
+        .with_targets(true);
+
+    let subscriber = Registry::default().with(layer);
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    */
+
+
+    // let filter = filter_fn(|meta| meta.target().contains("rumqttd"));
+
+    // with filter layers
+    tracing_subscriber::registry()
+        .with(fmt::layer().compact())
+        // .with(filter)
+        .with(EnvFilter::from_default_env())
+        .init();
+
 
     let config = config::Config::builder()
         .add_source(config::File::with_name(&commandline.config))
@@ -45,40 +76,10 @@ fn main() {
 
     let config = config.try_deserialize().unwrap();
 
-    println!("{:#?}", config);
+    // println!("{:#?}", config);
 
     let mut broker = Broker::new(config);
     broker.start().unwrap();
-}
-
-fn initialize_logging(commandline: &CommandLine) {
-    let mut config = simplelog::ConfigBuilder::new();
-
-    let level = match commandline.verbose {
-        0 => LevelFilter::Warn,
-        1 => LevelFilter::Info,
-        2 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
-    };
-
-    config
-        .set_location_level(LevelFilter::Off)
-        .set_target_level(LevelFilter::Error)
-        .set_target_padding(TargetPadding::Right(25))
-        .set_thread_level(LevelFilter::Error)
-        .set_thread_padding(ThreadPadding::Right(2))
-        .set_level_color(Level::Trace, Some(Color::Cyan))
-        .set_level_padding(LevelPadding::Right);
-
-    config.add_filter_allow_str("rumqttd");
-
-    let loggers = TermLogger::new(
-        level,
-        config.build(),
-        TerminalMode::Mixed,
-        ColorChoice::Always,
-    );
-    CombinedLogger::init(vec![loggers]).unwrap();
 }
 
 fn banner(commandline: &CommandLine) {
