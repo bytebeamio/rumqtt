@@ -274,9 +274,8 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
         let config = Arc::new(self.config.connections.clone());
         info!(
-            config=self.config.name,
-            "[>] waiting for remote connections > {}",
-            self.config.listen
+            config = self.config.name,
+            "[>] waiting for remote connections > {}", self.config.listen
         );
         loop {
             // Await new network connection.

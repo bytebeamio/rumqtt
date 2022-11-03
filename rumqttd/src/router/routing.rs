@@ -216,7 +216,7 @@ impl Router {
         }
     }
 
-    #[tracing::instrument(skip_all, fields(client_idxx))]
+    // #[tracing::instrument(skip_all, fields(client_idxx))]
     fn handle_new_connection(
         &mut self,
         mut connection: Connection,
@@ -225,7 +225,9 @@ impl Router {
     ) {
         let client_id = outgoing.client_id.clone();
 
-        tracing::Span::current().record("client_idxx", &client_id);
+        let span = tracing::info_span!("handle_new_conn", client_id);
+
+        let _guard = span.enter();
 
         if self.connections.len() >= self.config.max_connections {
             error!(client_id, "no space for new connection");
@@ -288,7 +290,7 @@ impl Router {
             .reschedule(connection_id, ScheduleReason::Init);
     }
 
-    #[tracing::instrument(skip(self))]
+    // #[tracing::instrument(skip(self))]
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
@@ -300,6 +302,8 @@ impl Router {
             }
         };
 
+        let span = tracing::info_span!("handle_disconnection", client_id);
+        let _guard = span.enter();
         if execute_last_will {
             self.handle_last_will(id, client_id.clone());
         }
@@ -355,7 +359,7 @@ impl Router {
     }
 
     /// Handles new incoming data on a topic
-    #[tracing::instrument(skip(self))]
+    // #[tracing::instrument(skip(self))]
     fn handle_device_payload(&mut self, id: ConnectionId) {
         // TODO: Retun errors and move error handling to the caller
         let incoming = match self.ibufs.get_mut(id) {
@@ -367,6 +371,8 @@ impl Router {
         };
 
         let client_id = incoming.client_id.clone();
+        let span = tracing::info_span!("handle_payload", client_id);
+        let _guard = span.enter();
         // Instead of exchanging, we should just append new incoming packets inside cache
         let mut packets = incoming.exchange(self.cache.take().unwrap());
 

@@ -1,7 +1,8 @@
 use rumqttd::Broker;
 
-use tracing::metadata::LevelFilter;
 use structopt::StructOpt;
+use tracing::metadata::LevelFilter;
+use tracing_subscriber::prelude::*;
 
 #[derive(StructOpt)]
 #[structopt(name = "rumqttd")]
@@ -56,17 +57,21 @@ fn main() {
     */
 
     let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_regex(false)
+        .with_regex(false) // exactly match fmt::Debug output
         .with_env_var("FILTER")
         .from_env()
         .unwrap();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        // .with_file(false)
-        // .with_thread_ids(false)
-        // .with_thread_names(false)
-        // .pretty()
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_line_number(false)
+        .with_file(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .compact();
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
         .init();
 
     let config = config::Config::builder()
