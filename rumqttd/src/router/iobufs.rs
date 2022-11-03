@@ -60,6 +60,8 @@ pub struct Outgoing {
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
     pub(crate) meter: OutgoingMeter,
+    /// Flag to identify if `Outgoing` belongs to a `PersistentLink`
+    pub(crate) persistent: bool,
 }
 
 impl Outgoing {
@@ -80,6 +82,7 @@ impl Outgoing {
             handle,
             last_pkid: 0,
             meter: Default::default(),
+            persistent: false,
         };
 
         (outgoing, rx)

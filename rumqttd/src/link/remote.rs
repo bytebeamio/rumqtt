@@ -96,6 +96,7 @@ impl<P: Protocol> RemoteLink<P> {
             clean_session,
             lastwill,
             dynamic_filters,
+            false,
         )?;
         let id = link_rx.id();
 

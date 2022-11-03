@@ -985,7 +985,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 {
+    let inflight_slots = if request.qos == 1 && !outgoing.persistent {
         let len = outgoing.free_slots();
         if len == 0 {
             return ConsumeStatus::InflightFull;

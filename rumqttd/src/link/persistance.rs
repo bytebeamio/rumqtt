@@ -8,7 +8,7 @@ use crate::{ConnectionId, ConnectionSettings, Link};
 use disk::Storage;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
 use std::collections::{VecDeque};
-use std::io;
+use std::{io, fs};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
@@ -62,41 +62,38 @@ pub(super) struct DiskHandler<P: AsyncProtocol> {
 }
 
 impl<P: AsyncProtocol> DiskHandler<P> {
-    fn new(protocol: P) -> Result<Self, Error> {
-        // TODO: take storage params from config
-        // 100 mb x 3 backup files
+    fn new(client_id: &str, protocol: P) -> Result<Self, Error> {
+        // TODO: take params from config
+        let path = format!("/tmp/rumqttd/{}", &client_id);
+        fs::create_dir_all(&path)?;
+
         Ok(DiskHandler {
-            storage: Storage::new("/tmp/rumqttd", 104857600, 3)?,
+            storage: Storage::new(path, 1024, 30)?,
             protocol,
         })
     }
+
     pub fn write(&mut self, notifications: &mut VecDeque<Notification>) {
-        // TODO: empty out notifs at the end of write
-        for notif in notifications.clone() {
-            // TODO: write only certain types of notifications  
+        for notif in notifications.drain(..) {
             let packet_or_unscheduled = notif.into();
             if let Some(packet) = packet_or_unscheduled {
                 if let Err(e) = self.protocol.write(packet, self.storage.writer()) {
-                    error!("{:15.15} failed to write to storage: {e}", "");
+                    error!("Failed to write to storage: {e}");
+                }
+
+                if let Err(e) = self.storage.flush_on_overflow() {
+                    error!("Failed to flush storage: {e}");
                 }
             }
         }
-        if let Err(e) = self.storage.flush_on_overflow() {
-            error!("{:15.15} failed to flush storage: {e}", "");
-        }
-
-        notifications.clear();
     }
 
     pub fn read(&mut self, buffer: &mut VecDeque<Packet>) {
-        match self.storage.reload_on_eof() {
-            Ok(true) => info!("read buffer still has data"),
-            Ok(false) => info!("read buffer is loaded"),
-            Err(_) => error!("well this is embarrassing"),
+        if let Err(e) = self.storage.reload_on_eof() {
+            error!("Failed to reload storage: {e}");
         }
 
         // TODO: fix max incoming size of packet
-        // this is network::readv() code straight up
         loop {
             match self
                 .protocol
@@ -110,7 +107,17 @@ impl<P: AsyncProtocol> DiskHandler<P> {
                         return 
                     }
                 }
-                Err(protocol::Error::InsufficientBytes(_)) => return,
+                Err(protocol::Error::InsufficientBytes(_)) => {
+                    if let Err(e) = self.storage.reload() {
+                        error!("Failed to reload storage: {e}");
+                        return
+                    }
+                    // Reader empty after reloading means
+                    // all disk backups have been read
+                    if self.storage.reader().is_empty() {
+                        return
+                    }
+                },
                 Err(e) => {
                     error!("{:15.15} failed to read from storage: {e}", "");
                     return
@@ -152,6 +159,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
             clean_session,
             lastwill,
             dynamic_filters,
+            true,
         )?;
         let id = link_rx.id();
 
@@ -163,13 +171,13 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
             network_update_tx,
             PersistanceLink {
                 _connect: connect,
-                client_id,
+                client_id: client_id.to_string(),
                 connection_id: id,
                 network,
                 link_tx,
                 link_rx,
                 notifications: VecDeque::with_capacity(100),
-                disk_handler: DiskHandler::new(protocol)?,
+                disk_handler: DiskHandler::new(&client_id, protocol)?,
                 network_update_rx,
                 connack: notification,
             },
@@ -219,17 +227,31 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
     }
 
     async fn write_to_client(&mut self) -> Result<(), Error> {
-        // take 1 packet, try to send it to client, if the future resolves too slowly then take more notifications and write them to the writer
+        // separate publish notifications out
+        let mut publish = VecDeque::new();
+        let mut non_pulish = VecDeque::new();
+        for notif in self.notifications.drain(..) {
+            match notif {
+                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => publish.push_back(notif),
+                _ => non_pulish.push_back(notif),
+            }
+        };
 
-        // write to disk
-        self.disk_handler.write(&mut self.notifications);
+        // write non-publishes to network
+        let unscheduled = self.network.writev(&mut non_pulish).await?;
+        if unscheduled {
+            self.link_rx.wake().await?;
+        };
 
-        // read from disk_handler
+        // write publishes to disk
+        if !publish.is_empty() { 
+            self.disk_handler.write(&mut publish);        
+        }
+        // read publishes from disk
         let mut buffer = VecDeque::new();
         self.disk_handler.read(&mut buffer);
-
-        // write to network
         // TODO: if network write throws an error then this means we again got network I/O error
+        // write publishes to network
         let unscheduled = self.network.writev(&mut buffer).await?;
         if unscheduled {
             self.link_rx.wake().await?;

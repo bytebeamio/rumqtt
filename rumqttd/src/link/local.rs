@@ -87,16 +87,26 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        persistent: bool,
     ) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx, metrics_rx) = Link::prepare(
+        let (mut message, i, o, link_rx, metrics_rx) = Link::prepare(
             /*tenant_id,*/ client_id,
             clean,
             last_will,
             dynamic_filters,
         );
+        if let Event::Connect {
+            connection: _,
+            incoming: _,
+            ref mut outgoing,
+        } = message
+        {
+            outgoing.persistent = persistent;
+        }
+
         router_tx.send((0, message))?;
 
         link_rx.recv()?;
@@ -369,6 +379,10 @@ impl LinkRx {
     ) -> Result<(), LinkError> {
         self.router_rx.recv_async().await?;
         mem::swap(&mut *self.send_buffer.lock(), notifications);
+        debug!(
+            "exchanged notifications from router, count: {}",
+            notifications.len()
+        );
         Ok(())
     }
 
