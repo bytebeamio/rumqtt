@@ -1,8 +1,7 @@
-use rumqttd::Broker;
+use rumqttd::{Broker, Config};
 
 use structopt::StructOpt;
 use tracing::metadata::LevelFilter;
-use tracing_subscriber::prelude::*;
 
 #[derive(StructOpt)]
 #[structopt(name = "rumqttd")]
@@ -56,30 +55,38 @@ fn main() {
 
     */
 
-    let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_regex(false) // exactly match fmt::Debug output
-        .with_env_var("FILTER")
-        .from_env()
-        .unwrap();
+    // let env_filter = tracing_subscriber::EnvFilter::builder()
+    //     .with_regex(false) // exactly match fmt::Debug output
+    //     .with_env_var("FILTER")
+    //     .from_env()
+    //     .unwrap();
 
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_line_number(false)
-        .with_file(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .compact();
+    // let fmt_layer = tracing_subscriber::fmt::layer()
+    //     .with_line_number(false)
+    //     .with_file(false)
+    //     .with_thread_ids(false)
+    //     .with_thread_names(false)
+    //     .compact();
+    
+    let builder = tracing_subscriber::fmt().with_env_filter("info").with_filter_reloading();
 
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(fmt_layer)
-        .init();
+    let handle = builder.reload_handle();
+
+    builder.try_init().expect("initialized subscriber succesfully");
+
+    // tracing_subscriber::registry()
+    //     .with(env_filter)
+    //     .with(fmt_layer)
+    //     .init();
 
     let config = config::Config::builder()
         .add_source(config::File::with_name(&commandline.config))
         .build()
         .unwrap();
 
-    let config = config.try_deserialize().unwrap();
+    let mut config: Config = config.try_deserialize().unwrap();
+
+    config.console.filter_handle = Some(handle);
 
     // println!("{:#?}", config);
 

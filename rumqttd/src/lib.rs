@@ -1,11 +1,9 @@
-#[macro_use]
-extern crate rouille;
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use segments::Storage;
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::{filter::EnvFilter, reload::Handle, fmt::Formatter};
 
 use std::net::SocketAddr;
 
@@ -99,6 +97,8 @@ pub struct RouterConfig {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConsoleSettings {
     pub listen: String,
+    #[serde(skip)]
+    pub filter_handle: Option<Handle<EnvFilter, Formatter>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
