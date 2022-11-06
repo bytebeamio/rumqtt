@@ -109,7 +109,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 }
                 return rouille::Response::json(&data);
             }
-            
+
             rouille::Response::empty_404()
            },
             _ => rouille::Response::empty_404()

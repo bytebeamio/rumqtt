@@ -1,7 +1,6 @@
 use rumqttd::{Broker, Config};
 
 use structopt::StructOpt;
-use tracing::metadata::LevelFilter;
 
 #[derive(StructOpt)]
 #[structopt(name = "rumqttd")]
@@ -32,52 +31,26 @@ fn main() {
     let commandline: CommandLine = CommandLine::from_args();
 
     banner(&commandline);
-    let _level = match commandline.verbose {
-        0 => LevelFilter::WARN,
-        1 => LevelFilter::INFO,
-        2 => LevelFilter::DEBUG,
-        _ => LevelFilter::TRACE,
+    let level = match commandline.verbose {
+        0 => "warn",
+        1 => "info",
+        2 => "debug",
+        _ => "trace",
     };
 
-    /* FOR TREE VIEW
-    let layer = tracing_tree::HierarchicalLayer::default()
-        .with_writer(std::io::stdout)
-        .with_indent_lines(true)
-        .with_indent_amount(2)
-        .with_thread_names(false)
+    let builder = tracing_subscriber::fmt()
+        .with_line_number(false)
+        .with_file(false)
         .with_thread_ids(false)
-        .with_verbose_exit(false)
-        .with_verbose_entry(false)
-        .with_targets(true);
+        .with_thread_names(false)
+        .with_env_filter(level)
+        .with_filter_reloading();
 
-    let subscriber = Registry::default().with(layer);
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let reload_handle = builder.reload_handle();
 
-    */
-
-    // let env_filter = tracing_subscriber::EnvFilter::builder()
-    //     .with_regex(false) // exactly match fmt::Debug output
-    //     .with_env_var("FILTER")
-    //     .from_env()
-    //     .unwrap();
-
-    // let fmt_layer = tracing_subscriber::fmt::layer()
-    //     .with_line_number(false)
-    //     .with_file(false)
-    //     .with_thread_ids(false)
-    //     .with_thread_names(false)
-    //     .compact();
-    
-    let builder = tracing_subscriber::fmt().with_env_filter("info").with_filter_reloading();
-
-    let handle = builder.reload_handle();
-
-    builder.try_init().expect("initialized subscriber succesfully");
-
-    // tracing_subscriber::registry()
-    //     .with(env_filter)
-    //     .with(fmt_layer)
-    //     .init();
+    builder
+        .try_init()
+        .expect("initialized subscriber succesfully");
 
     let config = config::Config::builder()
         .add_source(config::File::with_name(&commandline.config))
@@ -86,7 +59,7 @@ fn main() {
 
     let mut config: Config = config.try_deserialize().unwrap();
 
-    config.console.filter_handle = Some(handle);
+    config.console.set_filter_reload_handle(reload_handle);
 
     // println!("{:#?}", config);
 

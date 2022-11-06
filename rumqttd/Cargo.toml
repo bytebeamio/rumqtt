@@ -31,7 +31,6 @@ config = "0.13"
 structopt = "0.3.26"
 tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="0.3.16", features=["env-filter"] }
-tracing-tree = "0"
 
 [features]
 default = ["use-rustls"]
