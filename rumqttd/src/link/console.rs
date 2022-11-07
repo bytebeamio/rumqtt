@@ -102,14 +102,13 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::json(&v)
            },
            (POST) (/logs) => {
-            let data = try_or_400!(rouille::input::plain_text_body(&request));
+            let data = try_or_400!(rouille::input::plain_text_body(request));
             if let Some(handle) = &console.config.filter_handle {
-                if handle.reload(data.clone()).is_err() {
+                if handle.reload(&data).is_err() {
                     return rouille::Response::empty_400();
                 }
-                return rouille::Response::json(&data);
+                return rouille::Response::text(data);
             }
-
             rouille::Response::empty_404()
            },
             _ => rouille::Response::empty_404()
