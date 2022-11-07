@@ -34,7 +34,6 @@ impl Scheduler {
     }
 
     /// Next connection which is ready to make progress
-    // #[tracing::instrument(skip_all)]
     pub fn poll(&mut self) -> Option<(ConnectionId, VecDeque<DataRequest>)> {
         let id = self.readyqueue.pop_front()?;
         let tracker = self.trackers.get_mut(id)?;
