@@ -32,10 +32,10 @@ fn main() {
 
     banner(&commandline);
     let level = match commandline.verbose {
-        0 => "warn",
-        1 => "info",
-        2 => "debug",
-        _ => "trace",
+        0 => "rumqttd=warn",
+        1 => "rumqttd=info",
+        2 => "rumqttd=debug",
+        _ => "rumqttd=trace",
     };
 
     let builder = tracing_subscriber::fmt()
