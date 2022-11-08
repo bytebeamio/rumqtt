@@ -17,6 +17,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, tungstenite, WebSocketStream};
 use tungstenite::protocol::frame::coding::CloseCode;
+use tracing::{error, debug, warn};
 
 use super::network::N;
 
@@ -95,13 +96,16 @@ impl ShadowLink {
         let mut ping = time::interval(Duration::from_secs(10));
         let mut pong = true;
 
+        let span = tracing::info_span!("shadowlink_start", client_id=self.client_id);
+    let _guard = span.enter();
+
         // Note:
         // Shouldn't result in bounded queue deadlocks because of blocking n/w send
         loop {
             select! {
                 o = self.network.read() => {
                     let message = o?;
-                    debug!("{:15.15} {:20} size = {} bytes", self.client_id, "read",  message.len());
+                    debug!(size = message.len(), "read"  );
                     match message {
                         Message::Text(m) => {
                             self.extract_message(&m).await?;
@@ -136,7 +140,7 @@ impl ShadowLink {
                             continue
                         },
                         Notification::DeviceAck(ack) => {
-                            warn!("Ignoring acks for shadow. Ack = {:?}", ack);
+                            warn!(?ack, "Ignoring acks for shadow.");
                             continue;
                         }
                         Notification::Shadow(shadow) => {
@@ -147,9 +151,9 @@ impl ShadowLink {
                         v => unreachable!("Expecting only data or device acks. Received = {:?}", v)
                     };
 
-                    let write_len = message.len();
+                    let size = message.len();
                     self.network.write(message).await?;
-                    debug!("{:15.15} {:20} size = {} bytes", self.client_id, "write", write_len);
+                    debug!(size,  "write");
                 }
                 _ = interval.tick() => {
                     for filter in self.subscriptions.iter() {
@@ -158,7 +162,7 @@ impl ShadowLink {
                 }
                 _ = ping.tick() => {
                     if !pong {
-                        error!("{:15.15} {:20}", self.client_id, "no-pong");
+                        error!("no-pong");
                         break
                     }
 
@@ -173,6 +177,8 @@ impl ShadowLink {
     }
 
     async fn extract_message(&mut self, message: &str) -> Result<(), Error> {
+        let span = tracing::info_span!("extract_message", client_id=self.client_id);
+    let _guard = span.enter();
         match serde_json::from_str(message)? {
             Incoming::Shadow { filter } => match validate_shadow(&self.client_id, &filter) {
                 Ok(_) => {
@@ -180,7 +186,7 @@ impl ShadowLink {
                     self.link_tx.try_subscribe(filter)?;
                 }
                 Err(e) => {
-                    error!("{:15.15} {:20}: {}", self.client_id, "validation error", e);
+                    error!(?e, "validation error");
                     self.network.write(close(&e)).await?;
                     return Err(e);
                 }
