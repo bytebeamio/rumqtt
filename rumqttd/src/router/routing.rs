@@ -150,9 +150,8 @@ impl Router {
     /// Waits on incoming events when ready queue is empty.
     /// After pulling 1 event, tries to pull 500 more events
     /// before polling ready queue 100 times (connections)
+    #[tracing::instrument(skip_all)]
     fn run(&mut self, count: usize) -> Result<(), RouterError> {
-        let span = tracing::info_span!("run", count);
-        let _guard = span.enter();
         match count {
             0 => loop {
                 self.run_inner()?;
@@ -301,13 +300,13 @@ impl Router {
             }
         };
 
-        let span = tracing::info_span!("handle_disconnection", client_id);
+        let span = tracing::info_span!("handle_disconnection", client_id, id);
         let _guard = span.enter();
         if execute_last_will {
             self.handle_last_will(id);
         }
 
-        info!(id, "disconnect");
+        info!("disconnect");
 
         // Remove connection from router
         let mut connection = self.connections.remove(id);
@@ -369,7 +368,7 @@ impl Router {
         };
 
         let client_id = incoming.client_id.clone();
-        let span = tracing::info_span!("handle_payload", client_id, connection_id = id);
+        let span = tracing::info_span!("handle_payload", client_id, id);
         let _guard = span.enter();
         // Instead of exchanging, we should just append new incoming packets inside cache
         let mut packets = incoming.exchange(self.cache.take().unwrap());
@@ -483,8 +482,7 @@ impl Router {
                         let connection = self.connections.get_mut(id).unwrap();
 
                         if let Err(e) = validate_subscription(/*connection,*/ &f) {
-                            let id = &self.ibufs[id].client_id;
-                            error!(id, reason=?e,"bad-subscription" );
+                            error!(reason=?e,"bad-subscription" );
                             disconnect = true;
                             break;
                         }
@@ -535,14 +533,9 @@ impl Router {
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.subscribe_count -= 1;
 
-                            let outgoing = self.obufs.get_mut(id).unwrap();
-
                             if connection.subscriptions.contains(&filter) {
                                 connection.subscriptions.remove(&filter);
-                                debug!(
-                                    outgoing_client_id = outgoing.client_id,
-                                    filter, "unsubscribe"
-                                );
+                                debug!(filter, "unsubscribe");
                             } else {
                                 error!(pkid = unsubscribe.pkid, "unsubscribe-failed");
                                 continue;
@@ -1016,7 +1009,7 @@ fn forward_device_data(
 
     let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
 
-    trace!(inflight, buffer = len, "inflight");
+    trace!(inflight, buffer = len);
 
     if len >= MAX_CHANNEL_CAPACITY - 1 {
         outgoing.push_notification(Notification::Unschedule);
@@ -1040,7 +1033,7 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
             payload: publish.payload,
         };
 
-        // FIll notify shadow
+        // Fill notify shadow
         let message = Notification::Shadow(shadow_reply);
         let len = outgoing.push_notification(message);
         let _should_unschedule = if len >= MAX_CHANNEL_CAPACITY - 1 {

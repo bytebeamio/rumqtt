@@ -296,7 +296,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             };
 
             info!(
-                name=?self.config.name, info="accept", ?addr, count
+                name=?self.config.name, ?addr, count,"accept"
             );
 
             let config = config.clone();
@@ -343,19 +343,20 @@ async fn remote<P: Protocol>(
     let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
     let mut execute_will = false;
-
+    let span = tracing::info_span!("remote", client_id, connection_id);
+    let _guard = span.enter();
     match link.start().await {
         // Connection get close. This shouldn't usually happen
-        Ok(_) => error!(client_id, "connection-stop"),
+        Ok(_) => error!("connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(remote::Error::Link(e)) => {
-            error!(client_id, error=?e, "router-drop");
+            error!(error=?e, "router-drop");
             return;
         }
         // Any other error
         Err(e) => {
-            error!(client_id, error=?e,"Disconnected!!");
+            error!(error=?e,"Disconnected!!");
             execute_will = true;
         }
     };
@@ -381,7 +382,7 @@ async fn shadow_connection(
     let mut link = match ShadowLink::new(config, router_tx.clone(), stream).await {
         Ok(l) => l,
         Err(e) => {
-            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+            error!(reason=?e, "Remote link error");
             return;
         }
     };
@@ -389,16 +390,19 @@ async fn shadow_connection(
     let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
 
+    let span = tracing::info_span!("shadow_connection", client_id, connection_id);
+    let _guard = span.enter();
+
     match link.start().await {
         // Connection get close. This shouldn't usually happen
-        Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
+        Ok(_) => error!("connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(shadow::Error::Link(e)) => {
-            error!("{:15.15}[E] {:20} {:?}", client_id, "router-drop", e);
+            error!(reason=?e, "router-drop");
             return;
         }
-        Err(e) => error!("{:15.15}[E] {}", client_id, e.to_string()),
+        Err(e) => error!(?e),
     };
 
     let disconnect = Disconnection {

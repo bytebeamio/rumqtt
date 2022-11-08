@@ -63,12 +63,7 @@ impl Scheduler {
     pub fn reschedule(&mut self, id: ConnectionId, reason: ScheduleReason) {
         let tracker = self.trackers.get_mut(id).unwrap();
         if let Some(v) = tracker.try_ready(reason) {
-            trace!(
-                tracker_id = tracker.id,
-                info = "reschedule",
-                "{:?} -> Ready",
-                v
-            );
+            trace!(tracker_id = tracker.id, "reschedule {:?} -> Ready", v);
             self.readyqueue.push_back(id);
         }
     }
@@ -79,8 +74,7 @@ impl Scheduler {
 
         trace!(
             tracker_id = tracker.id,
-            info = "pause",
-            "{:?} -> {:?}",
+            "pause {:?} -> {:?}",
             tracker.status,
             reason
         );

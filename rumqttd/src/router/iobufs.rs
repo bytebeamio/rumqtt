@@ -162,7 +162,7 @@ impl Outgoing {
 
         // We don't support out of order acks
         if pkid != head {
-            error!(error = "out of order ack.", pkid, head);
+            error!(pkid, head, "out of order ack.");
             return None;
         }
 
