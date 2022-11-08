@@ -39,6 +39,7 @@ fn main() {
     };
 
     let builder = tracing_subscriber::fmt()
+        .pretty()
         .with_line_number(false)
         .with_file(false)
         .with_thread_ids(false)

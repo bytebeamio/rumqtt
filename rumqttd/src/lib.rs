@@ -3,7 +3,16 @@ use std::path::PathBuf;
 
 use segments::Storage;
 use serde::{Deserialize, Serialize};
-use tracing_subscriber::{filter::EnvFilter, fmt::Formatter, reload::Handle};
+use tracing_subscriber::{
+    filter::EnvFilter,
+    fmt::{
+        format::{Format, Pretty},
+        Layer,
+    },
+    layer::Layered,
+    reload::Handle,
+    Registry,
+};
 
 use std::net::SocketAddr;
 
@@ -94,15 +103,17 @@ pub struct RouterConfig {
     pub initialized_filters: Option<Vec<Filter>>,
 }
 
+type ReloadHandle = Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConsoleSettings {
     pub listen: String,
     #[serde(skip)]
-    filter_handle: Option<Handle<EnvFilter, Formatter>>,
+    filter_handle: Option<ReloadHandle>,
 }
 
 impl ConsoleSettings {
-    pub fn set_filter_reload_handle(&mut self, handle: Handle<EnvFilter, Formatter>) {
+    pub fn set_filter_reload_handle(&mut self, handle: ReloadHandle) {
         self.filter_handle.replace(handle);
     }
 }
