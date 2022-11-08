@@ -14,7 +14,7 @@ use crate::server::tls::{self, TLSAcceptor};
 use crate::ConnectionSettings;
 use flume::{RecvError, SendError, Sender};
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, field, info, Instrument, Span};
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
@@ -306,10 +306,22 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             let protocol = self.protocol.clone();
             match shadow {
                 #[cfg(feature = "websockets")]
-                true => task::spawn(shadow_connection(config, router_tx, network)),
-                _ => task::spawn(remote(
-                    config, /*tenant_id,*/ router_tx, network, protocol,
+                true => task::spawn(shadow_connection(config, router_tx, network).instrument(
+                    tracing::info_span!(
+                        "shadow_connection",
+                        client_id = field::Empty,
+                        connection_id = field::Empty
+                    ),
                 )),
+                _ => task::spawn(
+                    remote(config, /*tenant_id,*/ router_tx, network, protocol).instrument(
+                        tracing::info_span!(
+                            "remote",
+                            client_id = field::Empty,
+                            connection_id = field::Empty
+                        ),
+                    ),
+                ),
             };
 
             time::sleep(delay).await;
@@ -322,7 +334,6 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
 /// denial of service attacks (rogue clients which only does network connection without sending
 /// mqtt connection packet to make make the server reach its concurrent connection limit)
-#[tracing::instrument(skip_all)]
 async fn remote<P: Protocol>(
     config: Arc<ConnectionSettings>,
     // tenant_id: Option<String>,
@@ -343,8 +354,10 @@ async fn remote<P: Protocol>(
     let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
     let mut execute_will = false;
-    let span = tracing::info_span!("remote", client_id, connection_id);
-    let _guard = span.enter();
+
+    Span::current().record("client_id", &client_id);
+    Span::current().record("connection_id", &connection_id);
+
     match link.start().await {
         // Connection get close. This shouldn't usually happen
         Ok(_) => error!("connection-stop"),
@@ -390,8 +403,8 @@ async fn shadow_connection(
     let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
 
-    let span = tracing::info_span!("shadow_connection", client_id, connection_id);
-    let _guard = span.enter();
+    Span::current().record("client_id", &client_id);
+    Span::current().record("connection_id", &connection_id);
 
     match link.start().await {
         // Connection get close. This shouldn't usually happen

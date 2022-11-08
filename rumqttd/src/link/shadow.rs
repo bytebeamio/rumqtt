@@ -16,8 +16,8 @@ use tokio::{select, time};
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, tungstenite, WebSocketStream};
+use tracing::{debug, error, warn};
 use tungstenite::protocol::frame::coding::CloseCode;
-use tracing::{error, debug, warn};
 
 use super::network::N;
 
@@ -91,13 +91,11 @@ impl ShadowLink {
         })
     }
 
+    #[tracing::instrument(skip_all, fields(client_id=self.client_id))]
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut interval = time::interval(Duration::from_secs(5));
         let mut ping = time::interval(Duration::from_secs(10));
         let mut pong = true;
-
-        let span = tracing::info_span!("shadowlink_start", client_id=self.client_id);
-    let _guard = span.enter();
 
         // Note:
         // Shouldn't result in bounded queue deadlocks because of blocking n/w send
@@ -176,9 +174,8 @@ impl ShadowLink {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(client_id=self.client_id))]
     async fn extract_message(&mut self, message: &str) -> Result<(), Error> {
-        let span = tracing::info_span!("extract_message", client_id=self.client_id);
-    let _guard = span.enter();
         match serde_json::from_str(message)? {
             Incoming::Shadow { filter } => match validate_shadow(&self.client_id, &filter) {
                 Ok(_) => {
