@@ -414,6 +414,9 @@ impl Connection {
     /// [`EvenLoop`]: super::EventLoop
     pub fn try_recv(&mut self) -> Result<Result<Event, ConnectionError>, TryRecvError> {
         let f = self.eventloop.poll();
+        // Enters the runtime context so we can poll the future, as required by `now_or_never()`.
+        // ref: https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#method.enter
+        let _guard = self.runtime.enter();
         let event = f.now_or_never().ok_or(TryRecvError::Empty)?;
 
         resolve_event(event).ok_or(TryRecvError::Disconnected)
