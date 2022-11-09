@@ -150,7 +150,6 @@ impl Router {
     /// Waits on incoming events when ready queue is empty.
     /// After pulling 1 event, tries to pull 500 more events
     /// before polling ready queue 100 times (connections)
-    #[tracing::instrument(skip_all)]
     fn run(&mut self, count: usize) -> Result<(), RouterError> {
         match count {
             0 => loop {
