@@ -542,8 +542,7 @@ impl Router {
 
                             let outgoing = self.obufs.get_mut(id).unwrap();
 
-                            if connection.subscriptions.contains(&filter) {
-                                connection.subscriptions.remove(&filter);
+                            if connection.subscriptions.remove(&filter) {
                                 debug!(
                                     "{:15.15}[I] {:20} filter = {}",
                                     outgoing.client_id, "unsubscribe", filter
@@ -713,8 +712,7 @@ impl Router {
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
 
-        if !connection.subscriptions.contains(&filter) {
-            connection.subscriptions.insert(filter.clone());
+        if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
                 filter,
                 filter_idx,
@@ -893,10 +891,8 @@ fn append_to_commitlog(
     let filter_idxs = match filter_idxs {
         Some(v) => v,
         None if connections[id].dynamic_filters => {
-            let mut filter_idxs = vec![];
             let (idx, _cursor) = datalog.next_native_offset(topic);
-            filter_idxs.push(idx);
-            filter_idxs
+            vec![idx]
         }
         None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
     };
@@ -1091,12 +1087,9 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
         // FIll notify shadow
         let message = Notification::Shadow(shadow_reply);
         let len = outgoing.push_notification(message);
-        let _should_unschedule = if len >= MAX_CHANNEL_CAPACITY - 1 {
+        if len >= MAX_CHANNEL_CAPACITY - 1 {
             outgoing.push_notification(Notification::Unschedule);
-            true
-        } else {
-            false
-        };
+        }
         outgoing.handle.try_send(()).ok();
     }
 }
