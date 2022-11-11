@@ -532,10 +532,8 @@ impl Router {
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.subscribe_count -= 1;
 
-                            let outgoing = self.obufs.get_mut(id).unwrap();
-
                             if connection.subscriptions.remove(&filter) {
-                                debug!(outgoing.client_id, filter, "unsubscribe");
+                                debug!(filter, "unsubscribe");
                             } else {
                                 error!(pkid = unsubscribe.pkid, "unsubscribe-failed");
                                 continue;
