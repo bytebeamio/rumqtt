@@ -532,9 +532,10 @@ impl Router {
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.subscribe_count -= 1;
 
-                            if connection.subscriptions.contains(&filter) {
-                                connection.subscriptions.remove(&filter);
-                                debug!(filter, "unsubscribe");
+                            let outgoing = self.obufs.get_mut(id).unwrap();
+
+                            if connection.subscriptions.remove(&filter) {
+                                debug!(outgoing.client_id, filter, unsubscribe);
                             } else {
                                 error!(pkid = unsubscribe.pkid, "unsubscribe-failed");
                                 continue;
@@ -690,8 +691,7 @@ impl Router {
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
 
-        if !connection.subscriptions.contains(&filter) {
-            connection.subscriptions.insert(filter.clone());
+        if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
                 filter,
                 filter_idx,
@@ -860,10 +860,8 @@ fn append_to_commitlog(
     let filter_idxs = match filter_idxs {
         Some(v) => v,
         None if connections[id].dynamic_filters => {
-            let mut filter_idxs = vec![];
             let (idx, _cursor) = datalog.next_native_offset(topic);
-            filter_idxs.push(idx);
-            filter_idxs
+            vec![idx]
         }
         None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
     };
@@ -1035,12 +1033,9 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
         // Fill notify shadow
         let message = Notification::Shadow(shadow_reply);
         let len = outgoing.push_notification(message);
-        let _should_unschedule = if len >= MAX_CHANNEL_CAPACITY - 1 {
+        if len >= MAX_CHANNEL_CAPACITY - 1 {
             outgoing.push_notification(Notification::Unschedule);
-            true
-        } else {
-            false
-        };
+        }
         outgoing.handle.try_send(()).ok();
     }
 }
@@ -1122,7 +1117,7 @@ fn validate_subscription(
         return Err(RouterError::UnsupportedQoS(filter.qos));
     }
 
-    if filter.path.starts_with("test") || filter.path.starts_with('$') {
+    if filter.path.starts_with('$') {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
     }
 
