@@ -356,7 +356,7 @@ async fn remote<P: Protocol>(
     let mut execute_will = false;
 
     Span::current().record("client_id", &client_id);
-    Span::current().record("connection_id", &connection_id);
+    Span::current().record("connection_id", connection_id);
 
     match link.start().await {
         // Connection get close. This shouldn't usually happen
