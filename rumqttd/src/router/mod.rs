@@ -19,6 +19,7 @@ mod connection;
 mod graveyard;
 pub mod iobufs;
 mod logs;
+mod meter;
 mod routing;
 mod scheduler;
 mod waiters;
@@ -43,6 +44,10 @@ pub enum Event {
         incoming: iobufs::Incoming,
         outgoing: iobufs::Outgoing,
     },
+    /// New meter link
+    NewMeter(flume::Sender<(ConnectionId, Meter)>),
+    /// Request for meter
+    GetMeter(GetMeter),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog
@@ -215,7 +220,7 @@ pub struct ShadowReply {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct RouterMetrics {
+pub struct RouterMeter {
     pub router_id: RouterId,
     pub total_connections: usize,
     pub total_subscriptions: usize,
@@ -269,6 +274,21 @@ impl ConnectionMeter {
     }
 }
 
+
+#[derive(Debug, Clone)]
+pub enum GetMeter {
+    Router,
+    Connection(String),
+    Subscription(String)
+}
+
+#[derive(Debug, Clone)]
+pub enum Meter {
+    Router(usize, RouterMeter),
+    Connection(String, ConnectionMeter),
+    Subscription(String, SubscriptionMeter),
+}
+
 #[derive(Debug, Clone)]
 pub enum MetricsRequest {
     Config,
@@ -284,7 +304,7 @@ pub enum MetricsRequest {
 #[serde(rename_all = "lowercase")]
 pub enum MetricsReply {
     Config(RouterConfig),
-    Router(RouterMetrics),
+    Router(RouterMeter),
     Connection(Option<(ConnectionMeter, Tracker)>),
     Subscriptions(HashMap<Filter, Vec<String>>),
     Subscription(Option<SubscriptionMeter>),

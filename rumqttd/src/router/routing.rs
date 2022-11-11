@@ -22,8 +22,9 @@ use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, MetricsReply, MetricsRequest,
-    Notification, RouterMetrics, ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
+    packetid, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
+    MetricsRequest, Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY,
+    MAX_SCHEDULE_ITERATIONS,
 };
 
 #[derive(Error, Debug)]
@@ -54,6 +55,8 @@ pub struct Router {
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
     /// List of connections
+    meters: Slab<Sender<(ConnectionId, Meter)>>,
+    /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
     connection_map: HashMap<String, ConnectionId>,
@@ -80,7 +83,7 @@ pub struct Router {
     /// with this router
     router_tx: Sender<(ConnectionId, Event)>,
     /// Router metrics
-    router_metrics: RouterMetrics,
+    router_metrics: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
 }
@@ -89,14 +92,15 @@ impl Router {
     pub fn new(router_id: RouterId, config: RouterConfig) -> Router {
         let (router_tx, router_rx) = bounded(1000);
 
+        let meters = Slab::with_capacity(10);
         let connections = Slab::with_capacity(config.max_connections);
         let ibufs = Slab::with_capacity(config.max_connections);
         let obufs = Slab::with_capacity(config.max_connections);
         let ackslog = Slab::with_capacity(config.max_connections);
 
-        let router_metrics = RouterMetrics {
+        let router_metrics = RouterMeter {
             router_id,
-            ..RouterMetrics::default()
+            ..RouterMeter::default()
         };
 
         let max_connections = config.max_connections;
@@ -104,6 +108,7 @@ impl Router {
             id: router_id,
             config: config.clone(),
             graveyard: Graveyard::new(),
+            meters,
             connections,
             connection_map: Default::default(),
             subscription_map: Default::default(),
@@ -207,6 +212,8 @@ impl Router {
                 incoming,
                 outgoing,
             } => self.handle_new_connection(connection, incoming, outgoing),
+            Event::NewMeter(tx) => self.handle_new_meter(tx),
+            Event::GetMeter(meter) => self.handle_get_meter(id, meter),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
@@ -287,6 +294,15 @@ impl Router {
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
+    }
+
+    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Meter)>) {
+        let meter_id = self.meters.insert(tx);
+        let tx = &self.meters[meter_id];
+        let _ = tx.try_send((
+            meter_id,
+            Meter::Router(self.id, self.router_metrics.clone()),
+        ));
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
@@ -821,6 +837,33 @@ impl Router {
                 );
                 self.router_metrics.failed_publishes += 1;
                 // Removed disconnect = true from here because we disconnect anyways
+            }
+        };
+    }
+
+    fn handle_get_meter(&self, meter_id: ConnectionId, meter: router::GetMeter) {
+        let meter_tx = &self.meters[meter_id];
+        match meter {
+            GetMeter::Router => {
+                let _ = meter_tx.try_send((
+                    meter_id,
+                    Meter::Router(self.id, self.router_metrics.clone()),
+                ));
+            }
+            GetMeter::Connection(client_id) => {
+                let connection_id = self.connection_map.get(&client_id).unwrap();
+
+                // Update metrics
+                if let Some(meter) = self.connections.get(*connection_id).map(|v| &v.meter) {
+                    let meter = Meter::Connection(client_id, meter.clone());
+                    let _ = meter_tx.try_send((meter_id, meter));
+                }
+            }
+            GetMeter::Subscription(filter) => {
+                if let Some(meter) = self.datalog.meter(&filter) {
+                    let meter = Meter::Subscription(filter.clone(), meter.clone());
+                    let _ = meter_tx.try_send((meter_id, meter));
+                }
             }
         };
     }
