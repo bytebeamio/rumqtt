@@ -404,7 +404,7 @@ async fn shadow_connection(
     let connection_id = link.connection_id;
 
     Span::current().record("client_id", &client_id);
-    Span::current().record("connection_id", &connection_id);
+    Span::current().record("connection_id", connection_id);
 
     match link.start().await {
         // Connection get close. This shouldn't usually happen
