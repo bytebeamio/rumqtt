@@ -44,15 +44,15 @@ jobs:
           command: fetch
           args: --verbose
 
-      - name: Check benchmarks
-        uses: actions-rs/cargo@v1
-        env:
-          RUSTFLAGS: "-D warnings"
-        # NOTE: benchmarks are limited to compiling only on non windows systems, without any features enabled.
-        if: ${{ matrix.os != 'windows-latest' && matrix.features == '--no-default-features' }}
-        with:
-          command: clippy
-          args: --verbose --all-targets -p benchmarks
+      # - name: Check benchmarks
+      #   uses: actions-rs/cargo@v1
+      #   env:
+      #     RUSTFLAGS: "-D warnings"
+      #   # NOTE: benchmarks are limited to compiling only on non windows systems, without any features enabled.
+      #   if: ${{ matrix.os != 'windows-latest' && matrix.features == '--no-default-features' }}
+      #   with:
+      #     command: clippy
+      #     args: --verbose --all-targets -p benchmarks
 
       - name: Check rumqttc and rumqttd
         uses: actions-rs/cargo@v1
