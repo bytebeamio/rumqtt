@@ -19,7 +19,6 @@ mod connection;
 mod graveyard;
 pub mod iobufs;
 mod logs;
-mod meter;
 mod routing;
 mod scheduler;
 mod waiters;

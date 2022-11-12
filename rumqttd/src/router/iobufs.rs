@@ -10,7 +10,7 @@ use crate::{
     Cursor, Notification,
 };
 
-use super::{Forward, Meter};
+use super::Forward;
 
 const MAX_INFLIGHT: usize = 100;
 const MAX_PKID: u16 = MAX_INFLIGHT as u16;
@@ -234,7 +234,6 @@ impl OutgoingMeter {
         self.last_timestamp = now;
     }
 }
-
 
 #[cfg(test)]
 mod test {
