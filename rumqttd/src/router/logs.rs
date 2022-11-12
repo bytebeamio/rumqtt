@@ -1,5 +1,6 @@
 use super::Ack;
 use slab::Slab;
+use tracing::trace;
 
 use crate::protocol::{
     matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
@@ -205,7 +206,7 @@ impl DataLog {
         filter: &str,
         notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     ) {
-        trace!("{:15.15}[S] for filter: {:?}", "retain-msg", &filter);
+        trace!(info = "retain-msg", filter = &filter);
 
         let idx = self.filter_indexes.get(filter).unwrap();
 

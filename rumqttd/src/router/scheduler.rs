@@ -2,6 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use slab::Slab;
+use tracing::trace;
 
 use super::DataRequest;
 use crate::{ConnectionId, Filter};
@@ -61,12 +62,7 @@ impl Scheduler {
     pub fn reschedule(&mut self, id: ConnectionId, reason: ScheduleReason) {
         let tracker = self.trackers.get_mut(id).unwrap();
         if let Some(v) = tracker.try_ready(reason) {
-            trace!(
-                "{:15.15}[S] {:20} {:?} -> Ready",
-                tracker.id,
-                "reschedule",
-                v
-            );
+            trace!(tracker_id = tracker.id, "reschedule {:?} -> Ready", v);
             self.readyqueue.push_back(id);
         }
     }
@@ -76,9 +72,8 @@ impl Scheduler {
         let tracker = self.trackers.get_mut(id).unwrap();
 
         trace!(
-            "{:15.15}[S] {:20} {:?} -> {:?}",
-            tracker.id,
-            "pause",
+            tracker_id = tracker.id,
+            "pause {:?} -> {:?}",
             tracker.status,
             reason
         );
