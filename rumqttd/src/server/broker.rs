@@ -13,8 +13,8 @@ use crate::protocol::Protocol;
 use crate::server::tls::{self, TLSAcceptor};
 use crate::ConnectionSettings;
 use flume::{RecvError, SendError, Sender};
-use log::*;
 use std::sync::Arc;
+use tracing::{error, field, info, Instrument, Span};
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
@@ -123,11 +123,17 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (link_tx, link_rx, _ack) =
-            Link::new(None, client_id, self.router_tx.clone(), true, None, false)?;
+        let (link_tx, link_rx, _ack) = Link::new(
+            /*None,*/ client_id,
+            self.router_tx.clone(),
+            true,
+            None,
+            false,
+        )?;
         Ok((link_tx, link_rx))
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
         // spawn bridge in a separate thread
         // if let Some(bridge_config) = self.config.bridge.clone() {
@@ -157,7 +163,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(false).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
+                        error!(error=?e, "Remote link error");
                     }
                 });
             })?;
@@ -172,7 +178,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(false).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
+                        error!(error=?e, "Remote link error");
                     }
                 });
             })?;
@@ -194,7 +200,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(true).await {
-                        error!("{:15.15}[I] Remote link error = {:?}", "", e);
+                        error!(error=?e, "Remote link error");
                     }
                 });
             })?;
@@ -244,19 +250,23 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
     }
 
     // Depending on TLS or not create a new Network
-    async fn tls_accept(&self, stream: TcpStream) -> Result<(Box<dyn N>, Option<String>), Error> {
+    async fn tls_accept(
+        &self,
+        stream: TcpStream,
+    ) -> Result</*(*/ Box<dyn N> /*, Option<String>)*/, Error> {
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         match &self.config.tls {
             Some(c) => {
-                let (tenant_id, network) = TLSAcceptor::new(c)?.accept(stream).await?;
-                Ok((network, Some(tenant_id)))
+                let /*(tenant_id,*/ network/*)*/ = TLSAcceptor::new(c)?.accept(stream).await?;
+                Ok(/*(*/ network /*, Some(tenant_id))*/)
             }
-            None => Ok((Box::new(stream), None)),
+            None => Ok(/*(*/ Box::new(stream) /*, None)*/),
         }
         #[cfg(not(any(feature = "use-rustls", feature = "use-native-tls")))]
-        Ok((Box::new(stream), None))
+        Ok(/*(*/ Box::new(stream) /*, None)*/)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn start(&self, shadow: bool) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
@@ -264,30 +274,29 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
         let config = Arc::new(self.config.connections.clone());
         info!(
-            "{:15.15}[>] waiting for remote connections > {}",
-            self.config.name, self.config.listen
+            config = self.config.name,
+            "[>] waiting for remote connections > {}", self.config.listen
         );
         loop {
             // Await new network connection.
             let (stream, addr) = match listener.accept().await {
                 Ok((s, r)) => (s, r),
                 Err(e) => {
-                    error!("Unable to accept socket. Error = {:?}", e);
+                    error!(error=?e, "Unable to accept socket.");
                     continue;
                 }
             };
 
-            let (network, tenant_id) = match self.tls_accept(stream).await {
+            let /*(*/network /*, tenant_id)*/ = match self.tls_accept(stream).await {
                 Ok(o) => o,
                 Err(e) => {
-                    error!("Tls accept error = {:?}", e);
+                    error!(error=?e, "Tls accept error");
                     continue;
                 }
             };
 
             info!(
-                "{:15.15}[I] {:20} addr = {} count {}",
-                self.config.name, "accept", addr, count
+                name=?self.config.name, ?addr, count,"accept"
             );
 
             let config = config.clone();
@@ -297,8 +306,22 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             let protocol = self.protocol.clone();
             match shadow {
                 #[cfg(feature = "websockets")]
-                true => task::spawn(shadow_connection(config, router_tx, network)),
-                _ => task::spawn(remote(config, tenant_id, router_tx, network, protocol)),
+                true => task::spawn(shadow_connection(config, router_tx, network).instrument(
+                    tracing::info_span!(
+                        "shadow_connection",
+                        client_id = field::Empty,
+                        connection_id = field::Empty
+                    ),
+                )),
+                _ => task::spawn(
+                    remote(config, /*tenant_id,*/ router_tx, network, protocol).instrument(
+                        tracing::info_span!(
+                            "remote",
+                            client_id = field::Empty,
+                            connection_id = field::Empty
+                        ),
+                    ),
+                ),
             };
 
             time::sleep(delay).await;
@@ -313,17 +336,17 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 /// mqtt connection packet to make make the server reach its concurrent connection limit)
 async fn remote<P: Protocol>(
     config: Arc<ConnectionSettings>,
-    tenant_id: Option<String>,
+    // tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
 ) {
     let network = Network::new(stream, config.max_payload_size, 100, protocol);
     // Start the link
-    let mut link = match RemoteLink::new(config, router_tx.clone(), tenant_id, network).await {
+    let mut link = match RemoteLink::new(config, router_tx.clone(), /*tenant_id,*/ network).await {
         Ok(l) => l,
         Err(e) => {
-            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+            error!(error=?e, "Remote link error");
             return;
         }
     };
@@ -332,18 +355,21 @@ async fn remote<P: Protocol>(
     let connection_id = link.connection_id;
     let mut execute_will = false;
 
+    Span::current().record("client_id", &client_id);
+    Span::current().record("connection_id", connection_id);
+
     match link.start().await {
         // Connection get close. This shouldn't usually happen
-        Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
+        Ok(_) => error!("connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(remote::Error::Link(e)) => {
-            info!("{:15.15}[E] {:20} {:?}", client_id, "router-drop", e);
+            error!(error=?e, "router-drop");
             return;
         }
         // Any other error
         Err(e) => {
-            error!("{:15.15}[E] Disconnected!! {:?}", client_id, e);
+            error!(error=?e,"Disconnected!!");
             execute_will = true;
         }
     };
@@ -369,7 +395,7 @@ async fn shadow_connection(
     let mut link = match ShadowLink::new(config, router_tx.clone(), stream).await {
         Ok(l) => l,
         Err(e) => {
-            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+            error!(reason=?e, "Remote link error");
             return;
         }
     };
@@ -377,16 +403,19 @@ async fn shadow_connection(
     let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
 
+    Span::current().record("client_id", &client_id);
+    Span::current().record("connection_id", connection_id);
+
     match link.start().await {
         // Connection get close. This shouldn't usually happen
-        Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
+        Ok(_) => error!("connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(shadow::Error::Link(e)) => {
-            error!("{:15.15}[E] {:20} {:?}", client_id, "router-drop", e);
+            error!(reason=?e, "router-drop");
             return;
         }
-        Err(e) => error!("{:15.15}[E] {}", client_id, e.to_string()),
+        Err(e) => error!(?e),
     };
 
     let disconnect = Disconnection {

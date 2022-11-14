@@ -8,7 +8,7 @@ pub mod v5;
 
 /// Checks if the filter is valid
 ///
-/// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
 pub fn valid_filter(filter: &str) -> bool {
     if filter.is_empty() {
         return false;
@@ -16,22 +16,28 @@ pub fn valid_filter(filter: &str) -> bool {
 
     let hirerarchy = filter.split('/').collect::<Vec<&str>>();
     if let Some((last, remaining)) = hirerarchy.split_last() {
-        // # is not allowed in filer except as a last entry
-        // invalid: sport/tennis#/player
-        // invalid: sport/tennis/#/ranking
         for entry in remaining.iter() {
+            // # is not allowed in filter except as a last entry
+            // invalid: sport/tennis#/player
+            // invalid: sport/tennis/#/ranking
             if entry.contains('#') {
+                return false;
+            }
+
+            // + must occupy an entire level of the filter
+            // invalid: sport+
+            if entry.len() > 1 && entry.contains('+') {
                 return false;
             }
         }
 
-        // only single '#" is allowed in last entry
+        // only single '#" or '+' is allowed in last entry
         // invalid: sport/tennis#
-        if last.len() != 1 && last.contains('#') {
+        // invalid: sport/++
+        if last.len() != 1 && (last.contains('#') || last.contains('+')) {
             return false;
         }
     }
-
     true
 }
 
@@ -138,7 +144,7 @@ pub fn qos(num: u8) -> Result<QoS, Error> {
 ///          |         Remaining Bytes Len  (1/2/3/4 bytes)        |
 ///          +-----------------------------------------------------+
 ///
-/// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349207>
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct FixedHeader {

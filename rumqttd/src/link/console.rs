@@ -2,6 +2,7 @@ use crate::link::local::{Link, LinkRx};
 use crate::router::{Event, MetricsRequest};
 use crate::{ConnectionId, ConsoleSettings};
 use flume::Sender;
+use rouille::{router, try_or_400};
 use std::sync::Arc;
 
 pub struct ConsoleLink {
@@ -15,7 +16,8 @@ impl ConsoleLink {
     /// Requires the corresponding Router to be running to complete
     pub fn new(config: ConsoleSettings, router_tx: Sender<(ConnectionId, Event)>) -> ConsoleLink {
         let tx = router_tx.clone();
-        let (link_tx, link_rx, _ack) = Link::new(None, "console", tx, true, None, true).unwrap();
+        let (link_tx, link_rx, _ack) =
+            Link::new(/*None,*/ "console", tx, true, None, true).unwrap();
         let connection_id = link_tx.connection_id;
         ConsoleLink {
             config,
@@ -98,6 +100,16 @@ pub fn start(console: Arc<ConsoleLink>) {
 
                 let v = console.link_rx.metrics();
                 rouille::Response::json(&v)
+           },
+           (POST) (/logs) => {
+            let data = try_or_400!(rouille::input::plain_text_body(request));
+            if let Some(handle) = &console.config.filter_handle {
+                if handle.reload(&data).is_err() {
+                    return rouille::Response::empty_400();
+                }
+                return rouille::Response::text(data);
+            }
+            rouille::Response::empty_404()
            },
             _ => rouille::Response::empty_404()
         )

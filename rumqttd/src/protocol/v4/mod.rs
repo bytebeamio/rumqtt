@@ -52,7 +52,7 @@ pub enum PacketType {
 ///          |         Remaining Bytes Len  (1/2/3/4 bytes)        |
 ///          +-----------------------------------------------------+
 ///
-/// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349207>
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct FixedHeader {
@@ -299,7 +299,12 @@ impl Protocol for V4 {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
-                PacketType::Disconnect => Ok(Packet::Disconnect),
+                PacketType::Disconnect => Ok(Packet::Disconnect(
+                    Disconnect {
+                        reason_code: DisconnectReasonCode::NormalDisconnection,
+                    },
+                    None,
+                )),
                 _ => Err(Error::PayloadRequired),
             };
         }
@@ -310,7 +315,7 @@ impl Protocol for V4 {
                 let (connect, login, lastwill) = connect::read(fixed_header, packet)?;
                 Packet::Connect(connect, None, lastwill, None, login)
             }
-            PacketType::ConnAck => Packet::ConnAck(connack::read(fixed_header, packet)?),
+            PacketType::ConnAck => Packet::ConnAck(connack::read(fixed_header, packet)?, None),
             PacketType::Publish => Packet::Publish(publish::read(fixed_header, packet)?, None),
             PacketType::PubAck => Packet::PubAck(puback::read(fixed_header, packet)?, None),
             PacketType::Subscribe => {
@@ -318,57 +323,45 @@ impl Protocol for V4 {
             }
             PacketType::SubAck => Packet::SubAck(suback::read(fixed_header, packet)?, None),
             PacketType::Unsubscribe => {
-                Packet::Unsubscribe(unsubscribe::read(fixed_header, packet)?)
+                Packet::Unsubscribe(unsubscribe::read(fixed_header, packet)?, None)
             }
-            PacketType::UnsubAck => Packet::UnsubAck(unsuback::read(fixed_header, packet)?),
+            PacketType::UnsubAck => Packet::UnsubAck(unsuback::read(fixed_header, packet)?, None),
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
             PacketType::PubRec => Packet::PubRec(pubrec::read(fixed_header, packet)?, None),
             PacketType::PubRel => Packet::PubRel(pubrel::read(fixed_header, packet)?, None),
             PacketType::PubComp => Packet::PubComp(pubcomp::read(fixed_header, packet)?, None),
-            PacketType::Disconnect => Packet::Disconnect,
+            // v4 Disconnect packet gets handled in the previous check, this branch gets hit when
+            // Disconnect packet has properties which is only valid for v5
+            PacketType::Disconnect => return Err(Error::InvalidProtocol),
             _ => unreachable!(),
         };
 
         Ok(packet)
     }
 
-    fn write(&self, notification: Notification, write: &mut BytesMut) -> Result<bool, Error> {
-        match notification {
-            Notification::Forward(forward) => {
-                publish::write(&forward.publish, write)?;
+    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let size = match packet {
+            Packet::Connect(connect, None, last_will, None, login) => {
+                connect::write(&connect, &login, &last_will, buffer)?
             }
-            Notification::DeviceAck(ack) => match ack {
-                Ack::ConnAck(_, ack) => {
-                    connack::write(&ack, write)?;
-                }
-                Ack::PubAck(puback) => {
-                    puback::write(&puback, write)?;
-                }
-                Ack::SubAck(suback) => {
-                    suback::write(&suback, write)?;
-                }
-                Ack::PingResp(pingresp) => {
-                    ping::pingresp::write(write)?;
-                }
-                Ack::PubRec(pubrec) => {
-                    pubrec::write(&pubrec, write)?;
-                }
-                Ack::PubRel(pubrel) => {
-                    pubrel::write(&pubrel, write)?;
-                }
-                Ack::PubComp(pubcomp) => {
-                    pubcomp::write(&pubcomp, write)?;
-                }
-                Ack::UnsubAck(unsuback) => {
-                    unsuback::write(&unsuback, write)?;
-                }
-                _ => unimplemented!(),
-            },
-            Notification::Unschedule => return Ok(true),
-            v => unreachable!("{:?}", v),
-        }
-
-        Ok(false)
+            Packet::ConnAck(connack, None) => connack::write(&connack, buffer)?,
+            Packet::Publish(publish, None) => publish::write(&publish, buffer)?,
+            Packet::PubAck(puback, None) => puback::write(&puback, buffer)?,
+            Packet::Subscribe(subscribe, None) => subscribe::write(&subscribe, buffer)?,
+            Packet::SubAck(suback, None) => suback::write(&suback, buffer)?,
+            Packet::PubRec(pubrec, None) => pubrec::write(&pubrec, buffer)?,
+            Packet::PubRel(pubrel, None) => pubrel::write(&pubrel, buffer)?,
+            Packet::PubComp(pubcomp, None) => pubcomp::write(&pubcomp, buffer)?,
+            Packet::Unsubscribe(unsubscribe, None) => unsubscribe::write(&unsubscribe, buffer)?,
+            Packet::UnsubAck(unsuback, None) => unsuback::write(&unsuback, buffer)?,
+            Packet::Disconnect(disconnect, None) => disconnect::write(&disconnect, buffer)?,
+            Packet::PingReq(pingreq) => ping::pingreq::write(buffer)?,
+            Packet::PingResp(pingresp) => ping::pingresp::write(buffer)?,
+            _ => unreachable!(
+                "This branch only matches for packets with Properties, which is not possible in v4",
+            ),
+        };
+        Ok(size)
     }
 }

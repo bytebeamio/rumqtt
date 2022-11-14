@@ -81,7 +81,7 @@ enum PropertyType {
 ///          |         Remaining Bytes Len  (1/2/3/4 bytes)        |
 ///          +-----------------------------------------------------+
 ///
-/// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Figure_2.2_-
+/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349207>
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct FixedHeader {
@@ -371,7 +371,12 @@ impl Protocol for V5 {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
-                PacketType::Disconnect => Ok(Packet::Disconnect),
+                PacketType::Disconnect => Ok(Packet::Disconnect(
+                    Disconnect {
+                        reason_code: DisconnectReasonCode::NormalDisconnection,
+                    },
+                    None,
+                )),
                 _ => Err(Error::PayloadRequired),
             };
         }
@@ -401,64 +406,55 @@ impl Protocol for V5 {
             }
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
-            PacketType::Disconnect => Packet::Disconnect,
+            PacketType::Disconnect => {
+                let (disconnect, properties) = disconnect::read(fixed_header, packet)?;
+                Packet::Disconnect(disconnect, properties)
+            }
             _ => unreachable!(),
         };
 
         Ok(packet)
     }
 
-    fn write(&self, notification: Notification, write: &mut BytesMut) -> Result<bool, Error> {
-        match notification {
-            Notification::Forward(forward) => {
-                publish::write(&forward.publish, &None, write)?;
+    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let size = match packet {
+            Packet::Connect(
+                connect,
+                connect_properties,
+                last_will,
+                last_will_properties,
+                login,
+            ) => connect::write(
+                &connect,
+                &connect_properties,
+                &last_will,
+                &last_will_properties,
+                &login,
+                buffer,
+            )?,
+            Packet::ConnAck(connack, properties) => connack::write(&connack, &properties, buffer)?,
+            Packet::Publish(publish, properties) => publish::write(&publish, &properties, buffer)?,
+            Packet::PubAck(puback, properties) => puback::write(&puback, &properties, buffer)?,
+            Packet::Subscribe(subscribe, properties) => {
+                subscribe::write(&subscribe, &properties, buffer)?
             }
-            Notification::ForwardWithProperties(forward, properties) => {
-                publish::write(&forward.publish, &Some(properties), write)?;
+            Packet::SubAck(suback, properties) => suback::write(&suback, &properties, buffer)?,
+            Packet::PubRec(pubrec, properties) => pubrec::write(&pubrec, &properties, buffer)?,
+            Packet::PubRel(pubrel, properties) => pubrel::write(&pubrel, &properties, buffer)?,
+            Packet::PubComp(pubcomp, properties) => pubcomp::write(&pubcomp, &properties, buffer)?,
+            Packet::Unsubscribe(unsubscribe, properties) => {
+                unsubscribe::write(&unsubscribe, &properties, buffer)?
             }
-            Notification::DeviceAck(ack) => match ack {
-                Ack::ConnAck(_, ack) => {
-                    connack::write(&ack, &None, write)?;
-                }
-                Ack::PubAck(ack) => {
-                    puback::write(&ack, &None, write)?;
-                }
-                Ack::PubAckWithProperties(ack, properties) => {
-                    puback::write(&ack, &Some(properties), write)?;
-                }
-                Ack::SubAck(ack) => {
-                    suback::write(&ack, &None, write)?;
-                }
-                Ack::SubAckWithProperties(ack, properties) => {
-                    suback::write(&ack, &Some(properties), write)?;
-                }
-                Ack::PingResp(pingresp) => {
-                    ping::pingresp::write(write)?;
-                }
-                Ack::PubRec(pubrec) => {
-                    pubrec::write(&pubrec, &None, write)?;
-                }
-                Ack::PubRecWithProperties(pubrec, properties) => {
-                    pubrec::write(&pubrec, &Some(properties), write)?;
-                }
-                Ack::PubRel(pubrel) => {
-                    pubrel::write(&pubrel, &None, write)?;
-                }
-                Ack::PubRelWithProperties(pubrel, properties) => {
-                    pubrel::write(&pubrel, &Some(properties), write)?;
-                }
-                Ack::PubComp(pubcomp) => {
-                    pubcomp::write(&pubcomp, &None, write)?;
-                }
-                Ack::PubCompWithProperties(pubcomp, properties) => {
-                    pubcomp::write(&pubcomp, &Some(properties), write)?;
-                }
-                _ => unimplemented!(),
-            },
-            Notification::Unschedule => return Ok(true),
-            v => unreachable!("{:?}", v),
-        }
-
-        Ok(false)
+            Packet::UnsubAck(unsuback, properties) => {
+                unsuback::write(&unsuback, &properties, buffer)?
+            }
+            Packet::Disconnect(disconnect, properties) => {
+                disconnect::write(&disconnect, &properties, buffer)?
+            }
+            Packet::PingReq(pingreq) => ping::pingreq::write(buffer)?,
+            Packet::PingResp(pingresp) => ping::pingresp::write(buffer)?,
+            _ => unreachable!(),
+        };
+        Ok(size)
     }
 }

@@ -5,7 +5,7 @@ use websocket_codec::MessageCodec;
 
 use crate::protocol::Error;
 
-use super::Protocol;
+use super::{Packet, Protocol};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
@@ -55,11 +55,7 @@ impl Protocol for Ws {
         unimplemented!()
     }
 
-    fn write(
-        &self,
-        notification: crate::Notification,
-        write: &mut bytes::BytesMut,
-    ) -> Result<bool, super::Error> {
+    fn write(&self, packet: Packet, write: &mut bytes::BytesMut) -> Result<usize, super::Error> {
         todo!()
     }
 }

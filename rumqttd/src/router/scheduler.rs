@@ -1,10 +1,8 @@
-use std::{
-    collections::{HashSet, VecDeque},
-    mem,
-};
+use std::collections::{HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use slab::Slab;
+use tracing::trace;
 
 use super::DataRequest;
 use crate::{ConnectionId, Filter};
@@ -36,7 +34,9 @@ impl Scheduler {
     pub fn poll(&mut self) -> Option<(ConnectionId, VecDeque<DataRequest>)> {
         let id = self.readyqueue.pop_front()?;
         let tracker = self.trackers.get_mut(id)?;
-        let data_requests = mem::replace(&mut tracker.data_requests, VecDeque::with_capacity(10));
+
+        // drain will clear all DataRequest but will keep the allocated memory of our VecDeque.
+        let data_requests = tracker.data_requests.drain(..).collect();
 
         // Implicitly reschedule the connection. Router will take care of explicitly pausing if
         // required (it has the state necessary to determine if pausing is required)
@@ -62,12 +62,7 @@ impl Scheduler {
     pub fn reschedule(&mut self, id: ConnectionId, reason: ScheduleReason) {
         let tracker = self.trackers.get_mut(id).unwrap();
         if let Some(v) = tracker.try_ready(reason) {
-            trace!(
-                "{:15.15}[S] {:20} {:?} -> Ready",
-                tracker.id,
-                "reschedule",
-                v
-            );
+            trace!(tracker_id = tracker.id, "reschedule {:?} -> Ready", v);
             self.readyqueue.push_back(id);
         }
     }
@@ -77,9 +72,8 @@ impl Scheduler {
         let tracker = self.trackers.get_mut(id).unwrap();
 
         trace!(
-            "{:15.15}[S] {:20} {:?} -> {:?}",
-            tracker.id,
-            "pause",
+            tracker_id = tracker.id,
+            "pause {:?} -> {:?}",
             tracker.status,
             reason
         );
@@ -196,33 +190,26 @@ impl Tracker {
     }
 
     pub fn unregister_data_request(&mut self, filter: Filter) {
-        let mut idxs = Vec::<usize>::new();
-        for (i, data_req) in self.data_requests.iter().enumerate() {
-            if data_req.filter == filter {
-                idxs.push(i);
-            }
-        }
-        for idx in idxs {
-            self.data_requests.remove(idx);
-        }
+        self.data_requests
+            .retain(|data_req| data_req.filter != filter);
     }
 }
 
 // Methods to check duplicates in trackers and schedulers
 impl Scheduler {
     pub fn check_readyqueue_duplicates(&self) -> bool {
-        let mut uniq = HashSet::new();
-        self.readyqueue.iter().all(move |x| uniq.insert(x))
+        let readyqueue = &self.readyqueue;
+        // In _worst_ case where all elements are unique, the size of uniq will be same as len of readyqueue
+        let mut uniq = HashSet::with_capacity(readyqueue.len());
+        readyqueue.iter().all(|x| uniq.insert(x))
     }
 
     pub fn check_tracker_duplicates(&self, id: ConnectionId) -> bool {
-        let mut uniq = HashSet::new();
-
         let tracker = self.trackers.get(id).unwrap();
-        let no_duplicates = tracker
-            .get_data_requests()
-            .iter()
-            .all(move |x| uniq.insert(x.filter_idx));
+        let tracker_data_req = tracker.get_data_requests();
+        let mut uniq = HashSet::with_capacity(tracker_data_req.len());
+
+        let no_duplicates = tracker_data_req.iter().all(|x| uniq.insert(x.filter_idx));
 
         if !no_duplicates {
             dbg!(&tracker.data_requests);

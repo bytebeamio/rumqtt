@@ -2,15 +2,29 @@
 ---
 rumqttc
 -------
-- Route `Incoming::ConnAck` onto `Notifier` (#460)
+- Fixed panicking in `recv_timeout` and `try_recv` by entering tokio runtime context (#492, #497)
+- Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
+
+rumqttd
+-------
+- Add `tracing` for structured, context-aware logging (#499)
+- Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
+- Changed default segment size in demo config to 100MB (#484)
+- Allow subscription on topic's starting with `test` (#494)
+-----------
+
+### R17
+---
+rumqttc v0.17.0
+-------
+- Reimplement v5 with old `EvenLoop` design (#464)
 - Implement `recv`, `try_recv`, `recv_timeout` for `Connection` (#458)
-- Export `v5::TryRecvError` (#457)
 - Improve filter validation (#453) 
 - Validate topic before sending a `Publish` (#449)
 - Don't create a new runtime in `Iter::drop` (#405)
 - Unpin exact version dependency on `tokio-rustls` (#448)
 
-rumqttd
+rumqttd v0.12.0-beta.1
 -------
 - MQTT5 support, StructOpt/Clap based CLI, change in config format (next generation broker) (#442)
 - Make dependency on `rustls-pemfile` optional (#439)

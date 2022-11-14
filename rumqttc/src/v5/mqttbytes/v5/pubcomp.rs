@@ -6,7 +6,7 @@ fn len(pubcomp: &PubComp, properties: &Option<PubCompProperties>) -> usize {
 
     // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
     // and there are no Properties. In this case the PUBCOMP has a Remaining Length of 2.
-    // ref: https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901154
+    // <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901154>
     if pubcomp.reason == PubCompReason::Success && properties.is_none() {
         return 2;
     }
