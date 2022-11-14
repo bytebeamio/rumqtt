@@ -1,10 +1,16 @@
 ### Unreleased
-
+---
+rumqttc
+-------
+- Fixed panicking in `recv_timeout` and `try_recv` by entering tokio runtime context (#492, #497)
 - Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
-- (rumqttd) Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
-- (rumqttd) Changed default segment size in demo config to 100MB (#484)
-- (rumqttc) Fixed panicking of `timeout` in `recv_timeout` by entering tokio runtime context (#492)
-- (rumqttd) Allow subscription on topic's starting with `test` (#494)
+
+rumqttd
+-------
+- Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
+- Changed default segment size in demo config to 100MB (#484)
+- Allow subscription on topic's starting with `test` (#494)
+-----------
 
 ### R17
 ---
