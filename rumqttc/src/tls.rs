@@ -29,7 +29,7 @@ use crate::TlsConfiguration;
 use tokio_native_tls::TlsConnector as NativeTlsConnector;
 
 #[cfg(feature = "use-native-tls")]
-use tokio_native_tls::native_tls::Error as NativeTlsError;
+use tokio_native_tls::native_tls::{Error as NativeTlsError, Identity};
 
 use std::io;
 use std::net::AddrParseError;
@@ -151,6 +151,27 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
     Ok(RustlsConnector::from(config))
 }
 
+#[cfg(feature = "use-native-tls")]
+pub async fn native_tls_connector(
+    tls_config: &TlsConfiguration,
+) -> Result<NativeTlsConnector, Error> {
+    let connector = match tls_config {
+        TlsConfiguration::SimpleNative { ca, der, password } => {
+            let cert = native_tls::Certificate::from_pem(ca)?;
+            let identity = Identity::from_pkcs12(der, password)?;
+            native_tls::TlsConnector::builder()
+                .add_root_certificate(cert)
+                .identity(identity)
+                .build()?
+        }
+        TlsConfiguration::Native => native_tls::TlsConnector::new()?,
+        #[allow(unreachable_patterns)]
+        _ => unreachable!("This cannot be called for other TLS backends than Native TLS"),
+    };
+
+    Ok(connector.into())
+}
+
 pub async fn tls_connect(
     addr: &str,
     port: u16,
@@ -160,19 +181,14 @@ pub async fn tls_connect(
 
     let tls: Box<dyn N> = match tls_config {
         #[cfg(feature = "use-rustls")]
-        TlsConfiguration::Simple {
-            ca: _,
-            alpn: _,
-            client_auth: _,
-        }
-        | TlsConfiguration::Rustls(_) => {
+        TlsConfiguration::Simple { .. } | TlsConfiguration::Rustls(_) => {
             let connector = rustls_connector(tls_config).await?;
             let domain = ServerName::try_from(addr)?;
             Box::new(connector.connect(domain, tcp).await?)
         }
         #[cfg(feature = "use-native-tls")]
-        TlsConfiguration::Native => {
-            let connector: NativeTlsConnector = native_tls::TlsConnector::new().unwrap().into();
+        TlsConfiguration::Native | TlsConfiguration::SimpleNative { .. } => {
+            let connector = native_tls_connector(tls_config).await?;
             Box::new(connector.connect(addr, tcp).await?)
         }
         #[allow(unreachable_patterns)]

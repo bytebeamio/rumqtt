@@ -1,6 +1,6 @@
-use crate::{framed::Network, Transport};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
+use crate::{framed::Network, Transport};
 use crate::{Incoming, MqttState, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
