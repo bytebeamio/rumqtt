@@ -34,6 +34,7 @@ pub type Cursor = (u64, u64);
 pub use link::local;
 pub use link::meters;
 
+pub use router::GetMeter;
 pub use router::Notification;
 pub use server::Broker;
 
