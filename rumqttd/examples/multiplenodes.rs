@@ -1,4 +1,4 @@
-use std::thread;
+use std::{thread, time::Duration};
 
 use rumqttd::Broker;
 
@@ -12,7 +12,7 @@ fn main() {
 
     let config = config.try_deserialize().unwrap();
     println!("{config:?}");
-    let mut broker = Broker::new(config);
+    let broker = Broker::new(config);
 
     const CONNECTIONS: usize = 10;
     const MESSAGES_PER_CONNECTION: usize = 2;
@@ -21,19 +21,23 @@ fn main() {
     for i in 0..CONNECTIONS {
         let client_id = format!("client_{i}");
         let (mut link_tx, link_rx) = broker.link(&client_id).expect("New link should be made");
-        rxs.push(link_rx);
-        thread::spawn(move || {
-            for _ in 0..MESSAGES_PER_CONNECTION {
-                link_tx.publish("hello/world", vec![1, 2, 3]).unwrap();
-            }
-        });
+        if i.is_power_of_two() { // 0, 1, 2, 4, 8 .. just to make some subscriber clients
+            link_tx.subscribe("hello/world").unwrap();
+            rxs.push(link_rx);
+        } else {
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(1));
+                for _ in 0..MESSAGES_PER_CONNECTION {
+                    link_tx.publish("hello/world", vec![1, 2, 3]).unwrap();
+                }
+            });
+        }
     }
 
-    thread::spawn(move || {
-        broker.start().unwrap();
-    });
-    for mut rx in rxs {
-        let not = rx.recv().unwrap();
-        println!("RECV {not:?}");
+    loop {
+        for rx in &mut rxs {
+            let not = rx.recv().unwrap();
+            println!("RECV {not:?}");
+        }
     }
 }
