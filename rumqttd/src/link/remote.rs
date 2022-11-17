@@ -129,7 +129,7 @@ impl<P: Protocol> RemoteLink<P> {
                         buffer.len()
                     };
 
-                    debug!(buffercount=len, "packets");
+                    debug!("Packets read from network for connection id {}, count = {}", self.connection_id, len);
                     self.link_tx.notify().await?;
                 }
                 // Receive from router when previous when state isn't in collision

@@ -159,6 +159,10 @@ impl DataLog {
         // reads will definitely happen on a valid filter.
         let data = self.native.get(filter_idx).unwrap();
         let mut o = Vec::new();
+        // TODO: `readv` is infallible but its current return type does not
+        // reflect that. Consequently, this method is also infallible.
+        // Encoding this information is important so that calling function
+        // has more information on how this method behaves.
         let next = data.log.readv(offset, len, &mut o)?;
         Ok((next, o))
     }
