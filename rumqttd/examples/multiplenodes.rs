@@ -5,8 +5,9 @@ use rumqttd::Broker;
 fn main() {
     // let router = Router::new(); // Router is not publically exposed!
     tracing_subscriber::fmt::init();
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let config = config::Config::builder()
-        .add_source(config::File::with_name("demo.toml"))
+        .add_source(config::File::with_name(&format!("{manifest_dir}/demo.toml")))
         .build()
         .unwrap(); // Config::default() doesn't have working values
 
