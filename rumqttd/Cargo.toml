@@ -37,6 +37,7 @@ default = ["use-rustls"]
 use-rustls = ["tokio-rustls", "rustls-pemfile", "x509-parser"]
 use-native-tls = ["tokio-native-tls" , "x509-parser"]
 websockets = ["tokio-tungstenite", "websocket-codec", "tokio-util", "futures-util"]
+validate-tenant-prefix = []
 
 [dev-dependencies]
 pretty_env_logger = "0.4.0"

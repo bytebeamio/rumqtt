@@ -36,6 +36,7 @@ pub enum RouterError {
     Disconnected,
     #[error("Topic not utf-8")]
     NonUtf8Topic(#[from] Utf8Error),
+    #[cfg(feature = "validate-tenant-prefix")]
     #[error("Bad Tenant")]
     BadTenant(String, String),
     #[error("No matching filters to topic {0}")]
@@ -834,6 +835,7 @@ fn append_to_commitlog(
     let topic = std::str::from_utf8(&publish.topic)?;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
+    #[cfg(feature = "validate-tenant-prefix")]
     if let Some(tenant_prefix) = &connections[id].tenant_prefix {
         if !topic.starts_with(tenant_prefix) {
             return Err(RouterError::BadTenant(tenant_prefix.to_owned(), topic.to_owned()));
@@ -1095,7 +1097,10 @@ fn validate_subscription(
     connection: &mut Connection,
     filter: &protocol::Filter,
 ) -> Result<(), RouterError> {
+
+    trace!("validate subscription = {}, tenant = {:?}", filter.path, connection.tenant_prefix);
     // Ensure that only client devices of the tenant can
+    #[cfg(feature = "validate-tenant-prefix")]
     if let Some(tenant_prefix) = &connection.tenant_prefix {
         if !filter.path.starts_with(tenant_prefix) {
             return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
