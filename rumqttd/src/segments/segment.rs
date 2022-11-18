@@ -82,9 +82,9 @@ where
         }
 
         match ret {
-            Some(relative_offset) => Ok(SegmentPosition::Next(
-                self.absolute_offset + relative_offset,
-            )),
+            Some(relative_offset) => {
+                Ok(SegmentPosition::Next(self.absolute_offset + relative_offset))
+            }
             None => Ok(SegmentPosition::Done(self.next_offset())),
         }
     }
@@ -137,10 +137,7 @@ mod tests {
 
         let mut out: Vec<Bytes> = Vec::new();
         let _ = segment.readv(0, 2, &mut out).unwrap();
-        assert_eq!(
-            out,
-            vec![Bytes::from_static(b"test1"), Bytes::from_static(b"test2")]
-        );
+        assert_eq!(out, vec![Bytes::from_static(b"test1"), Bytes::from_static(b"test2")]);
     }
 
     #[test]

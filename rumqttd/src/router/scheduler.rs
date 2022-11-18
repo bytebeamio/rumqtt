@@ -71,12 +71,7 @@ impl Scheduler {
         assert_eq!(self.readyqueue.pop_back(), Some(id));
         let tracker = self.trackers.get_mut(id).unwrap();
 
-        trace!(
-            tracker_id = tracker.id,
-            "pause {:?} -> {:?}",
-            tracker.status,
-            reason
-        );
+        trace!(tracker_id = tracker.id, "pause {:?} -> {:?}", tracker.status, reason);
         tracker.pause(reason);
     }
 }

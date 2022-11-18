@@ -165,12 +165,7 @@ pub struct Message {
 
 impl fmt::Debug for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Topic = {:?}, Payload size = {}",
-            self.topic,
-            self.payload.len()
-        )
+        write!(f, "Topic = {:?}, Payload size = {}", self.topic, self.payload.len())
     }
 }
 

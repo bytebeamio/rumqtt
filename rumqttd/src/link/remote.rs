@@ -57,7 +57,7 @@ impl<P: Protocol> RemoteLink<P> {
     pub async fn new(
         config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,
-        // tenant_id: Option<String>,
+        tenant_id: Option<String>,
         mut network: Network<P>,
     ) -> Result<RemoteLink<P>, Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
@@ -90,14 +90,8 @@ impl<P: Protocol> RemoteLink<P> {
             return Err(Error::InvalidClientId);
         }
 
-        let (link_tx, link_rx, notification) = Link::new(
-            // tenant_id,
-            &client_id,
-            router_tx,
-            clean_session,
-            lastwill,
-            dynamic_filters,
-        )?;
+        let (link_tx, link_rx, notification) =
+            Link::new(tenant_id, &client_id, router_tx, clean_session, lastwill, dynamic_filters)?;
         let id = link_rx.id();
 
         network.write(notification).await?;

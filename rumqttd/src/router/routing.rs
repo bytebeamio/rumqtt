@@ -36,8 +36,8 @@ pub enum RouterError {
     Disconnected,
     #[error("Topic not utf-8")]
     NonUtf8Topic(#[from] Utf8Error),
-    // #[error("Bad Tenant")]
-    // BadTenant(String, String),
+    #[error("Bad Tenant")]
+    BadTenant(String, String),
     #[error("No matching filters to topic {0}")]
     NoMatchingFilters(String),
     #[error("Unsupported QoS {0:?}")]
@@ -480,7 +480,7 @@ impl Router {
                         info!(filter = f.path, "subscribe");
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if let Err(e) = validate_subscription(/*connection,*/ &f) {
+                        if let Err(e) = validate_subscription(connection, &f) {
                             error!(reason=?e,"bad-subscription" );
                             disconnect = true;
                             break;
@@ -833,15 +833,12 @@ fn append_to_commitlog(
 ) -> Result<Offset, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
 
-    // // Ensure that only clients associated with a tenant can publish to tenant's topic
-    // if let Some(tenant_prefix) = &connections[id].tenant_prefix {
-    //     if !topic.starts_with(tenant_prefix) {
-    //         return Err(RouterError::BadTenant(
-    //             tenant_prefix.to_owned(),
-    //             topic.to_owned(),
-    //         ));
-    //     }
-    // }
+    // Ensure that only clients associated with a tenant can publish to tenant's topic
+    if let Some(tenant_prefix) = &connections[id].tenant_prefix {
+        if !topic.starts_with(tenant_prefix) {
+            return Err(RouterError::BadTenant(tenant_prefix.to_owned(), topic.to_owned()));
+        }
+    }
 
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
@@ -965,13 +962,7 @@ fn forward_device_data(
         );
     }
 
-    trace!(
-        message = "data-response",
-        "cursor = {}[{}, {})",
-        request.filter,
-        next.0,
-        next.1,
-    );
+    trace!(message = "data-response", "cursor = {}[{}, {})", request.filter, next.0, next.1,);
 
     let qos = request.qos;
     let filter_idx = request.filter_idx;
@@ -1101,15 +1092,15 @@ fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsReque
 }
 
 fn validate_subscription(
-    // connection: &mut Connection,
+    connection: &mut Connection,
     filter: &protocol::Filter,
 ) -> Result<(), RouterError> {
-    // // Ensure that only client devices of the tenant can
-    // if let Some(tenant_prefix) = &connection.tenant_prefix {
-    //     if !filter.path.starts_with(tenant_prefix) {
-    //         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
-    //     }
-    // }
+    // Ensure that only client devices of the tenant can
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
+        if !filter.path.starts_with(tenant_prefix) {
+            return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
+        }
+    }
 
     if filter.qos == QoS::ExactlyOnce {
         return Err(RouterError::UnsupportedQoS(filter.qos));
