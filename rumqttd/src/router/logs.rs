@@ -122,8 +122,11 @@ impl DataLog {
         let (filter_idx, data) = match filter_indexes.get(filter) {
             Some(idx) => (*idx, self.native.get(*idx).unwrap()),
             None => {
-                let data =
-                    Data::new(filter, self.config.max_segment_size, self.config.max_segment_count);
+                let data = Data::new(
+                    filter,
+                    self.config.max_segment_size,
+                    self.config.max_segment_count,
+                );
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map

@@ -838,7 +838,10 @@ fn append_to_commitlog(
     #[cfg(feature = "validate-tenant-prefix")]
     if let Some(tenant_prefix) = &connections[id].tenant_prefix {
         if !topic.starts_with(tenant_prefix) {
-            return Err(RouterError::BadTenant(tenant_prefix.to_owned(), topic.to_owned()));
+            return Err(RouterError::BadTenant(
+                tenant_prefix.to_owned(),
+                topic.to_owned(),
+            ));
         }
     }
 
@@ -964,7 +967,13 @@ fn forward_device_data(
         );
     }
 
-    trace!(message = "data-response", "cursor = {}[{}, {})", request.filter, next.0, next.1,);
+    trace!(
+        message = "data-response",
+        "cursor = {}[{}, {})",
+        request.filter,
+        next.0,
+        next.1,
+    );
 
     let qos = request.qos;
     let filter_idx = request.filter_idx;
@@ -1097,8 +1106,11 @@ fn validate_subscription(
     connection: &mut Connection,
     filter: &protocol::Filter,
 ) -> Result<(), RouterError> {
-
-    trace!("validate subscription = {}, tenant = {:?}", filter.path, connection.tenant_prefix);
+    trace!(
+        "validate subscription = {}, tenant = {:?}",
+        filter.path,
+        connection.tenant_prefix
+    );
     // Ensure that only client devices of the tenant can
     #[cfg(feature = "validate-tenant-prefix")]
     if let Some(tenant_prefix) = &connection.tenant_prefix {

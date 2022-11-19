@@ -52,8 +52,13 @@ impl Link {
         Receiver<()>,
         Receiver<MetricsReply>,
     ) {
-        let (connection, metrics_rx) =
-            Connection::new(tenant_id, client_id.to_owned(), clean, last_will, dynamic_filters);
+        let (connection, metrics_rx) = Connection::new(
+            tenant_id,
+            client_id.to_owned(),
+            clean,
+            last_will,
+            dynamic_filters,
+        );
         let incoming = Incoming::new(client_id.to_string());
         let (outgoing, link_rx) = Outgoing::new(client_id.to_string());
         let outgoing_data_buffer = outgoing.buffer();
@@ -65,7 +70,13 @@ impl Link {
             outgoing,
         };
 
-        (event, incoming_data_buffer, outgoing_data_buffer, link_rx, metrics_rx)
+        (
+            event,
+            incoming_data_buffer,
+            outgoing_data_buffer,
+            link_rx,
+            metrics_rx,
+        )
     }
 
     #[allow(clippy::new_ret_no_self)]

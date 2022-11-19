@@ -305,15 +305,15 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         connection_id = field::Empty
                     ),
                 )),
-                _ => {
-                    task::spawn(remote(config, tenant_id, router_tx, network, protocol).instrument(
+                _ => task::spawn(
+                    remote(config, tenant_id, router_tx, network, protocol).instrument(
                         tracing::info_span!(
                             "remote",
                             client_id = field::Empty,
                             connection_id = field::Empty
                         ),
-                    ))
-                }
+                    ),
+                ),
             };
 
             time::sleep(delay).await;
