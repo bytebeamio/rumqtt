@@ -486,7 +486,7 @@ impl Router {
                         info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if let Err(e) = validate_subscription(/*connection,*/ &f) {
+                        if let Err(e) = validate_subscription(connection, &f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
 
                             disconnect = true;
