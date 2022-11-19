@@ -2,7 +2,7 @@ use std::{collections::VecDeque, sync::Arc, time::Instant};
 
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{
     protocol::Packet,
@@ -146,7 +146,10 @@ impl Outgoing {
         let inflight_count = self.inflight_buffer.len();
 
         if inflight_count > MAX_INFLIGHT {
-            error!(inflight_count, MAX_INFLIGHT);
+            warn!(
+                "More inflight publishes than max allowed, inflight count = {}, max allowed = {}",
+                inflight_count, MAX_INFLIGHT
+            );
         }
 
         (buffer_count, inflight_count)

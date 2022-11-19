@@ -258,7 +258,6 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    #[tracing::instrument(skip(self))]
     async fn start(&self, shadow: bool) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
@@ -267,7 +266,8 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         let config = Arc::new(self.config.connections.clone());
         info!(
             config = self.config.name,
-            "[>] waiting for remote connections > {}", self.config.listen
+            listen_addr = self.config.listen.to_string(),
+            "Listening for remote connections",
         );
         loop {
             // Await new network connection.
@@ -308,7 +308,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 _ => task::spawn(
                     remote(config, tenant_id, router_tx, network, protocol).instrument(
                         tracing::info_span!(
-                            "remote",
+                            "remote_link",
                             client_id = field::Empty,
                             connection_id = field::Empty
                         ),
