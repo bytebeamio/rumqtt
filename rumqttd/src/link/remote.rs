@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
-use tracing::debug;
+use tracing::trace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -129,7 +129,7 @@ impl<P: Protocol> RemoteLink<P> {
                         buffer.len()
                     };
 
-                    debug!(buffercount=len, "packets");
+                    trace!("Packets read from network, count = {}", len);
                     self.link_tx.notify().await?;
                 }
                 // Receive from router when previous when state isn't in collision
