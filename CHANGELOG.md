@@ -8,6 +8,7 @@ rumqttc
 
 rumqttd
 -------
+- Add metrics related to router, subscriptions, and connections (#505)
 - Add `tracing` for structured, context-aware logging (#499)
 - Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
 - Changed default segment size in demo config to 100MB (#484)
