@@ -287,6 +287,7 @@ impl LinkTx {
     }
 }
 
+#[derive(Debug)]
 pub struct LinkRx {
     connection_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,

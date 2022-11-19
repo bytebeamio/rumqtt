@@ -4,7 +4,9 @@ use crate::{ConnectionId, ConsoleSettings};
 use flume::Sender;
 use rouille::{router, try_or_400};
 use std::sync::Arc;
+use tracing::info;
 
+#[derive(Debug)]
 pub struct ConsoleLink {
     config: ConsoleSettings,
     connection_id: ConnectionId,
@@ -28,6 +30,7 @@ impl ConsoleLink {
     }
 }
 
+#[tracing::instrument]
 pub fn start(console: Arc<ConsoleLink>) {
     let address = console.config.listen.clone();
 
@@ -102,6 +105,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::json(&v)
            },
            (POST) (/logs) => {
+            info!("Reloading tracing filter");
             let data = try_or_400!(rouille::input::plain_text_body(request));
             if let Some(handle) = &console.config.filter_handle {
                 if handle.reload(&data).is_err() {
