@@ -60,7 +60,7 @@ pub enum Error {
 }
 
 /// Extract uid from certificate's subject organization field
-fn extract_tenant_id(der: &[u8]) -> Result<String, Error> {
+fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
         x509_parser::parse_x509_certificate(der).map_err(|_| Error::CertificateParse)?;
     let tenant_id = match cert.subject().iter_organization().next() {
@@ -68,14 +68,19 @@ fn extract_tenant_id(der: &[u8]) -> Result<String, Error> {
             Ok(val) => val.to_string(),
             Err(_) => return Err(Error::InvalidTenant),
         },
-        None => return Err(Error::MissingTenantId),
+        None => {
+            #[cfg(feature = "validate-tenant-prefix")]
+            return Err(Error::MissingTenantId);
+            #[cfg(not(feature = "validate-tenant-prefix"))]
+            return Ok(None);
+        }
     };
 
     if tenant_id.chars().any(|c| !c.is_alphanumeric()) {
         return Err(Error::InvalidTenantId(tenant_id));
     }
 
-    Ok(tenant_id)
+    Ok(Some(tenant_id))
 }
 
 #[allow(dead_code)]
@@ -109,7 +114,7 @@ impl TLSAcceptor {
         }
     }
 
-    pub async fn accept(&self, stream: TcpStream) -> Result<(String, Box<dyn N>), Error> {
+    pub async fn accept(&self, stream: TcpStream) -> Result<(Option<String>, Box<dyn N>), Error> {
         match self {
             #[cfg(feature = "use-rustls")]
             TLSAcceptor::Rustls { acceptor } => {

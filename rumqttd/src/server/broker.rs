@@ -250,7 +250,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         match &self.config.tls {
             Some(c) => {
                 let (tenant_id, network) = TLSAcceptor::new(c)?.accept(stream).await?;
-                Ok((network, Some(tenant_id)))
+                Ok((network, tenant_id))
             }
             None => Ok((Box::new(stream), None)),
         }
