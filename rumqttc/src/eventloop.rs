@@ -1,7 +1,8 @@
-use crate::framed::Network;
-#[cfg(feature = "use-rustls")]
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
-use crate::{Incoming, MqttOptions, MqttState, Outgoing, Packet, Request, StateError, Transport};
+use crate::{framed::Network, Transport};
+use crate::{Incoming, MqttState, Packet, Request, StateError};
+use crate::{MqttOptions, Outgoing};
 
 use crate::mqttbytes::v4::*;
 #[cfg(feature = "websocket")]
@@ -37,7 +38,7 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket Connect: {0}")]
     WsConnect(#[from] http::Error),
-    #[cfg(feature = "use-rustls")]
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     #[error("TLS: {0}")]
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -239,7 +240,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket = TcpStream::connect((addr, port)).await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
-        #[cfg(feature = "use-rustls")]
+        #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
             let socket = tls::tls_connect(&options.broker_addr, options.port, &tls_config).await?;
             Network::new(socket, options.max_incoming_packet_size)
@@ -270,7 +271,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .header("Sec-WebSocket-Protocol", "mqttv3.1")
                 .body(())?;
 
-            let connector = tls::tls_connector(&tls_config).await?;
+            let connector = tls::rustls_connector(&tls_config).await?;
 
             let (socket, _) = connect_async_with_tls_connector(request, Some(connector)).await?;
 

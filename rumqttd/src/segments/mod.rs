@@ -1,4 +1,3 @@
-use log::warn;
 use std::usize;
 use std::{collections::VecDeque, io};
 
@@ -6,6 +5,7 @@ mod segment;
 pub mod utils;
 
 use segment::{Segment, SegmentPosition};
+use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Position {
@@ -86,7 +86,7 @@ where
         }
 
         let mut segments = VecDeque::with_capacity(max_mem_segments);
-        segments.push_back(Segment::with_capacity(max_segment_size));
+        segments.push_back(Segment::new());
 
         Ok(Self {
             head: 0,
@@ -168,10 +168,8 @@ where
             // Pushing a new segment into segments and updating tail automatically changes active
             // segment to new empty one.
             let absolute_offset = self.active_segment().next_offset();
-            self.segments.push_back(Segment::with_capacity_and_offset(
-                self.max_segment_size,
-                absolute_offset,
-            ));
+            self.segments
+                .push_back(Segment::with_offset(absolute_offset));
             self.tail += 1;
         }
     }

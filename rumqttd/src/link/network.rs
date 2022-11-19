@@ -9,6 +9,7 @@ use tokio::time::{error::Elapsed, Duration};
 
 use crate::{
     protocol::{self, Packet, Protocol},
+    router::Ack,
     Notification,
 };
 
@@ -129,7 +130,13 @@ impl<P: Protocol> Network<P> {
     }
 
     pub async fn write(&mut self, notification: Notification) -> Result<bool, Error> {
-        let unscheduled = Protocol::write(&self.protocol, notification, &mut self.write)?;
+        let mut unscheduled = false;
+        let packet_or_unscheduled = extract_packet_from_notification(notification);
+        if let Some(packet) = packet_or_unscheduled {
+            Protocol::write(&self.protocol, packet, &mut self.write)?;
+        } else {
+            unscheduled = true;
+        }
         self.socket.write_all(&self.write).await?;
         self.write.clear();
         Ok(unscheduled)
@@ -141,16 +148,57 @@ impl<P: Protocol> Network<P> {
     ) -> Result<bool, Error> {
         let mut o = false;
         for notification in notifications.drain(..) {
-            let unscheduled = Protocol::write(&self.protocol, notification, &mut self.write)?;
-            if unscheduled {
+            let packet_or_unscheduled = extract_packet_from_notification(notification);
+            if let Some(packet) = packet_or_unscheduled {
+                Protocol::write(&self.protocol, packet, &mut self.write)?;
+            } else {
                 o = true
             }
         }
-
         self.socket.write_all(&self.write).await?;
         self.write.clear();
         Ok(o)
     }
+}
+
+// We either get a Packet to write to buffer or we unschedule which is represented as `None`
+fn extract_packet_from_notification(notification: Notification) -> Option<Packet> {
+    let packet: Packet;
+    match notification {
+        Notification::Forward(forward) => {
+            packet = Packet::Publish(forward.publish, None);
+        }
+        Notification::DeviceAck(ack) => match ack {
+            Ack::ConnAck(_, connack) => {
+                packet = Packet::ConnAck(connack, None);
+            }
+            Ack::PubAck(puback) => {
+                packet = Packet::PubAck(puback, None);
+            }
+            Ack::SubAck(suback) => {
+                packet = Packet::SubAck(suback, None);
+            }
+            Ack::PingResp(pingresp) => {
+                packet = Packet::PingResp(pingresp);
+            }
+            Ack::PubRec(pubrec) => {
+                packet = Packet::PubRec(pubrec, None);
+            }
+            Ack::PubRel(pubrel) => {
+                packet = Packet::PubRel(pubrel, None);
+            }
+            Ack::PubComp(pubcomp) => {
+                packet = Packet::PubComp(pubcomp, None);
+            }
+            Ack::UnsubAck(unsuback) => {
+                packet = Packet::UnsubAck(unsuback, None);
+            }
+            _ => unimplemented!(),
+        },
+        Notification::Unschedule => return None,
+        v => unreachable!("{:?}", v),
+    }
+    Some(packet)
 }
 
 pub trait N: AsyncRead + AsyncWrite + Send + Sync + Unpin {}

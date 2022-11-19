@@ -19,18 +19,18 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe, 
     Ok(unsubscribe)
 }
 
-pub fn write(unsubscribe: &Unsubscribe, payload: &mut BytesMut) -> Result<usize, Error> {
+pub fn write(unsubscribe: &Unsubscribe, buffer: &mut BytesMut) -> Result<usize, Error> {
     let remaining_len = 2 + unsubscribe
         .filters
         .iter()
         .fold(0, |s, topic| s + topic.len() + 2);
 
-    payload.put_u8(0xA2);
-    let remaining_len_bytes = write_remaining_length(payload, remaining_len)?;
-    payload.put_u16(unsubscribe.pkid);
+    buffer.put_u8(0xA2);
+    let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
+    buffer.put_u16(unsubscribe.pkid);
 
     for topic in unsubscribe.filters.iter() {
-        write_mqtt_string(payload, topic.as_str());
+        write_mqtt_string(buffer, topic.as_str());
     }
     Ok(1 + remaining_len_bytes + remaining_len)
 }

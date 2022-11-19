@@ -140,7 +140,7 @@ impl TLSAcceptor {
     #[cfg(feature = "use-native-tls")]
     fn native_tls(pkcs12_path: &String, pkcs12_pass: &str) -> Result<Self, Error> {
         // Get certificates
-        let cert_file = File::open(&pkcs12_path);
+        let cert_file = File::open(pkcs12_path);
         let mut cert_file =
             cert_file.map_err(|_| Error::ServerCertNotFound(pkcs12_path.clone()))?;
 
@@ -170,7 +170,7 @@ impl TLSAcceptor {
     ) -> Result<TLSAcceptor, Error> {
         let (certs, key) = {
             // Get certificates
-            let cert_file = File::open(&cert_path);
+            let cert_file = File::open(cert_path);
             let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert_path.clone()))?;
             let certs = rustls_pemfile::certs(&mut BufReader::new(cert_file));
             let certs = certs.map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
@@ -180,7 +180,7 @@ impl TLSAcceptor {
                 .collect();
 
             // Get private key
-            let key_file = File::open(&key_path);
+            let key_file = File::open(key_path);
             let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
             let keys = rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file));
             let keys = keys.map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
