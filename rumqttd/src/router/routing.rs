@@ -940,11 +940,8 @@ enum ConsumeStatus {
 }
 
 /// Sweep datalog from offset in DataRequest and updates DataRequest
-/// for next sweep. Returns (busy, caughtup) status
-/// Returned arguments:
-/// 1. `busy`: whether the data request was completed or not.
-/// 2. `done`: whether the connection was busy or not.
-/// 3. `inflight_full`: whether the inflight requests were completely filled
+/// for next sweep. Returns `ConsumeStatus` indicating whether forward
+/// was successful or not.
 fn forward_device_data(
     request: &mut DataRequest,
     datalog: &DataLog,
@@ -959,93 +956,101 @@ fn forward_device_data(
         request.cursor.1
     );
 
+    // Determine read size
     let inflight_slots = if request.qos == 1 {
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
             return ConsumeStatus::InflightFull;
         }
-
         len as u64
     } else {
         datalog.config.max_read_len
     };
 
-    let (next, publishes) =
-        match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
-            Ok(v) => v,
-            Err(e) => {
-                error!(error = ?e, "Failed to read from commitlog {}", e);
-                return ConsumeStatus::FilterCaughtup;
+    // Read publishes from commitlog
+    let (publishes, next, caughtup) = {
+        let (position, publishes) =
+            match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
+                Ok((pos, publishes)) => {
+                    if publishes.is_empty() {
+                        return ConsumeStatus::FilterCaughtup;
+                    }
+                    (pos, publishes)
+                }
+                Err(e) => {
+                    // TODO: native_readv should not err as per its current implemenation
+                    error!(error = ?e, "Failed to read from commitlog {}", e);
+                    return ConsumeStatus::FilterCaughtup;
+                }
+            };
+
+        let (next, caughtup) = {
+            let (start, next, caughtup) = match position {
+                Position::Next { start, end } => (start, end, false),
+                Position::Done { start, end } => (start, end, true),
+            };
+            if start != request.cursor {
+                warn!(
+                    request_cursor = ?request.cursor,
+                    start_cursor = ?start,
+                    "Read cursor start jumped from {:?} to {:?}", request.cursor, start,
+                );
             }
+            (next, caughtup)
         };
 
-    let (start, next, caughtup) = match next {
-        Position::Next { start, end } => (start, end, false),
-        Position::Done { start, end } => (start, end, true),
+        trace!(
+            "Read from commitlog, cursor = {}[{}, {}), read count = {}",
+            request.filter,
+            next.0,
+            next.1,
+            publishes.len()
+        );
+        request.read_count += publishes.len();
+        request.cursor = next;
+        (publishes, next, caughtup)
     };
 
-    if start != request.cursor {
-        warn!(
-            request_cursor = ?request.cursor,
-            start_cursor = ?start,
-            "Read cursor start jumped from {:?} to {:?}", request.cursor, start,
+    // Prepare forwards and push them to outgoing buffer
+    let forward_buffer_len = {
+        let qos = request.qos;
+        let filter_idx = request.filter_idx;
+        let forwards = publishes.into_iter().map(|mut publish| {
+            publish.qos = protocol::qos(qos).unwrap();
+            Forward {
+                cursor: next,
+                size: 0,
+                publish,
+            }
+        });
+
+        let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
+        debug!(
+            inflight_count = inflight,
+            forward_count = len,
+            "Forwarding publishes, cursor = {}[{}, {}) forward count = {}",
+            request.filter,
+            request.cursor.0,
+            request.cursor.1,
+            len
         );
-    }
-
-    trace!(
-        "Read from commitlog, cursor = {}[{}, {}), read count = {}",
-        request.filter,
-        next.0,
-        next.1,
-        publishes.len()
-    );
-
-    let qos = request.qos;
-    let filter_idx = request.filter_idx;
-    request.read_count += publishes.len();
-    request.cursor = next;
-    // println!("{:?} {:?} {}", start, next, request.read_count);
-
-    if publishes.is_empty() {
-        return ConsumeStatus::FilterCaughtup;
-    }
-
-    // Fill and notify device data
-    let forwards = publishes.into_iter().map(|mut publish| {
-        publish.qos = protocol::qos(qos).unwrap();
-        Forward {
-            cursor: next,
-            size: 0,
-            publish,
-        }
-    });
-
-    let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
-
-    debug!(
-        inflight_count = inflight,
-        forward_count = len,
-        "Forwarding publishes, cursor = {}[{}, {}) forward count = {}",
-        request.filter,
-        request.cursor.0,
-        request.cursor.1,
         len
-    );
+    };
 
-    if len >= MAX_CHANNEL_CAPACITY - 1 {
+    let return_status = if forward_buffer_len >= MAX_CHANNEL_CAPACITY - 1 {
         debug!("Outgoing channel reached its capacity");
         outgoing.push_notification(Notification::Unschedule);
-        outgoing.handle.try_send(()).ok();
-        return ConsumeStatus::BufferFull;
-    }
-
-    outgoing.handle.try_send(()).ok();
-    if caughtup {
+        ConsumeStatus::BufferFull
+    } else if caughtup {
         ConsumeStatus::FilterCaughtup
     } else {
         ConsumeStatus::PartialRead
-    }
+    };
+
+    outgoing.handle.try_send(()).ok();
+
+    return_status
 }
 
 fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: ShadowRequest) {
