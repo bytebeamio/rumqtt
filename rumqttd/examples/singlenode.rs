@@ -1,6 +1,6 @@
-use rumqttd::{Broker, Config, GetMeter, Notification};
+use rumqttd::{Broker, Config, Notification};
 
-use std::{thread, time::Duration};
+use std::thread;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -21,22 +21,9 @@ fn main() {
     dbg!(&config);
 
     let mut broker = Broker::new(config);
-
-    let meters = broker.meters().unwrap();
     let (_link_tx, mut link_rx) = broker.link("singlenode").unwrap();
-
     thread::spawn(move || {
         broker.start().unwrap();
-    });
-
-    thread::spawn(move || -> ! {
-        loop {
-            let v = meters
-                .get(GetMeter::Subscription("hello/world".to_owned()))
-                .unwrap();
-            println!("{:?}", v);
-            thread::sleep(Duration::from_secs(1));
-        }
     });
 
     let mut count = 0;
