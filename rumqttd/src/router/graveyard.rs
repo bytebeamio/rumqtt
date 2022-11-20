@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     scheduler::{PauseReason, Tracker},
-    ConnectionMeter,
+    ConnectionEvents,
 };
 
 pub struct Graveyard {
@@ -27,7 +27,7 @@ impl Graveyard {
         &mut self,
         mut tracker: Tracker,
         subscriptions: HashSet<String>,
-        metrics: ConnectionMeter,
+        metrics: ConnectionEvents,
     ) {
         tracker.pause(PauseReason::Busy);
         let id = tracker.id.clone();
@@ -47,7 +47,7 @@ impl Graveyard {
 pub struct SavedState {
     pub tracker: Tracker,
     pub subscriptions: HashSet<String>,
-    pub metrics: ConnectionMeter,
+    pub metrics: ConnectionEvents,
 }
 
 impl SavedState {
@@ -55,7 +55,7 @@ impl SavedState {
         SavedState {
             tracker: Tracker::new(client_id),
             subscriptions: HashSet::new(),
-            metrics: ConnectionMeter::default(),
+            metrics: ConnectionEvents::default(),
         }
     }
 }

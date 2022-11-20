@@ -1,10 +1,5 @@
 use rumqttd::{Broker, Config, GetMeter, Notification};
-
 use std::{thread, time::Duration};
-
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 fn main() {
     pretty_env_logger::init();
@@ -20,45 +15,54 @@ fn main() {
 
     dbg!(&config);
 
-    let mut broker = Broker::new(config);
-
+    let broker = Broker::new(config);
     let meters = broker.meters().unwrap();
-    let (_link_tx, mut link_rx) = broker.link("singlenode").unwrap();
 
+    let (mut link_tx, mut link_rx) = broker.link("consumer").unwrap();
+    link_tx.subscribe("hello/+/world").unwrap();
     thread::spawn(move || {
-        broker.start().unwrap();
-    });
-
-    thread::spawn(move || -> ! {
+        let mut count = 0;
         loop {
-            let v = meters
-                .get(GetMeter::Subscription("hello/world".to_owned()))
-                .unwrap();
-            println!("{:?}", v);
-            thread::sleep(Duration::from_secs(1));
+            let notification = match link_rx.recv().unwrap() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            match notification {
+                Notification::Forward(forward) => {
+                    count += 1;
+                    println!(
+                        "Topic = {:?}, Count = {}, Payload = {} bytes",
+                        forward.publish.topic,
+                        count,
+                        forward.publish.payload.len()
+                    );
+                }
+                v => {
+                    println!("{:?}", v);
+                }
+            }
         }
     });
 
-    let mut count = 0;
-    loop {
-        let notification = match link_rx.recv().unwrap() {
-            Some(v) => v,
-            None => continue,
-        };
+    for i in 0..10 {
+        let client_id = format!("client_{i}");
+        let topic = format!("hello/{}/world", client_id);
+        let payload = vec![0u8; 1_000]; // 0u8 is one byte, so total ~1KB
+        let (mut link_tx, _link_rx) = broker.link(&client_id).expect("New link should be made");
 
-        match notification {
-            Notification::Forward(forward) => {
-                count += 1;
-                println!(
-                    "Topic = {:?}, Count = {}, Payload = {} bytes",
-                    forward.publish.topic,
-                    count,
-                    forward.publish.payload.len()
-                );
+        thread::spawn(move || {
+            for _ in 0..10 {
+                thread::sleep(Duration::from_secs(1));
+                link_tx.publish(topic.clone(), payload.clone()).unwrap();
             }
-            v => {
-                println!("{:?}", v);
-            }
-        }
+        });
+    }
+
+    loop {
+        let request = GetMeter::Subscription("hello/+/world".to_owned());
+        let v = meters.get(request).unwrap();
+        println!("{:?}", v);
+        thread::sleep(Duration::from_secs(1));
     }
 }

@@ -249,13 +249,12 @@ impl Router {
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
-            connection.meter = saved.metrics;
+            connection.events = saved.metrics;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.meter = saved.metrics;
-            connection.meter.subscriptions.clear();
+            connection.events = saved.metrics;
             Tracker::new(client_id.clone())
         };
         let ackslog = AckLog::new();
@@ -266,10 +265,11 @@ impl Router {
         };
 
         let event = "connection at ".to_owned() + &time + ", clean = " + &clean_session.to_string();
-        connection.meter.push_event(event);
-        connection
-            .meter
-            .push_subscriptions(connection.subscriptions.clone());
+        connection.events.events.push_back(event);
+
+        if connection.events.events.len() > 10 {
+            connection.events.events.pop_front();
+        }
 
         let connection_id = self.connections.insert(connection);
         assert_eq!(self.ibufs.insert(incoming), connection_id);
@@ -353,7 +353,11 @@ impl Router {
         };
 
         let event = "disconnection at ".to_owned() + &time;
-        connection.meter.push_event(event);
+        connection.events.events.push_back(event);
+
+        if connection.events.events.len() > 10 {
+            connection.events.events.pop_front();
+        }
 
         // Save state for persistent sessions
         if !connection.clean {
@@ -363,12 +367,11 @@ impl Router {
                 .for_each(|r| tracker.register_data_request(r));
 
             self.graveyard
-                .save(tracker, connection.subscriptions, connection.meter);
+                .save(tracker, connection.subscriptions, connection.events);
         } else {
             // Only save metrics in clean session
-            connection.meter.subscriptions.clear();
             self.graveyard
-                .save(Tracker::new(client_id), HashSet::new(), connection.meter);
+                .save(Tracker::new(client_id), HashSet::new(), connection.events);
         }
     }
 
@@ -476,12 +479,6 @@ impl Router {
                         }
                     };
 
-                    // Update metrics
-                    if let Some(metrics) = self.connections.get_mut(id).map(|v| &mut v.meter) {
-                        metrics.increment_publish_count();
-                        metrics.add_publish_size(size);
-                    }
-
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     meter.publish_count += 1;
                     meter.total_size += size;
@@ -495,7 +492,6 @@ impl Router {
 
                     for f in s.filters {
                         info!(filter = f.path, "subscribe");
-                        let connection = self.connections.get_mut(id).unwrap();
 
                         if let Err(e) = validate_subscription(/*connection,*/ &f) {
                             error!(reason=?e,"bad-subscription" );
@@ -505,9 +501,6 @@ impl Router {
 
                         let filter = f.path;
                         let qos = f.qos;
-
-                        // Update metrics
-                        connection.meter.push_subscription(filter.clone());
 
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
@@ -545,7 +538,6 @@ impl Router {
                                 continue;
                             }
 
-                            connection.meter.remove_subscription(filter.clone());
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.subscribe_count -= 1;
 
@@ -852,7 +844,7 @@ impl Router {
                 let connection_id = self.connection_map.get(&client_id).unwrap();
 
                 // Update metrics
-                if let Some(meter) = self.connections.get(*connection_id).map(|v| &v.meter) {
+                if let Some(meter) = self.connections.get(*connection_id).map(|v| &v.events) {
                     let meter = Meter::Connection(client_id, meter.clone());
                     let _ = meter_tx.try_send((meter_id, meter));
                 }
@@ -1088,7 +1080,11 @@ fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsReque
         MetricsRequest::Router => MetricsReply::Router(router.router_metrics.clone()),
         MetricsRequest::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
-                let c = router.connections.get(*v).map(|v| v.meter.clone()).unwrap();
+                let c = router
+                    .connections
+                    .get(*v)
+                    .map(|v| v.events.clone())
+                    .unwrap();
                 let t = router.scheduler.trackers.get(*v).cloned().unwrap();
                 (c, t)
             });

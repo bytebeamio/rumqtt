@@ -3,7 +3,7 @@ use crate::Filter;
 use flume::{bounded, Receiver, Sender};
 use std::collections::HashSet;
 
-use super::{ConnectionMeter, MetricsReply};
+use super::{ConnectionEvents, MetricsReply};
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
@@ -21,8 +21,8 @@ pub struct Connection {
     pub subscriptions: HashSet<Filter>,
     /// Handle to send metrics reply
     pub metrics: Sender<MetricsReply>,
-    /// Connection metrics
-    pub meter: ConnectionMeter,
+    /// Connection events
+    pub events: ConnectionEvents,
     pub last_will: Option<LastWill>,
 }
 
@@ -55,7 +55,7 @@ impl Connection {
             clean,
             subscriptions: HashSet::default(),
             metrics: metrics_tx,
-            meter: ConnectionMeter::default(),
+            events: ConnectionEvents::default(),
             last_will,
         };
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt,
 };
 
@@ -236,55 +236,36 @@ pub struct SubscriptionMeter {
     pub read_offset: usize,
 }
 
+#[derive(Debug, Default)]
+pub struct IncomingMeter {
+    pub publish_count: usize,
+    pub subscribe_count: usize,
+    pub total_size: usize,
+}
+
+#[derive(Debug, Default)]
+#[allow(dead_code)]
+pub struct OutgoingMeter {
+    pub publish_count: usize,
+    pub total_size: usize,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ConnectionMeter {
-    publish_count: usize,
-    publish_size: usize,
-    subscriptions: HashSet<Filter>,
+pub struct ConnectionEvents {
     events: VecDeque<String>,
 }
-
-impl ConnectionMeter {
-    pub fn increment_publish_count(&mut self) {
-        self.publish_count += 1
-    }
-
-    pub fn add_publish_size(&mut self, size: usize) {
-        self.publish_size += size;
-    }
-
-    pub fn push_subscription(&mut self, filter: Filter) {
-        self.subscriptions.insert(filter);
-    }
-
-    pub fn push_subscriptions(&mut self, filters: HashSet<Filter>) {
-        self.subscriptions.extend(filters);
-    }
-
-    pub fn push_event(&mut self, event: String) {
-        self.events.push_back(event);
-        if self.events.len() > 10 {
-            self.events.pop_front();
-        }
-    }
-
-    pub fn remove_subscription(&mut self, filter: Filter) {
-        self.subscriptions.remove(&filter);
-    }
-}
-
 
 #[derive(Debug, Clone)]
 pub enum GetMeter {
     Router,
     Connection(String),
-    Subscription(String)
+    Subscription(String),
 }
 
 #[derive(Debug, Clone)]
 pub enum Meter {
     Router(usize, RouterMeter),
-    Connection(String, ConnectionMeter),
+    Connection(String, ConnectionEvents),
     Subscription(String, SubscriptionMeter),
 }
 
@@ -304,7 +285,7 @@ pub enum MetricsRequest {
 pub enum MetricsReply {
     Config(RouterConfig),
     Router(RouterMeter),
-    Connection(Option<(ConnectionMeter, Tracker)>),
+    Connection(Option<(ConnectionEvents, Tracker)>),
     Subscriptions(HashMap<Filter, Vec<String>>),
     Subscription(Option<SubscriptionMeter>),
     Waiters(Option<VecDeque<(String, DataRequest)>>),
