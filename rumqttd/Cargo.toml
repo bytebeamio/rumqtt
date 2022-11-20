@@ -33,7 +33,7 @@ tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="0.3.16", features=["env-filter"] }
 
 [features]
-default = ["use-rustls", "validate-tenant-prefix"]
+default = ["use-rustls"]
 use-rustls = ["tokio-rustls", "rustls-pemfile", "x509-parser"]
 use-native-tls = ["tokio-native-tls" , "x509-parser"]
 websockets = ["tokio-tungstenite", "websocket-codec", "tokio-util", "futures-util"]
