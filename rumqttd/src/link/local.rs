@@ -40,7 +40,7 @@ pub struct Link;
 impl Link {
     #[allow(clippy::type_complexity)]
     fn prepare(
-        // tenant_id: Option<String>,
+        tenant_id: Option<String>,
         client_id: &str,
         clean: bool,
         last_will: Option<LastWill>,
@@ -53,7 +53,7 @@ impl Link {
         Receiver<MetricsReply>,
     ) {
         let (connection, metrics_rx) = Connection::new(
-            // tenant_id,
+            tenant_id,
             client_id.to_owned(),
             clean,
             last_will,
@@ -81,7 +81,7 @@ impl Link {
 
     #[allow(clippy::new_ret_no_self)]
     pub fn new(
-        // tenant_id: Option<String>,
+        tenant_id: Option<String>,
         client_id: &str,
         router_tx: Sender<(ConnectionId, Event)>,
         clean: bool,
@@ -91,12 +91,8 @@ impl Link {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx, metrics_rx) = Link::prepare(
-            /*tenant_id,*/ client_id,
-            clean,
-            last_will,
-            dynamic_filters,
-        );
+        let (message, i, o, link_rx, metrics_rx) =
+            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         router_tx.send((0, message))?;
 
         link_rx.recv()?;
@@ -115,7 +111,7 @@ impl Link {
     }
 
     pub async fn init(
-        // tenant_id: Option<String>,
+        tenant_id: Option<String>,
         client_id: &str,
         router_tx: Sender<(ConnectionId, Event)>,
         clean: bool,
@@ -125,12 +121,8 @@ impl Link {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx, metrics_rx) = Link::prepare(
-            /*tenant_id,*/ client_id,
-            clean,
-            last_will,
-            dynamic_filters,
-        );
+        let (message, i, o, link_rx, metrics_rx) =
+            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         router_tx.send_async((0, message)).await?;
 
         link_rx.recv_async().await?;

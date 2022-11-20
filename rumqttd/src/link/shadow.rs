@@ -71,7 +71,8 @@ impl ShadowLink {
         let client_id = connect.client_id.clone();
 
         let (link_tx, link_rx, _ack) = Link::new(
-            /*None,*/ &client_id,
+            None,
+            &client_id,
             router_tx,
             true,
             None,
