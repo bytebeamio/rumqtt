@@ -1,9 +1,9 @@
-use crate::link::local::{LinkError, LinkRx, LinkTx};
+use crate::link::local::{Link, LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::protocol::{Connect, Packet, Protocol};
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings, Link};
+use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
 use std::collections::VecDeque;

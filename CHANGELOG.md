@@ -8,9 +8,10 @@ rumqttc
 
 rumqttd
 -------
-- Add meters related to router, subscriptions, and connections (#505)
-- Allow multi-tenancy validation for mtls clients with `Org` set in certificates
+- Add meters related to router, subscriptions, and connections (#508)
+- Allow multi-tenancy validation for mtls clients with `Org` set in certificates (#505)
 - Add `tracing` for structured, context-aware logging (#499, #503)
+- Add the ablity to change log levels and filters dynamically at runtime (#499)
 - Added properties field to `Unsubscribe`, `UnsubAck`, and `Disconnect` packets so its consistent with other packets. (#480)
 - Changed default segment size in demo config to 100MB (#484)
 - Allow subscription on topic's starting with `test` (#494)

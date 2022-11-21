@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt,
 };
 
@@ -43,6 +43,10 @@ pub enum Event {
         incoming: iobufs::Incoming,
         outgoing: iobufs::Outgoing,
     },
+    /// New meter link
+    NewMeter(flume::Sender<(ConnectionId, Meter)>),
+    /// Request for meter
+    GetMeter(GetMeter),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog
@@ -215,7 +219,7 @@ pub struct ShadowReply {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct RouterMetrics {
+pub struct RouterMeter {
     pub router_id: RouterId,
     pub total_connections: usize,
     pub total_subscriptions: usize,
@@ -232,41 +236,36 @@ pub struct SubscriptionMeter {
     pub read_offset: usize,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct IncomingMeter {
+    pub publish_count: usize,
+    pub subscribe_count: usize,
+    pub total_size: usize,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct OutgoingMeter {
+    pub publish_count: usize,
+    pub total_size: usize,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ConnectionMeter {
-    publish_count: usize,
-    publish_size: usize,
-    subscriptions: HashSet<Filter>,
+pub struct ConnectionEvents {
     events: VecDeque<String>,
 }
 
-impl ConnectionMeter {
-    pub fn increment_publish_count(&mut self) {
-        self.publish_count += 1
-    }
+#[derive(Debug, Clone)]
+pub enum GetMeter {
+    Router,
+    Connection(String),
+    Subscription(String),
+}
 
-    pub fn add_publish_size(&mut self, size: usize) {
-        self.publish_size += size;
-    }
-
-    pub fn push_subscription(&mut self, filter: Filter) {
-        self.subscriptions.insert(filter);
-    }
-
-    pub fn push_subscriptions(&mut self, filters: HashSet<Filter>) {
-        self.subscriptions.extend(filters);
-    }
-
-    pub fn push_event(&mut self, event: String) {
-        self.events.push_back(event);
-        if self.events.len() > 10 {
-            self.events.pop_front();
-        }
-    }
-
-    pub fn remove_subscription(&mut self, filter: Filter) {
-        self.subscriptions.remove(&filter);
-    }
+#[derive(Debug, Clone)]
+pub enum Meter {
+    Router(usize, RouterMeter),
+    Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
+    Subscription(String, Option<SubscriptionMeter>),
 }
 
 #[derive(Debug, Clone)]
@@ -284,8 +283,8 @@ pub enum MetricsRequest {
 #[serde(rename_all = "lowercase")]
 pub enum MetricsReply {
     Config(RouterConfig),
-    Router(RouterMetrics),
-    Connection(Option<(ConnectionMeter, Tracker)>),
+    Router(RouterMeter),
+    Connection(Option<(ConnectionEvents, Tracker)>),
     Subscriptions(HashMap<Filter, Vec<String>>),
     Subscription(Option<SubscriptionMeter>),
     Waiters(Option<VecDeque<(String, DataRequest)>>),

@@ -1,9 +1,8 @@
 use crate::protocol::LastWill;
 use crate::Filter;
-use flume::{bounded, Receiver, Sender};
 use std::collections::HashSet;
 
-use super::{ConnectionMeter, MetricsReply};
+use super::ConnectionEvents;
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
@@ -19,11 +18,10 @@ pub struct Connection {
     pub clean: bool,
     /// Subscriptions
     pub subscriptions: HashSet<Filter>,
-    /// Handle to send metrics reply
-    pub metrics: Sender<MetricsReply>,
-    /// Connection metrics
-    pub meter: ConnectionMeter,
+    /// Last will of this connection
     pub last_will: Option<LastWill>,
+    /// Connection events
+    pub events: ConnectionEvents,
 }
 
 impl Connection {
@@ -34,9 +32,7 @@ impl Connection {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
-    ) -> (Connection, Receiver<MetricsReply>) {
-        let (metrics_tx, metrics_rx) = bounded(1);
-
+    ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
         let (client_id, tenant_prefix) = match tenant_id {
@@ -48,17 +44,14 @@ impl Connection {
             None => (client_id, None),
         };
 
-        let connection = Connection {
+        Connection {
             client_id,
             tenant_prefix,
             dynamic_filters,
             clean,
             subscriptions: HashSet::default(),
-            metrics: metrics_tx,
-            meter: ConnectionMeter::default(),
             last_will,
-        };
-
-        (connection, metrics_rx)
+            events: ConnectionEvents::default(),
+        }
     }
 }

@@ -1,6 +1,7 @@
 use crate::link::local::{LinkError, LinkRx, LinkTx};
+use crate::local::Link;
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings, Filter, Link};
+use crate::{ConnectionId, ConnectionSettings, Filter};
 use bytes::Bytes;
 use flume::{RecvError, SendError, Sender, TrySendError};
 use futures_util::{SinkExt, StreamExt};
