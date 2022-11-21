@@ -301,10 +301,7 @@ impl Router {
     fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Meter)>) {
         let meter_id = self.meters.insert(tx);
         let tx = &self.meters[meter_id];
-        let _ = tx.try_send((
-            meter_id,
-            Meter::Router(self.id, self.router_meters.clone()),
-        ));
+        let _ = tx.try_send((meter_id, Meter::Router(self.id, self.router_meters.clone())));
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
@@ -856,11 +853,18 @@ impl Router {
         let meter_tx = &self.meters[meter_id];
         match meter {
             GetMeter::Router => {
-                let router_meters = Meter::Router(self.id, self.router_meters.clone()); 
+                let router_meters = Meter::Router(self.id, self.router_meters.clone());
                 let _ = meter_tx.try_send((meter_id, router_meters));
             }
             GetMeter::Connection(client_id) => {
-                let connection_id = self.connection_map.get(&client_id).unwrap();
+                let connection_id = match self.connection_map.get(&client_id) {
+                    Some(val) => val,
+                    None => {
+                        let meter = Meter::Connection("".to_owned(), None, None);
+                        let _ = meter_tx.try_send((meter_id, meter));
+                        return;
+                    }
+                };
 
                 // Update metrics
                 let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
@@ -870,7 +874,7 @@ impl Router {
             }
             GetMeter::Subscription(filter) => {
                 let subscription_meter = self.datalog.meter(&filter);
-                let meter = Meter::Subscription(filter.clone(),subscription_meter);
+                let meter = Meter::Subscription(filter.clone(), subscription_meter);
                 let _ = meter_tx.try_send((meter_id, meter));
             }
         };
