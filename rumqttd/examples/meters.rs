@@ -79,8 +79,7 @@ fn main() {
         println!("{:#?}", v);
 
         // Consumer meters
-        let client_id = format!("consumer");
-        let request = GetMeter::Connection(client_id);
+        let request = GetMeter::Connection("consumer".to_owned());
         let v = meters.get(request).unwrap();
         println!("{:#?}", v);
 

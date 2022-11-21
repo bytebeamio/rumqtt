@@ -11,7 +11,7 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{ConnectionSettings, meters};
+use crate::{meters, ConnectionSettings};
 use flume::{RecvError, SendError, Sender};
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument, Span};

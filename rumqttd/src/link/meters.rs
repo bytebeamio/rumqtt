@@ -52,13 +52,16 @@ impl MetersLink {
     }
 
     pub fn get(&self, meter: GetMeter) -> Result<Meter, LinkError> {
-        self.router_tx.send((self.meter_id, Event::GetMeter(meter)))?;
+        self.router_tx
+            .send((self.meter_id, Event::GetMeter(meter)))?;
         let (_meter_id, meter) = self.router_rx.recv()?;
         Ok(meter)
     }
 
     pub async fn fetch(&self, meter: GetMeter) -> Result<Meter, LinkError> {
-        self.router_tx.send_async((self.meter_id, Event::GetMeter(meter))).await?;
+        self.router_tx
+            .send_async((self.meter_id, Event::GetMeter(meter)))
+            .await?;
         let (_meter_id, meter) = self.router_rx.recv_async().await?;
         Ok(meter)
     }
