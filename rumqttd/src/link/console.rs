@@ -48,8 +48,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                     return rouille::Response::empty_404()
                 }
 
-                let v = console.link_rx.metrics();
-                rouille::Response::json(&v)
+                rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/device/{id: String}) => {
                 let event = Event::Metrics(MetricsRequest::Connection(id));
@@ -58,8 +57,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                     return rouille::Response::empty_404()
                 }
 
-                let v = console.link_rx.metrics();
-                rouille::Response::json(&v)
+                rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/subscriptions) => {
                 let event = Event::Metrics(MetricsRequest::Subscriptions);
@@ -68,8 +66,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                     return rouille::Response::empty_404()
                 }
 
-                let v = console.link_rx.metrics();
-                rouille::Response::json(&v)
+                rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/subscription/{filter: String}) => {
                 let filter = filter.replace('.', "/");
@@ -79,8 +76,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                     return rouille::Response::empty_404()
                 }
 
-                let v = console.link_rx.metrics();
-                rouille::Response::json(&v)
+                rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/waiters/{filter: String}) => {
                 let filter = filter.replace('.', "/");
@@ -90,8 +86,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                     return rouille::Response::empty_404()
                 }
 
-                let v = console.link_rx.metrics();
-                rouille::Response::json(&v)
+                rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/readyqueue) => {
                 let event = Event::Metrics(MetricsRequest::ReadyQueue);
@@ -100,8 +95,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                     return rouille::Response::empty_404()
                 }
 
-                let v = console.link_rx.metrics();
-                rouille::Response::json(&v)
+                rouille::Response::text("OK").with_status_code(200)
            },
            (POST) (/logs) => {
             info!("Reloading tracing filter");

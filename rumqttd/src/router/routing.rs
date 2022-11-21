@@ -222,7 +222,7 @@ impl Router {
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
-            Event::Metrics(metrics) => retrieve_metrics(id, self, metrics),
+            Event::Metrics(metrics) => retrieve_metrics(self, metrics),
         }
     }
 
@@ -1106,7 +1106,7 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
     }
 }
 
-fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsRequest) {
+fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
     let message = match metrics {
         MetricsRequest::Config => MetricsReply::Config(router.config.clone()),
         MetricsRequest::Router => MetricsReply::Router(router.router_metrics.clone()),
@@ -1168,8 +1168,7 @@ fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsReque
         }
     };
 
-    let connection = router.connections.get_mut(id).unwrap();
-    connection.metrics.try_send(message).ok();
+    println!("{:#?}", message);
 }
 
 fn validate_subscription(

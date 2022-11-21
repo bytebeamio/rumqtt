@@ -59,7 +59,6 @@ fn main() {
         .unwrap();
 
     let mut config: Config = config.try_deserialize().unwrap();
-
     config.console.set_filter_reload_handle(reload_handle);
 
     // println!("{:#?}", config);

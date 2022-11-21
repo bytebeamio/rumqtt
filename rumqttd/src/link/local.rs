@@ -4,7 +4,7 @@ use crate::protocol::{
 use crate::router::Ack;
 use crate::router::{
     iobufs::{Incoming, Outgoing},
-    Connection, Event, MetricsReply, Notification, ShadowRequest,
+    Connection, Event, Notification, ShadowRequest,
 };
 use crate::ConnectionId;
 use bytes::Bytes;
@@ -15,7 +15,7 @@ use parking_lot::{Mutex, RawMutex};
 use std::collections::VecDeque;
 use std::mem;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -50,9 +50,8 @@ impl Link {
         Arc<Mutex<VecDeque<Packet>>>,
         Arc<Mutex<VecDeque<Notification>>>,
         Receiver<()>,
-        Receiver<MetricsReply>,
     ) {
-        let (connection, metrics_rx) = Connection::new(
+        let connection = Connection::new(
             tenant_id,
             client_id.to_owned(),
             clean,
@@ -70,13 +69,7 @@ impl Link {
             outgoing,
         };
 
-        (
-            event,
-            incoming_data_buffer,
-            outgoing_data_buffer,
-            link_rx,
-            metrics_rx,
-        )
+        (event, incoming_data_buffer, outgoing_data_buffer, link_rx)
     }
 
     #[allow(clippy::new_ret_no_self)]
@@ -91,7 +84,7 @@ impl Link {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx, metrics_rx) =
+        let (message, i, o, link_rx) =
             Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         router_tx.send((0, message))?;
 
@@ -106,7 +99,7 @@ impl Link {
         };
 
         let tx = LinkTx::new(id, router_tx.clone(), i);
-        let rx = LinkRx::new(id, router_tx, link_rx, metrics_rx, o);
+        let rx = LinkRx::new(id, router_tx, link_rx, o);
         Ok((tx, rx, notification))
     }
 
@@ -121,7 +114,7 @@ impl Link {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx, metrics_rx) =
+        let (message, i, o, link_rx) =
             Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         router_tx.send_async((0, message)).await?;
 
@@ -135,7 +128,7 @@ impl Link {
         };
 
         let tx = LinkTx::new(id, router_tx.clone(), i);
-        let rx = LinkRx::new(id, router_tx, link_rx, metrics_rx, o);
+        let rx = LinkRx::new(id, router_tx, link_rx, o);
         Ok((tx, rx, ack))
     }
 }
@@ -284,7 +277,6 @@ pub struct LinkRx {
     connection_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,
     router_rx: Receiver<()>,
-    metrics_rx: Receiver<MetricsReply>,
     send_buffer: Arc<Mutex<VecDeque<Notification>>>,
     cache: VecDeque<Notification>,
 }
@@ -294,14 +286,12 @@ impl LinkRx {
         connection_id: ConnectionId,
         router_tx: Sender<(ConnectionId, Event)>,
         router_rx: Receiver<()>,
-        metrics_rx: Receiver<MetricsReply>,
         outgoing_data_buffer: Arc<Mutex<VecDeque<Notification>>>,
     ) -> LinkRx {
         LinkRx {
             connection_id,
             router_tx,
             router_rx,
-            metrics_rx,
             send_buffer: outgoing_data_buffer,
             cache: VecDeque::with_capacity(100),
         }
@@ -375,12 +365,6 @@ impl LinkRx {
             .send_async((self.connection_id, Event::Ready))
             .await?;
         Ok(())
-    }
-
-    pub fn metrics(&self) -> Option<MetricsReply> {
-        self.metrics_rx
-            .recv_deadline(Instant::now() + Duration::from_secs(1))
-            .ok()
     }
 }
 
