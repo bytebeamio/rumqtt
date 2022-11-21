@@ -129,13 +129,8 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (link_tx, link_rx, _ack) = Link::new(
-            /*None,*/ client_id,
-            self.router_tx.clone(),
-            true,
-            None,
-            false,
-        )?;
+        let (link_tx, link_rx, _ack) =
+            Link::new(None, client_id, self.router_tx.clone(), true, None, false)?;
         Ok((link_tx, link_rx))
     }
 
@@ -256,23 +251,19 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
     }
 
     // Depending on TLS or not create a new Network
-    async fn tls_accept(
-        &self,
-        stream: TcpStream,
-    ) -> Result</*(*/ Box<dyn N> /*, Option<String>)*/, Error> {
+    async fn tls_accept(&self, stream: TcpStream) -> Result<(Box<dyn N>, Option<String>), Error> {
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         match &self.config.tls {
             Some(c) => {
-                let /*(tenant_id,*/ network/*)*/ = TLSAcceptor::new(c)?.accept(stream).await?;
-                Ok(/*(*/ network /*, Some(tenant_id))*/)
+                let (tenant_id, network) = TLSAcceptor::new(c)?.accept(stream).await?;
+                Ok((network, tenant_id))
             }
-            None => Ok(/*(*/ Box::new(stream) /*, None)*/),
+            None => Ok((Box::new(stream), None)),
         }
         #[cfg(not(any(feature = "use-rustls", feature = "use-native-tls")))]
-        Ok(/*(*/ Box::new(stream) /*, None)*/)
+        Ok((Box::new(stream), None))
     }
 
-    #[tracing::instrument(skip(self))]
     async fn start(&self, shadow: bool) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
@@ -281,7 +272,8 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         let config = Arc::new(self.config.connections.clone());
         info!(
             config = self.config.name,
-            "[>] waiting for remote connections > {}", self.config.listen
+            listen_addr = self.config.listen.to_string(),
+            "Listening for remote connections",
         );
         loop {
             // Await new network connection.
@@ -293,7 +285,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 }
             };
 
-            let /*(*/network /*, tenant_id)*/ = match self.tls_accept(stream).await {
+            let (network, tenant_id) = match self.tls_accept(stream).await {
                 Ok(o) => o,
                 Err(e) => {
                     error!(error=?e, "Tls accept error");
@@ -320,9 +312,9 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                     ),
                 )),
                 _ => task::spawn(
-                    remote(config, /*tenant_id,*/ router_tx, network, protocol).instrument(
+                    remote(config, tenant_id, router_tx, network, protocol).instrument(
                         tracing::info_span!(
-                            "remote",
+                            "remote_link",
                             client_id = field::Empty,
                             connection_id = field::Empty
                         ),
@@ -342,14 +334,14 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 /// mqtt connection packet to make make the server reach its concurrent connection limit)
 async fn remote<P: Protocol>(
     config: Arc<ConnectionSettings>,
-    // tenant_id: Option<String>,
+    tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
 ) {
     let network = Network::new(stream, config.max_payload_size, 100, protocol);
     // Start the link
-    let mut link = match RemoteLink::new(config, router_tx.clone(), /*tenant_id,*/ network).await {
+    let mut link = match RemoteLink::new(config, router_tx.clone(), tenant_id, network).await {
         Ok(l) => l,
         Err(e) => {
             error!(error=?e, "Remote link error");

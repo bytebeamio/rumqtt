@@ -108,7 +108,7 @@ mod eventloop;
 mod framed;
 pub mod mqttbytes;
 mod state;
-#[cfg(feature = "use-rustls")]
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 mod tls;
 pub mod v5;
 
@@ -121,7 +121,7 @@ pub use mqttbytes::*;
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
-#[cfg(feature = "use-rustls")]
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
@@ -204,7 +204,7 @@ impl From<Unsubscribe> for Request {
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
-    #[cfg(feature = "use-rustls")]
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     Tls(TlsConfiguration),
     #[cfg(unix)]
     Unix,
@@ -249,7 +249,7 @@ impl Transport {
         Self::tls_with_config(config)
     }
 
-    #[cfg(feature = "use-rustls")]
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Tls(tls_config)
     }
@@ -298,8 +298,9 @@ impl Transport {
 
 /// TLS configuration method
 #[derive(Clone)]
-#[cfg(feature = "use-rustls")]
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub enum TlsConfiguration {
+    #[cfg(feature = "use-rustls")]
     Simple {
         /// connection method
         ca: Vec<u8>,
@@ -308,8 +309,20 @@ pub enum TlsConfiguration {
         /// tls client_authentication
         client_auth: Option<(Vec<u8>, Key)>,
     },
+    #[cfg(feature = "use-native-tls")]
+    SimpleNative {
+        /// ca certificate
+        ca: Vec<u8>,
+        /// pkcs12 binary der
+        der: Vec<u8>,
+        /// password for use with der
+        password: String,
+    },
+    #[cfg(feature = "use-rustls")]
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     Rustls(Arc<ClientConfig>),
+    #[cfg(feature = "use-native-tls")]
+    Native,
 }
 
 #[cfg(feature = "use-rustls")]
