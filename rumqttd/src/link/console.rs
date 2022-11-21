@@ -11,7 +11,7 @@ pub struct ConsoleLink {
     config: ConsoleSettings,
     connection_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,
-    link_rx: LinkRx,
+    _link_rx: LinkRx,
 }
 
 impl ConsoleLink {
@@ -23,7 +23,7 @@ impl ConsoleLink {
         ConsoleLink {
             config,
             router_tx,
-            link_rx,
+            _link_rx: link_rx,
             connection_id,
         }
     }

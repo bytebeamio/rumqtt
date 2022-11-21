@@ -874,7 +874,7 @@ impl Router {
             }
             GetMeter::Subscription(filter) => {
                 let subscription_meter = self.datalog.meter(&filter);
-                let meter = Meter::Subscription(filter.clone(), subscription_meter);
+                let meter = Meter::Subscription(filter, subscription_meter);
                 let _ = meter_tx.try_send((meter_id, meter));
             }
         };
