@@ -236,15 +236,14 @@ pub struct SubscriptionMeter {
     pub read_offset: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct IncomingMeter {
     pub publish_count: usize,
     pub subscribe_count: usize,
     pub total_size: usize,
 }
 
-#[derive(Debug, Default)]
-#[allow(dead_code)]
+#[derive(Debug, Default, Clone)]
 pub struct OutgoingMeter {
     pub publish_count: usize,
     pub total_size: usize,
@@ -265,8 +264,8 @@ pub enum GetMeter {
 #[derive(Debug, Clone)]
 pub enum Meter {
     Router(usize, RouterMeter),
-    Connection(String, ConnectionEvents),
-    Subscription(String, SubscriptionMeter),
+    Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
+    Subscription(String, Option<SubscriptionMeter>),
 }
 
 #[derive(Debug, Clone)]

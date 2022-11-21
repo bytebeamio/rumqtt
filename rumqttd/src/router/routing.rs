@@ -84,7 +84,7 @@ pub struct Router {
     /// with this router
     router_tx: Sender<(ConnectionId, Event)>,
     /// Router metrics
-    router_metrics: RouterMeter,
+    router_meters: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
 }
@@ -121,7 +121,7 @@ impl Router {
             notifications: VecDeque::with_capacity(1024),
             router_rx,
             router_tx,
-            router_metrics,
+            router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
         }
     }
@@ -303,7 +303,7 @@ impl Router {
         let tx = &self.meters[meter_id];
         let _ = tx.try_send((
             meter_id,
-            Meter::Router(self.id, self.router_metrics.clone()),
+            Meter::Router(self.id, self.router_meters.clone()),
         ));
     }
 
@@ -455,7 +455,7 @@ impl Router {
                         }
                     };
 
-                    self.router_metrics.total_publishes += 1;
+                    self.router_meters.total_publishes += 1;
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -476,7 +476,7 @@ impl Router {
                             error!(
                                 reason = ?e, "Failed to append to commitlog"
                             );
-                            self.router_metrics.failed_publishes += 1;
+                            self.router_meters.failed_publishes += 1;
                             disconnect = true;
                             break;
                         }
@@ -642,7 +642,7 @@ impl Router {
                             error!(
                                 reason = ?e, "Failed to append to commitlog"
                             );
-                            self.router_metrics.failed_publishes += 1;
+                            self.router_meters.failed_publishes += 1;
                             disconnect = true;
                             break;
                         }
@@ -846,7 +846,7 @@ impl Router {
                 error!(
                     reason = ?e, "Failed to append to commitlog"
                 );
-                self.router_metrics.failed_publishes += 1;
+                self.router_meters.failed_publishes += 1;
                 // Removed disconnect = true from here because we disconnect anyways
             }
         };
@@ -856,25 +856,22 @@ impl Router {
         let meter_tx = &self.meters[meter_id];
         match meter {
             GetMeter::Router => {
-                let _ = meter_tx.try_send((
-                    meter_id,
-                    Meter::Router(self.id, self.router_metrics.clone()),
-                ));
+                let router_meters = Meter::Router(self.id, self.router_meters.clone()); 
+                let _ = meter_tx.try_send((meter_id, router_meters));
             }
             GetMeter::Connection(client_id) => {
                 let connection_id = self.connection_map.get(&client_id).unwrap();
 
                 // Update metrics
-                if let Some(meter) = self.connections.get(*connection_id).map(|v| &v.events) {
-                    let meter = Meter::Connection(client_id, meter.clone());
-                    let _ = meter_tx.try_send((meter_id, meter));
-                }
+                let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
+                let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
+                let meter = Meter::Connection(client_id, incoming_meter, outgoing_meter);
+                let _ = meter_tx.try_send((meter_id, meter));
             }
             GetMeter::Subscription(filter) => {
-                if let Some(meter) = self.datalog.meter(&filter) {
-                    let meter = Meter::Subscription(filter.clone(), meter.clone());
-                    let _ = meter_tx.try_send((meter_id, meter));
-                }
+                let subscription_meter = self.datalog.meter(&filter);
+                let meter = Meter::Subscription(filter.clone(),subscription_meter);
+                let _ = meter_tx.try_send((meter_id, meter));
             }
         };
     }
@@ -1109,7 +1106,7 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
 fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
     let message = match metrics {
         MetricsRequest::Config => MetricsReply::Config(router.config.clone()),
-        MetricsRequest::Router => MetricsReply::Router(router.router_metrics.clone()),
+        MetricsRequest::Router => MetricsReply::Router(router.router_meters.clone()),
         MetricsRequest::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
                 let c = router
