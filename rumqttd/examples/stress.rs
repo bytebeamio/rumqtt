@@ -11,19 +11,29 @@ use tokio::{
     select, task,
     time::{self, Instant},
 };
+use tracing_subscriber::EnvFilter;
 
-const CONNECTIONS: usize = 1000;
+const CONNECTIONS: usize = 200;
 const MAX_MSG_PER_PUB: usize = 5;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    // let router = Router::new(); // Router is not publically exposed!
-    tracing_subscriber::fmt::init();
+    // RUST_LOG=rumqttd[{client_id=consumer}]=debug cargo run --example stress
+    let builder = tracing_subscriber::fmt()
+        .pretty()
+        .with_line_number(false)
+        .with_file(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_env_filter(EnvFilter::from_env("RUST_LOG"));
+        // .with_env_filter("rumqttd=debug");
+
+    builder.try_init().unwrap();
+
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let config = format!("{manifest_dir}/demo.toml");
     let config = config::Config::builder()
-        .add_source(config::File::with_name(&format!(
-            "{manifest_dir}/demo.toml"
-        )))
+        .add_source(config::File::with_name(&config))
         .build()
         .unwrap(); // Config::default() doesn't have working values
 
@@ -31,7 +41,7 @@ async fn main() {
     let broker = Broker::new(config);
 
     let (mut link_tx, mut link_rx) = broker
-        .link("the_subscriber")
+        .link("consumer")
         .expect("New link should be made");
 
     link_tx
