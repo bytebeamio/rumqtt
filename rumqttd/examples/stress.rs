@@ -19,16 +19,11 @@ const MAX_MSG_PER_PUB: usize = 5;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     // RUST_LOG=rumqttd[{client_id=consumer}]=debug cargo run --example stress
-    let builder = tracing_subscriber::fmt()
-        .pretty()
-        .with_line_number(false)
-        .with_file(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .with_env_filter(EnvFilter::from_env("RUST_LOG"));
+    tracing_subscriber::fmt()
         // .with_env_filter("rumqttd=debug");
-
-    builder.try_init().unwrap();
+        .with_env_filter(EnvFilter::from_env("RUST_LOG"))
+        .pretty()
+        .init();
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let config = format!("{manifest_dir}/demo.toml");
@@ -40,9 +35,7 @@ async fn main() {
     let config = config.try_deserialize().unwrap();
     let broker = Broker::new(config);
 
-    let (mut link_tx, mut link_rx) = broker
-        .link("consumer")
-        .expect("New link should be made");
+    let (mut link_tx, mut link_rx) = broker.link("consumer").expect("New link should be made");
 
     link_tx
         .subscribe("hello/+/world")

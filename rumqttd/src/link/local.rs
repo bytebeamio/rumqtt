@@ -324,6 +324,8 @@ impl LinkRx {
             None => {
                 // If cache is empty, check for router trigger and get fresh notifications
                 self.router_rx.recv()?;
+                // Collect 'all' the data in the buffer after a notification. 
+                // Notification means fresh data which isn't previously collected
                 mem::swap(&mut *self.send_buffer.lock(), &mut self.cache);
                 Ok(self.cache.pop_front())
             }
@@ -354,6 +356,8 @@ impl LinkRx {
             None => {
                 // If cache is empty, check for router trigger and get fresh notifications
                 self.router_rx.recv_async().await?;
+                // Collect 'all' the data in the buffer after a notification. 
+                // Notification means fresh data which isn't previously collected
                 mem::swap(&mut *self.send_buffer.lock(), &mut self.cache);
                 Ok(self.cache.pop_front())
             }
