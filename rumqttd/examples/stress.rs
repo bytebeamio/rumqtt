@@ -1,20 +1,24 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use rumqttd::{
     local::LinkRx,
-    protocol::{Packet, Publish, QoS},
-    Broker,
+    protocol::{Packet, Publish},
+    Broker, Notification,
 };
 
 use tokio::{
-    select, task,
+    select,
+    sync::Barrier,
+    task,
     time::{self, Instant},
 };
 use tracing_subscriber::EnvFilter;
 
-const CONNECTIONS: usize = 200;
-const MAX_MSG_PER_PUB: usize = 5;
+const PUBLISHERS: usize = 10000;
+const MAX_MSG_PER_PUB: usize = 100;
+const SLEEP_TIME_MS_BETWEEN_PUB: u64 = 100;
+const CONSUMERS: usize = 2;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -35,56 +39,60 @@ async fn main() {
     let config = config.try_deserialize().unwrap();
     let broker = Broker::new(config);
 
-    let (mut link_tx, mut link_rx) = broker.link("consumer").expect("New link should be made");
+    for i in 0..CONSUMERS {
+        let client_id = format!("consumer_{i}");
+        let (mut link_tx, mut link_rx) = broker.link(&client_id).unwrap();
 
-    link_tx
-        .subscribe("hello/+/world")
-        .expect("link should subscribe");
+        link_tx.subscribe("hello/+/world").unwrap();
+        link_rx.recv().unwrap();
 
-    link_rx.recv().expect("Should recieve Ack");
+        task::spawn(async move { consumer(&client_id, link_rx).await });
+    }
 
-    for i in 0..CONNECTIONS {
-        let client_id = format!("client_{i}");
+    let barrier = Arc::new(Barrier::new(PUBLISHERS + 1));
+    for i in 0..PUBLISHERS {
+        let c = barrier.clone();
+        let client_id = format!("publisher_{i}");
         let topic = format!("hello/{}/world", client_id);
         let payload = vec![0u8; 1_000]; // 0u8 is one byte, so total ~1KB
-        let (mut link_tx, _link_rx) = broker.link(&client_id).expect("New link should be made");
+        let (mut link_tx, _link_rx) = broker.link(&client_id).unwrap();
 
         let topic: Bytes = topic.into();
         let payload: Bytes = payload.into();
         task::spawn(async move {
             for _ in 0..MAX_MSG_PER_PUB {
-                time::sleep(Duration::from_secs(1)).await;
-
-                let publish = Publish {
-                    dup: false,
-                    qos: QoS::AtMostOnce,
-                    retain: false,
-                    topic: topic.clone(),
-                    pkid: 0,
-                    payload: payload.clone(),
-                };
-
+                time::sleep(Duration::from_millis(SLEEP_TIME_MS_BETWEEN_PUB)).await;
+                let publish = Publish::new(topic.clone(), payload.clone(), false);
                 link_tx.send(Packet::Publish(publish, None)).await.unwrap();
             }
+
+            c.wait().await;
         });
     }
 
-    consumer(link_rx).await
+    barrier.wait().await;
+    time::sleep(Duration::from_secs(5)).await;
 }
 
-async fn consumer(mut link_rx: LinkRx) {
+async fn consumer(client_id: &str, mut link_rx: LinkRx) {
     let mut count = 0;
-    let mut interval = time::interval(Duration::from_secs(1));
+    let mut interval = time::interval(Duration::from_millis(500));
     let instant = Instant::now();
     loop {
         select! {
             _ = interval.tick() => {
-                println!("TOTAL COUNT: {count:?}; TIME: {:?}", instant.elapsed());
+                println!("{client_id:?}: total count: {count:<10}; time: {:?}", instant.elapsed());
             }
             notification = link_rx.next() => {
-                let notification = notification.unwrap();
-                if notification.is_some() {
-                    count += 1;
+                let notification = match notification.unwrap() {
+                    Some(v) => v,
+                    None => continue
+                };
+
+                match notification {
+                    Notification::Forward(_) => count += 1,
+                    Notification::Unschedule => link_rx.wake().await.unwrap(),
+                    _ => unreachable!()
                 }
             }
         }
