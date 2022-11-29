@@ -1,12 +1,14 @@
 use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
+use crate::local::Link;
 use crate::protocol::{AsyncProtocol, Connect, LastWill, Packet, self};
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings, Link};
+use crate::{ConnectionId, ConnectionSettings};
 
 use disk::Storage;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
+use tracing::{info, error, trace};
 use std::collections::{VecDeque};
 use std::{io, fs};
 use std::sync::Arc;
@@ -119,7 +121,7 @@ impl<P: AsyncProtocol> DiskHandler<P> {
                     }
                 },
                 Err(e) => {
-                    error!("{:15.15} failed to read from storage: {e}", "");
+                    error!("Failed to read from storage: {e}");
                     return
                 }
             }
@@ -131,7 +133,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
     pub async fn new(
         config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,
-        // tenant_id: Option<String>,
+        tenant_id: Option<String>,
         connect: Connect,
         lastwill: Option<LastWill>,
         mut network: Network<P>,
@@ -153,7 +155,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
         }
 
         let (link_tx, link_rx, notification) = Link::new(
-            // tenant_id,
+            tenant_id,
             &client_id,
             router_tx,
             clean_session,
@@ -206,7 +208,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
     }
 
     async fn disconnected(&mut self) -> Result<State, Error> {
-        info!("{:15.15} persistent mode: disconnected", self.client_id);
+        info!(state = ?State::Disconnected, "Disconnected from persistent connection");
 
         loop {
             select! {
@@ -267,16 +269,13 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
             self.network.readv(&mut buffer)?;
             buffer.len()
         };
-        debug!(
-            "{:15.15}[I] {:20} buffercount = {}",
-            self.client_id, "packets", len
-        );
+        trace!("Packets read from network, count = {}", len);
         self.link_tx.notify().await?;
         Ok(())
     }
 
     async fn run(&mut self) -> Result<State, Error> {
-        info!("{:15.15}[I] persistent mode: normal", self.client_id);
+        info!(state = ?State::Normal, "Persistent connection is running in normal mode");
         loop {
             select! {
                 // read from remote client
@@ -319,6 +318,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
     }
 }
 
+#[derive(Debug)]
 pub enum State {
     Normal,
     Disconnected,

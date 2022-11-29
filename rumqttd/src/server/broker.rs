@@ -362,14 +362,14 @@ impl<P: AsyncProtocol> Server<P> {
                         ),
                     ),
                 ),
+                // TODO: Fix tracing for persistent links
                 LinkType::Persistent(map) => task::spawn(
-                    persistance(config, router_tx, network, protocol, map.clone()).instrument(
-                        tracing::info_span!(
+                    persistance(config, tenant_id, router_tx, network, protocol, map.clone())
+                        .instrument(tracing::info_span!(
                             "persistent_link",
                             client_id = field::Empty,
                             connection_id = field::Empty
-                        ),
-                    ),
+                        )),
                 ),
             };
 
@@ -480,7 +480,7 @@ async fn shadow_connection(
 
 async fn persistance<P: AsyncProtocol>(
     config: Arc<ConnectionSettings>,
-    // tenant_id: Option<String>,
+    tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
@@ -505,14 +505,21 @@ async fn persistance<P: AsyncProtocol>(
             .unwrap()
             .send(network)
         {
-            error!("{:15.15}[E] Remote link error = {:?}", "", e);
+            error!(error=?e, "Remote link error");
         }
     } else {
         info!("New connection found! client id: {}", connect.client_id);
         connection_map.insert(connect.client_id.clone(), {
-            persistance_spawn(config, router_tx.clone(), connect, lastwill, network)
-                .await
-                .unwrap()
+            persistance_spawn(
+                config,
+                router_tx.clone(),
+                tenant_id,
+                connect,
+                lastwill,
+                network,
+            )
+            .await
+            .unwrap()
         });
     }
 }
@@ -520,20 +527,28 @@ async fn persistance<P: AsyncProtocol>(
 async fn persistance_spawn<P: AsyncProtocol>(
     config: Arc<ConnectionSettings>,
     router_tx: Sender<(ConnectionId, Event)>,
-    // tenant_id: Option<String>,
+    tenant_id: Option<String>,
     connect: Connect,
     lastwill: Option<LastWill>,
     network: Network<P>,
 ) -> Result<Sender<Network<P>>, Error> {
     // Start the link
-    let (network_tx, mut link) =
-        match PersistanceLink::new(config, router_tx.clone(), connect, lastwill, network).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!("{:15.15}[E] Remote link error = {:?}", "", e);
-                return Err(e.into());
-            }
-        };
+    let (network_tx, mut link) = match PersistanceLink::new(
+        config,
+        router_tx.clone(),
+        tenant_id,
+        connect,
+        lastwill,
+        network,
+    )
+    .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            error!(error=?e, "Remote link error");
+            return Err(e.into());
+        }
+    };
 
     tokio::spawn(async move {
         let client_id = link.client_id.clone();
