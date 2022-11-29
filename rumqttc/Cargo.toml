@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.17.0"
+version = "0.18.0"
 description = "An efficient and robust mqtt client for your connected devices"
 license = "Apache-2.0"
 repository = "https://github.com/bytebeamio/rumqtt"
@@ -15,24 +15,33 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-websocket = ["async-tungstenite", "ws_stream_tungstenite", "http"]
 use-rustls = ["tokio-rustls", "rustls-pemfile", "rustls-native-certs"]
+use-native-tls = ["tokio-native-tls", "native-tls"]
+websocket = ["async-tungstenite", "ws_stream_tungstenite", "http"]
 
 [dependencies]
-async-tungstenite = { version = "0.16", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
-bytes = "1"
-flume = "0.10"
 futures = "0.3"
-http = { version = "0.2", optional = true}
+tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
+bytes = "1.0"
 log = "0.4"
 pollster = "0.2"
-rustls-pemfile = { version = "0.3", optional = true }
+flume = "0.10"
 thiserror = "1"
-tokio = { version = "1", features = ["rt", "macros", "io-util", "net", "time"] }
+
+# Optional
+# rustls
 tokio-rustls = { version = "0.23", optional = true }
+rustls-pemfile = { version = "0.3", optional = true }
 rustls-native-certs = { version = "0.6", optional = true }
-url = { version = "2", default-features = false, optional = true }
+# websockets
+async-tungstenite = { version = "0.16", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
 ws_stream_tungstenite = { version = "0.7", default-features = false, features = ["tokio_io"], optional = true }
+http = { version = "0.2", optional = true }
+# native-tls
+tokio-native-tls = { version = "0.3.0", optional = true }
+native-tls = { version = "0.2.8", optional = true }
+# url
+url = { version = "2", default-features = false, optional = true }
 
 [dev-dependencies]
 color-backtrace = "0.4"

@@ -1,7 +1,8 @@
-use std::{collections::VecDeque, sync::Arc, time::Instant};
+use std::{collections::VecDeque, sync::Arc};
 
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
+use tracing::{error, warn};
 
 use crate::{
     protocol::Packet,
@@ -9,7 +10,7 @@ use crate::{
     Cursor, Notification,
 };
 
-use super::Forward;
+use super::{Forward, IncomingMeter, OutgoingMeter};
 
 const MAX_INFLIGHT: usize = 100;
 const MAX_PKID: u16 = MAX_INFLIGHT as u16;
@@ -148,8 +149,8 @@ impl Outgoing {
         let inflight_count = self.inflight_buffer.len();
 
         if inflight_count > MAX_INFLIGHT {
-            error!(
-                "inflight_count = {:<2} MAX_INFLIGHT = {:<2}",
+            warn!(
+                "More inflight publishes than max allowed, inflight count = {}, max allowed = {}",
                 inflight_count, MAX_INFLIGHT
             );
         }
@@ -167,76 +168,11 @@ impl Outgoing {
 
         // We don't support out of order acks
         if pkid != head {
-            error!("out of order ack. pkid = {}, head = {}", pkid, head);
+            error!(pkid, head, "out of order ack.");
             return None;
         }
 
         Some(())
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct IncomingMeter {
-    pub(crate) publish_count: usize,
-    pub(crate) subscribe_count: usize,
-    pub(crate) total_size: usize,
-    pub(crate) last_timestamp: Instant,
-    start: Instant,
-    pub(crate) data_rate: usize,
-}
-
-impl Default for IncomingMeter {
-    fn default() -> Self {
-        Self {
-            publish_count: 0,
-            subscribe_count: 0,
-            total_size: 0,
-            last_timestamp: Instant::now(),
-            start: Instant::now(),
-            data_rate: 0,
-        }
-    }
-}
-
-impl IncomingMeter {
-    //TODO: Fix this
-    #[allow(dead_code)]
-    pub(crate) fn average_last_data_rate(&mut self) {
-        let now = Instant::now();
-        self.data_rate = self.total_size / now.duration_since(self.start).as_micros() as usize;
-        self.last_timestamp = now;
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct OutgoingMeter {
-    pub(crate) publish_count: usize,
-    pub(crate) total_size: usize,
-    pub(crate) last_timestamp: Instant,
-    start: Instant,
-    pub(crate) data_rate: usize,
-}
-
-impl Default for OutgoingMeter {
-    fn default() -> Self {
-        Self {
-            publish_count: 0,
-            total_size: 0,
-            last_timestamp: Instant::now(),
-            start: Instant::now(),
-            data_rate: 0,
-        }
-    }
-}
-
-impl OutgoingMeter {
-    #[allow(dead_code)]
-    pub(crate) fn average_last_data_rate(&mut self) {
-        let now = Instant::now();
-        self.data_rate = self.total_size / now.duration_since(self.start).as_micros() as usize;
-        self.last_timestamp = now;
     }
 }
 

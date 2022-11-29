@@ -1,14 +1,18 @@
-#[macro_use]
-extern crate log;
-
-#[macro_use]
-extern crate rouille;
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use segments::Storage;
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::{
+    filter::EnvFilter,
+    fmt::{
+        format::{Format, Pretty},
+        Layer,
+    },
+    layer::Layered,
+    reload::Handle,
+    Registry,
+};
 
 use std::net::SocketAddr;
 
@@ -27,7 +31,10 @@ pub type TopicId = usize;
 pub type Offset = (u64, u64);
 pub type Cursor = (u64, u64);
 
-pub use link::local::{Link, LinkError, LinkRx, LinkTx};
+pub use link::local;
+pub use link::meters;
+
+pub use router::GetMeter;
 pub use router::Notification;
 pub use server::Broker;
 
@@ -100,9 +107,19 @@ pub struct RouterConfig {
     pub initialized_filters: Option<Vec<Filter>>,
 }
 
+type ReloadHandle = Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConsoleSettings {
     pub listen: String,
+    #[serde(skip)]
+    filter_handle: Option<ReloadHandle>,
+}
+
+impl ConsoleSettings {
+    pub fn set_filter_reload_handle(&mut self, handle: ReloadHandle) {
+        self.filter_handle.replace(handle);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

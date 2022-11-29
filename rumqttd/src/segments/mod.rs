@@ -1,4 +1,3 @@
-use log::warn;
 use std::usize;
 use std::{collections::VecDeque, io};
 
@@ -6,6 +5,7 @@ mod segment;
 pub mod utils;
 
 use segment::{Segment, SegmentPosition};
+use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Position {

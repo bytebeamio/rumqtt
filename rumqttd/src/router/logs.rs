@@ -1,5 +1,6 @@
 use super::Ack;
 use slab::Slab;
+use tracing::trace;
 
 use crate::protocol::{
     matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
@@ -81,10 +82,15 @@ impl DataLog {
             .get_mut(*self.filter_indexes.get(filter)?)
             .unwrap();
         let waiters = data.waiters.get_mut();
-        return match waiters.iter().position(|x| x.0 == id) {
-            Some(index) => waiters.swap_remove_back(index).map(|v| v.1),
-            None => None,
-        };
+
+        waiters
+            .iter()
+            .position(|&(conn_id, _)| conn_id == id)
+            .and_then(|index| {
+                waiters
+                    .swap_remove_back(index)
+                    .map(|(_, data_req)| data_req)
+            })
     }
 
     // TODO: Currently returning a Option<Vec> instead of Option<&Vec> due to Rust borrow checker
@@ -93,12 +99,12 @@ impl DataLog {
         match &self.publish_filters.get(topic) {
             Some(v) => Some(v.to_vec()),
             None => {
-                let mut v = Vec::new();
-                for (filter, filter_idx) in self.filter_indexes.iter() {
-                    if matches(topic, filter) {
-                        v.push(*filter_idx);
-                    }
-                }
+                let v: Vec<usize> = self
+                    .filter_indexes
+                    .iter()
+                    .filter(|(filter, _)| matches(topic, filter))
+                    .map(|(_, filter_idx)| *filter_idx)
+                    .collect();
 
                 if !v.is_empty() {
                     self.publish_filters.insert(topic.to_owned(), v.clone());
@@ -153,6 +159,10 @@ impl DataLog {
         // reads will definitely happen on a valid filter.
         let data = self.native.get(filter_idx).unwrap();
         let mut o = Vec::new();
+        // TODO: `readv` is infallible but its current return type does not
+        // reflect that. Consequently, this method is also infallible.
+        // Encoding this information is important so that calling function
+        // has more information on how this method behaves.
         let next = data.log.readv(offset, len, &mut o)?;
         Ok((next, o))
     }
@@ -200,7 +210,7 @@ impl DataLog {
         filter: &str,
         notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     ) {
-        trace!("{:15.15}[S] for filter: {:?}", "retain-msg", &filter);
+        trace!(info = "retain-msg", filter = &filter);
 
         let idx = self.filter_indexes.get(filter).unwrap();
 

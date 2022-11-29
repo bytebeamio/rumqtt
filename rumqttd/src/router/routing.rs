@@ -9,21 +9,22 @@ use crate::router::Forward;
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use log::*;
 use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
 use std::thread;
 use std::time::SystemTime;
 use thiserror::Error;
+use tracing::{debug, error, info, trace, warn};
 
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, MetricsReply, MetricsRequest,
-    Notification, RouterMetrics, ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
+    packetid, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
+    MetricsRequest, Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY,
+    MAX_SCHEDULE_ITERATIONS,
 };
 
 #[derive(Error, Debug)]
@@ -36,8 +37,9 @@ pub enum RouterError {
     Disconnected,
     #[error("Topic not utf-8")]
     NonUtf8Topic(#[from] Utf8Error),
-    // #[error("Bad Tenant")]
-    // BadTenant(String, String),
+    #[cfg(feature = "validate-tenant-prefix")]
+    #[error("Bad Tenant")]
+    BadTenant(String, String),
     #[error("No matching filters to topic {0}")]
     NoMatchingFilters(String),
     #[error("Unsupported QoS {0:?}")]
@@ -53,6 +55,8 @@ pub struct Router {
     config: RouterConfig,
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
+    /// List of connections
+    meters: Slab<Sender<(ConnectionId, Meter)>>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
@@ -80,7 +84,7 @@ pub struct Router {
     /// with this router
     router_tx: Sender<(ConnectionId, Event)>,
     /// Router metrics
-    router_metrics: RouterMetrics,
+    router_meters: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
 }
@@ -89,14 +93,15 @@ impl Router {
     pub fn new(router_id: RouterId, config: RouterConfig) -> Router {
         let (router_tx, router_rx) = bounded(1000);
 
+        let meters = Slab::with_capacity(10);
         let connections = Slab::with_capacity(config.max_connections);
         let ibufs = Slab::with_capacity(config.max_connections);
         let obufs = Slab::with_capacity(config.max_connections);
         let ackslog = Slab::with_capacity(config.max_connections);
 
-        let router_metrics = RouterMetrics {
+        let router_metrics = RouterMeter {
             router_id,
-            ..RouterMetrics::default()
+            ..RouterMeter::default()
         };
 
         let max_connections = config.max_connections;
@@ -104,6 +109,7 @@ impl Router {
             id: router_id,
             config: config.clone(),
             graveyard: Graveyard::new(),
+            meters,
             connections,
             connection_map: Default::default(),
             subscription_map: Default::default(),
@@ -115,7 +121,7 @@ impl Router {
             notifications: VecDeque::with_capacity(1024),
             router_rx,
             router_tx,
-            router_metrics,
+            router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
         }
     }
@@ -134,13 +140,14 @@ impl Router {
     /// to communicate with router should only be returned only after it starts.
     /// For that reason, all the public methods should start the router in the
     /// background
+    #[tracing::instrument(skip_all)]
     pub fn spawn(mut self) -> Sender<(ConnectionId, Event)> {
         let router = thread::Builder::new().name(format!("router-{}", self.id));
         let link = self.link();
         router
             .spawn(move || {
                 let e = self.run(0);
-                error!("Router done! Reason = {:?}", e);
+                error!(reason=?e, "Router done!");
             })
             .unwrap();
         link
@@ -149,6 +156,7 @@ impl Router {
     /// Waits on incoming events when ready queue is empty.
     /// After pulling 1 event, tries to pull 500 more events
     /// before polling ready queue 100 times (connections)
+    #[tracing::instrument(skip_all)]
     fn run(&mut self, count: usize) -> Result<(), RouterError> {
         match count {
             0 => loop {
@@ -197,19 +205,24 @@ impl Router {
     }
 
     fn events(&mut self, id: ConnectionId, data: Event) {
+        let span = tracing::info_span!("[>] incoming", connection_id = id);
+        let _guard = span.enter();
+
         match data {
             Event::Connect {
                 connection,
                 incoming,
                 outgoing,
             } => self.handle_new_connection(connection, incoming, outgoing),
+            Event::NewMeter(tx) => self.handle_new_meter(tx),
+            Event::GetMeter(meter) => self.handle_get_meter(id, meter),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
-            Event::Metrics(metrics) => retrieve_metrics(id, self, metrics),
+            Event::Metrics(metrics) => retrieve_metrics(self, metrics),
         }
     }
 
@@ -221,11 +234,11 @@ impl Router {
     ) {
         let client_id = outgoing.client_id.clone();
 
+        let span = tracing::info_span!("incoming_connect", client_id);
+        let _guard = span.enter();
+
         if self.connections.len() >= self.config.max_connections {
-            error!(
-                "{:15.15}[E] {:20}",
-                client_id, "no space for new connection"
-            );
+            error!("no space for new connection");
             // let ack = ConnectionAck::Failure("No space for new connection".to_owned());
             // let message = Notification::ConnectionAck(ack);
             return;
@@ -238,13 +251,12 @@ impl Router {
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
-            connection.meter = saved.metrics;
+            connection.events = saved.metrics;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.meter = saved.metrics;
-            connection.meter.subscriptions.clear();
+            connection.events = saved.metrics;
             Tracker::new(client_id.clone())
         };
         let ackslog = AckLog::new();
@@ -255,20 +267,18 @@ impl Router {
         };
 
         let event = "connection at ".to_owned() + &time + ", clean = " + &clean_session.to_string();
-        connection.meter.push_event(event);
-        connection
-            .meter
-            .push_subscriptions(connection.subscriptions.clone());
+        connection.events.events.push_back(event);
+
+        if connection.events.events.len() > 10 {
+            connection.events.events.pop_front();
+        }
 
         let connection_id = self.connections.insert(connection);
         assert_eq!(self.ibufs.insert(incoming), connection_id);
         assert_eq!(self.obufs.insert(outgoing), connection_id);
 
         self.connection_map.insert(client_id.clone(), connection_id);
-        info!(
-            "{:15.15}[I] {:20} id = {}",
-            client_id, "connect", connection_id
-        );
+        info!(connection_id, "Client connection registered");
 
         assert_eq!(self.ackslog.insert(ackslog), connection_id);
         assert_eq!(self.scheduler.add(tracker), connection_id);
@@ -288,24 +298,31 @@ impl Router {
             .reschedule(connection_id, ScheduleReason::Init);
     }
 
+    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Meter)>) {
+        let meter_id = self.meters.insert(tx);
+        let tx = &self.meters[meter_id];
+        let _ = tx.try_send((meter_id, Meter::Router(self.id, self.router_meters.clone())));
+    }
+
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
         let client_id = match &self.obufs.get(id) {
             Some(v) => v.client_id.clone(),
             None => {
-                error!(
-                    "{:15.15}[E] {:20} id {} is already gone",
-                    "", "no-connection", id
-                );
+                error!("no-connection id {} is already gone", id);
                 return;
             }
         };
+
+        let span = tracing::info_span!("incoming_disconnect", client_id);
+        let _guard = span.enter();
+
         if execute_last_will {
-            self.handle_last_will(id, client_id.clone());
+            self.handle_last_will(id);
         }
 
-        info!("{:15.15}[I] {:20} id = {}", client_id, "disconnect", id);
+        info!("Disconnecting connection");
 
         // Remove connection from router
         let mut connection = self.connections.remove(id);
@@ -336,7 +353,11 @@ impl Router {
         };
 
         let event = "disconnection at ".to_owned() + &time;
-        connection.meter.push_event(event);
+        connection.events.events.push_back(event);
+
+        if connection.events.events.len() > 10 {
+            connection.events.events.pop_front();
+        }
 
         // Save state for persistent sessions
         if !connection.clean {
@@ -346,12 +367,11 @@ impl Router {
                 .for_each(|r| tracker.register_data_request(r));
 
             self.graveyard
-                .save(tracker, connection.subscriptions, connection.meter);
+                .save(tracker, connection.subscriptions, connection.events);
         } else {
             // Only save metrics in clean session
-            connection.meter.subscriptions.clear();
             self.graveyard
-                .save(Tracker::new(client_id), HashSet::new(), connection.meter);
+                .save(Tracker::new(client_id), HashSet::new(), connection.events);
         }
     }
 
@@ -361,15 +381,15 @@ impl Router {
         let incoming = match self.ibufs.get_mut(id) {
             Some(v) => v,
             None => {
-                debug!(
-                    "{:15.15}[E] {:20} id {} is already gone",
-                    "", "no-connection", id
-                );
+                error!("no-connection id {} is already gone", id);
                 return;
             }
         };
 
         let client_id = incoming.client_id.clone();
+        let span = tracing::info_span!("incoming_payload", client_id);
+        let _guard = span.enter();
+
         // Instead of exchanging, we should just append new incoming packets inside cache
         let mut packets = incoming.exchange(self.cache.take().unwrap());
 
@@ -383,12 +403,9 @@ impl Router {
         for packet in packets.drain(0..) {
             match packet {
                 Packet::Publish(publish, _) => {
-                    trace!(
-                        "{:15.15}[I] {:20} {:?}",
-                        client_id,
-                        "publish",
-                        publish.topic
-                    );
+                    let span =
+                        tracing::info_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
+                    let _guard = span.enter();
 
                     let size = publish.len();
                     let qos = publish.qos;
@@ -435,7 +452,7 @@ impl Router {
                         }
                     };
 
-                    self.router_metrics.total_publishes += 1;
+                    self.router_meters.total_publishes += 1;
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -454,20 +471,13 @@ impl Router {
                         Err(e) => {
                             // Disconnect on bad publishes
                             error!(
-                                "{:15.15}[E] {:20} error = {:?}",
-                                client_id, "append-fail", e
+                                reason = ?e, "Failed to append to commitlog"
                             );
-                            self.router_metrics.failed_publishes += 1;
+                            self.router_meters.failed_publishes += 1;
                             disconnect = true;
                             break;
                         }
                     };
-
-                    // Update metrics
-                    if let Some(metrics) = self.connections.get_mut(id).map(|v| &mut v.meter) {
-                        metrics.increment_publish_count();
-                        metrics.add_publish_size(size);
-                    }
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     meter.publish_count += 1;
@@ -481,24 +491,21 @@ impl Router {
                     // let len = s.len();
 
                     for f in s.filters {
-                        info!(
-                            "{:15.15}[I] {:20} filter = {}",
-                            client_id, "subscribe", f.path
-                        );
+                        let span = tracing::info_span!("subscribe", topic = f.path, pkid = s.pkid);
+                        let _guard = span.enter();
+
+                        info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if let Err(e) = validate_subscription(/*connection,*/ &f) {
-                            let id = &self.ibufs[id].client_id;
-                            error!("{:15.15}[E] {:20} error = {:?}", id, "bad-subscription", e);
+                        if let Err(e) = validate_subscription(connection, &f) {
+                            warn!(reason = ?e,"Subscription cannot be validated: {}", e);
+
                             disconnect = true;
                             break;
                         }
 
                         let filter = f.path;
                         let qos = f.qos;
-
-                        // Update metrics
-                        connection.meter.push_subscription(filter.clone());
 
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
@@ -523,38 +530,30 @@ impl Router {
                     force_ack = true;
                 }
                 Packet::Unsubscribe(unsubscribe, _) => {
-                    debug!(
-                        "{:11} {:14} Id = {} Filters = {:?}",
-                        "data", "unsubscribe", id, unsubscribe.filters
-                    );
                     let connection = self.connections.get_mut(id).unwrap();
                     let pkid = unsubscribe.pkid;
                     for filter in unsubscribe.filters {
+                        let span = tracing::info_span!("unsubscribe", topic = filter, pkid);
+                        let _guard = span.enter();
+
+                        debug!("Removing subscription on filter {}", filter);
                         if let Some(connection_ids) = self.subscription_map.get_mut(&filter) {
                             let removed = connection_ids.remove(&id);
                             if !removed {
                                 continue;
                             }
 
-                            connection.meter.remove_subscription(filter.clone());
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.subscribe_count -= 1;
 
-                            let outgoing = self.obufs.get_mut(id).unwrap();
-
-                            if connection.subscriptions.contains(&filter) {
-                                connection.subscriptions.remove(&filter);
-                                debug!(
-                                    "{:15.15}[I] {:20} filter = {}",
-                                    outgoing.client_id, "unsubscribe", filter
-                                );
-                            } else {
-                                error!(
-                                    "{:15.15}[E] {:20} pkid = {:?}",
-                                    id, "unsubscribe-failed", unsubscribe.pkid
+                            if !connection.subscriptions.remove(&filter) {
+                                warn!(
+                                    pkid = unsubscribe.pkid,
+                                    "Unsubscribe failed as filter was not subscribed previously"
                                 );
                                 continue;
                             }
+
                             let unsuback = UnsubAck {
                                 pkid,
                                 // reasons are used in MQTTv5
@@ -569,13 +568,13 @@ impl Router {
                     }
                 }
                 Packet::PubAck(puback, _) => {
+                    let span = tracing::info_span!("puback", pkid = puback.pkid);
+                    let _guard = span.enter();
+
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = puback.pkid;
                     if outgoing.register_ack(pkid).is_none() {
-                        error!(
-                            "{:15.15}[E] {:20} pkid = {:?}",
-                            id, "unsolicited/ooo ack", pkid
-                        );
+                        error!(pkid, "Unsolicited/ooo ack received for pkid {}", pkid);
                         disconnect = true;
                         break;
                     }
@@ -583,13 +582,13 @@ impl Router {
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
                 Packet::PubRec(pubrec, _) => {
+                    let span = tracing::info_span!("pubrec", pkid = pubrec.pkid);
+                    let _guard = span.enter();
+
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = pubrec.pkid;
                     if outgoing.register_ack(pkid).is_none() {
-                        error!(
-                            "{:15.15}[E] {:20} pkid = {:?}",
-                            id, "unsolicited/ooo ack", pkid
-                        );
+                        error!(pkid, "Unsolicited/ooo ack received for pkid {}", pkid);
                         disconnect = true;
                         break;
                     }
@@ -604,6 +603,9 @@ impl Router {
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
                 Packet::PubRel(pubrel, None) => {
+                    let span = tracing::info_span!("pubrel", pkid = pubrel.pkid);
+                    let _guard = span.enter();
+
                     let ackslog = self.ackslog.get_mut(id).unwrap();
                     let pubcomp = PubComp {
                         pkid: pubrel.pkid,
@@ -635,10 +637,9 @@ impl Router {
                         Err(e) => {
                             // Disconnect on bad publishes
                             error!(
-                                "{:15.15}[E] {:20} error = {:?}",
-                                client_id, "append-fail", e
+                                reason = ?e, "Failed to append to commitlog"
                             );
-                            self.router_metrics.failed_publishes += 1;
+                            self.router_meters.failed_publishes += 1;
                             disconnect = true;
                             break;
                         }
@@ -652,12 +653,15 @@ impl Router {
                     force_ack = true;
                 }
                 Packet::Disconnect(_, _) => {
+                    let span = tracing::info_span!("disconnect");
+                    let _guard = span.enter();
+
                     disconnect = true;
                     execute_will = false;
                     break;
                 }
                 incoming => {
-                    warn!("Packet = {:?} not supported by router yet", incoming);
+                    warn!(packet=?incoming, "Packet not supported by router yet" );
                 }
             }
         }
@@ -713,8 +717,7 @@ impl Router {
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
 
-        if !connection.subscriptions.contains(&filter) {
-            connection.subscriptions.insert(filter.clone());
+        if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
                 filter,
                 filter_idx,
@@ -740,13 +743,13 @@ impl Router {
     fn consume(&mut self) -> Option<()> {
         let (id, mut requests) = self.scheduler.poll()?;
 
+        let span = tracing::info_span!("[<] outgoing", connection_id = id);
+        let _guard = span.enter();
+
         let outgoing = match self.obufs.get_mut(id) {
             Some(v) => v,
             None => {
-                debug!(
-                    "{:15.15}[E] {:20} id {} is already gone",
-                    "", "no-connection", id
-                );
+                error!("Connection is already disconnected");
                 return Some(());
             }
         };
@@ -754,17 +757,10 @@ impl Router {
         let ackslog = self.ackslog.get_mut(id).unwrap();
         let datalog = &mut self.datalog;
 
-        trace!(
-            "{:15.15}[S] {:20} id = {}",
-            outgoing.client_id,
-            "consume",
-            id
-        );
+        trace!("Consuming requests");
 
         // We always try to ack when ever a connection is scheduled
-        if ack_device_data(ackslog, outgoing) {
-            trace!("{:15.15}[T] {:20}", outgoing.client_id, "acks-done");
-        }
+        ack_device_data(ackslog, outgoing);
 
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
@@ -795,11 +791,7 @@ impl Router {
                 }
                 ConsumeStatus::FilterCaughtup => {
                     let filter = &request.filter;
-                    trace!(
-                        "{:15.15}[S] {:20} f = {filter}",
-                        outgoing.client_id,
-                        "caughtup-park"
-                    );
+                    trace!(filter, "Filter caughtup {filter}, parking connection");
 
                     // When all the data in the log is caught up, current request is
                     // registered in waiters and not added back to the tracker. This
@@ -817,7 +809,7 @@ impl Router {
         Some(())
     }
 
-    pub fn handle_last_will(&mut self, id: ConnectionId, client_id: String) {
+    pub fn handle_last_will(&mut self, id: ConnectionId) {
         let connection = self.connections.get_mut(id).unwrap();
         let will = match connection.last_will.take() {
             Some(v) => v,
@@ -849,11 +841,41 @@ impl Router {
             Err(e) => {
                 // Disconnect on bad publishes
                 error!(
-                    "{:15.15}[E] {:20} error = {:?}",
-                    client_id, "append-fail", e
+                    reason = ?e, "Failed to append to commitlog"
                 );
-                self.router_metrics.failed_publishes += 1;
+                self.router_meters.failed_publishes += 1;
                 // Removed disconnect = true from here because we disconnect anyways
+            }
+        };
+    }
+
+    fn handle_get_meter(&self, meter_id: ConnectionId, meter: router::GetMeter) {
+        let meter_tx = &self.meters[meter_id];
+        match meter {
+            GetMeter::Router => {
+                let router_meters = Meter::Router(self.id, self.router_meters.clone());
+                let _ = meter_tx.try_send((meter_id, router_meters));
+            }
+            GetMeter::Connection(client_id) => {
+                let connection_id = match self.connection_map.get(&client_id) {
+                    Some(val) => val,
+                    None => {
+                        let meter = Meter::Connection("".to_owned(), None, None);
+                        let _ = meter_tx.try_send((meter_id, meter));
+                        return;
+                    }
+                };
+
+                // Update metrics
+                let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
+                let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
+                let meter = Meter::Connection(client_id, incoming_meter, outgoing_meter);
+                let _ = meter_tx.try_send((meter_id, meter));
+            }
+            GetMeter::Subscription(filter) => {
+                let subscription_meter = self.datalog.meter(&filter);
+                let meter = Meter::Subscription(filter, subscription_meter);
+                let _ = meter_tx.try_send((meter_id, meter));
             }
         };
     }
@@ -868,15 +890,16 @@ fn append_to_commitlog(
 ) -> Result<Offset, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
 
-    // // Ensure that only clients associated with a tenant can publish to tenant's topic
-    // if let Some(tenant_prefix) = &connections[id].tenant_prefix {
-    //     if !topic.starts_with(tenant_prefix) {
-    //         return Err(RouterError::BadTenant(
-    //             tenant_prefix.to_owned(),
-    //             topic.to_owned(),
-    //         ));
-    //     }
-    // }
+    // Ensure that only clients associated with a tenant can publish to tenant's topic
+    #[cfg(feature = "validate-tenant-prefix")]
+    if let Some(tenant_prefix) = &connections[id].tenant_prefix {
+        if !topic.starts_with(tenant_prefix) {
+            return Err(RouterError::BadTenant(
+                tenant_prefix.to_owned(),
+                topic.to_owned(),
+            ));
+        }
+    }
 
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
@@ -893,10 +916,8 @@ fn append_to_commitlog(
     let filter_idxs = match filter_idxs {
         Some(v) => v,
         None if connections[id].dynamic_filters => {
-            let mut filter_idxs = vec![];
             let (idx, _cursor) = datalog.next_native_offset(topic);
-            filter_idxs.push(idx);
-            filter_idxs
+            vec![idx]
         }
         None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
     };
@@ -906,14 +927,8 @@ fn append_to_commitlog(
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
         let (offset, filter) = datalog.append(publish.clone(), notifications);
         debug!(
-            "{:15.15}[I] {:20} append = {}[{}, {}), pkid = {}",
-            // map client id from connection id
-            connections[id].client_id,
-            "publish",
-            filter,
-            offset.0,
-            offset.1,
-            pkid
+            pkid,
+            "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
         );
 
         o = offset;
@@ -927,9 +942,13 @@ fn append_to_commitlog(
 /// We write everything to outgoing buf with out worrying about buffer size
 /// because acks most certainly won't cause memory bloat
 fn ack_device_data(ackslog: &mut AckLog, outgoing: &mut Outgoing) -> bool {
+    let span = tracing::info_span!("outgoing_ack", client_id = outgoing.client_id);
+    let _guard = span.enter();
+
     let acks = ackslog.readv();
     if acks.is_empty() {
-        return true;
+        debug!("No acks pending");
+        return false;
     }
 
     let mut count = 0;
@@ -939,29 +958,25 @@ fn ack_device_data(ackslog: &mut AckLog, outgoing: &mut Outgoing) -> bool {
     // At any given point of time, there can be a max of connection's buffer size
     for ack in acks.drain(..) {
         let pkid = packetid(&ack);
-        trace!(
-            "{:15.15}[O] {:20} pkid = {:?}",
-            outgoing.client_id,
-            "ack",
-            pkid
-        );
+        trace!(pkid, "Ack added for pkid {}", pkid);
         let message = Notification::DeviceAck(ack);
         buffer.push_back(message);
         count += 1;
     }
 
-    debug!(
-        "{:15.15}[O] {:20} count = {:?}",
-        outgoing.client_id, "acks", count
-    );
+    debug!(acks_count = count, "Acks sent to device");
     outgoing.handle.try_send(()).ok();
     true
 }
 
 enum ConsumeStatus {
+    /// Limit for publishes on outgoing channel reached
     BufferFull,
+    /// Limit for inflight publishes on outgoing channel reached
     InflightFull,
+    /// All publishes on topic forwarded
     FilterCaughtup,
+    /// Some publishes on topic have been forwarded
     PartialRead,
 }
 
@@ -976,10 +991,10 @@ fn forward_device_data(
     datalog: &DataLog,
     outgoing: &mut Outgoing,
 ) -> ConsumeStatus {
+    let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
+    let _guard = span.enter();
     trace!(
-        "{:15.15}[T] {:20} cursor = {}[{}, {}]",
-        outgoing.client_id,
-        "data-request",
+        "Reading from datalog: {}[{}, {}]",
         request.filter,
         request.cursor.0,
         request.cursor.1
@@ -988,6 +1003,7 @@ fn forward_device_data(
     let inflight_slots = if request.qos == 1 && !outgoing.persistent {
         let len = outgoing.free_slots();
         if len == 0 {
+            trace!("Aborting read from datalog: inflight capacity reached");
             return ConsumeStatus::InflightFull;
         }
 
@@ -1000,7 +1016,7 @@ fn forward_device_data(
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
             Ok(v) => v,
             Err(e) => {
-                error!("Failed to read from commitlog. Error = {:?}", e);
+                error!(error = ?e, "Failed to read from commitlog {}", e);
                 return ConsumeStatus::FilterCaughtup;
             }
         };
@@ -1011,19 +1027,19 @@ fn forward_device_data(
     };
 
     if start != request.cursor {
-        error!(
-            "Read cursor jump. Cursor = {:?}, Start = {:?}",
-            request.cursor, start
+        warn!(
+            request_cursor = ?request.cursor,
+            start_cursor = ?start,
+            "Read cursor start jumped from {:?} to {:?}", request.cursor, start,
         );
     }
 
     trace!(
-        "{:15.15}[T] {:20} cursor = {}[{}, {})",
-        outgoing.client_id,
-        "data-response",
+        "Read from commitlog, cursor = {}[{}, {}), read count = {}",
         request.filter,
         next.0,
         next.1,
+        publishes.len()
     );
 
     let qos = request.qos;
@@ -1037,16 +1053,6 @@ fn forward_device_data(
     }
 
     // Fill and notify device data
-    debug!(
-        "{:15.15}[O] {:20} cursor = {}[{}, {}) count = {}",
-        outgoing.client_id,
-        "data-proxy",
-        request.filter,
-        request.cursor.0,
-        request.cursor.1,
-        publishes.len()
-    );
-
     let forwards = publishes.into_iter().map(|mut publish| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
@@ -1058,15 +1064,18 @@ fn forward_device_data(
 
     let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
 
-    trace!(
-        "{:15.15}[O] {:20} buffer = {}, inflight = {}",
-        outgoing.client_id,
-        "inflight",
-        len,
-        inflight
+    debug!(
+        inflight_count = inflight,
+        forward_count = len,
+        "Forwarding publishes, cursor = {}[{}, {}) forward count = {}",
+        request.filter,
+        request.cursor.0,
+        request.cursor.1,
+        len
     );
 
     if len >= MAX_CHANNEL_CAPACITY - 1 {
+        debug!("Outgoing channel reached its capacity");
         outgoing.push_notification(Notification::Unschedule);
         outgoing.handle.try_send(()).ok();
         return ConsumeStatus::BufferFull;
@@ -1088,26 +1097,27 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
             payload: publish.payload,
         };
 
-        // FIll notify shadow
+        // Fill notify shadow
         let message = Notification::Shadow(shadow_reply);
         let len = outgoing.push_notification(message);
-        let _should_unschedule = if len >= MAX_CHANNEL_CAPACITY - 1 {
+        if len >= MAX_CHANNEL_CAPACITY - 1 {
             outgoing.push_notification(Notification::Unschedule);
-            true
-        } else {
-            false
-        };
+        }
         outgoing.handle.try_send(()).ok();
     }
 }
 
-fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsRequest) {
+fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
     let message = match metrics {
         MetricsRequest::Config => MetricsReply::Config(router.config.clone()),
-        MetricsRequest::Router => MetricsReply::Router(router.router_metrics.clone()),
+        MetricsRequest::Router => MetricsReply::Router(router.router_meters.clone()),
         MetricsRequest::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
-                let c = router.connections.get(*v).map(|v| v.meter.clone()).unwrap();
+                let c = router
+                    .connections
+                    .get(*v)
+                    .map(|v| v.events.clone())
+                    .unwrap();
                 let t = router.scheduler.trackers.get(*v).cloned().unwrap();
                 (c, t)
             });
@@ -1159,26 +1169,31 @@ fn retrieve_metrics(id: ConnectionId, router: &mut Router, metrics: MetricsReque
         }
     };
 
-    let connection = router.connections.get_mut(id).unwrap();
-    connection.metrics.try_send(message).ok();
+    println!("{:#?}", message);
 }
 
 fn validate_subscription(
-    // connection: &mut Connection,
+    connection: &mut Connection,
     filter: &protocol::Filter,
 ) -> Result<(), RouterError> {
-    // // Ensure that only client devices of the tenant can
-    // if let Some(tenant_prefix) = &connection.tenant_prefix {
-    //     if !filter.path.starts_with(tenant_prefix) {
-    //         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
-    //     }
-    // }
+    trace!(
+        "validate subscription = {}, tenant = {:?}",
+        filter.path,
+        connection.tenant_prefix
+    );
+    // Ensure that only client devices of the tenant can
+    #[cfg(feature = "validate-tenant-prefix")]
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
+        if !filter.path.starts_with(tenant_prefix) {
+            return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
+        }
+    }
 
     if filter.qos == QoS::ExactlyOnce {
         return Err(RouterError::UnsupportedQoS(filter.qos));
     }
 
-    if filter.path.starts_with("test") || filter.path.starts_with('$') {
+    if filter.path.starts_with('$') {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
     }
 

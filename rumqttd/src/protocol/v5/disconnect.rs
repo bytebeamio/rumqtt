@@ -75,9 +75,8 @@ pub fn write(
     }
 
     let len_len = write_remaining_length(buffer, length)?;
-    
-    buffer.put_u8(code(disconnect.reason_code));
 
+    buffer.put_u8(code(disconnect.reason_code));
 
     if let Some(properties) = &properties {
         properties::write(properties, buffer)?;
