@@ -36,7 +36,7 @@ pub use link::meters;
 
 pub use router::GetMeter;
 pub use router::Notification;
-pub use server::Broker;
+pub use server::{Broker, Error, Spawner, ThreadSpawner};
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {

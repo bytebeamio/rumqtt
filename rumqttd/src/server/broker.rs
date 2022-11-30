@@ -18,6 +18,7 @@ use tracing::{error, field, info, Instrument, Span};
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
+use std::future::Future;
 use std::time::Duration;
 use std::{io, thread};
 
@@ -47,6 +48,14 @@ pub enum Error {
     Accept(String),
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
+}
+
+pub trait Spawner {
+    fn spawn<F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        name: String,
+        task: F,
+    ) -> Result<(), Error>;
 }
 
 pub struct Broker {
@@ -134,60 +143,43 @@ impl Broker {
         Ok((link_tx, link_rx))
     }
 
-    #[tracing::instrument(skip(self))]
-    pub fn start(&mut self) -> Result<(), Error> {
+    pub fn spawn<S>(&mut self, mut spawner: S) -> Result<(), Error>
+    where
+        S: Spawner,
+    {
         // spawn bridge in a separate thread
         // if let Some(bridge_config) = self.config.bridge.clone() {
         //     let router_tx = self.router_tx.clone();
-        //     thread::Builder::new()
-        //         .name("bridge-thread".to_string())
-        //         .spawn(move || {
-        //             let mut runtime = tokio::runtime::Builder::new_current_thread();
-        //             let runtime = runtime.enable_all().build().unwrap();
-        //             let router_tx = router_tx.clone();
-
-        //             runtime.block_on(async move {
-        //                 if let Err(e) = bridge::bridge_launch(bridge_config, router_tx).await {
-        //                     error!("bridge: {:?}", e);
-        //                 };
-        //             });
-        //         })?;
+        //     spawner.spawn("bridge-thread".to_string(), async move {
+        //         if let Err(e) = bridge::bridge_launch(bridge_config, router_tx).await {
+        //             error!("bridge: {:?}", e);
+        //         };
+        //     })?
         // }
 
-        // spawn servers in a separate thread
         for (_, config) in self.config.v4.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
+            let name = config.name.clone();
             let server = Server::new(config, self.router_tx.clone(), V4);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
-
-                runtime.block_on(async {
-                    if let Err(e) = server.start(false).await {
-                        error!(error=?e, "Remote link error");
-                    }
-                });
-            })?;
+            spawner.spawn(name, async move {
+                if let Err(e) = server.start(false).await {
+                    error!(error=?e, "Remote link error");
+                }
+            })?
         }
 
         for (_, config) in self.config.v5.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
+            let name = config.name.clone();
             let server = Server::new(config, self.router_tx.clone(), V5);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
-
-                runtime.block_on(async {
-                    if let Err(e) = server.start(false).await {
-                        error!(error=?e, "Remote link error");
-                    }
-                });
-            })?;
+            spawner.spawn(name, async move {
+                if let Err(e) = server.start(false).await {
+                    error!(error=?e, "Remote link error");
+                }
+            })?
         }
 
         #[cfg(feature = "websockets")]
         for (_, config) in self.config.ws.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
+            let name = config.name.clone();
             let server = Server::new(
                 config,
                 self.router_tx.clone(),
@@ -195,37 +187,53 @@ impl Broker {
                     codec: MessageCodec::server(),
                 },
             );
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
-
-                runtime.block_on(async {
-                    if let Err(e) = server.start(true).await {
-                        error!(error=?e, "Remote link error");
-                    }
-                });
-            })?;
+            spawner.spawn(name, async move {
+                if let Err(e) = server.start(false).await {
+                    error!(error=?e, "Remote link error");
+                }
+            })?
         }
 
         // for (_, config) in self.config.shadows.clone() {
-        //     let server_thread = thread::Builder::new().name(config.name.clone());
+        //     let name = config.name.clone();
         //     let server = Server::new(config, self.router_tx.clone());
-        //     server_thread.spawn(move || {
-        //         let mut runtime = tokio::runtime::Builder::new_current_thread();
-        //         let runtime = runtime.enable_all().build().unwrap();
-
-        //         runtime.block_on(async {
-        //             if let Err(e) = server.start(true).await {
-        //                 error!("Accept loop error: {:?}", e.to_string());
-        //             }
-        //         });
+        //     spawner.spawn(name, async move || {
+        //         if let Err(e) = server.start(true).await {
+        //             error!("Accept loop error: {:?}", e.to_string());
+        //         }
         //     })?;
         // }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn start(&mut self) -> Result<(), Error> {
+        self.spawn(ThreadSpawner)?;
 
         let console_link = ConsoleLink::new(self.config.console.clone(), self.router_tx.clone());
 
         let console_link = Arc::new(console_link);
         console::start(console_link);
+
+        Ok(())
+    }
+}
+
+pub struct ThreadSpawner;
+
+impl Spawner for ThreadSpawner {
+    fn spawn<F: Future<Output = ()> + Send + 'static>(
+        &mut self,
+        name: String,
+        task: F,
+    ) -> Result<(), Error> {
+        thread::Builder::new().name(name).spawn(move || {
+            let mut runtime = tokio::runtime::Builder::new_current_thread();
+            let runtime = runtime.enable_all().build().unwrap();
+
+            runtime.block_on(task);
+        })?;
 
         Ok(())
     }
