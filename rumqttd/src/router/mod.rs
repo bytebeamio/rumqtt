@@ -7,6 +7,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    protocol,
     protocol::{
         ConnAck, PingResp, PubAck, PubAckProperties, PubComp, PubCompProperties, PubRec,
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
@@ -45,6 +46,8 @@ pub enum Event {
     },
     /// New meter link
     NewMeter(flume::Sender<(ConnectionId, Meter)>),
+    /// New subscription link
+    NewSubscription(flume::Sender<(ConnectionId, Subscription)>),
     /// Request for meter
     GetMeter(GetMeter),
     /// Connection ready to receive more data
@@ -266,6 +269,13 @@ pub enum Meter {
     Router(usize, RouterMeter),
     Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
     Subscription(String, Option<SubscriptionMeter>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Subscription {
+    Created,
+    Added(ConnectionId, protocol::Filter),
+    Removed(ConnectionId, Filter),
 }
 
 #[derive(Debug, Clone)]

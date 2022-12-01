@@ -11,7 +11,7 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings};
+use crate::{meters, subscriptions, ConnectionSettings};
 use flume::{RecvError, SendError, Sender};
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument, Span};
@@ -119,6 +119,12 @@ impl Broker {
     //         cluster.add_replica_router_handle(node_id, link);
     //     }
     // }
+
+    // Link to get subscriptions
+    pub fn subscriptions(&self) -> Result<subscriptions::SubscriptionsLink, subscriptions::LinkError> {
+        let link = subscriptions::SubscriptionsLink::new(self.router_tx.clone())?;
+        Ok(link)
+    }
 
     // Link to get meters
     pub fn meters(&self) -> Result<meters::MetersLink, meters::LinkError> {
