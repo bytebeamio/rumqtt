@@ -1,7 +1,6 @@
 use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRec, PubRecReason, PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode,
-    UnsubAck,
+    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
