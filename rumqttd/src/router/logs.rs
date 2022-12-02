@@ -303,6 +303,8 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
+    // TODO: Remove this allow once we support QoS::ExactlyOnce
+    #[allow(dead_code)]
     pub fn pubrec(&mut self, publish: Publish, ack: PubRec) {
         let ack = Ack::PubRec(ack);
         self.recorded.push_back(publish);

@@ -1,7 +1,6 @@
 use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRec, PubRecReason, PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode,
-    UnsubAck,
+    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
@@ -440,15 +439,18 @@ impl Router {
                             force_ack = true;
                         }
                         QoS::ExactlyOnce => {
-                            let pubrec = PubRec {
-                                pkid,
-                                reason: PubRecReason::Success,
-                            };
-
-                            let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.pubrec(publish, pubrec);
-                            force_ack = true;
-                            continue;
+                            error!("QoS::ExactlyOnce is not yet supported");
+                            disconnect = true;
+                            break;
+                            // let pubrec = PubRec {
+                            //     pkid,
+                            //     reason: PubRecReason::Success,
+                            // };
+                            //
+                            // let ackslog = self.ackslog.get_mut(id).unwrap();
+                            // ackslog.pubrec(publish, pubrec);
+                            // force_ack = true;
+                            // continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing
