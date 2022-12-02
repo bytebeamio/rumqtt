@@ -681,7 +681,7 @@ pub enum Error {
     InvalidRemainingLength(usize),
     #[error("Invalid protocol used")]
     InvalidProtocol,
-    #[error("Invalid protocol level")]
+    #[error("Invalid protocol level {0}. Make sure right port is being used.")]
     InvalidProtocolLevel(u8),
     #[error("Invalid packet format")]
     IncorrectPacketFormat,
