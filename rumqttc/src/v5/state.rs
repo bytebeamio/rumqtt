@@ -2,7 +2,8 @@ use crate::v5::mqttbytes::PingReq;
 
 use super::mqttbytes::v5::Packet;
 use super::mqttbytes::{
-    self, ConnectReturnCode, PubAck, PubComp, PubRec, PubRel, Publish, QoS, Subscribe, Unsubscribe,
+    self, ConnectReturnCode, PubAck, PubComp, PubRec, PubRel, Publish, PublishProperties, QoS,
+    Subscribe, Unsubscribe,
 };
 use super::{Event, Incoming, Outgoing, Request};
 
@@ -110,7 +111,7 @@ impl MqttState {
         // remove and collect pending publishes
         for publish in self.outgoing_pub.iter_mut() {
             if let Some(publish) = publish.take() {
-                let request = Request::Publish(publish);
+                let request = Request::Publish(publish, None);
                 pending.push(request);
             }
         }
@@ -142,7 +143,7 @@ impl MqttState {
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
         match request {
-            Request::Publish(publish) => self.outgoing_publish(publish)?,
+            Request::Publish(publish, props) => self.outgoing_publish(publish, props)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
@@ -321,7 +322,11 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(
+        &mut self,
+        mut publish: Publish,
+        props: Option<PublishProperties>,
+    ) -> Result<(), StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
@@ -355,7 +360,7 @@ impl MqttState {
         );
 
         let pkid = publish.pkid;
-        Packet::Publish(publish, None).write(&mut self.write)?;
+        Packet::Publish(publish, props).write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Publish(pkid));
         self.events.push_back(event);
         Ok(())

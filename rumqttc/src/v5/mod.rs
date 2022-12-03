@@ -5,6 +5,7 @@ mod client;
 mod eventloop;
 mod framed;
 pub mod mqttbytes;
+mod publisher;
 mod state;
 
 #[cfg(feature = "use-rustls")]
@@ -24,7 +25,7 @@ use crate::Outgoing;
 /// handled one by one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    Publish(Publish),
+    Publish(Publish, Option<PublishProperties>),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),

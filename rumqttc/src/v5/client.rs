@@ -1,12 +1,10 @@
-//! This module offers a high level synchronous and asynchronous abstraction to
-//! async eventloop.
+// use std::collections::HashMap;
 use std::time::Duration;
 
 use super::mqttbytes::{Filter, PubAck, PubRec, Publish, QoS, Subscribe, Unsubscribe};
+use super::publisher::Publisher;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::valid_topic;
 
-use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 use futures::FutureExt;
 use tokio::runtime::{self, Runtime};
@@ -43,6 +41,7 @@ impl From<TrySendError<Request>> for ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
+    // alias_mapping: HashMap<String, u16>,
 }
 
 impl AsyncClient {
@@ -52,8 +51,12 @@ impl AsyncClient {
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
+        // let alias_mapping = HashMap::new();
 
-        let client = AsyncClient { request_tx };
+        let client = AsyncClient {
+            request_tx,
+            // alias_mapping,
+        };
 
         (client, eventloop)
     }
@@ -61,54 +64,66 @@ impl AsyncClient {
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
     pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
-        AsyncClient { request_tx }
+        // let alias_mapping = HashMap::new();
+        AsyncClient {
+            request_tx,
+            // alias_mapping
+        }
+    }
+
+    pub fn publisher<S>(&self, topic: S) -> Publisher
+    where
+        S: Into<String>,
+    {
+        let topic = topic.into();
+        Publisher::new(topic, self.request_tx.clone())
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
-    pub async fn publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
-        }
-        self.request_tx.send_async(publish).await?;
-        Ok(())
-    }
+    // pub async fn publish<S, P>(
+    //     &self,
+    //     topic: S,
+    //     qos: QoS,
+    //     retain: bool,
+    //     payload: P,
+    // ) -> Result<(), ClientError>
+    // where
+    //     S: Into<String>,
+    //     P: Into<Bytes>,
+    // {
+    //     let topic = topic.into();
+    //     let mut publish = Publish::new(&topic, qos, payload);
+    //     publish.retain = retain;
+    //     let publish = Request::Publish(publish);
+    //     if !valid_topic(&topic) {
+    //         return Err(ClientError::Request(publish));
+    //     }
+    //     self.request_tx.send_async(publish).await?;
+    //     Ok(())
+    // }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
-    pub fn try_publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
-        }
-        self.request_tx.try_send(publish)?;
-        Ok(())
-    }
+    // pub fn try_publish<S, P>(
+    //     &self,
+    //     topic: S,
+    //     qos: QoS,
+    //     retain: bool,
+    //     payload: P,
+    // ) -> Result<(), ClientError>
+    // where
+    //     S: Into<String>,
+    //     P: Into<Bytes>,
+    // {
+    //     let topic = topic.into();
+    //     let mut publish = Publish::new(&topic, qos, payload);
+    //     publish.retain = retain;
+    //     let publish = Request::Publish(publish);
+    //     if !valid_topic(&topic) {
+    //         return Err(ClientError::TryRequest(publish));
+    //     }
+    //     self.request_tx.try_send(publish)?;
+    //     Ok(())
+    // }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
@@ -130,26 +145,26 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
-    pub async fn publish_bytes<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
-        }
-        self.request_tx.send_async(publish).await?;
-        Ok(())
-    }
+    // pub async fn publish_bytes<S>(
+    //     &self,
+    //     topic: S,
+    //     qos: QoS,
+    //     retain: bool,
+    //     payload: Bytes,
+    // ) -> Result<(), ClientError>
+    // where
+    //     S: Into<String>,
+    // {
+    //     let topic = topic.into();
+    //     let mut publish = Publish::new(&topic, qos, payload);
+    //     publish.retain = retain;
+    //     let publish = Request::Publish(publish);
+    //     if !valid_topic(&topic) {
+    //         return Err(ClientError::TryRequest(publish));
+    //     }
+    //     self.request_tx.send_async(publish).await?;
+    //     Ok(())
+    // }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
@@ -263,35 +278,35 @@ impl Client {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
-    pub fn publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
-        Ok(())
-    }
-
-    pub fn try_publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.client.try_publish(topic, qos, retain, payload)?;
-        Ok(())
-    }
+    // pub fn publish<S, P>(
+    //     &self,
+    //     topic: S,
+    //     qos: QoS,
+    //     retain: bool,
+    //     payload: P,
+    // ) -> Result<(), ClientError>
+    // where
+    //     S: Into<String>,
+    //     P: Into<Bytes>,
+    // {
+    //     pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
+    //     Ok(())
+    // }
+    //
+    // pub fn try_publish<S, P>(
+    //     &self,
+    //     topic: S,
+    //     qos: QoS,
+    //     retain: bool,
+    //     payload: P,
+    // ) -> Result<(), ClientError>
+    // where
+    //     S: Into<String>,
+    //     P: Into<Bytes>,
+    // {
+    //     self.client.try_publish(topic, qos, retain, payload)?;
+    //     Ok(())
+    // }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
