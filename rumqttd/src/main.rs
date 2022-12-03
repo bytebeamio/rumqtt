@@ -38,7 +38,7 @@ fn main() {
         _ => "rumqttd=trace",
     };
 
-    // tracing syntac -> 
+    // tracing syntac ->
     let builder = tracing_subscriber::fmt()
         .pretty()
         .with_line_number(false)

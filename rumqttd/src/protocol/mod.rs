@@ -194,6 +194,10 @@ impl Publish {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     /// Approximate length for meter
     pub fn len(&self) -> usize {
         let len = 2 + self.topic.len() + self.payload.len();
@@ -325,6 +329,10 @@ pub struct SubAck {
 }
 
 impl SubAck {
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     pub fn len(&self) -> usize {
         2 + self.return_codes.len()
     }
