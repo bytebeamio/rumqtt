@@ -34,7 +34,7 @@ pub type Cursor = (u64, u64);
 pub use link::local;
 pub use link::meters;
 
-pub use router::{Notification, GetMeter, Meter};
+pub use router::{GetMeter, Meter, Notification};
 pub use server::Broker;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -47,6 +47,14 @@ pub struct Config {
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
     pub bridge: Option<BridgeConfig>,
+    pub prometheus: Option<PrometheusSetting>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PrometheusSetting {
+    port: u16,
+    // How frequently to update metrics
+    interval: u64,
 }
 
 // TODO: Change names without _ until config-rs issue is resolved

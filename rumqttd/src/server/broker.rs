@@ -11,13 +11,16 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings};
+use crate::{meters, ConnectionSettings, GetMeter, Meter};
 use flume::{RecvError, SendError, Sender};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument, Span};
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
+use metrics::register_gauge;
+use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
 use std::{io, thread};
 
@@ -204,6 +207,43 @@ impl Broker {
                         error!(error=?e, "Remote link error");
                     }
                 });
+            })?;
+        }
+
+        if let Some(prometheus_setting) = &self.config.prometheus {
+            let port = prometheus_setting.port;
+            let timeout = prometheus_setting.interval;
+            let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
+            let meter_link = self.meters().unwrap();
+            metrics_thread.spawn(move || {
+                let builder = PrometheusBuilder::new()
+                    .with_http_listener(SocketAddr::new("127.0.0.1".parse().unwrap(), port));
+                builder.install().unwrap();
+
+                let total_publishes = register_gauge!("metrics.router.total_publishes");
+                let total_connections = register_gauge!("metrics.router.total_connections");
+                let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+                loop {
+                    let request = GetMeter::Router;
+                    let metrics = match meter_link.get(request) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!("Data link receive error = {:?}", e);
+                            break;
+                        }
+                    };
+
+                    println!("Metrics = {:?}", metrics);
+                    std::thread::sleep(Duration::from_secs(timeout));
+                    match metrics {
+                        Meter::Router(_, r) => {
+                            total_connections.set(r.total_connections as f64);
+                            total_publishes.set(r.total_publishes as f64);
+                            failed_publishes.set(r.failed_publishes as f64);
+                        }
+                        _ => panic!("We only request for router metrics"),
+                    }
+                }
             })?;
         }
 
