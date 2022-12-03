@@ -212,7 +212,7 @@ impl Broker {
 
         if let Some(prometheus_setting) = &self.config.prometheus {
             let port = prometheus_setting.port;
-            let timeout = prometheus_setting.timeout;
+            let timeout = prometheus_setting.interval;
             let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
             let meter_link = self.meters().unwrap();
             metrics_thread.spawn(move || {

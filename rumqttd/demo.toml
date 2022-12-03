@@ -57,7 +57,7 @@ next_connection_delay_ms = 1
 
 [prometheus]
 port = 9042
-timeout = 1
+interval = 1
 
 [ws]
 
