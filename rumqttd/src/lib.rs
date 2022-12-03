@@ -17,7 +17,7 @@ use tracing_subscriber::{
 use std::net::SocketAddr;
 
 mod link;
-mod protocol;
+pub mod protocol;
 mod router;
 mod segments;
 mod server;

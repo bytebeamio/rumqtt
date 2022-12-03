@@ -170,17 +170,34 @@ pub struct ConnAckProperties {
 //--------------------------- Publish packet -------------------------------
 
 /// Publish packet
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Publish {
-    pub dup: bool,
-    pub qos: QoS,
+    pub(crate) dup: bool,
+    pub(crate) qos: QoS,
+    pub(crate) pkid: u16,
     pub retain: bool,
     pub topic: Bytes,
-    pub pkid: u16,
     pub payload: Bytes,
 }
 
 impl Publish {
+    // Constructor for publish. Used in local links as local links shouldn't
+    // send qos 1 or 2 packets
+    pub fn new<T: Into<Bytes>>(topic: T, payload: T, retain: bool) -> Publish {
+        Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            pkid: 0,
+            retain,
+            topic: topic.into(),
+            payload: payload.into(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     /// Approximate length for meter
     pub fn len(&self) -> usize {
         let len = 2 + self.topic.len() + self.payload.len();
@@ -312,6 +329,10 @@ pub struct SubAck {
 }
 
 impl SubAck {
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     pub fn len(&self) -> usize {
         2 + self.return_codes.len()
     }
@@ -558,9 +579,10 @@ pub struct DisconnectProperties {
 
 /// Quality of service
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum QoS {
+    #[default]
     AtMostOnce = 0,
     AtLeastOnce = 1,
     ExactlyOnce = 2,

@@ -40,6 +40,7 @@ websockets = ["tokio-tungstenite", "websocket-codec", "tokio-util", "futures-uti
 validate-tenant-prefix = []
 
 [dev-dependencies]
+tokio = { version = "1.4.0", features = ["rt", "time", "net", "io-util", "macros", "sync"]}
 pretty_env_logger = "0.4.0"
 config = "0.13"
 pretty_assertions = "1.3.0"
