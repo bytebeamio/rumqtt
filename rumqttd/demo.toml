@@ -56,7 +56,7 @@ next_connection_delay_ms = 1
     max_inflight_size = 1024
 
 [prometheus]
-port = 9000
+port = 9042
 timeout = 1
 
 [ws]

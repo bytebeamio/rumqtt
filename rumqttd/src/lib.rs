@@ -53,7 +53,8 @@ pub struct Config {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PrometheusSetting {
     port: u16,
-    timeout: u64,
+    // How frequently to update metrics
+    interval: u64,
 }
 
 // TODO: Change names without _ until config-rs issue is resolved
