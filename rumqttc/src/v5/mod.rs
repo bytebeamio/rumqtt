@@ -5,13 +5,15 @@ mod client;
 mod eventloop;
 mod framed;
 pub mod mqttbytes;
-mod publisher;
 mod state;
+pub mod sync;
+pub mod unsync;
 
 #[cfg(feature = "use-rustls")]
 pub use crate::tls::Error as TlsError;
+
 use crate::Transport;
-pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
+pub use client::ClientError;
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 

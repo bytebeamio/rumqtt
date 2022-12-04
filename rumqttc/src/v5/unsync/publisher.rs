@@ -1,9 +1,10 @@
 use bytes::Bytes;
 use flume::Sender;
 
-use crate::v5::mqttbytes::{Publish, PublishProperties, QoS};
-
-use super::{mqttbytes::valid_topic, ClientError, Request};
+use crate::v5::{
+    mqttbytes::{valid_topic, Publish, PublishProperties, QoS},
+    ClientError, Request,
+};
 
 #[derive(Debug)]
 pub struct Publisher {
