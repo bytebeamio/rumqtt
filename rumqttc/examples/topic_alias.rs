@@ -1,9 +1,8 @@
-use rumqttc::v5::mqttbytes::QoS;
-use tokio::{task, time};
-
-use rumqttc::v5::{AsyncClient, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
+use tokio::{task, time};
+
+use rumqttc::v5::{mqttbytes::QoS, unsync::Client, MqttOptions};
 
 #[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -12,7 +11,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new("test-1", "broker.emqx.io", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = Client::new(mqttoptions, 10);
     task::spawn(async move {
         requests(client).await;
         time::sleep(Duration::from_secs(3)).await;
@@ -25,7 +24,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn requests(client: AsyncClient) {
+async fn requests(client: Client) {
     client
         .subscribe("hello/world", QoS::AtMostOnce)
         .await
