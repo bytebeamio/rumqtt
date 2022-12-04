@@ -22,8 +22,9 @@ impl Publisher {
         }
     }
 
-    pub fn topic_alias(&mut self, alias: u16) {
+    pub fn topic_alias(mut self, alias: u16) -> Self {
         self.properties.topic_alias = Some(alias);
+        self
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.

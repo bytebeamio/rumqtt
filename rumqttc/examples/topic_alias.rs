@@ -36,16 +36,14 @@ async fn requests(client: AsyncClient) {
         .await
         .unwrap();
 
-    let mut publisher1 = client.publisher("hello/world");
-    publisher1.topic_alias(3);
+    let mut publisher1 = client.publisher("hello/world").topic_alias(3);
 
     publisher1
         .publish(QoS::ExactlyOnce, false, vec![3; 3])
         .await
         .unwrap();
 
-    let mut publisher2 = client.publisher("bye/world");
-    publisher2.topic_alias(5);
+    let mut publisher2 = client.publisher("bye/world").topic_alias(5);
 
     publisher2
         .publish(QoS::ExactlyOnce, false, vec![3; 3])
