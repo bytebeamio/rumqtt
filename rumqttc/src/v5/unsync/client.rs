@@ -1,14 +1,9 @@
 // use std::collections::HashMap;
-use std::time::Duration;
-
 use super::publisher::Publisher;
 use crate::v5::mqttbytes::{Filter, PubAck, PubRec, Publish, QoS, Subscribe, Unsubscribe};
-use crate::v5::{ClientError, ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::v5::{ClientError, EventLoop, MqttOptions, Request};
 
 use flume::Sender;
-use futures::FutureExt;
-use tokio::runtime::Runtime;
-use tokio::time::timeout;
 
 /// An asynchronous client, communicates with MQTT `EventLoop`.
 ///
@@ -200,118 +195,6 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
         QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid)),
     };
     Some(ack)
-}
-
-/// Error type returned by [`Connection::recv`]
-#[derive(Debug, Eq, PartialEq)]
-pub struct RecvError;
-
-/// Error type returned by [`Connection::try_recv`]
-#[derive(Debug, Eq, PartialEq)]
-pub enum TryRecvError {
-    /// User has closed requests channel
-    Disconnected,
-    /// Did not resolve
-    Empty,
-}
-
-/// Error type returned by [`Connection::recv_timeout`]
-#[derive(Debug, Eq, PartialEq)]
-pub enum RecvTimeoutError {
-    /// User has closed requests channel
-    Disconnected,
-    /// Recv request timedout
-    Timeout,
-}
-
-///  MQTT connection. Maintains all the necessary state
-pub struct Connection {
-    pub eventloop: EventLoop,
-    runtime: Runtime,
-}
-
-impl Connection {
-    fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
-        Connection { eventloop, runtime }
-    }
-
-    /// Returns an iterator over this connection. Iterating over this is all that's
-    /// necessary to make connection progress and maintain a robust connection.
-    /// Just continuing to loop will reconnect
-    /// **NOTE** Don't block this while iterating
-    // ideally this should be named iter_mut because it requires a mutable reference
-    // Also we can implement IntoIter for this to make it easy to iterate over it
-    #[must_use = "Connection should be iterated over a loop to make progress"]
-    pub fn iter(&mut self) -> Iter<'_> {
-        Iter { connection: self }
-    }
-
-    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
-    /// if all clients/users have closed requests channel.
-    ///
-    /// [`EvenLoop`]: super::EventLoop
-    pub fn recv(&mut self) -> Result<Result<Event, ConnectionError>, RecvError> {
-        let f = self.eventloop.poll();
-        let event = self.runtime.block_on(f);
-
-        resolve_event(event).ok_or(RecvError)
-    }
-
-    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
-    /// if none immediately present or all clients/users have closed requests channel.
-    ///
-    /// [`EvenLoop`]: super::EventLoop
-    pub fn try_recv(&mut self) -> Result<Result<Event, ConnectionError>, TryRecvError> {
-        let f = self.eventloop.poll();
-        // Enters the runtime context so we can poll the future, as required by `now_or_never()`.
-        // ref: https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#method.enter
-        let _guard = self.runtime.enter();
-        let event = f.now_or_never().ok_or(TryRecvError::Empty)?;
-
-        resolve_event(event).ok_or(TryRecvError::Disconnected)
-    }
-
-    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
-    /// if all clients/users have closed requests channel or the timeout has expired.
-    ///
-    /// [`EvenLoop`]: super::EventLoop
-    pub fn recv_timeout(
-        &mut self,
-        duration: Duration,
-    ) -> Result<Result<Event, ConnectionError>, RecvTimeoutError> {
-        let f = self.eventloop.poll();
-        let event = self
-            .runtime
-            .block_on(async { timeout(duration, f).await })
-            .map_err(|_| RecvTimeoutError::Timeout)?;
-
-        resolve_event(event).ok_or(RecvTimeoutError::Disconnected)
-    }
-}
-
-fn resolve_event(event: Result<Event, ConnectionError>) -> Option<Result<Event, ConnectionError>> {
-    match event {
-        Ok(v) => Some(Ok(v)),
-        // closing of request channel should stop the iterator
-        Err(ConnectionError::RequestsDone) => {
-            trace!("Done with requests");
-            None
-        }
-        Err(e) => Some(Err(e)),
-    }
-}
-
-/// Iterator which polls the `EventLoop` for connection progress
-pub struct Iter<'a> {
-    connection: &'a mut Connection,
-}
-
-impl Iterator for Iter<'_> {
-    type Item = Result<Event, ConnectionError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.connection.recv().ok()
-    }
 }
 
 #[cfg(test)]
