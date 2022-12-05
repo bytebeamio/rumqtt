@@ -3,18 +3,18 @@ use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
+use rumqttc::v5::{unsync::Client, Event, EventLoop, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
-fn create_conn() -> (AsyncClient, EventLoop) {
+fn create_conn() -> (Client, EventLoop) {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
         .set_clean_session(false);
 
-    AsyncClient::new(mqttoptions, 10)
+    Client::new(mqttoptions, 10)
 }
 
 #[tokio::main(worker_threads = 1)]
@@ -65,10 +65,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn requests(client: &AsyncClient) {
+async fn requests(client: &Client) {
+    let mut publisher = client.publisher("hello/world");
     for i in 1..=10 {
-        client
-            .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
+        publisher
+            .publish(QoS::AtLeastOnce, false, vec![1; i])
             .await
             .unwrap();
 
