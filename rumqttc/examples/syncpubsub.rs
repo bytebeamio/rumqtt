@@ -6,10 +6,10 @@ fn main() {
     pretty_env_logger::init();
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+    // let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
     mqttoptions
-        .set_keep_alive(Duration::from_secs(5))
-        .set_last_will(will);
+        .set_keep_alive(Duration::from_secs(5));
+        //.set_last_will(will);
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
     thread::spawn(move || publish(client));
@@ -22,13 +22,14 @@ fn main() {
 }
 
 fn publish(mut client: Client) {
-    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
-    for i in 0..10_usize {
-        let payload = vec![1; i];
+    // client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
+    for i in 0..1_000_000_usize {
+        let payload = vec![1; 2048];
         let topic = format!("hello/{}/world", i);
         let qos = QoS::AtLeastOnce;
 
-        client.publish(topic, qos, true, payload).unwrap();
+        client.publish(topic, qos, false, payload).unwrap();
+        thread::sleep(Duration::from_millis(10));
     }
 
     thread::sleep(Duration::from_secs(1));

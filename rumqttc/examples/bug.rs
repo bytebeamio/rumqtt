@@ -10,11 +10,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         mqttoptions.set_keep_alive(std::time::Duration::from_secs(60));
 
         let (mut client, mut connection) = Client::new(mqttoptions, 10);
-        client.subscribe("hello/world", QoS::AtLeastOnce)?;
+        client.subscribe("hello/+/world", QoS::AtLeastOnce)?;
 
         use rumqttc::Event::*;
         use rumqttc::Packet::*;
         let mut last_seen_data = time::Instant::now();
+
         loop {
             if last_seen_data.elapsed() > time::Duration::from_secs(15) {
                 eprint!("Haven't seen new data for > 15seconds. Reconnecting.");
@@ -40,6 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             match n {
                 Incoming(Publish(data)) => {
+                    last_seen_data = time::Instant::now();
                     println!("{:?}", data);
                 }
                 Incoming(_) | Outgoing(_) => continue,
