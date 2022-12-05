@@ -45,6 +45,15 @@ impl Client {
         (client, connection)
     }
 
+    pub fn publisher<S>(&self, topic: S) -> Publisher
+    where
+        S: Into<String>,
+    {
+        let async_pub = self.client.publisher(topic);
+        Publisher::new(async_pub)
+        // pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
+        // Ok(())
+    }
     /// Sends a MQTT Publish to the `EventLoop`
     // pub fn publish<S, P>(
     //     &self,
