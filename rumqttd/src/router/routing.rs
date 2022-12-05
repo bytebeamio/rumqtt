@@ -22,7 +22,7 @@ use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
+    packetid, AckData, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
     MetricsRequest, Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY,
     MAX_SCHEDULE_ITERATIONS,
 };
@@ -223,6 +223,7 @@ impl Router {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
             Event::Metrics(metrics) => retrieve_metrics(self, metrics),
+            Event::AckData(ackdata) => self.register_ack_signal(ackdata),
         }
     }
 
@@ -427,14 +428,16 @@ impl Router {
 
                     match qos {
                         QoS::AtLeastOnce => {
-                            let puback = PubAck {
-                                pkid,
-                                reason: PubAckReason::Success,
-                            };
+                            // Add PUBACK after adding PUBLISH message to commitlog
 
-                            let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.puback(puback);
-                            force_ack = true;
+                            // let puback = PubAck {
+                            //     pkid,
+                            //     reason: PubAckReason::Success,
+                            // };
+                            //
+                            // let ackslog = self.ackslog.get_mut(id).unwrap();
+                            // ackslog.puback(puback);
+                            // force_ack = true;
                         }
                         QoS::ExactlyOnce => {
                             let pubrec = PubRec {
@@ -462,7 +465,14 @@ impl Router {
                         &mut self.notifications,
                         &mut self.connections,
                     ) {
-                        Ok(_offset) => {
+                        Ok(offset_map) => {
+                            let puback = PubAck {
+                                pkid,
+                                reason: PubAckReason::Success,
+                            };
+                            let ackslog = self.ackslog.get_mut(id).unwrap();
+                            ackslog.insert_pending_acks(puback, offset_map);
+
                             // Even if one of the data in the batch is appended to commitlog,
                             // set new data. This triggers notifications to wake waiters.
                             // Don't overwrite this flag to false if it is already true.
@@ -508,6 +518,10 @@ impl Router {
                         let qos = f.qos;
 
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
+                        // set in the datalog the info about which filters and from which cursor they have to persistent
+                        if connection.persistent {
+                            self.datalog.register_subscriber(idx, cursor, id);
+                        }
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
                         self.datalog
                             .handle_retained_messages(&filter, &mut self.notifications);
@@ -879,6 +893,14 @@ impl Router {
             }
         };
     }
+
+    fn register_ack_signal(&mut self, ackdata: AckData) {
+        // get the acker of the 'to' connection
+        // let acker = self.acker.get(ackdata.client_id)
+
+        // send the event into the acker
+        // acker.update(ackdata.status)
+    }
 }
 
 fn append_to_commitlog(
@@ -887,7 +909,7 @@ fn append_to_commitlog(
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
-) -> Result<Offset, RouterError> {
+) -> Result<HashMap<usize, Offset>, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
@@ -922,7 +944,7 @@ fn append_to_commitlog(
         None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
     };
 
-    let mut o = (0, 0);
+    let mut filter_offsets = HashMap::new();
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
         let (offset, filter) = datalog.append(publish.clone(), notifications);
@@ -931,11 +953,11 @@ fn append_to_commitlog(
             "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
         );
 
-        o = offset;
+        filter_offsets.insert(filter_idx, offset);
     }
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
-    Ok(o)
+    Ok(filter_offsets)
 }
 
 /// Sweep ackslog for all the pending acks.
@@ -1057,7 +1079,7 @@ fn forward_device_data(
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
             cursor: next,
-            size: 0,
+            filter_idx,
             publish,
         }
     });

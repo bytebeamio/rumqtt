@@ -23,6 +23,8 @@ pub struct Incoming {
     pub(crate) buffer: Arc<Mutex<VecDeque<Packet>>>,
     /// incoming metrics
     pub(crate) meter: IncomingMeter,
+    /// buffer that keeps track of pesisted messages
+    pub(crate) ack_buffer: VecDeque<u32>,
 }
 
 impl Incoming {
@@ -32,6 +34,7 @@ impl Incoming {
             buffer: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY))),
             meter: Default::default(),
             client_id,
+            ack_buffer: VecDeque::with_capacity(100),
         }
     }
 
@@ -44,6 +47,21 @@ impl Incoming {
     pub(crate) fn exchange(&mut self, mut v: VecDeque<Packet>) -> VecDeque<Packet> {
         std::mem::swap(&mut v, &mut self.buffer.lock());
         v
+    }
+
+    pub(crate) fn register_persist_ack(&mut self, pkid: u32) -> Option<()> {
+        let head = match self.ack_buffer.pop_front() {
+            Some(v) => v,
+            None => return None,
+        };
+
+        // We don't support out of order acks
+        if pkid != head {
+            error!("out of order ack. pkid = {}, head = {}", pkid, head);
+            return None;
+        }
+
+        Some(())
     }
 }
 

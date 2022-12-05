@@ -22,6 +22,7 @@ pub struct Connection {
     pub last_will: Option<LastWill>,
     /// Connection events
     pub events: ConnectionEvents,
+    pub persistent: bool,
 }
 
 impl Connection {
@@ -32,6 +33,7 @@ impl Connection {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        persistent: bool,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
@@ -51,6 +53,7 @@ impl Connection {
             clean,
             subscriptions: HashSet::default(),
             last_will,
+            persistent: false,
             events: ConnectionEvents::default(),
         }
     }

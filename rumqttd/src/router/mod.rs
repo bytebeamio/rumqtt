@@ -5,6 +5,7 @@ use std::{
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::filter::FilterId;
 
 use crate::{
     protocol::{
@@ -12,7 +13,7 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId,
+    ConnectionId, Filter, Offset, RouterConfig, RouterId,
 };
 
 mod connection;
@@ -57,6 +58,20 @@ pub enum Event {
     Shadow(ShadowRequest),
     /// Get metrics of a connection or all connections
     Metrics(MetricsRequest),
+    AckData(AckData),
+}
+
+#[derive(Debug)]
+pub struct AckData {
+    pub(crate) read_map: HashMap<FilterIdx, Offset>,
+}
+
+#[derive(Debug)]
+enum AckStatus {
+    Persisted {
+        persistent_client_id: ConnectionId,
+        pkid: usize,
+    },
 }
 
 /// Notification from router to connection
@@ -117,7 +132,7 @@ impl From<Notification> for MaybePacket {
 #[derive(Debug, Clone)]
 pub struct Forward {
     pub cursor: (u64, u64),
-    pub size: usize,
+    pub filter_idx: FilterIdx,
     pub publish: Publish,
 }
 

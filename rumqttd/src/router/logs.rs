@@ -1,16 +1,16 @@
-use super::Ack;
+use super::{Ack, Connection};
 use slab::Slab;
 use tracing::trace;
 
 use crate::protocol::{
-    matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
+    matches, ConnAck, Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
 };
 use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
-use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
+use crate::{ConnectionId, Cursor, Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
 use crate::Storage;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 
 /// Stores 'device' data and 'actions' data in native commitlog
@@ -31,6 +31,7 @@ pub struct DataLog {
     retained_publishes: HashMap<Topic, Publish>,
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
+    subscriber_read_markers: HashMap<FilterIdx, Vec<ReadMarker>>,
 }
 
 impl DataLog {
@@ -39,6 +40,7 @@ impl DataLog {
         let mut filter_indexes = HashMap::new();
         let retained_publishes = HashMap::new();
         let publish_filters = HashMap::new();
+        let persistence_map = HashMap::new();
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
@@ -57,6 +59,7 @@ impl DataLog {
             publish_filters,
             filter_indexes,
             retained_publishes,
+            subscriber_read_markers: persistence_map,
         })
     }
 
@@ -222,6 +225,29 @@ impl DataLog {
             }
         }
     }
+
+    /// Make a note of subscribers reading from current topic
+    pub fn register_subscriber(
+        &mut self,
+        filter_id: usize,
+        start_cursor: Cursor,
+        subscriber_id: ConnectionId,
+    ) {
+        let read_marker = ReadMarker {
+            reader_id: subscriber_id,
+            start_pos: start_cursor,
+            curr_pos: start_cursor,
+        };
+
+        let entry = self.subscriber_read_markers.entry(filter_id).or_default();
+        entry.push(read_marker);
+    }
+}
+
+pub struct ReadMarker {
+    reader_id: ConnectionId,
+    start_pos: Cursor,
+    curr_pos: Cursor,
 }
 
 pub struct Data<T> {
@@ -277,6 +303,13 @@ pub struct AckLog {
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
     recorded: VecDeque<Publish>,
+    deferred_acks: VecDeque<DeferredAck>,
+}
+
+#[derive(Debug)]
+struct DeferredAck {
+    puback: PubAck,
+    map: HashMap<usize, Offset>,
 }
 
 impl AckLog {
@@ -285,6 +318,7 @@ impl AckLog {
         AckLog {
             committed: VecDeque::with_capacity(100),
             recorded: VecDeque::with_capacity(100),
+            deferred_acks: VecDeque::with_capacity(100),
         }
     }
 
@@ -298,7 +332,7 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    pub fn puback(&mut self, ack: PubAck) {
+    fn puback(&mut self, ack: PubAck) {
         let ack = Ack::PubAck(ack);
         self.committed.push_back(ack);
     }
@@ -332,6 +366,13 @@ impl AckLog {
 
     pub fn readv(&mut self) -> &mut VecDeque<Ack> {
         &mut self.committed
+    }
+
+    pub fn insert_pending_acks(&mut self, puback: PubAck, offset_map: HashMap<usize, Offset>) {
+        self.deferred_acks.push_back(DeferredAck {
+            puback,
+            map: offset_map,
+        })
     }
 }
 

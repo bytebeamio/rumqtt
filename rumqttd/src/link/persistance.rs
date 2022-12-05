@@ -3,13 +3,13 @@ use crate::link::network;
 use crate::link::network::Network;
 use crate::local::Link;
 use crate::protocol::{AsyncProtocol, Connect, LastWill, Packet, self};
-use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings};
+use crate::router::{Event, Notification, Forward, FilterIdx};
+use crate::{ConnectionId, ConnectionSettings, Cursor, Offset};
 
 use disk::Storage;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
 use tracing::{info, error, trace};
-use std::collections::{VecDeque};
+use std::collections::{VecDeque, HashMap};
 use std::{io, fs};
 use std::sync::Arc;
 use std::time::Duration;
@@ -75,19 +75,39 @@ impl<P: AsyncProtocol> DiskHandler<P> {
         })
     }
 
-    pub fn write(&mut self, notifications: &mut VecDeque<Notification>) {
+    pub fn write(&mut self, notifications: &mut VecDeque<Notification>) -> HashMap::<FilterIdx, Offset> {
+        // let ack_list = VecDeque::new();
+
+        let mut stored_filter_offset_map: HashMap<FilterIdx, Offset> = HashMap::new();
         for notif in notifications.drain(..) {
-            let packet_or_unscheduled = notif.into();
+
+            let packet_or_unscheduled = notif.clone().into();
             if let Some(packet) = packet_or_unscheduled {
+
                 if let Err(e) = self.protocol.write(packet, self.storage.writer()) {
                     error!("Failed to write to storage: {e}");
+                    continue;
                 }
 
                 if let Err(e) = self.storage.flush_on_overflow() {
                     error!("Failed to flush storage: {e}");
+                    continue;
                 }
+
+                match &notif {
+                    Notification::Forward(forward) => {
+                        let mut cursor = *stored_filter_offset_map.entry(forward.filter_idx).or_default();
+                        if forward.cursor > cursor {
+                            cursor = forward.cursor;
+                        }
+                    },
+                    _ => continue,
+                }
+                
             }
         }
+
+        stored_filter_offset_map
     }
 
     pub fn read(&mut self, buffer: &mut VecDeque<Packet>) {
@@ -222,6 +242,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
                 // write to disk
                 o = self.link_rx.exchange(&mut self.notifications) => {
                     o?;
+                    // TODO: write only publishes
                     self.disk_handler.write(&mut self.notifications);
                 }
             }
@@ -247,7 +268,8 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
 
         // write publishes to disk
         if !publish.is_empty() { 
-            self.disk_handler.write(&mut publish);        
+            let written = self.disk_handler.write(&mut publish);
+            self.link_tx.persist(written);
         }
         // read publishes from disk
         let mut buffer = VecDeque::new();
