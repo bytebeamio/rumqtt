@@ -88,9 +88,7 @@ impl Link {
         let (mut message, i, o, link_rx) =
             Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         if let Event::Connect {
-            connection: _,
-            incoming: _,
-            ref mut outgoing,
+            ref mut outgoing, ..
         } = message
         {
             outgoing.persistent = persistent;

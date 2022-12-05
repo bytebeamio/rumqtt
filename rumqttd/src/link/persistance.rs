@@ -231,16 +231,16 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
     async fn write_to_client(&mut self) -> Result<(), Error> {
         // separate publish notifications out
         let mut publish = VecDeque::new();
-        let mut non_pulish = VecDeque::new();
+        let mut non_publish = VecDeque::new();
         for notif in self.notifications.drain(..) {
             match notif {
                 Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => publish.push_back(notif),
-                _ => non_pulish.push_back(notif),
+                _ => non_publish.push_back(notif),
             }
         };
 
         // write non-publishes to network
-        let unscheduled = self.network.writev(&mut non_pulish).await?;
+        let unscheduled = self.network.writev(&mut non_publish).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
