@@ -223,7 +223,7 @@ impl Router {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
             Event::Metrics(metrics) => retrieve_metrics(self, metrics),
-            Event::AckData(ackdata) => self.register_ack_signal(ackdata),
+            Event::AckData(ackdata) => self.register_ack_signal(id, ackdata),
         }
     }
 
@@ -894,12 +894,31 @@ impl Router {
         };
     }
 
-    fn register_ack_signal(&mut self, ackdata: AckData) {
-        // get the acker of the 'to' connection
-        // let acker = self.acker.get(ackdata.client_id)
+    fn register_ack_signal(&mut self, connection_id: ConnectionId, ackdata: AckData) {
+        let mut filters_with_progress = VecDeque::<(FilterIdx, Offset)>::new();
 
-        // send the event into the acker
-        // acker.update(ackdata.status)
+        for (filter_idx, last_persisted_read_offset) in ackdata.read_map {
+            let filter_read_marker = self
+                .datalog
+                .filter_read_markers
+                .get_mut(&filter_idx)
+                .expect("Filter should be present");
+
+            let read_progress = filter_read_marker
+                .update_subscriber_marker(connection_id, last_persisted_read_offset);
+
+            if read_progress {
+                filters_with_progress.push_back((
+                    filter_idx,
+                    filter_read_marker
+                        .get_slowest_marker()
+                        .expect("slowest marker was just updated so it cannot be none"),
+                ))
+            }
+
+            // 2. find all the publishers that publish on those filters
+            // 3. send updated markers to those publishers and send acks based on updated markers
+        }
     }
 }
 

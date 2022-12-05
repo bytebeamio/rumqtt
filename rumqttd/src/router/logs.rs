@@ -31,7 +31,39 @@ pub struct DataLog {
     retained_publishes: HashMap<Topic, Publish>,
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
-    subscriber_read_markers: HashMap<FilterIdx, Vec<ReadMarker>>,
+    pub filter_read_markers: HashMap<FilterIdx, ReadMarker>,
+    // pub subscriber_markers: HashMap<ConnectionId,
+}
+
+#[derive(Default)]
+pub struct ReadMarker {
+    subscriber_markers: HashMap<ConnectionId, Offset>,
+    slowest_marker: Option<Offset>,
+}
+
+impl ReadMarker {
+    // Return true if slowest_marker moved ahead
+    pub fn update_subscriber_marker(
+        &mut self,
+        subscriber_id: ConnectionId,
+        marker: Offset,
+    ) -> bool {
+        // after this operations the slowest_marker >= pre operations slowest_marker
+        *self.subscriber_markers.entry(subscriber_id).or_default() = marker;
+        self.compute_slowest_marker()
+    }
+
+    // Return true if slowest_marker moved ahead
+    fn compute_slowest_marker(&mut self) -> bool {
+        let prev_slowest_marker = self.slowest_marker;
+        self.slowest_marker = self.subscriber_markers.values().min().copied();
+
+        self.slowest_marker > prev_slowest_marker
+    }
+
+    pub fn get_slowest_marker(&self) -> Option<Offset> {
+        self.slowest_marker
+    }
 }
 
 impl DataLog {
@@ -40,7 +72,7 @@ impl DataLog {
         let mut filter_indexes = HashMap::new();
         let retained_publishes = HashMap::new();
         let publish_filters = HashMap::new();
-        let persistence_map = HashMap::new();
+        let filter_read_markers = HashMap::new();
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
@@ -59,7 +91,7 @@ impl DataLog {
             publish_filters,
             filter_indexes,
             retained_publishes,
-            subscriber_read_markers: persistence_map,
+            filter_read_markers,
         })
     }
 
@@ -230,24 +262,18 @@ impl DataLog {
     pub fn register_subscriber(
         &mut self,
         filter_id: usize,
-        start_cursor: Cursor,
+        start_cursor: Offset,
         subscriber_id: ConnectionId,
     ) {
-        let read_marker = ReadMarker {
-            reader_id: subscriber_id,
-            start_pos: start_cursor,
-            curr_pos: start_cursor,
-        };
+        // reset the read marker of the filter to the new
+        // let read_marker = ReadMarker {
+        //     start_pos: start_cursor,
+        //     curr_pos: start_cursor,
+        // };
 
-        let entry = self.subscriber_read_markers.entry(filter_id).or_default();
-        entry.push(read_marker);
+        let marker = self.filter_read_markers.entry(filter_id).or_default();
+        marker.update_subscriber_marker(subscriber_id, start_cursor);
     }
-}
-
-pub struct ReadMarker {
-    reader_id: ConnectionId,
-    start_pos: Cursor,
-    curr_pos: Cursor,
 }
 
 pub struct Data<T> {
