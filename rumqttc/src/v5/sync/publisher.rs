@@ -26,19 +26,10 @@ impl Publisher {
         Ok(())
     }
 
-    //
-    // pub fn try_publish<S, P>(
-    //     &self,
-    //     topic: S,
-    //     qos: QoS,
-    //     retain: bool,
-    //     payload: P,
-    // ) -> Result<(), ClientError>
-    // where
-    //     S: Into<String>,
-    //     P: Into<Bytes>,
-    // {
-    //     self.client.try_publish(topic, qos, retain, payload)?;
-    //     Ok(())
-    // }
+    pub fn try_publish<P>(&mut self, qos: QoS, retain: bool, payload: P) -> Result<(), ClientError>
+    where
+        P: Into<Bytes>,
+    {
+        self.async_pub.try_publish(qos, retain, payload)
+    }
 }

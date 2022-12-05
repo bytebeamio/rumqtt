@@ -4,8 +4,8 @@ use std::time::Duration;
 use crate::v5::unsync::Client as AsyncClient;
 
 use super::publisher::Publisher;
-use crate::v5::mqttbytes::{Filter, PubAck, PubRec, Publish, QoS, Subscribe, Unsubscribe};
-use crate::v5::{ClientError, ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::v5::mqttbytes::{Filter, Publish, QoS};
+use crate::v5::{ClientError, ConnectionError, Event, EventLoop, MqttOptions};
 
 use futures::FutureExt;
 use tokio::runtime::{self, Runtime};
@@ -51,39 +51,7 @@ impl Client {
     {
         let async_pub = self.client.publisher(topic);
         Publisher::new(async_pub)
-        // pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
-        // Ok(())
     }
-    /// Sends a MQTT Publish to the `EventLoop`
-    // pub fn publish<S, P>(
-    //     &self,
-    //     topic: S,
-    //     qos: QoS,
-    //     retain: bool,
-    //     payload: P,
-    // ) -> Result<(), ClientError>
-    // where
-    //     S: Into<String>,
-    //     P: Into<Bytes>,
-    // {
-    //     pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
-    //     Ok(())
-    // }
-    //
-    // pub fn try_publish<S, P>(
-    //     &self,
-    //     topic: S,
-    //     qos: QoS,
-    //     retain: bool,
-    //     payload: P,
-    // ) -> Result<(), ClientError>
-    // where
-    //     S: Into<String>,
-    //     P: Into<Bytes>,
-    // {
-    //     self.client.try_publish(topic, qos, retain, payload)?;
-    //     Ok(())
-    // }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
