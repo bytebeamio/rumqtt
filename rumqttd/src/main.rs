@@ -1,6 +1,11 @@
-use rumqttd::{Broker, Config};
+use std::io::Write;
+
+use config::FileFormat;
+use rumqttd::Broker;
 
 use structopt::StructOpt;
+
+pub static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../demo.toml");
 
 #[derive(StructOpt)]
 #[structopt(name = "rumqttd")]
@@ -21,14 +26,29 @@ struct CommandLine {
     commit_date: String,
     /// path to config file
     #[structopt(short, long)]
-    config: String,
+    config: Option<String>,
+    #[structopt(subcommand)]
+    command: Option<Command>,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
 }
 
+#[derive(StructOpt)]
+enum Command {
+    /// Write default configuration file to stdout
+    GenerateConfig,
+}
+
 fn main() {
     let commandline: CommandLine = CommandLine::from_args();
+
+    if let Some(Command::GenerateConfig) = commandline.command {
+        std::io::stdout()
+            .write_all(RUMQTTD_DEFAULT_CONFIG.as_bytes())
+            .unwrap();
+        std::process::exit(0);
+    }
 
     banner(&commandline);
     let level = match commandline.verbose {
@@ -54,17 +74,31 @@ fn main() {
         .try_init()
         .expect("initialized subscriber succesfully");
 
-    let config = config::Config::builder()
-        .add_source(config::File::with_name(&commandline.config))
-        .build()
-        .unwrap();
+    let mut configs: rumqttd::Config;
+    if let Some(config) = &commandline.config {
+        configs = config::Config::builder()
+            .add_source(config::File::with_name(config))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+    } else {
+        configs = config::Config::builder()
+            .add_source(config::File::from_str(
+                RUMQTTD_DEFAULT_CONFIG,
+                FileFormat::Toml,
+            ))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+    }
 
-    let mut config: Config = config.try_deserialize().unwrap();
-    config.console.set_filter_reload_handle(reload_handle);
+    configs.console.set_filter_reload_handle(reload_handle);
 
     // println!("{:#?}", config);
 
-    let mut broker = Broker::new(config);
+    let mut broker = Broker::new(configs);
     broker.start().unwrap();
 }
 
