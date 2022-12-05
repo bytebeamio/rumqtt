@@ -28,6 +28,11 @@ impl Publisher {
         self
     }
 
+    pub fn set_properties(mut self, properties: PublishProperties) -> Self {
+        self.properties = properties;
+        self
+    }
+
     /// Sends a MQTT Publish to the `EventLoop`.
     pub async fn publish<P>(
         &mut self,

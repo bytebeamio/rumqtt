@@ -1,6 +1,10 @@
 use bytes::Bytes;
 
-use crate::v5::{mqttbytes::QoS, unsync::Publisher as AsyncPublisher, ClientError};
+use crate::v5::{
+    mqttbytes::{PublishProperties, QoS},
+    unsync::Publisher as AsyncPublisher,
+    ClientError,
+};
 
 #[derive(Debug)]
 pub struct Publisher {
@@ -14,6 +18,11 @@ impl Publisher {
 
     pub fn topic_alias(mut self, alias: u16) -> Self {
         self.async_pub = self.async_pub.topic_alias(alias);
+        self
+    }
+
+    pub fn set_properties(mut self, properties: PublishProperties) -> Self {
+        self.async_pub = self.async_pub.set_properties(properties);
         self
     }
 
