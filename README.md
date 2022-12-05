@@ -47,9 +47,9 @@ rumqttd can be used with docker by pulling the image from docker hub as follows:
 docker pull bytebeamio/rumqttd
 ```
 
-To use the rumqttd docker image with the included `demo.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
+To use the rumqttd docker image with the included `rumqttd.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
 ```bash
-docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c demo.toml
+docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c rumqttd.toml
 ```
 
 One can also mount the local directory containing configs as a volume and use the appropriate config file as follows:
@@ -68,16 +68,16 @@ cargo install --git https://github.com/bytebeamio/rumqtt rumqttd
 download the demo config file
 
 ```
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/bytebeamio/rumqtt/main/rumqttd/demo.toml > demo.toml
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/bytebeamio/rumqtt/main/rumqttd/rumqttd.toml > rumqttd.toml
 ```
 
 and run the broker using
 
 ```
-rumqttd --config demo.toml
+rumqttd --config rumqttd.toml
 ```
 
-Note: Make sure to you correct demo.toml file for a specific version of rumqttd
+Note: Make sure to you correct rumqttd.toml file for a specific version of rumqttd
 
 <br/>
 
@@ -93,7 +93,7 @@ Change directory to that folder and run
 
 ```
 cd rumqtt
-cargo run --release --bin rumqttd -- -c rumqttd/demo.toml -vvv
+cargo run --release --bin rumqttd -- -c rumqttd/rumqttd.toml -vvv
 ```
 
 <br/>
