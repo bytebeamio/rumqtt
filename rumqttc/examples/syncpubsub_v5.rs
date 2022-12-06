@@ -17,19 +17,40 @@ fn main() {
 
     for (i, notification) in connection.iter().enumerate() {
         println!("{}. Notification = {:?}", i, notification);
+        if let Err(ref err) = notification {
+            match err {
+                rumqttc::v5::ConnectionError::Io(ref e) => {
+                    if e.kind() == std::io::ErrorKind::ConnectionRefused {
+                        // we can just stop the client!
+                        // panic!("Please make sure broker is running and you are connecting to correct port!");
+                        eprintln!("Please make sure broker is running and you are connecting to correct port!");
+                        thread::sleep(Duration::from_secs(2));
+                    };
+                }
+                // this should be error variant if connection is refused ???
+                // rumqttc::v5::ConnectionError::ConnectionRefused(_) => todo!(),
+                _ => (),
+            }
+        }
     }
 
     println!("Done with the stream!!");
 }
 
 fn publish(client: Client) {
-    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
+    client
+        .subscribe("hello/+/world", QoS::AtMostOnce)
+        .expect("subscribe to topic");
+
     for i in 0..10_usize {
         let payload = vec![1; i];
         let topic = format!("hello/{}/world", i);
         let qos = QoS::AtLeastOnce;
 
-        client.publisher(topic).publish(qos, true, payload).unwrap()
+        client
+            .publisher(topic)
+            .publish(qos, true, payload)
+            .expect("publised message")
     }
 
     thread::sleep(Duration::from_secs(1));
