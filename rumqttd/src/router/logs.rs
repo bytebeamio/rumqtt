@@ -331,7 +331,7 @@ pub struct AckLog {
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
     recorded: VecDeque<Publish>,
-    deferred_acks: VecDeque<DeferredAck>,
+    // deferred_acks: VecDeque<DeferredAck>,
 }
 
 /// Offset map, for topic T:
@@ -355,46 +355,115 @@ pub struct AckLog {
 /// publishes on 3 filters and marker (denoted by ←) corresponding to
 /// every filter. Puback for P_0 is already released.
 ///
-///              filters ➡️
-///    publishes
-///        ↓  
-///            |  F_0     F_1     F_2
-///            |  a/b/c   a/+/c   a/#
-///      ------------------------------             
-///   [x] P_0  |  0 ←     3       1          ⬅️ threshold
-///       P_1  |  1       5 ←     10 ←         
-///       P_2  |  2       7       20
-///       P_3  |  3       10      22
+/// At t = 0,
+///
+///                 filters ➡️
+/// time, publishes
+///  ↓        ↓  
+///               |  F_0     F_1     F_2
+///               |  a/b/c   a/+/c   a/#
+/// --------------------------------------             
+///  t_0     P_0  |  0 ←                   [x]  ⬅️ threshold
 ///
 ///
-/// Lets say markers were updated as following:
+/// At t = 4,
 ///
-///             old     new
-///      F_0    0       3
-///      F_1    5       8
-///      F_2    11      21
+///                 filters ➡️
+/// time, publishes
+///  ↓        ↓  
+///               |  F_0     F_1     F_2
+///               |  a/b/c   a/+/c   a/#
+/// --------------------------------------             
+///  t_0     P_0  |  0 ←                   [x]  ⬅️ threshold
+///  t_1     P_1  |  1       2               
+///  t_2     P_2  |  2       7       
+///  t_3     P_3  |  3       10      22
+///
+/// Lets say markers are updated at t = 4 as:
+///
+///           | old     new
+///     --------------------
+///      F_0  | 0       3
+///      F_1  | N/A     8
+///      F_2  | N/A     21
 ///
 /// We recompute the threshold and release pubacks for P_1 and P_2:
 ///
-///              filters ➡️
-///    publishes
-///        ↓  
-///            |  F_0     F_1     F_2
-///            |  a/b/c   a/+/c   a/#
-///      ------------------------------             
-///   [x] P_0  |  0       3       1          ⬅️ old threshold
-///   [x] P_1  |  1       5       10
-///   [x] P_2  |  2       7 ←     20         ⬅️ new threshold
-///       P_3  |  3 ←     10      22 ←
+///                 filters ➡️
+/// time, publishes
+///  ↓        ↓  
+///               |  F_0     F_1     F_2
+///               |  a/b/c   a/+/c   a/#
+/// --------------------------------------             
+///  t_0     P_0  |  0                          ⬅️ old threshold
+///  t_1     P_1  |  1       2         
+///  t_2     P_2  |  2       7 ←                ⬅️ new threshold
+///  t_3     P_3  |  3 ←     10      22 ←
 ///   
 #[derive(Debug)]
-struct DeferredAck {
-    puback: VecDeque<PubAck>,
+struct OffsetMap {
+    // subscribers end
+    // where for each filter's all subscribers have read till
+    filter_markers: HashMap<FilterIdx, Offset>,
+    //
+    filter_to_topics: HashMap<FilterIdx, Vec<Topic>>,
+    topic_to_filters: HashMap<Topic, Vec<FilterIdx>>,
+    filter_publish_offsets: HashMap<FilterIdx, VecDeque<Offset>>,
+
+    publishers_markers: HashMap<Topic, Offset>,
+    pending_pubacks: HashMap<Topic, VecDeque<(usize, PubAck)>>,
+    // this can be take from commit log instead?
     // store of offsets of publishes on filters
     // VecDeque<Offset> is increasing in nature
-    filter_publish_markers: HashMap<FilterIdx, VecDeque<Offset>>,
     // store of offsets till which all subscribers have persisted data
-    filter_thresholds: HashMap<FilterIdx, Offset>,
+}
+
+type AckResult = Result<(), String>;
+
+impl OffsetMap {
+    pub fn update(&mut self, filter_id: FilterIdx, marker: Offset) -> AckResult {
+        // update that filter's subscriber marker
+        self.filter_markers.entry(filter_id).or_insert(marker);
+
+        // get topics of updated filter
+        let topics = match self.filter_to_topics.get(&filter_id) {
+            Some(topics) => topics,
+            None => return Err("filter does not map to any topic".into()),
+        };
+
+        // update topic's publisher threshold
+        let mut updated_topics = Vec::<(&Topic, &Offset)>::new();
+        for topic in topics {
+            let topic_filters = match self.topic_to_filters.get(topic) {
+                Some(filters) => filters,
+                None => return Err("topic does not map to any filter".into()),
+            };
+
+            let new_publish_threshold = topic_filters
+                .iter()
+                .map(|filter| self.filter_markers.get(filter).unwrap())
+                .min()
+                .unwrap();
+
+            // we can release pubacks for this topic
+            if new_publish_threshold > self.publishers_markers.get(topic).unwrap() {
+                updated_topics.push((topic, new_publish_threshold));
+            }
+        }
+
+        // TODO: release pubacks and update topic marker
+        let freed_pubacks = Vec::<PubAck>::new();
+        for (topic, marker) in updated_topics {
+            // Figure out the position of puback in the list pending_pubacks based
+            // on the filter marker info
+            // As per the example, filter markers F_0:3, F_1:8, F_2:21 should translate
+            // to position of puback as t_2, P_2
+
+            // if let Some(pending_pubacks) = self.pending_pubacks.get(topic) {}
+        }
+
+        Ok(())
+    }
 }
 
 impl AckLog {
@@ -403,7 +472,7 @@ impl AckLog {
         AckLog {
             committed: VecDeque::with_capacity(100),
             recorded: VecDeque::with_capacity(100),
-            deferred_acks: VecDeque::with_capacity(100),
+            // deferred_acks: VecDeque::with_capacity(100),
         }
     }
 
