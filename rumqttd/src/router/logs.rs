@@ -32,7 +32,7 @@ pub struct DataLog {
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
     pub filter_read_markers: HashMap<FilterIdx, ReadMarker>,
-    // pub subscriber_markers: HashMap<ConnectionId,
+    pub filter_write_markers: HashMap<FilterIdx, HashSet<ConnectionId>>,
 }
 
 #[derive(Default)]
@@ -73,6 +73,7 @@ impl DataLog {
         let retained_publishes = HashMap::new();
         let publish_filters = HashMap::new();
         let filter_read_markers = HashMap::new();
+        let filter_write_markers = HashMap::new();
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
@@ -92,6 +93,7 @@ impl DataLog {
             filter_indexes,
             retained_publishes,
             filter_read_markers,
+            filter_write_markers,
         })
     }
 
@@ -332,10 +334,67 @@ pub struct AckLog {
     deferred_acks: VecDeque<DeferredAck>,
 }
 
+/// Offset map, for topic T:
+///
+/// - For N publishes on T with M matching filters, we store the offsets
+/// in a map. The i, j value of map gives the offset of i-th publish on
+/// j-th filter's append log.
+/// - We also store markers per filter. For j-th filter, the marker tells
+/// what was the last persisted offset.
+/// - Based on the markers of all filters in an offset map we calculate a
+/// threshold. Threshold points to the latest publish packet that has been
+/// persisted by all the subscribers.
+///
+/// From the datalog we receive information that F_i has been updated.
+/// On update of marker of F_i, we recompute threshold for all offset
+/// maps that have F_i in it and release the pubacks based new threshold.  
+///
+/// Example:
+/// For publish on topic a/b/c we have have the following offset map.
+/// Topic a/b/c maps to the filters a/b/c, a/+/c, and a/#. We have 4
+/// publishes on 3 filters and marker (denoted by ←) corresponding to
+/// every filter. Puback for P_0 is already released.
+///
+///              filters ➡️
+///    publishes
+///        ↓  
+///            |  F_0     F_1     F_2
+///            |  a/b/c   a/+/c   a/#
+///      ------------------------------             
+///   [x] P_0  |  0 ←     3       1          ⬅️ threshold
+///       P_1  |  1       5 ←     10 ←         
+///       P_2  |  2       7       20
+///       P_3  |  3       10      22
+///
+///
+/// Lets say markers were updated as following:
+///
+///             old     new
+///      F_0    0       3
+///      F_1    5       8
+///      F_2    11      21
+///
+/// We recompute the threshold and release pubacks for P_1 and P_2:
+///
+///              filters ➡️
+///    publishes
+///        ↓  
+///            |  F_0     F_1     F_2
+///            |  a/b/c   a/+/c   a/#
+///      ------------------------------             
+///   [x] P_0  |  0       3       1          ⬅️ old threshold
+///   [x] P_1  |  1       5       10
+///   [x] P_2  |  2       7 ←     20         ⬅️ new threshold
+///       P_3  |  3 ←     10      22 ←
+///   
 #[derive(Debug)]
 struct DeferredAck {
-    puback: PubAck,
-    map: HashMap<usize, Offset>,
+    puback: VecDeque<PubAck>,
+    // store of offsets of publishes on filters
+    // VecDeque<Offset> is increasing in nature
+    filter_publish_markers: HashMap<FilterIdx, VecDeque<Offset>>,
+    // store of offsets till which all subscribers have persisted data
+    filter_thresholds: HashMap<FilterIdx, Offset>,
 }
 
 impl AckLog {
@@ -395,10 +454,7 @@ impl AckLog {
     }
 
     pub fn insert_pending_acks(&mut self, puback: PubAck, offset_map: HashMap<usize, Offset>) {
-        self.deferred_acks.push_back(DeferredAck {
-            puback,
-            map: offset_map,
-        })
+        // do something
     }
 }
 
