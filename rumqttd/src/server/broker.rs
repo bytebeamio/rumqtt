@@ -346,7 +346,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             match shadow {
                 #[cfg(feature = "websockets")]
                 true => task::spawn(shadow_connection(config, router_tx, network).instrument(
-                    tracing::info_span!(
+                    tracing::error_span!(
                         "shadow_connection",
                         client_id = field::Empty,
                         connection_id = field::Empty
@@ -354,7 +354,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 )),
                 _ => task::spawn(
                     remote(config, tenant_id, router_tx, network, protocol).instrument(
-                        tracing::info_span!(
+                        tracing::error_span!(
                             "remote_link",
                             client_id = field::Empty,
                             connection_id = field::Empty
