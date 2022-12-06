@@ -26,6 +26,7 @@ rumqtt is an opensource set of libraries written in rust-lang to implement the M
 * [Installation and Usage](#installation-and-usage)
     * [rumqttd](#rumqttd)
         * [Run using docker](#run-using-docker)
+        * [Prebuild binaries](#prebuilt-binaries)
         * [Install using cargo](#install-using-cargo)
         * [Compile from source](#compile-from-source)
     * [rumqttc](#rumqttc)
@@ -56,6 +57,12 @@ One can also mount the local directory containing configs as a volume and use th
 ```bash
 docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
 ```
+
+<br/>
+
+### Prebuilt binaries
+
+For prebuilt binaries checkout our [releases](https://github.com/bytebeamio/rumqtt/releases), download suitable binary for your system and move it to any directory in your [PATH](https://en.wikipedia.org/wiki/PATH_(variable)).
 
 <br/>
 
