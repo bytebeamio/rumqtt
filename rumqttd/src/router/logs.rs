@@ -226,8 +226,8 @@ impl DataLog {
 
 pub struct Data<T> {
     filter: Filter,
-    log: CommitLog<T>,
-    waiters: Waiters<DataRequest>,
+    pub log: CommitLog<T>,
+    pub waiters: Waiters<DataRequest>,
     meter: SubscriptionMeter,
 }
 
@@ -235,7 +235,7 @@ impl<T> Data<T>
 where
     T: Storage + Clone,
 {
-    fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data<T> {
+    pub fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data<T> {
         let log = CommitLog::new(max_segment_size, max_mem_segments).unwrap();
 
         let waiters = Waiters::with_capacity(10);

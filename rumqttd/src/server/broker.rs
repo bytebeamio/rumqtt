@@ -1,3 +1,4 @@
+use crate::link::alerts::{self};
 // use crate::link::bridge;
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
@@ -11,7 +12,7 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, GetMeter, Meter};
+use crate::{meters, ConnectionSettings, Filter, GetMeter, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -130,6 +131,11 @@ impl Broker {
         Ok(link)
     }
 
+    pub fn alerts(&self, filter: Filter) -> Result<alerts::AlertLink, alerts::LinkError> {
+        let link = alerts::AlertLink::new(self.router_tx.clone(), filter)?;
+        Ok(link)
+    }
+
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
@@ -167,7 +173,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(false).await {
+                    if let Err(e) = server.start(LinkType::Remote).await {
                         error!(error=?e, "Remote link error");
                     }
                 });
@@ -182,7 +188,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(false).await {
+                    if let Err(e) = server.start(LinkType::Remote).await {
                         error!(error=?e, "Remote link error");
                     }
                 });
@@ -204,7 +210,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(true).await {
+                    if let Err(e) = server.start(LinkType::Shadow).await {
                         error!(error=?e, "Remote link error");
                     }
                 });
@@ -272,6 +278,13 @@ impl Broker {
     }
 }
 
+#[derive(Copy, Clone)]
+pub enum LinkType {
+    #[cfg(feature = "websockets")]
+    Shadow,
+    Remote,
+}
+
 struct Server<P> {
     config: ServerSettings,
     router_tx: Sender<(ConnectionId, Event)>,
@@ -305,7 +318,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&self, shadow: bool) -> Result<(), Error> {
+    async fn start(&self, link_type: LinkType) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -343,16 +356,16 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             count += 1;
 
             let protocol = self.protocol.clone();
-            match shadow {
+            match link_type {
                 #[cfg(feature = "websockets")]
-                true => task::spawn(shadow_connection(config, router_tx, network).instrument(
-                    tracing::info_span!(
+                LinkType::Shadow => task::spawn(
+                    shadow_connection(config, router_tx, network).instrument(tracing::info_span!(
                         "shadow_connection",
                         client_id = field::Empty,
                         connection_id = field::Empty
-                    ),
-                )),
-                _ => task::spawn(
+                    )),
+                ),
+                LinkType::Remote => task::spawn(
                     remote(config, tenant_id, router_tx, network, protocol).instrument(
                         tracing::info_span!(
                             "remote_link",
