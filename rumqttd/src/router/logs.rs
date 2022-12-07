@@ -385,7 +385,7 @@ pub struct AckLog {
 ///     --------------------
 ///      F_0  | 0       3
 ///      F_1  | N/A     8
-///      F_2  | N/A     21
+///      F_2  | N/A     24
 ///
 /// We recompute the threshold and release pubacks for P_1 and P_2:
 ///
@@ -412,10 +412,76 @@ struct OffsetMap {
 
     publishers_markers: HashMap<Topic, Offset>,
     pending_pubacks: HashMap<Topic, VecDeque<(usize, PubAck)>>,
-    // this can be take from commit log instead?
-    // store of offsets of publishes on filters
-    // VecDeque<Offset> is increasing in nature
-    // store of offsets till which all subscribers have persisted data
+
+    topic_read_map: HashMap<Topic, TopicReadStateMap>,
+}
+
+#[derive(Debug)]
+pub struct TopicReadStateMap {
+    map: Vec<Vec<Option<Offset>>>,
+    filter_to_row_id: HashMap<FilterIdx, usize>,
+    pubacks: Vec<PubAck>,
+    read_marker_column: usize,
+}
+
+impl TopicReadStateMap {
+    fn update(&mut self, puback: PubAck, updates: HashMap<FilterIdx, Offset>) {
+        self.pubacks.push(puback);
+
+        let map_width = match self.map.first() {
+            Some(first) => first.len(),
+            None => 0,
+        };
+
+        for (filter_id, updated_offset) in updates {
+            // check if filter id is in the mapping
+            // if not present then that means the update is new
+            // this means we need to add a new row to the map
+            // and set the mapping for the filter_id
+
+            let maybe_id = self.filter_to_row_id.get(&filter_id);
+            if let Some(&id) = maybe_id {
+                // already the filter is present in map
+                let t = self.map.get_mut(id).unwrap();
+                t.push(Some(updated_offset));
+            } else {
+                // new filter!
+                let mut new_row = vec![None; map_width];
+                new_row.push(Some(updated_offset));
+                self.map.push(new_row);
+                self.filter_to_row_id.insert(filter_id, self.map.len() - 1);
+            }
+        }
+
+        for row in self.map.iter_mut() {
+            row.resize(map_width + 1, None);
+            // println!("{row:?}");
+        }
+    }
+
+    fn recompute_read_marker(&mut self, filter_thresholds: &HashMap<FilterIdx, Offset>) {
+        let mut markers = Vec::new();
+
+        for (filter_idx, &filter_threshold) in filter_thresholds {
+            let filter_row = self
+                .filter_to_row_id
+                .get(&filter_idx)
+                .expect("unexpected: filter id should be present in map");
+            let row = self.map.get(*filter_row).unwrap();
+
+            let mut threshold = 0;
+            for (col, publish_offset) in row.iter().enumerate() {
+                if publish_offset.is_some() && publish_offset > &Some(filter_threshold) {
+                    break;
+                };
+                threshold = col
+            }
+
+            markers.push(threshold);
+        }
+
+        self.read_marker_column = markers.iter().min().copied().unwrap();
+    }
 }
 
 type AckResult = Result<(), String>;
@@ -431,37 +497,22 @@ impl OffsetMap {
             None => return Err("filter does not map to any topic".into()),
         };
 
-        // update topic's publisher threshold
-        let mut updated_topics = Vec::<(&Topic, &Offset)>::new();
+        let mut freed_pubacks = Vec::<PubAck>::new();
         for topic in topics {
-            let topic_filters = match self.topic_to_filters.get(topic) {
-                Some(filters) => filters,
+            let read_map = match self.topic_read_map.get_mut(topic) {
+                Some(read_map) => read_map,
                 None => return Err("topic does not map to any filter".into()),
             };
 
-            let new_publish_threshold = topic_filters
-                .iter()
-                .map(|filter| self.filter_markers.get(filter).unwrap())
-                .min()
-                .unwrap();
+            let prev_read_marker = read_map.read_marker_column;
+            read_map.recompute_read_marker(&self.filter_markers);
+            let new_read_marker = read_map.read_marker_column;
 
-            // we can release pubacks for this topic
-            if new_publish_threshold > self.publishers_markers.get(topic).unwrap() {
-                updated_topics.push((topic, new_publish_threshold));
-            }
+            // release the pubacks
+            let mut eligible_pubacks =
+                read_map.pubacks[prev_read_marker - 1..=new_read_marker].to_vec();
+            freed_pubacks.append(&mut eligible_pubacks);
         }
-
-        // TODO: release pubacks and update topic marker
-        let freed_pubacks = Vec::<PubAck>::new();
-        for (topic, marker) in updated_topics {
-            // Figure out the position of puback in the list pending_pubacks based
-            // on the filter marker info
-            // As per the example, filter markers F_0:3, F_1:8, F_2:21 should translate
-            // to position of puback as t_2, P_2
-
-            // if let Some(pending_pubacks) = self.pending_pubacks.get(topic) {}
-        }
-
         Ok(())
     }
 }
@@ -529,8 +580,9 @@ impl AckLog {
 
 #[cfg(test)]
 mod test {
-    use super::DataLog;
-    use crate::RouterConfig;
+    use super::{DataLog, TopicReadStateMap};
+    use crate::{protocol::PubAck, router::FilterIdx, RouterConfig};
+    use std::{collections::HashMap, vec};
 
     #[test]
     fn publish_filters_updating_correctly_on_new_topic_subscription() {
@@ -567,6 +619,182 @@ mod test {
         data.matches("topic/a");
 
         assert_eq!(data.publish_filters.get("topic/a").unwrap().len(), 1);
+    }
+
+    fn grow_map(
+        map: &mut Vec<Vec<Option<usize>>>,
+        updates: HashMap<FilterIdx, usize>,
+        filter_to_index_mapping: &mut HashMap<FilterIdx, usize>,
+    ) {
+        let map_width = match map.first() {
+            Some(first) => first.len(),
+            None => 0,
+        };
+
+        for (filter_id, updated_offset) in updates {
+            // check if filter id is in the mapping
+            // if not present then that means the update is new
+            // this means we need to add a new row to the map
+            // and set the mapping for the filter_id
+
+            let maybe_id = filter_to_index_mapping.get(&filter_id);
+            if let Some(&id) = maybe_id {
+                // already the filter is present in map
+                let t = map.get_mut(id).unwrap();
+                t.push(Some(updated_offset));
+            } else {
+                // new filter!
+                let mut new_row = vec![None; map_width];
+                new_row.push(Some(updated_offset));
+                map.push(new_row);
+                filter_to_index_mapping.insert(filter_id, map.len() - 1);
+            }
+        }
+
+        for row in map.iter_mut() {
+            row.resize(map_width + 1, None);
+            println!("{row:?}");
+        }
+
+        println!();
+    }
+
+    #[test]
+    fn test_offset_map_updates() {
+        // Expected state of map with every update
+        //
+        // t_0:
+        //
+        //    f_0 [0]
+        //
+        // t_1:
+        //
+        //    f_0 [0, 5]
+        //    f_2 [x, 10]
+        //
+        // t_2:
+        //
+        //    f_0 [0, 5,  8]
+        //    f_2 [x, 10, 12]
+        //    f_5 [x, x,  3]
+        //
+        // t_3:
+        //
+        //    f_0 [0, 5,  8,  x]
+        //    f_2 [x, 10, 12, 15]
+        //    f_5 [x, x,  3,  x]
+        //
+        // t_4:
+        //
+        //    f_0 [0, 5,  8,  x,  11]
+        //    f_2 [x, 10, 12, 15, x]
+        //    f_5 [x, x,  3,  x,  7]
+        //    f_6 [x, x,  x,  x,  4]
+        //
+
+        let mut filter_to_index_mapping = HashMap::new();
+        let mut map = Vec::<Vec<Option<usize>>>::new();
+
+        let updates = vec![
+            HashMap::from([(0, 0)]),
+            HashMap::from([(0, 5), (2, 10)]),
+            HashMap::from([(0, 8), (2, 12), (5, 3)]),
+            HashMap::from([(2, 15)]),
+            HashMap::from([(0, 11), (5, 7), (6, 4)]),
+        ];
+
+        for update in updates {
+            grow_map(&mut map, update, &mut filter_to_index_mapping);
+        }
+
+        assert_eq!(
+            map,
+            vec![
+                vec![Some(0), Some(5), Some(8), None, Some(11)],
+                vec![None, Some(10), Some(12), Some(15), None],
+                vec![None, None, Some(3), None, Some(7)],
+                vec![None, None, None, None, Some(4)],
+            ]
+        );
+    }
+
+    #[test]
+    fn test_find_threshold() {
+        // let filter = vec![Some(2), None, None, Some(5), None, Some(7)];
+        // let thresholds = vec![(1, 0), (2, 2), (3, 2), (4, 2), (5, 4), (6, 4), (7, 5)];
+        let filter = vec![None, None, Some(5), Some(7), Some(9), Some(12)];
+        let thresholds = vec![(3, 1), (5, 2), (6, 2), (7, 3), (10, 4), (12, 5), (15, 5)];
+
+        for t in thresholds {
+            let mut threshold = 0;
+            for (id, f) in filter.iter().enumerate() {
+                if f.is_some() && f > &Some(t.0) {
+                    break;
+                };
+                threshold = id
+            }
+            println!("{threshold}, {t:?}");
+            assert_eq!(threshold, t.1);
+        }
+    }
+
+    #[test]
+    fn test_topic_marker_calculation() {
+        let map = vec![vec![Some((0, 0))]];
+        let filter_to_row_id = HashMap::from([(0, 0)]);
+        let pubacks = vec![PubAck {
+            pkid: 0,
+            reason: crate::protocol::PubAckReason::Success,
+        }];
+        let read_marker_column = 0;
+
+        let mut topic_state_read_map = TopicReadStateMap {
+            map,
+            filter_to_row_id,
+            pubacks,
+            read_marker_column,
+        };
+
+        let puback_updates = vec![
+            (
+                PubAck {
+                    pkid: 1,
+                    reason: crate::protocol::PubAckReason::Success,
+                },
+                HashMap::from([(0, (0, 1)), (1, (0, 2))]),
+            ),
+            (
+                PubAck {
+                    pkid: 2,
+                    reason: crate::protocol::PubAckReason::Success,
+                },
+                HashMap::from([(0, (0, 2)), (1, (0, 7))]),
+            ),
+            (
+                PubAck {
+                    pkid: 3,
+                    reason: crate::protocol::PubAckReason::Success,
+                },
+                HashMap::from([(0, (0, 3)), (1, (0, 10)), (2, (0, 22))]),
+            ),
+        ];
+
+        let prev = topic_state_read_map.read_marker_column;
+        for (puback, update) in puback_updates {
+            topic_state_read_map.update(puback, update)
+        }
+
+        for row in &topic_state_read_map.map {
+            println!("{:?}", row);
+        }
+
+        let updated_thresholds = HashMap::from([(0, (0, 3)), (1, (0, 11)), (2, (0, 24))]);
+        topic_state_read_map.recompute_read_marker(&updated_thresholds);
+
+        let curr = topic_state_read_map.read_marker_column;
+
+        assert_eq!(prev, 0);
+        assert_eq!(curr, 3);
     }
 
     //     #[test]
