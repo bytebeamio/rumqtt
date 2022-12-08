@@ -260,7 +260,7 @@ impl Router {
             connection.events = saved.metrics;
             Tracker::new(client_id.clone())
         };
-        let ackslog = AckLog::new();
+        let ackslog = AckLog::new(self.datalog.read_state.clone());
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(v) => v.as_millis().to_string(),
@@ -428,7 +428,8 @@ impl Router {
 
                     match qos {
                         QoS::AtLeastOnce => {
-                            // Add PUBACK after adding PUBLISH message to commitlog
+                            // Note: If any subscriber chooses persistence then
+                            // all publishers will have to ack in deferred manner
 
                             // let puback = PubAck {
                             //     pkid,
@@ -460,18 +461,14 @@ impl Router {
                     // Try to append publish to commitlog
                     match append_to_commitlog(
                         id,
-                        publish,
+                        publish.clone(),
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
                     ) {
                         Ok(offset_map) => {
-                            let puback = PubAck {
-                                pkid,
-                                reason: PubAckReason::Success,
-                            };
                             let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.insert_pending_acks(puback, offset_map);
+                            ackslog.insert_pending_acks(publish, offset_map);
 
                             // Even if one of the data in the batch is appended to commitlog,
                             // set new data. This triggers notifications to wake waiters.
@@ -520,7 +517,10 @@ impl Router {
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
                         // set in the datalog the info about which filters and from which cursor they have to persistent
                         if connection.persistent {
-                            self.datalog.register_subscriber(idx, cursor, id);
+                            self.datalog
+                                .read_state
+                                .lock()
+                                .register_read(idx, id, cursor);
                         }
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
                         self.datalog
@@ -895,29 +895,36 @@ impl Router {
     }
 
     fn register_ack_signal(&mut self, connection_id: ConnectionId, ackdata: AckData) {
-        let mut filters_with_progress = VecDeque::<(FilterIdx, Offset)>::new();
+        let mut publishers_with_progress = HashSet::<ConnectionId>::new();
 
         for (filter_idx, last_persisted_read_offset) in ackdata.read_map {
-            let filter_read_marker = self
-                .datalog
-                .filter_read_markers
-                .get_mut(&filter_idx)
-                .expect("Filter should be present");
+            let progress = self.datalog.read_state.lock().register_read(
+                filter_idx,
+                connection_id,
+                last_persisted_read_offset,
+            );
 
-            let read_progress = filter_read_marker
-                .update_subscriber_marker(connection_id, last_persisted_read_offset);
+            match progress {
+                Some(_) => {
+                    let publishers = self
+                        .datalog
+                        .read_state
+                        .lock()
+                        .get_publishers_for_filter(filter_idx)
+                        .to_vec();
 
-            if read_progress {
-                filters_with_progress.push_back((
-                    filter_idx,
-                    filter_read_marker
-                        .get_slowest_marker()
-                        .expect("slowest marker was just updated so it cannot be none"),
-                ))
-            }
+                    publishers_with_progress.extend(publishers);
+                }
+                None => continue,
+            };
+        }
 
-            // 2. find all the publishers that publish on those filters
-            // 3. send updated markers to those publishers and send acks based on updated markers
+        for publisher in publishers_with_progress {
+            let ackslog = self.ackslog.get_mut(publisher).unwrap();
+            ackslog.release_pending_acks();
+            let outgoing = self.obufs.get_mut(publisher).unwrap();
+
+            ack_device_data(ackslog, outgoing);
         }
     }
 }
@@ -965,6 +972,7 @@ fn append_to_commitlog(
 
     let mut filter_offsets = HashMap::new();
     for filter_idx in filter_idxs {
+        datalog.read_state.lock().register_publisher(id, filter_idx);
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
         let (offset, filter) = datalog.append(publish.clone(), notifications);
         debug!(

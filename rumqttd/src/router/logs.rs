@@ -1,17 +1,19 @@
-use super::{Ack, Connection};
+use super::Ack;
+use parking_lot::Mutex;
 use slab::Slab;
 use tracing::trace;
 
 use crate::protocol::{
-    matches, ConnAck, Packet, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
+    matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
 };
 use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
-use crate::{ConnectionId, Cursor, Filter, Offset, RouterConfig, Topic};
+use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
 use crate::Storage;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::sync::Arc;
 
 /// Stores 'device' data and 'actions' data in native commitlog
 /// organized by subscription filter. Device data is replicated
@@ -31,12 +33,45 @@ pub struct DataLog {
     retained_publishes: HashMap<Topic, Publish>,
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
-    pub filter_read_markers: HashMap<FilterIdx, ReadMarker>,
-    pub filter_write_markers: HashMap<FilterIdx, HashSet<ConnectionId>>,
+    pub read_state: Arc<Mutex<ReadState>>,
 }
 
-#[derive(Default)]
-pub struct ReadMarker {
+#[derive(Debug)]
+pub struct PublishState {
+    publish_offsets: Vec<Vec<Option<Offset>>>,
+    filter_to_row_id: HashMap<FilterIdx, usize>,
+    pubacks: Vec<PubAck>,
+    read_marker_column: usize,
+}
+
+#[derive(Default, Debug)]
+pub struct WriteState {
+    inner: HashMap<Topic, PublishState>,
+}
+
+impl WriteState {
+    pub fn register_write(
+        &mut self,
+        topic: Topic,
+        publish: Publish,
+        publish_offsets: HashMap<FilterIdx, Offset>,
+    ) {
+        // create puback from publish
+        let puback = PubAck {
+            pkid: publish.pkid,
+            reason: crate::protocol::PubAckReason::Success,
+        };
+
+        // find publish state for the topic
+        let publish_state = self.inner.get_mut(&topic).unwrap();
+
+        // update publish state
+        publish_state.update(puback, publish_offsets);
+    }
+}
+
+#[derive(Default, Debug)]
+struct ReadMarker {
     subscriber_markers: HashMap<ConnectionId, Offset>,
     slowest_marker: Option<Offset>,
 }
@@ -66,14 +101,115 @@ impl ReadMarker {
     }
 }
 
+// give read state to the commit log
+// data log -> readstate
+#[derive(Default, Debug)]
+pub struct ReadState {
+    inner: HashMap<FilterIdx, Offset>,
+    read_markers: HashMap<FilterIdx, ReadMarker>,
+    filter_publishers: HashMap<FilterIdx, Vec<ConnectionId>>,
+}
+
+impl ReadState {
+    pub fn register_read(
+        &mut self,
+        filter_idx: FilterIdx,
+        connection_id: ConnectionId,
+        last_persisted_read_offset: Offset,
+    ) -> Option<Offset> {
+        let read_marker = self
+            .read_markers
+            .get_mut(&filter_idx)
+            .expect("Filter should be present");
+
+        let read_progress =
+            read_marker.update_subscriber_marker(connection_id, last_persisted_read_offset);
+
+        if read_progress {
+            read_marker.get_slowest_marker()
+        } else {
+            None
+        }
+    }
+
+    pub fn register_publisher(&mut self, publisher_id: ConnectionId, filter_id: FilterIdx) {
+        self.filter_publishers
+            .entry(filter_id)
+            .or_default()
+            .push(publisher_id);
+    }
+
+    pub fn get_publishers_for_filter(&self, filter_idx: FilterIdx) -> &Vec<ConnectionId> {
+        self.filter_publishers.get(&filter_idx).unwrap()
+    }
+}
+
+#[derive(Debug)]
+pub struct Acker {
+    read_state: Arc<Mutex<ReadState>>,
+    write_state: WriteState,
+}
+
+impl Acker {
+    pub fn new(read_state: Arc<Mutex<ReadState>>) -> Acker {
+        Acker {
+            read_state,
+            write_state: Default::default(),
+        }
+    }
+
+    pub fn register_write(
+        &mut self,
+        publish: Publish,
+        publish_offsets: HashMap<FilterIdx, Offset>,
+    ) {
+        self.write_state.register_write(
+            String::from_utf8(publish.topic.to_vec()).unwrap(),
+            publish,
+            publish_offsets,
+        );
+    }
+
+    pub fn release_acks(&mut self) -> Vec<PubAck> {
+        // What about out of order acks? A_3, A_0, A_1, A_4, A_2, A_5, A_6, ...?
+
+        let progress = self.sync();
+        let mut acks_to_be_released = Vec::new();
+
+        for (topic, (prev_marker, curr_marker)) in progress {
+            let write_state = self.write_state.inner.get_mut(&topic).unwrap();
+            let mut queued_acks = write_state.pubacks[prev_marker..curr_marker].to_vec();
+
+            acks_to_be_released.append(&mut queued_acks);
+        }
+
+        acks_to_be_released
+    }
+
+    fn sync(&mut self) -> HashMap<Topic, (usize, usize)> {
+        let current_read_state = &self.read_state.lock().inner;
+
+        let mut progress = HashMap::<Topic, (usize, usize)>::new();
+        for (topic, publish_state) in self.write_state.inner.iter_mut() {
+            let prev_marker = publish_state.read_marker_column;
+            publish_state.recompute_read_marker(current_read_state);
+            let curr_marker = publish_state.read_marker_column;
+
+            if curr_marker > prev_marker {
+                progress.insert(topic.to_owned(), (prev_marker, curr_marker));
+            }
+        }
+
+        progress
+    }
+}
+
 impl DataLog {
     pub fn new(config: RouterConfig) -> io::Result<DataLog> {
         let mut native = Slab::new();
         let mut filter_indexes = HashMap::new();
         let retained_publishes = HashMap::new();
         let publish_filters = HashMap::new();
-        let filter_read_markers = HashMap::new();
-        let filter_write_markers = HashMap::new();
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
@@ -92,8 +228,7 @@ impl DataLog {
             publish_filters,
             filter_indexes,
             retained_publishes,
-            filter_read_markers,
-            filter_write_markers,
+            read_state: Default::default(),
         })
     }
 
@@ -259,23 +394,6 @@ impl DataLog {
             }
         }
     }
-
-    /// Make a note of subscribers reading from current topic
-    pub fn register_subscriber(
-        &mut self,
-        filter_id: usize,
-        start_cursor: Offset,
-        subscriber_id: ConnectionId,
-    ) {
-        // reset the read marker of the filter to the new
-        // let read_marker = ReadMarker {
-        //     start_pos: start_cursor,
-        //     curr_pos: start_cursor,
-        // };
-
-        let marker = self.filter_read_markers.entry(filter_id).or_default();
-        marker.update_subscriber_marker(subscriber_id, start_cursor);
-    }
 }
 
 pub struct Data<T> {
@@ -331,7 +449,7 @@ pub struct AckLog {
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
     recorded: VecDeque<Publish>,
-    // deferred_acks: VecDeque<DeferredAck>,
+    acker: Acker,
 }
 
 /// Offset map, for topic T:
@@ -400,35 +518,27 @@ pub struct AckLog {
 ///  t_2     P_2  |  2       7 ←                ⬅️ new threshold
 ///  t_3     P_3  |  3 ←     10      22 ←
 ///   
-#[derive(Debug)]
-struct OffsetMap {
-    // subscribers end
-    // where for each filter's all subscribers have read till
-    filter_markers: HashMap<FilterIdx, Offset>,
-    //
-    filter_to_topics: HashMap<FilterIdx, Vec<Topic>>,
-    topic_to_filters: HashMap<Topic, Vec<FilterIdx>>,
-    filter_publish_offsets: HashMap<FilterIdx, VecDeque<Offset>>,
+// #[derive(Debug)]
+// struct OffsetMap {
+//     // subscribers end
+//     // where for each filter's all subscribers have read till
+//     filter_markers: HashMap<FilterIdx, Offset>,
+//     //
+//     filter_to_topics: HashMap<FilterIdx, Vec<Topic>>,
+//     topic_to_filters: HashMap<Topic, Vec<FilterIdx>>,
+//     filter_publish_offsets: HashMap<FilterIdx, VecDeque<Offset>>,
 
-    publishers_markers: HashMap<Topic, Offset>,
-    pending_pubacks: HashMap<Topic, VecDeque<(usize, PubAck)>>,
+//     publishers_markers: HashMap<Topic, Offset>,
+//     pending_pubacks: HashMap<Topic, VecDeque<(usize, PubAck)>>,
 
-    topic_read_map: HashMap<Topic, TopicReadStateMap>,
-}
+//     topic_read_map: HashMap<Topic, PublishState>,
+// }
 
-#[derive(Debug)]
-pub struct TopicReadStateMap {
-    map: Vec<Vec<Option<Offset>>>,
-    filter_to_row_id: HashMap<FilterIdx, usize>,
-    pubacks: Vec<PubAck>,
-    read_marker_column: usize,
-}
-
-impl TopicReadStateMap {
+impl PublishState {
     fn update(&mut self, puback: PubAck, updates: HashMap<FilterIdx, Offset>) {
         self.pubacks.push(puback);
 
-        let map_width = match self.map.first() {
+        let map_width = match self.publish_offsets.first() {
             Some(first) => first.len(),
             None => 0,
         };
@@ -442,18 +552,19 @@ impl TopicReadStateMap {
             let maybe_id = self.filter_to_row_id.get(&filter_id);
             if let Some(&id) = maybe_id {
                 // already the filter is present in map
-                let t = self.map.get_mut(id).unwrap();
+                let t = self.publish_offsets.get_mut(id).unwrap();
                 t.push(Some(updated_offset));
             } else {
                 // new filter!
                 let mut new_row = vec![None; map_width];
                 new_row.push(Some(updated_offset));
-                self.map.push(new_row);
-                self.filter_to_row_id.insert(filter_id, self.map.len() - 1);
+                self.publish_offsets.push(new_row);
+                self.filter_to_row_id
+                    .insert(filter_id, self.publish_offsets.len() - 1);
             }
         }
 
-        for row in self.map.iter_mut() {
+        for row in self.publish_offsets.iter_mut() {
             row.resize(map_width + 1, None);
             // println!("{row:?}");
         }
@@ -465,9 +576,9 @@ impl TopicReadStateMap {
         for (filter_idx, &filter_threshold) in filter_thresholds {
             let filter_row = self
                 .filter_to_row_id
-                .get(&filter_idx)
+                .get(filter_idx)
                 .expect("unexpected: filter id should be present in map");
-            let row = self.map.get(*filter_row).unwrap();
+            let row = self.publish_offsets.get(*filter_row).unwrap();
 
             let mut threshold = 0;
             for (col, publish_offset) in row.iter().enumerate() {
@@ -484,46 +595,44 @@ impl TopicReadStateMap {
     }
 }
 
-type AckResult = Result<(), String>;
+// impl OffsetMap {
+//     pub fn update(&mut self, filter_id: FilterIdx, marker: Offset) -> Result<(), String> {
+//         // update that filter's subscriber marker
+//         self.filter_markers.entry(filter_id).or_insert(marker);
 
-impl OffsetMap {
-    pub fn update(&mut self, filter_id: FilterIdx, marker: Offset) -> AckResult {
-        // update that filter's subscriber marker
-        self.filter_markers.entry(filter_id).or_insert(marker);
+//         // get topics of updated filter
+//         let topics = match self.filter_to_topics.get(&filter_id) {
+//             Some(topics) => topics,
+//             None => return Err("filter does not map to any topic".into()),
+//         };
 
-        // get topics of updated filter
-        let topics = match self.filter_to_topics.get(&filter_id) {
-            Some(topics) => topics,
-            None => return Err("filter does not map to any topic".into()),
-        };
+//         let mut freed_pubacks = Vec::<PubAck>::new();
+//         for topic in topics {
+//             let read_map = match self.topic_read_map.get_mut(topic) {
+//                 Some(read_map) => read_map,
+//                 None => return Err("topic does not map to any filter".into()),
+//             };
 
-        let mut freed_pubacks = Vec::<PubAck>::new();
-        for topic in topics {
-            let read_map = match self.topic_read_map.get_mut(topic) {
-                Some(read_map) => read_map,
-                None => return Err("topic does not map to any filter".into()),
-            };
+//             let prev_read_marker = read_map.read_marker_column;
+//             read_map.recompute_read_marker(&self.filter_markers);
+//             let new_read_marker = read_map.read_marker_column;
 
-            let prev_read_marker = read_map.read_marker_column;
-            read_map.recompute_read_marker(&self.filter_markers);
-            let new_read_marker = read_map.read_marker_column;
-
-            // release the pubacks
-            let mut eligible_pubacks =
-                read_map.pubacks[prev_read_marker - 1..=new_read_marker].to_vec();
-            freed_pubacks.append(&mut eligible_pubacks);
-        }
-        Ok(())
-    }
-}
+//             // release the pubacks
+//             let mut eligible_pubacks =
+//                 read_map.pubacks[prev_read_marker - 1..=new_read_marker].to_vec();
+//             freed_pubacks.append(&mut eligible_pubacks);
+//         }
+//         Ok(())
+//     }
+// }
 
 impl AckLog {
     /// New log
-    pub fn new() -> AckLog {
+    pub fn new(read_state: Arc<Mutex<ReadState>>) -> AckLog {
         AckLog {
             committed: VecDeque::with_capacity(100),
             recorded: VecDeque::with_capacity(100),
-            // deferred_acks: VecDeque::with_capacity(100),
+            acker: Acker::new(read_state),
         }
     }
 
@@ -573,14 +682,29 @@ impl AckLog {
         &mut self.committed
     }
 
-    pub fn insert_pending_acks(&mut self, puback: PubAck, offset_map: HashMap<usize, Offset>) {
-        // do something
+    pub fn insert_pending_acks(
+        &mut self,
+        publish: Publish,
+        publish_offsets: HashMap<usize, Offset>,
+    ) {
+        self.acker.register_write(publish, publish_offsets)
+    }
+
+    pub fn release_pending_acks(&mut self) {
+        let mut pubacks = self
+            .acker
+            .release_acks()
+            .into_iter()
+            .map(Ack::PubAck)
+            .collect();
+
+        self.committed.append(&mut pubacks);
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{DataLog, TopicReadStateMap};
+    use super::{DataLog, PublishState};
     use crate::{protocol::PubAck, router::FilterIdx, RouterConfig};
     use std::{collections::HashMap, vec};
 
@@ -740,7 +864,7 @@ mod test {
 
     #[test]
     fn test_topic_marker_calculation() {
-        let map = vec![vec![Some((0, 0))]];
+        let publish_offsets = vec![vec![Some((0, 0))]];
         let filter_to_row_id = HashMap::from([(0, 0)]);
         let pubacks = vec![PubAck {
             pkid: 0,
@@ -748,8 +872,8 @@ mod test {
         }];
         let read_marker_column = 0;
 
-        let mut topic_state_read_map = TopicReadStateMap {
-            map,
+        let mut topic_state_read_map = PublishState {
+            publish_offsets,
             filter_to_row_id,
             pubacks,
             read_marker_column,
@@ -784,7 +908,7 @@ mod test {
             topic_state_read_map.update(puback, update)
         }
 
-        for row in &topic_state_read_map.map {
+        for row in &topic_state_read_map.publish_offsets {
             println!("{:?}", row);
         }
 
