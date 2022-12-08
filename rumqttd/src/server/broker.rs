@@ -31,7 +31,6 @@ use crate::{Config, ConnectionId, ServerSettings};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
-use tracing::debug;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -242,7 +241,6 @@ impl Broker {
                         }
                         _ => panic!("We only request for router metrics"),
                     }
-                    debug!("Prometheus update: {:?}", &metrics);
                     std::thread::sleep(Duration::from_secs(timeout));
                 }
             })?;
