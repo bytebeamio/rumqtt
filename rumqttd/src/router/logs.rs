@@ -36,12 +36,12 @@ pub struct DataLog {
     pub read_state: Arc<Mutex<ReadState>>,
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct PublishState {
     publish_offsets: Vec<Vec<Option<Offset>>>,
     filter_to_row_id: HashMap<FilterIdx, usize>,
     pubacks: Vec<PubAck>,
-    read_marker_column: usize,
+    read_marker_column: Option<usize>,
 }
 
 #[derive(Default, Debug)]
@@ -53,17 +53,11 @@ impl WriteState {
     pub fn register_write(
         &mut self,
         topic: Topic,
-        publish: Publish,
+        puback: PubAck,
         publish_offsets: HashMap<FilterIdx, Offset>,
     ) {
-        // create puback from publish
-        let puback = PubAck {
-            pkid: publish.pkid,
-            reason: crate::protocol::PubAckReason::Success,
-        };
-
         // find publish state for the topic
-        let publish_state = self.inner.get_mut(&topic).unwrap();
+        let publish_state = self.inner.entry(topic).or_default();
 
         // update publish state
         publish_state.update(puback, publish_offsets);
@@ -117,15 +111,14 @@ impl ReadState {
         connection_id: ConnectionId,
         last_persisted_read_offset: Offset,
     ) -> Option<Offset> {
-        let read_marker = self
-            .read_markers
-            .get_mut(&filter_idx)
-            .expect("Filter should be present");
+        let read_marker = self.read_markers.entry(filter_idx).or_default();
 
         let read_progress =
             read_marker.update_subscriber_marker(connection_id, last_persisted_read_offset);
 
         if read_progress {
+            *self.inner.entry(filter_idx).or_default() = read_marker.get_slowest_marker().unwrap();
+
             read_marker.get_slowest_marker()
         } else {
             None
@@ -160,14 +153,12 @@ impl Acker {
 
     pub fn register_write(
         &mut self,
-        publish: Publish,
+        topic: Topic,
+        puback: PubAck,
         publish_offsets: HashMap<FilterIdx, Offset>,
     ) {
-        self.write_state.register_write(
-            String::from_utf8(publish.topic.to_vec()).unwrap(),
-            publish,
-            publish_offsets,
-        );
+        self.write_state
+            .register_write(topic, puback, publish_offsets);
     }
 
     pub fn release_acks(&mut self) -> Vec<PubAck> {
@@ -178,18 +169,25 @@ impl Acker {
 
         for (topic, (prev_marker, curr_marker)) in progress {
             let write_state = self.write_state.inner.get_mut(&topic).unwrap();
-            let mut queued_acks = write_state.pubacks[prev_marker..curr_marker].to_vec();
 
-            acks_to_be_released.append(&mut queued_acks);
+            if let Some(curr) = curr_marker {
+                let prev = match prev_marker {
+                    Some(prev) => prev + 1,
+                    None => 0,
+                };
+                let mut queued_acks = write_state.pubacks[prev..=curr].to_vec();
+
+                acks_to_be_released.append(&mut queued_acks);
+            }
         }
 
         acks_to_be_released
     }
 
-    fn sync(&mut self) -> HashMap<Topic, (usize, usize)> {
+    fn sync(&mut self) -> HashMap<Topic, (Option<usize>, Option<usize>)> {
         let current_read_state = &self.read_state.lock().inner;
 
-        let mut progress = HashMap::<Topic, (usize, usize)>::new();
+        let mut progress = HashMap::<Topic, (Option<usize>, Option<usize>)>::new();
         for (topic, publish_state) in self.write_state.inner.iter_mut() {
             let prev_marker = publish_state.read_marker_column;
             publish_state.recompute_read_marker(current_read_state);
@@ -200,6 +198,7 @@ impl Acker {
             }
         }
 
+        println!("progress is {progress:?}");
         progress
     }
 }
@@ -566,7 +565,7 @@ impl PublishState {
 
         for row in self.publish_offsets.iter_mut() {
             row.resize(map_width + 1, None);
-            // println!("{row:?}");
+            println!("{row:?}");
         }
     }
 
@@ -580,18 +579,18 @@ impl PublishState {
                 .expect("unexpected: filter id should be present in map");
             let row = self.publish_offsets.get(*filter_row).unwrap();
 
-            let mut threshold = 0;
+            let mut threshold = None;
             for (col, publish_offset) in row.iter().enumerate() {
                 if publish_offset.is_some() && publish_offset > &Some(filter_threshold) {
                     break;
                 };
-                threshold = col
+                threshold = Some(col)
             }
 
             markers.push(threshold);
         }
 
-        self.read_marker_column = markers.iter().min().copied().unwrap();
+        self.read_marker_column = markers.into_iter().min().unwrap();
     }
 }
 
@@ -687,7 +686,14 @@ impl AckLog {
         publish: Publish,
         publish_offsets: HashMap<usize, Offset>,
     ) {
-        self.acker.register_write(publish, publish_offsets)
+        self.acker.register_write(
+            String::from_utf8(publish.topic.to_vec()).unwrap(),
+            PubAck {
+                pkid: publish.pkid,
+                reason: crate::protocol::PubAckReason::Success,
+            },
+            publish_offsets,
+        )
     }
 
     pub fn release_pending_acks(&mut self) {
@@ -704,9 +710,18 @@ impl AckLog {
 
 #[cfg(test)]
 mod test {
+    use parking_lot::Mutex;
+
     use super::{DataLog, PublishState};
-    use crate::{protocol::PubAck, router::FilterIdx, RouterConfig};
-    use std::{collections::HashMap, vec};
+    use crate::{
+        protocol::{PubAck, Publish},
+        router::{
+            logs::{Acker, ReadState},
+            FilterIdx,
+        },
+        Offset, RouterConfig,
+    };
+    use std::{collections::HashMap, sync::Arc, vec};
 
     #[test]
     fn publish_filters_updating_correctly_on_new_topic_subscription() {
@@ -745,180 +760,196 @@ mod test {
         assert_eq!(data.publish_filters.get("topic/a").unwrap().len(), 1);
     }
 
-    fn grow_map(
-        map: &mut Vec<Vec<Option<usize>>>,
-        updates: HashMap<FilterIdx, usize>,
-        filter_to_index_mapping: &mut HashMap<FilterIdx, usize>,
-    ) {
-        let map_width = match map.first() {
-            Some(first) => first.len(),
-            None => 0,
-        };
-
-        for (filter_id, updated_offset) in updates {
-            // check if filter id is in the mapping
-            // if not present then that means the update is new
-            // this means we need to add a new row to the map
-            // and set the mapping for the filter_id
-
-            let maybe_id = filter_to_index_mapping.get(&filter_id);
-            if let Some(&id) = maybe_id {
-                // already the filter is present in map
-                let t = map.get_mut(id).unwrap();
-                t.push(Some(updated_offset));
-            } else {
-                // new filter!
-                let mut new_row = vec![None; map_width];
-                new_row.push(Some(updated_offset));
-                map.push(new_row);
-                filter_to_index_mapping.insert(filter_id, map.len() - 1);
-            }
-        }
-
-        for row in map.iter_mut() {
-            row.resize(map_width + 1, None);
-            println!("{row:?}");
-        }
-
-        println!();
-    }
-
     #[test]
     fn test_offset_map_updates() {
         // Expected state of map with every update
         //
         // t_0:
         //
-        //    f_0 [0]
+        //    f_0 [(0, 0)]
         //
         // t_1:
         //
-        //    f_0 [0, 5]
-        //    f_2 [x, 10]
+        //    f_0 [(0,0),  (1,5) ]
+        //    f_2 [ x,     (0,10)]
         //
         // t_2:
         //
-        //    f_0 [0, 5,  8]
-        //    f_2 [x, 10, 12]
-        //    f_5 [x, x,  3]
+        //    f_0 [(0,0),  (1,5),   (1,8) ]
+        //    f_2 [ x,     (0,10),  (1,12)]
+        //    f_5 [ x,      x,      (1,3) ]
         //
         // t_3:
-        //
-        //    f_0 [0, 5,  8,  x]
-        //    f_2 [x, 10, 12, 15]
-        //    f_5 [x, x,  3,  x]
+        //    f_0 [(0,0),  (1,5),   (1,8),    x,   ]
+        //    f_2 [ x,     (0,10),  (1,12),  (1,15)]
+        //    f_5 [ x,      x,      (1,3),    x,   ]
         //
         // t_4:
         //
-        //    f_0 [0, 5,  8,  x,  11]
-        //    f_2 [x, 10, 12, 15, x]
-        //    f_5 [x, x,  3,  x,  7]
-        //    f_6 [x, x,  x,  x,  4]
-        //
+        //    f_0 [(0,0),  (1,5),   (1,8),    x,      (2,11)]
+        //    f_2 [ x,     (0,10),  (1,12),  (1,15),   x    ]
+        //    f_5 [ x,      x,      (1,3),    x,      (1,7) ]
+        //    f_6 [ x,      x,       x,       x,      (0,4) ]
 
-        let mut filter_to_index_mapping = HashMap::new();
-        let mut map = Vec::<Vec<Option<usize>>>::new();
+        let filter_to_index_mapping = HashMap::new();
+        let map = Vec::<Vec<Option<Offset>>>::new();
+
+        let mut publish_state = PublishState {
+            publish_offsets: map,
+            filter_to_row_id: filter_to_index_mapping,
+            pubacks: Vec::new(),
+            read_marker_column: None,
+        };
 
         let updates = vec![
-            HashMap::from([(0, 0)]),
-            HashMap::from([(0, 5), (2, 10)]),
-            HashMap::from([(0, 8), (2, 12), (5, 3)]),
-            HashMap::from([(2, 15)]),
-            HashMap::from([(0, 11), (5, 7), (6, 4)]),
+            HashMap::from([(0, (0, 0))]),
+            HashMap::from([(0, (1, 5)), (2, (0, 10))]),
+            HashMap::from([(0, (1, 8)), (2, (1, 12)), (5, (1, 3))]),
+            HashMap::from([(2, (1, 15))]),
+            HashMap::from([(0, (2, 11)), (5, (1, 7)), (6, (0, 4))]),
         ];
 
-        for update in updates {
-            grow_map(&mut map, update, &mut filter_to_index_mapping);
+        let publishes = (0..updates.len())
+            .map(|id| {
+                (
+                    PubAck {
+                        pkid: id as u16,
+                        reason: crate::protocol::PubAckReason::Success,
+                    },
+                    updates[id].clone(),
+                )
+            })
+            .collect::<Vec<(PubAck, HashMap<FilterIdx, Offset>)>>();
+
+        for publish in publishes {
+            publish_state.update(publish.0, publish.1);
         }
 
         assert_eq!(
-            map,
+            publish_state.publish_offsets,
             vec![
-                vec![Some(0), Some(5), Some(8), None, Some(11)],
-                vec![None, Some(10), Some(12), Some(15), None],
-                vec![None, None, Some(3), None, Some(7)],
-                vec![None, None, None, None, Some(4)],
+                vec![
+                    Some((0, 0)),
+                    Some((1, 5)),
+                    Some((1, 8)),
+                    None,
+                    Some((2, 11))
+                ],
+                vec![None, Some((0, 10)), Some((1, 12)), Some((1, 15)), None],
+                vec![None, None, Some((1, 3)), None, Some((1, 7))],
+                vec![None, None, None, None, Some((0, 4))],
             ]
         );
     }
 
     #[test]
-    fn test_find_threshold() {
-        // let filter = vec![Some(2), None, None, Some(5), None, Some(7)];
-        // let thresholds = vec![(1, 0), (2, 2), (3, 2), (4, 2), (5, 4), (6, 4), (7, 5)];
-        let filter = vec![None, None, Some(5), Some(7), Some(9), Some(12)];
-        let thresholds = vec![(3, 1), (5, 2), (6, 2), (7, 3), (10, 4), (12, 5), (15, 5)];
-
-        for t in thresholds {
-            let mut threshold = 0;
-            for (id, f) in filter.iter().enumerate() {
-                if f.is_some() && f > &Some(t.0) {
-                    break;
-                };
-                threshold = id
-            }
-            println!("{threshold}, {t:?}");
-            assert_eq!(threshold, t.1);
-        }
-    }
-
-    #[test]
     fn test_topic_marker_calculation() {
-        let publish_offsets = vec![vec![Some((0, 0))]];
-        let filter_to_row_id = HashMap::from([(0, 0)]);
-        let pubacks = vec![PubAck {
-            pkid: 0,
-            reason: crate::protocol::PubAckReason::Success,
-        }];
-        let read_marker_column = 0;
+        let read_state = Arc::new(Mutex::from(ReadState::default()));
 
-        let mut topic_state_read_map = PublishState {
-            publish_offsets,
-            filter_to_row_id,
-            pubacks,
-            read_marker_column,
-        };
+        // subscriber - 0
+        // reading on filter - 0
+        // read offset - 0, 0
+        read_state.lock().register_read(0, 0, (0, 0));
+        // subscriber - 1
+        // reading on filter - 1
+        // read offset - 0, 0
+        read_state.lock().register_read(1, 1, (0, 0));
 
-        let puback_updates = vec![
-            (
-                PubAck {
-                    pkid: 1,
-                    reason: crate::protocol::PubAckReason::Success,
-                },
-                HashMap::from([(0, (0, 1)), (1, (0, 2))]),
-            ),
-            (
-                PubAck {
-                    pkid: 2,
-                    reason: crate::protocol::PubAckReason::Success,
-                },
-                HashMap::from([(0, (0, 2)), (1, (0, 7))]),
-            ),
-            (
-                PubAck {
-                    pkid: 3,
-                    reason: crate::protocol::PubAckReason::Success,
-                },
-                HashMap::from([(0, (0, 3)), (1, (0, 10)), (2, (0, 22))]),
-            ),
-        ];
+        let mut acker = Acker::new(read_state.clone());
 
-        let prev = topic_state_read_map.read_marker_column;
-        for (puback, update) in puback_updates {
-            topic_state_read_map.update(puback, update)
-        }
+        // publisher - 1
+        // publishing on topic "A" that matches filter - 0 and 1
+        // on filter 0 offset is (0, 5)
+        // on filter 1 offset is (1, 10)
+        acker.register_write(
+            "A".into(),
+            PubAck {
+                pkid: 0,
+                reason: crate::protocol::PubAckReason::Success,
+            },
+            HashMap::from([(0, (0, 5)), (1, (1, 10))]),
+        );
 
-        for row in &topic_state_read_map.publish_offsets {
-            println!("{:?}", row);
-        }
+        acker.register_write(
+            "A".into(),
+            PubAck {
+                pkid: 1,
+                reason: crate::protocol::PubAckReason::Success,
+            },
+            HashMap::from([(0, (0, 8)), (1, (1, 15))]),
+        );
 
-        let updated_thresholds = HashMap::from([(0, (0, 3)), (1, (0, 11)), (2, (0, 24))]);
-        topic_state_read_map.recompute_read_marker(&updated_thresholds);
+        let acks = acker.release_acks();
+        println!("{acks:?}");
 
-        let curr = topic_state_read_map.read_marker_column;
+        // subscriber - 0
+        // reading on filter - 0
+        // read offset - 0, 0
+        read_state.lock().register_read(0, 0, (0, 7));
+        // subscriber - 1
+        // reading on filter - 1
+        // read offset - 0, 0
+        read_state.lock().register_read(1, 1, (1, 11));
 
-        assert_eq!(prev, 0);
-        assert_eq!(curr, 3);
+        let acks = acker.release_acks();
+        // println!("{read_state:?}");
+        println!("{acks:?}");
+
+        // let publish_offsets = vec![vec![Some((0, 0))]];
+        // let filter_to_row_id = HashMap::from([(0, 0)]);
+        // let pubacks = vec![PubAck {
+        //     pkid: 0,
+        //     reason: crate::protocol::PubAckReason::Success,
+        // }];
+        // let read_marker_column = 0;
+
+        // let mut topic_state_read_map = PublishState {
+        //     publish_offsets,
+        //     filter_to_row_id,
+        //     pubacks,
+        //     read_marker_column,
+        // };
+
+        // let puback_updates = vec![
+        //     (
+        //         PubAck {
+        //             pkid: 1,
+        //             reason: crate::protocol::PubAckReason::Success,
+        //         },
+        //         HashMap::from([(0, (0, 1)), (1, (0, 2))]),
+        //     ),
+        //     (
+        //         PubAck {
+        //             pkid: 2,
+        //             reason: crate::protocol::PubAckReason::Success,
+        //         },
+        //         HashMap::from([(0, (0, 2)), (1, (0, 7))]),
+        //     ),
+        //     (
+        //         PubAck {
+        //             pkid: 3,
+        //             reason: crate::protocol::PubAckReason::Success,
+        //         },
+        //         HashMap::from([(0, (0, 3)), (1, (0, 10)), (2, (0, 22))]),
+        //     ),
+        // ];
+
+        // let prev = topic_state_read_map.read_marker_column;
+        // for (puback, update) in puback_updates {
+        //     topic_state_read_map.update(puback, update)
+        // }
+
+        // for row in &topic_state_read_map.publish_offsets {
+        //     println!("{:?}", row);
+        // }
+
+        // let updated_thresholds = HashMap::from([(0, (0, 3)), (1, (0, 11)), (2, (0, 24))]);
+        // topic_state_read_map.recompute_read_marker(&updated_thresholds);
+
+        // let curr = topic_state_read_map.read_marker_column;
+
+        // assert_eq!(prev, 0);
+        // assert_eq!(curr, 3);
     }
 
     //     #[test]
