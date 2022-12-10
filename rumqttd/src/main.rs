@@ -32,6 +32,9 @@ struct CommandLine {
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
+    /// launch without printing banner
+    #[structopt(short, long)]
+    quiet: bool,
 }
 
 #[derive(StructOpt)]
@@ -103,6 +106,10 @@ fn main() {
 }
 
 fn banner(commandline: &CommandLine) {
+    if commandline.quiet {
+        return;
+    }
+
     const B: &str = r#"                                              
          ___ _   _ __  __  ___ _____ _____ ___  
         | _ \ | | |  \/  |/ _ \_   _|_   _|   \ 
