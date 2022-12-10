@@ -7,6 +7,3 @@ members = [
   "benchmarks",
   "benchmarks/simplerouter",
 ]
-
-[patch.crates-io]
-native-tls = {git = "https://github.com/jm-observer/rust-native-tls.git"}
