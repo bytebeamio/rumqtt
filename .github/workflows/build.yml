@@ -20,29 +20,18 @@ jobs:
           - ubuntu-latest
           - macOS-latest
           - windows-latest
-        features:
-          - --no-default-features
-          - --features url
-          - --features use-rustls
-          - --features websocket
-          - --no-default-features --features url
-          - --no-default-features --features use-rustls
-          - --no-default-features --features websocket
-          - --all-features
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v3
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-          override: true
-          profile: minimal
-          toolchain: stable
 
-      - name: Fetch dependencies
-        uses: actions-rs/cargo@v1
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v1
         with:
-          command: fetch
-          args: --verbose
+          tool: cargo-hack
 
       # - name: Check benchmarks
       #   uses: actions-rs/cargo@v1
@@ -55,23 +44,13 @@ jobs:
       #     args: --verbose --all-targets -p benchmarks
 
       - name: Check rumqttc and rumqttd
-        uses: actions-rs/cargo@v1
+        run: cargo hack clippy --verbose --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
         env:
           RUSTFLAGS: "-D warnings"
-        with:
-          command: clippy
-          args: --verbose --all-targets ${{ matrix.features }} -p rumqttc -p rumqttd
 
       - name: Check docs
         if: ${{ matrix.os != 'windows-latest' }}
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --verbose --no-deps ${{ matrix.features }}
+        run: cargo hack doc --verbose --no-deps --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
 
-        # NOTE: Tests for rumqttc and rumqttd on all platforms
       - name: Test rumqttc and rumqttd
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --release ${{ matrix.features }} -p rumqttc -p rumqttd
+        run: cargo hack test --verbose --each-feature --optional-deps url -p rumqttc -p rumqttd

@@ -169,9 +169,9 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
+        ca_path: &String,
         cert_path: &String,
         key_path: &String,
-        ca_path: &String,
     ) -> Result<TLSAcceptor, Error> {
         let (certs, key) = {
             // Get certificates
