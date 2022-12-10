@@ -103,7 +103,8 @@ impl<P: AsyncProtocol> DiskHandler<P> {
                                 if forward.cursor > *cursor {
                                     *cursor = forward.cursor
                                 }
-                            });
+                            })
+                            .or_insert(forward.cursor);
                     }
                     _ => continue,
                 }
