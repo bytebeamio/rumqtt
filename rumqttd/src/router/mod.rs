@@ -5,7 +5,6 @@ use std::{
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use tracing_subscriber::filter::FilterId;
 
 use crate::{
     protocol::{
@@ -20,6 +19,7 @@ mod connection;
 mod graveyard;
 pub mod iobufs;
 mod logs;
+mod persist;
 mod routing;
 mod scheduler;
 mod waiters;
@@ -64,14 +64,6 @@ pub enum Event {
 #[derive(Debug)]
 pub struct AckData {
     pub(crate) read_map: HashMap<FilterIdx, Offset>,
-}
-
-#[derive(Debug)]
-enum AckStatus {
-    Persisted {
-        persistent_client_id: ConnectionId,
-        pkid: usize,
-    },
 }
 
 /// Notification from router to connection

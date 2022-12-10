@@ -2,19 +2,19 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::Link;
-use crate::protocol::{AsyncProtocol, Connect, LastWill, Packet, self};
-use crate::router::{Event, Notification, Forward, FilterIdx};
-use crate::{ConnectionId, ConnectionSettings, Cursor, Offset};
+use crate::protocol::{self, AsyncProtocol, Connect, LastWill, Packet};
+use crate::router::{Event, FilterIdx, Notification};
+use crate::{ConnectionId, ConnectionSettings, Offset};
 
 use disk::Storage;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
-use tracing::{info, error, trace};
-use std::collections::{VecDeque, HashMap};
-use std::{io, fs};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
+use std::{fs, io};
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
+use tracing::{error, info, trace};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -75,15 +75,16 @@ impl<P: AsyncProtocol> DiskHandler<P> {
         })
     }
 
-    pub fn write(&mut self, notifications: &mut VecDeque<Notification>) -> HashMap::<FilterIdx, Offset> {
+    pub fn write(
+        &mut self,
+        notifications: &mut VecDeque<Notification>,
+    ) -> HashMap<FilterIdx, Offset> {
         // let ack_list = VecDeque::new();
 
         let mut stored_filter_offset_map: HashMap<FilterIdx, Offset> = HashMap::new();
         for notif in notifications.drain(..) {
-
             let packet_or_unscheduled = notif.clone().into();
             if let Some(packet) = packet_or_unscheduled {
-
                 if let Err(e) = self.protocol.write(packet, self.storage.writer()) {
                     error!("Failed to write to storage: {e}");
                     continue;
@@ -96,14 +97,16 @@ impl<P: AsyncProtocol> DiskHandler<P> {
 
                 match &notif {
                     Notification::Forward(forward) => {
-                        let mut cursor = *stored_filter_offset_map.entry(forward.filter_idx).or_default();
-                        if forward.cursor > cursor {
-                            cursor = forward.cursor;
-                        }
-                    },
+                        stored_filter_offset_map
+                            .entry(forward.filter_idx)
+                            .and_modify(|cursor| {
+                                if forward.cursor > *cursor {
+                                    *cursor = forward.cursor
+                                }
+                            });
+                    }
                     _ => continue,
                 }
-                
             }
         }
 
@@ -126,7 +129,7 @@ impl<P: AsyncProtocol> DiskHandler<P> {
                     let connection_buffer_length = buffer.len();
                     //TODO: Don't hardcode max_connection_buffer_len
                     if connection_buffer_length >= 100 {
-                        return 
+                        return
                     }
                 }
                 Err(protocol::Error::InsufficientBytes(_)) => {
@@ -255,10 +258,12 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
         let mut non_pulish = VecDeque::new();
         for notif in self.notifications.drain(..) {
             match notif {
-                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => publish.push_back(notif),
+                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
+                    publish.push_back(notif)
+                }
                 _ => non_pulish.push_back(notif),
             }
-        };
+        }
 
         // write non-publishes to network
         let unscheduled = self.network.writev(&mut non_pulish).await?;
@@ -267,9 +272,11 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
         };
 
         // write publishes to disk
-        if !publish.is_empty() { 
+        if !publish.is_empty() {
             let written = self.disk_handler.write(&mut publish);
-            self.link_tx.persist(written);
+            if let Err(e) = self.link_tx.persist(written) {
+                error!("Failed to inform router of read progress: {e}")
+            };
         }
         // read publishes from disk
         let mut buffer = VecDeque::new();
