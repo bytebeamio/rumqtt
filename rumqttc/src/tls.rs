@@ -34,6 +34,9 @@ use tokio_native_tls::native_tls::{Error as NativeTlsError, Identity};
 use std::io;
 use std::net::AddrParseError;
 
+#[cfg(feature = "use-native-tls")]
+pub mod native_tls_config;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Error parsing IP address

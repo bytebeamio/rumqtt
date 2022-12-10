@@ -39,7 +39,7 @@ ws_stream_tungstenite = { version = "0.7", default-features = false, features = 
 http = { version = "0.2", optional = true }
 # native-tls
 tokio-native-tls = { version = "0.3.0", optional = true }
-native-tls = { version = "0.2.11", optional = true }
+native-tls = { version = "0.2.10", optional = true }
 # url
 url = { version = "2", default-features = false, optional = true }
 
@@ -52,3 +52,8 @@ rustls = "0.20"
 rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full", "macros"] }
+
+
+[[example]]
+name = "tls3"
+required-features = ["use-native-tls"]
