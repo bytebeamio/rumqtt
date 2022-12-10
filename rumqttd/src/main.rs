@@ -1,11 +1,9 @@
-use std::io::Write;
-
 use config::FileFormat;
 use rumqttd::Broker;
 
 use structopt::StructOpt;
 
-pub static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../demo.toml");
+static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../demo.toml");
 
 #[derive(StructOpt)]
 #[structopt(name = "rumqttd")]
@@ -47,10 +45,8 @@ fn main() {
     let commandline: CommandLine = CommandLine::from_args();
 
     if let Some(Command::GenerateConfig) = commandline.command {
-        std::io::stdout()
-            .write_all(RUMQTTD_DEFAULT_CONFIG.as_bytes())
-            .unwrap();
-        std::process::exit(0);
+        println!("{RUMQTTD_DEFAULT_CONFIG}");
+        return;
     }
 
     banner(&commandline);
@@ -61,7 +57,7 @@ fn main() {
         _ => "rumqttd=trace",
     };
 
-    // tracing syntac ->
+    // tracing syntax ->
     let builder = tracing_subscriber::fmt()
         .pretty()
         .with_line_number(false)
