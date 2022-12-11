@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
@@ -7,7 +10,7 @@ use tracing::{error, warn};
 use crate::{
     protocol::Packet,
     router::{FilterIdx, MAX_CHANNEL_CAPACITY},
-    Cursor, Notification,
+    Cursor, Notification, Offset,
 };
 
 use super::{Forward, IncomingMeter, OutgoingMeter};
@@ -56,7 +59,7 @@ pub struct Outgoing {
     /// Handle which is given to router to allow router to communicate with this connection
     pub(crate) handle: Sender<()>,
     /// The buffer to keep track of inflight packets.
-    inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
+    pub(crate) inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -170,6 +173,17 @@ impl Outgoing {
         }
 
         Some(())
+    }
+
+    pub fn retrasmission_map(&self) -> HashMap<FilterIdx, Cursor> {
+        let mut o = HashMap::new();
+        for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
+            if !o.contains_key(filter_idx) {
+                o.insert(*filter_idx, *cursor);
+            }
+        }
+
+        o
     }
 }
 

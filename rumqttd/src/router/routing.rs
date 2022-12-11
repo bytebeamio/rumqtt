@@ -328,7 +328,7 @@ impl Router {
         // Remove connection from router
         let mut connection = self.connections.remove(id);
         let _incoming = self.ibufs.remove(id);
-        let _outgoing = self.obufs.remove(id);
+        let outgoing = self.obufs.remove(id);
         let mut tracker = self.scheduler.remove(id);
         self.connection_map.remove(&client_id);
         self.ackslog.remove(id);
@@ -339,6 +339,7 @@ impl Router {
         // self.readyqueue.remove(id);
 
         let inflight_data_requests = self.datalog.clean(id);
+        let retransmissions = outgoing.retrasmission_map();
 
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
@@ -367,6 +368,15 @@ impl Router {
                 .into_iter()
                 .for_each(|r| tracker.register_data_request(r));
 
+            debug!("{:?}, {:?} ", &tracker, retransmissions);
+
+            for request in tracker.data_requests.iter_mut() {
+                if let Some(cursor) = retransmissions.get(&request.filter_idx) {
+                    request.cursor = *cursor;
+                }
+            }
+
+            debug!("{:?}, {:?} ", &tracker, retransmissions);
             self.graveyard
                 .save(tracker, connection.subscriptions, connection.events);
         } else {
