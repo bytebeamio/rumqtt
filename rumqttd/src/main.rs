@@ -10,18 +10,6 @@ static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../demo.toml");
 #[structopt(about = "A high performance, lightweight and embeddable MQTT broker written in Rust.")]
 #[structopt(author = "tekjar <raviteja@bytebeam.io>")]
 struct CommandLine {
-    /// Binary version
-    #[structopt(skip = env!("VERGEN_BUILD_SEMVER"))]
-    version: String,
-    /// Build profile
-    #[structopt(skip= env!("VERGEN_CARGO_PROFILE"))]
-    profile: String,
-    /// Commit SHA
-    #[structopt(skip= env!("VERGEN_GIT_SHA"))]
-    commit_sha: String,
-    /// Commit SHA
-    #[structopt(skip= env!("VERGEN_GIT_COMMIT_TIMESTAMP"))]
-    commit_date: String,
     /// path to config file
     #[structopt(short, long)]
     config: Option<String>,
@@ -49,7 +37,10 @@ fn main() {
         return;
     }
 
-    banner(&commandline);
+    if !commandline.quiet {
+        banner();
+    }
+
     let level = match commandline.verbose {
         0 => "rumqttd=warn",
         1 => "rumqttd=info",
@@ -92,11 +83,7 @@ fn main() {
     broker.start().unwrap();
 }
 
-fn banner(commandline: &CommandLine) {
-    if commandline.quiet {
-        return;
-    }
-
+fn banner() {
     const B: &str = r#"                                              
          ___ _   _ __  __  ___ _____ _____ ___  
         | _ \ | | |  \/  |/ _ \_   _|_   _|   \ 
@@ -104,10 +91,5 @@ fn banner(commandline: &CommandLine) {
         |_|_\\___/|_|  |_|\__\_\|_|   |_| |___/ 
     "#;
 
-    println!("{}", B);
-    println!("    version: {}", commandline.version);
-    println!("    profile: {}", commandline.profile);
-    println!("    commit_sha: {}", commandline.commit_sha);
-    println!("    commit_date: {}", commandline.commit_date);
-    println!("\n");
+    println!("{}\n", B);
 }
