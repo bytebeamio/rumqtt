@@ -73,29 +73,20 @@ fn main() {
         .try_init()
         .expect("initialized subscriber succesfully");
 
-    let mut configs: rumqttd::Config;
-    if let Some(config) = &commandline.config {
-        configs = config::Config::builder()
-            .add_source(config::File::with_name(config))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .unwrap();
-    } else {
-        configs = config::Config::builder()
-            .add_source(config::File::from_str(
-                RUMQTTD_DEFAULT_CONFIG,
-                FileFormat::Toml,
-            ))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .unwrap();
-    }
+    let mut config_builder = config::Config::builder();
 
+    config_builder = match &commandline.config {
+        Some(config) => config_builder.add_source(config::File::with_name(config)),
+        None => config_builder.add_source(config::File::from_str(
+            RUMQTTD_DEFAULT_CONFIG,
+            FileFormat::Toml,
+        )),
+    };
+
+    let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
     configs.console.set_filter_reload_handle(reload_handle);
 
-    // println!("{:#?}", config);
+    // println!("{:#?}", configs);
 
     let mut broker = Broker::new(configs);
     broker.start().unwrap();
