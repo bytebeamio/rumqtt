@@ -96,7 +96,9 @@ impl Link {
             persistent,
         );
         if let Event::Connect {
-            ref mut outgoing, ..
+            ref mut outgoing,
+            ref mut connection,
+            ..
         } = message
         {
             connection.persistent = persistent;

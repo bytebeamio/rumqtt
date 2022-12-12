@@ -108,17 +108,7 @@ impl<P: AsyncProtocol> DiskHandler<P> {
                     }
                     _ => continue,
                 }
-
-                match &notif {
-                    Notification::Forward(forward) => {
-                        stored_filter_offset_map
-                            .entry(forward.filter_idx)
-                            .and_modify(|cursor| {
-                                if forward.cursor > *cursor {
-                                    *cursor = forward.cursor
-                                }
-                            })
-                            .or_insert(forward.cursor);
+            }
         }
 
         stored_filter_offset_map
@@ -272,7 +262,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
                 Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
                     publish.push_back(notif)
                 }
-                _ => non_pulish.push_back(notif),
+                _ => non_publish.push_back(notif),
             }
         }
 
@@ -285,7 +275,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
         // write publishes to disk
         if !publish.is_empty() {
             let written = self.disk_handler.write(&mut publish);
-            if let Err(e) = self.link_tx.persist(written) {
+            if let Err(e) = self.link_tx.persist(written).await {
                 error!("Failed to inform router of read progress: {e}")
             };
         }
