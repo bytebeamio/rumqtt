@@ -386,7 +386,7 @@ impl<P: AsyncProtocol> Server<P> {
             match &link_type {
                 #[cfg(feature = "websockets")]
                 LinkType::Shadow => task::spawn(
-                    shadow_connection(config, router_tx, network).instrument(tracing::info_span!(
+                    shadow_connection(config, router_tx, network).instrument(tracing::error_span!(
                         "shadow_connection",
                         client_id = field::Empty,
                         connection_id = field::Empty
@@ -404,7 +404,7 @@ impl<P: AsyncProtocol> Server<P> {
                 // TODO: Fix tracing for persistent links
                 LinkType::Persistent(map) => task::spawn(
                     persistance(config, tenant_id, router_tx, network, protocol, map.clone())
-                        .instrument(tracing::info_span!(
+                        .instrument(tracing::error_span!(
                             "persistent_link",
                             client_id = field::Empty,
                             connection_id = field::Empty
