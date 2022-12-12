@@ -1,7 +1,6 @@
 use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRec, PubRecReason, PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode,
-    UnsubAck,
+    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
@@ -296,6 +295,8 @@ impl Router {
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
+
+        self.router_meters.total_connections += 1;
     }
 
     fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Meter)>) {
@@ -373,6 +374,7 @@ impl Router {
             self.graveyard
                 .save(Tracker::new(client_id), HashSet::new(), connection.events);
         }
+        self.router_meters.total_connections -= 1;
     }
 
     /// Handles new incoming data on a topic
@@ -437,15 +439,18 @@ impl Router {
                             force_ack = true;
                         }
                         QoS::ExactlyOnce => {
-                            let pubrec = PubRec {
-                                pkid,
-                                reason: PubRecReason::Success,
-                            };
-
-                            let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.pubrec(publish, pubrec);
-                            force_ack = true;
-                            continue;
+                            error!("QoS::ExactlyOnce is not yet supported");
+                            disconnect = true;
+                            break;
+                            // let pubrec = PubRec {
+                            //     pkid,
+                            //     reason: PubRecReason::Success,
+                            // };
+                            //
+                            // let ackslog = self.ackslog.get_mut(id).unwrap();
+                            // ackslog.pubrec(publish, pubrec);
+                            // force_ack = true;
+                            // continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing

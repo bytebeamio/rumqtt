@@ -178,6 +178,20 @@ impl LinkTx {
         Ok(len)
     }
 
+    /// Send raw device data
+    pub async fn send(&mut self, data: Packet) -> Result<usize, LinkError> {
+        let len = {
+            let mut buffer = self.recv_buffer.lock();
+            buffer.push_back(data);
+            buffer.len()
+        };
+
+        self.router_tx
+            .send((self.connection_id, Event::DeviceData))?;
+
+        Ok(len)
+    }
+
     fn try_push(&mut self, data: Packet) -> Result<usize, LinkError> {
         let len = {
             let mut buffer = self.recv_buffer.lock();
@@ -318,6 +332,8 @@ impl LinkRx {
             None => {
                 // If cache is empty, check for router trigger and get fresh notifications
                 self.router_rx.recv()?;
+                // Collect 'all' the data in the buffer after a notification.
+                // Notification means fresh data which isn't previously collected
                 mem::swap(&mut *self.send_buffer.lock(), &mut self.cache);
                 Ok(self.cache.pop_front())
             }
@@ -348,6 +364,8 @@ impl LinkRx {
             None => {
                 // If cache is empty, check for router trigger and get fresh notifications
                 self.router_rx.recv_async().await?;
+                // Collect 'all' the data in the buffer after a notification.
+                // Notification means fresh data which isn't previously collected
                 mem::swap(&mut *self.send_buffer.lock(), &mut self.cache);
                 Ok(self.cache.pop_front())
             }
@@ -372,6 +390,7 @@ impl LinkRx {
         self.router_tx
             .send_async((self.connection_id, Event::Ready))
             .await?;
+
         Ok(())
     }
 }

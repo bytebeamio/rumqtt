@@ -17,13 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --all-features
+          components: clippy
+      - run: cargo test --all-features
 
           # deploy:
     # name: Source build, docker build and deploy
