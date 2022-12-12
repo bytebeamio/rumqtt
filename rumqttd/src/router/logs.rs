@@ -2,7 +2,7 @@ use super::persist::{Acker, ReadState};
 use super::Ack;
 use parking_lot::Mutex;
 use slab::Slab;
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::protocol::{
     matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
@@ -357,12 +357,18 @@ impl AckLog {
     }
 
     pub fn release_pending_acks(&mut self) {
-        let mut pubacks = self
+        let mut pubacks: VecDeque<Ack> = self
             .acker
             .release_acks()
             .into_iter()
             .map(Ack::PubAck)
             .collect();
+
+        debug!(
+            "Releasing acks, count: {}, pubacks: {:?}",
+            &pubacks.len(),
+            pubacks
+        );
 
         self.committed.append(&mut pubacks);
     }

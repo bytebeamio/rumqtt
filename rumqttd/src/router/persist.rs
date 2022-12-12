@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use parking_lot::Mutex;
+use tracing::debug;
 
 use crate::{protocol::PubAck, ConnectionId, Offset, Topic};
 
@@ -194,10 +195,14 @@ impl PublishState {
         let mut markers = Vec::new();
 
         for (filter_idx, &filter_threshold) in filter_thresholds {
-            let filter_row = self
-                .filter_to_row_id
-                .get(filter_idx)
-                .expect("unexpected: filter id should be present in map");
+            let filter_row = match self.filter_to_row_id.get(filter_idx) {
+                Some(filter_row) => filter_row,
+                None => {
+                    debug!("This filter was not being published.");
+                    continue;
+                }
+            };
+
             let row = self.publish_offsets.get(*filter_row).unwrap();
 
             let mut threshold = None;

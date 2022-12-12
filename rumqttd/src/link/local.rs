@@ -297,10 +297,12 @@ impl LinkTx {
         Ok(())
     }
 
-    pub fn persist(&mut self, written: HashMap<FilterIdx, Offset>) -> Result<(), LinkError> {
+    pub async fn persist(&mut self, written: HashMap<FilterIdx, Offset>) -> Result<(), LinkError> {
         let ack_data = Event::AckData(AckData { read_map: written });
 
-        self.router_tx.try_send((self.connection_id, ack_data))?;
+        self.router_tx
+            .send_async((self.connection_id, ack_data))
+            .await?;
         Ok(())
     }
 }

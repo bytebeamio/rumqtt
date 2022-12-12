@@ -467,8 +467,14 @@ impl Router {
                         &mut self.connections,
                     ) {
                         Ok(offset_map) => {
-                            let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.insert_pending_acks(publish, offset_map);
+                            match qos {
+                                QoS::AtLeastOnce => {
+                                    let ackslog = self.ackslog.get_mut(id).unwrap();
+                                    ackslog.insert_pending_acks(publish, offset_map);
+                                    force_ack = true;
+                                }
+                                _ => continue,
+                            }
 
                             // Even if one of the data in the batch is appended to commitlog,
                             // set new data. This triggers notifications to wake waiters.
