@@ -108,7 +108,17 @@ impl<P: AsyncProtocol> DiskHandler<P> {
                     }
                     _ => continue,
                 }
-            }
+
+                match &notif {
+                    Notification::Forward(forward) => {
+                        stored_filter_offset_map
+                            .entry(forward.filter_idx)
+                            .and_modify(|cursor| {
+                                if forward.cursor > *cursor {
+                                    *cursor = forward.cursor
+                                }
+                            })
+                            .or_insert(forward.cursor);
         }
 
         stored_filter_offset_map
@@ -256,7 +266,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
     async fn write_to_client(&mut self) -> Result<(), Error> {
         // separate publish notifications out
         let mut publish = VecDeque::new();
-        let mut non_pulish = VecDeque::new();
+        let mut non_publish = VecDeque::new();
         for notif in self.notifications.drain(..) {
             match notif {
                 Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
@@ -267,7 +277,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
         }
 
         // write non-publishes to network
-        let unscheduled = self.network.writev(&mut non_pulish).await?;
+        let unscheduled = self.network.writev(&mut non_publish).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
