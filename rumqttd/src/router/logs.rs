@@ -282,16 +282,22 @@ pub struct AckLog {
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
     recorded: VecDeque<Publish>,
-    acker: Acker,
+    acker: Option<Acker>,
 }
 
 impl AckLog {
     /// New log
-    pub fn new(read_state: Arc<Mutex<ReadState>>) -> AckLog {
+    pub fn new(read_state: Arc<Mutex<ReadState>>, persistent: bool) -> AckLog {
+        let acker = if persistent {
+            Some(Acker::new(read_state))
+        } else {
+            None
+        };
+
         AckLog {
             committed: VecDeque::with_capacity(100),
             recorded: VecDeque::with_capacity(100),
-            acker: Acker::new(read_state),
+            acker,
         }
     }
 
@@ -305,7 +311,7 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    fn puback(&mut self, ack: PubAck) {
+    fn _puback(&mut self, ack: PubAck) {
         let ack = Ack::PubAck(ack);
         self.committed.push_back(ack);
     }
@@ -348,31 +354,34 @@ impl AckLog {
         publish: Publish,
         publish_offsets: HashMap<usize, Offset>,
     ) {
-        self.acker.register_write(
-            String::from_utf8(publish.topic.to_vec()).unwrap(),
-            PubAck {
-                pkid: publish.pkid,
-                reason: crate::protocol::PubAckReason::Success,
-            },
-            publish_offsets,
-        )
+        let puback = PubAck {
+            pkid: publish.pkid,
+            reason: crate::protocol::PubAckReason::Success,
+        };
+
+        match &mut self.acker {
+            Some(acker) => acker.register_write(
+                String::from_utf8(publish.topic.to_vec()).unwrap(),
+                puback,
+                publish_offsets,
+            ),
+            None => self.committed.push_back(Ack::PubAck(puback)),
+        }
     }
 
     pub fn release_pending_acks(&mut self) {
-        let mut pubacks: VecDeque<Ack> = self
-            .acker
-            .release_acks()
-            .into_iter()
-            .map(Ack::PubAck)
-            .collect();
+        if let Some(acker) = &mut self.acker {
+            let mut pubacks: VecDeque<Ack> =
+                acker.release_acks().into_iter().map(Ack::PubAck).collect();
 
-        debug!(
-            "Releasing acks, count: {}, pubacks: {:?}",
-            &pubacks.len(),
-            pubacks
-        );
+            debug!(
+                "Releasing acks, count: {}, pubacks: {:?}",
+                &pubacks.len(),
+                pubacks
+            );
 
-        self.committed.append(&mut pubacks);
+            self.committed.append(&mut pubacks);
+        }
     }
 }
 

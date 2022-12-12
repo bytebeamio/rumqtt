@@ -257,10 +257,15 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
         // separate publish notifications out
         let mut publish = VecDeque::new();
         let mut non_publish = VecDeque::new();
+        let mut acked_publishes = VecDeque::new();
         for notif in self.notifications.drain(..) {
             match notif {
                 Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
                     publish.push_back(notif)
+                }
+                Notification::AckDone => {
+                    // release all publishes in storage
+                    self.disk_handler.read(&mut acked_publishes);
                 }
                 _ => non_publish.push_back(notif),
             }
@@ -268,6 +273,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
 
         // write non-publishes to network
         let unscheduled = self.network.writev(&mut non_publish).await?;
+        self.network.writev(&mut acked_publishes).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
@@ -280,14 +286,16 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
             };
         }
         // read publishes from disk
-        let mut buffer = VecDeque::new();
-        self.disk_handler.read(&mut buffer);
+        // let mut buffer = VecDeque::new();
+        // self.disk_handler.read(&mut buffer);
+
         // TODO: if network write throws an error then this means we again got network I/O error
         // write publishes to network
-        let unscheduled = self.network.writev(&mut buffer).await?;
-        if unscheduled {
-            self.link_rx.wake().await?;
-        };
+
+        // let unscheduled = self.network.writev(&mut acked_publishes).await?;
+        // if unscheduled {
+        //     self.link_rx.wake().await?;
+        // };
 
         Ok(())
     }

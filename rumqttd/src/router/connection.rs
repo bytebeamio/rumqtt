@@ -33,7 +33,6 @@ impl Connection {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
-        persistent: bool,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics

@@ -91,6 +91,7 @@ pub enum Notification {
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
+    AckDone,
 }
 
 type MaybePacket = Option<Packet>;

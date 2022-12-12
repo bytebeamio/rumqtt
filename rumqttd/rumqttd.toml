@@ -16,7 +16,7 @@ max_connections = 10010
 [v4.1]
 name = "v4-1"
 listen = "0.0.0.0:1883"
-persistence = true
+persistence = false
 next_connection_delay_ms = 1
     [v4.1.connections]
     connection_timeout_ms = 60000
@@ -31,6 +31,7 @@ next_connection_delay_ms = 1
 [v4.2]
 name = "v4-2"
 listen = "0.0.0.0:8883"
+persistence = false
 next_connection_delay_ms = 10
     # tls config for rustls
     [v4.2.tls]

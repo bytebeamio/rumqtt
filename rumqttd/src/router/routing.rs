@@ -1,6 +1,6 @@
 use crate::protocol::{
-    ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    ConnAck, ConnectReturnCode, Packet, PingResp, PubComp, PubCompReason, PubRel, PubRelReason,
+    Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
@@ -259,7 +259,7 @@ impl Router {
             connection.events = saved.metrics;
             Tracker::new(client_id.clone())
         };
-        let ackslog = AckLog::new(self.datalog.read_state.clone());
+        let ackslog = AckLog::new(self.datalog.read_state.clone(), outgoing.persistent);
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(v) => v.as_millis().to_string(),
@@ -412,7 +412,6 @@ impl Router {
 
                     let size = publish.len();
                     let qos = publish.qos;
-                    let pkid = publish.pkid;
 
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
@@ -472,14 +471,11 @@ impl Router {
                         &mut self.connections,
                     ) {
                         Ok(offset_map) => {
-                            match qos {
-                                QoS::AtLeastOnce => {
-                                    let ackslog = self.ackslog.get_mut(id).unwrap();
-                                    ackslog.insert_pending_acks(publish, offset_map);
-                                    force_ack = true;
-                                }
-                                _ => continue,
-                            }
+                            if let QoS::AtLeastOnce = qos {
+                                let ackslog = self.ackslog.get_mut(id).unwrap();
+                                ackslog.insert_pending_acks(publish, offset_map);
+                                force_ack = true;
+                            };
 
                             // Even if one of the data in the batch is appended to commitlog,
                             // set new data. This triggers notifications to wake waiters.
@@ -936,7 +932,17 @@ impl Router {
             let outgoing = self.obufs.get_mut(publisher).unwrap();
 
             ack_device_data(ackslog, outgoing);
+
+            // self.scheduler
+            //     .reschedule(publisher, ScheduleReason::FreshData);
         }
+
+        let outgoing = self.obufs.get_mut(connection_id).unwrap();
+        let mut buffer = outgoing.data_buffer.lock();
+
+        let ack_done = Notification::AckDone;
+        buffer.push_back(ack_done);
+        outgoing.handle.try_send(()).ok();
     }
 }
 

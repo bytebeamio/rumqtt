@@ -45,7 +45,7 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
-        persistent: bool,
+        _persistent: bool,
     ) -> (
         Event,
         Arc<Mutex<VecDeque<Packet>>>,
@@ -58,7 +58,6 @@ impl Link {
             clean,
             last_will,
             dynamic_filters,
-            persistent,
         );
         let incoming = Incoming::new(client_id.to_string());
         let (outgoing, link_rx) = Outgoing::new(client_id.to_string());
