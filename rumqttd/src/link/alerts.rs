@@ -38,7 +38,7 @@ impl AlertLink {
         Ok(link)
     }
 
-    pub fn poll(&mut self) -> (ConnectionId, Alert) {
+    pub fn poll(&self) -> (ConnectionId, Alert) {
         self.router_rx.recv().unwrap()
     }
 }
