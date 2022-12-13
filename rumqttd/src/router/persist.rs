@@ -78,7 +78,8 @@ impl ReadState {
     }
 }
 
-/// TODO: Redo this
+///```text
+///  TODO: Redo this
 ///
 /// Publish offset map, for topic T:
 ///
@@ -145,6 +146,7 @@ impl ReadState {
 ///  t_1     P_1  |  1       2         
 ///  t_2     P_2  |  2       7 ←                ⬅️ new threshold
 ///  t_3     P_3  |  3 ←     10      22 ←
+/// ```
 #[derive(Default, Debug)]
 pub struct PublishState {
     publish_offsets: Vec<Vec<Option<Offset>>>,
