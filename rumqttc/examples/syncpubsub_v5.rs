@@ -1,4 +1,5 @@
 use rumqttc::v5::mqttbytes::{LastWill, QoS};
+use rumqttc::v5::ConnectionError;
 use rumqttc::v5::{Client, MqttOptions};
 use std::thread;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use std::time::Duration;
 fn main() {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
@@ -16,6 +17,15 @@ fn main() {
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {
+        match notification {
+            Err(ConnectionError::Io(error))
+                if error.kind() == std::io::ErrorKind::ConnectionRefused =>
+            {
+                println!("Failed to connect to the server. Make sure correct client is configured properly!\nError: {:?}", error);
+                return;
+            }
+            _ => {}
+        }
         println!("{}. Notification = {:?}", i, notification);
     }
 
@@ -29,7 +39,7 @@ fn publish(client: Client) {
         let topic = format!("hello/{}/world", i);
         let qos = QoS::AtLeastOnce;
 
-        client.publish(topic, qos, true, payload).unwrap();
+        let _ = client.publish(topic, qos, true, payload);
     }
 
     thread::sleep(Duration::from_secs(1));
