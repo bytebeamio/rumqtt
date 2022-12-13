@@ -539,7 +539,7 @@ impl Router {
                         info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if let Err(e) = validate_subscription(connection, &f) {
+                        if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
 
                             disconnect = true;
@@ -549,10 +549,10 @@ impl Router {
                         let filter = &f.path;
                         let qos = f.qos;
 
-                        let (idx, cursor) = self.datalog.next_native_offset(&filter);
+                        let (idx, cursor) = self.datalog.next_native_offset(filter);
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
                         self.datalog
-                            .handle_retained_messages(&filter, &mut self.notifications);
+                            .handle_retained_messages(filter, &mut self.notifications);
 
                         let code = match qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
@@ -615,8 +615,8 @@ impl Router {
                             };
                             let ackslog = self.ackslog.get_mut(id).unwrap();
                             ackslog.unsuback(unsuback);
-                            self.scheduler.untrack(id, &filter);
-                            self.datalog.remove_waiters_for_id(id, &filter);
+                            self.scheduler.untrack(id, filter);
+                            self.datalog.remove_waiters_for_id(id, filter);
                             force_ack = true;
                         }
                     }
@@ -721,7 +721,7 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
 
-                    let alert = Alert::Disconnect(client_id.clone());
+                    let alert = Alert::Disconnect(client_id);
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -776,7 +776,7 @@ impl Router {
             .alertlog
             .offsets
             .entry(filter)
-            .or_insert(HashMap::new());
+            .or_insert_with(HashMap::new);
         offsets.entry(id).or_insert((0, 0));
     }
 

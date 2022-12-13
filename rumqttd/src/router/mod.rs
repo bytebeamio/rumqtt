@@ -12,7 +12,7 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId, Topic,
+    ConnectionId, Filter, RouterConfig, RouterId,
 };
 
 mod alertlog;
