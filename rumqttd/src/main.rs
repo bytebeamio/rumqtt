@@ -3,7 +3,7 @@ use rumqttd::Broker;
 
 use structopt::StructOpt;
 
-static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../demo.toml");
+static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
 #[derive(StructOpt)]
 #[structopt(name = "rumqttd")]
