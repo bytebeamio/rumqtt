@@ -1,5 +1,9 @@
 ### Unreleased
 ---
+misc
+---
+- Remove rumqttd-old in favour of rumqttd (#530)
+
 rumqttc
 -------
 - Add support for native-tls within rumqttc (#501)
