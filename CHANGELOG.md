@@ -9,6 +9,7 @@ rumqttc
 - Add support for native-tls within rumqttc (#501)
 - Fixed panicking in `recv_timeout` and `try_recv` by entering tokio runtime context (#492, #497)
 - Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
+- Remove `Connect` from `ConnectionError::StateError` (#541)
 
 rumqttd
 -------
