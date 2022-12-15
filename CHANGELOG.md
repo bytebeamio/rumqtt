@@ -3,10 +3,15 @@
 misc
 ---
 - Remove rumqttd-old in favour of rumqttd (#530)
+- Optimize Github CI workflow (#526)
+- Revamp Readme and rename demo.toml to rumqttd.toml (#532)
 
 rumqttd
 -------
 - Make router::Meter public (#521)
+- Expose prometheus scraping endpoints for router metricss (#522)
+- Make configuration file optional for running the broker and add subcommand to generate default configuration file (#523)
+- Use CA path in correct argument position (#529)
 ------
 
 ### R18
