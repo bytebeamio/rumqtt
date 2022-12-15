@@ -3,8 +3,20 @@
 misc
 ---
 - Remove rumqttd-old in favour of rumqttd (#530)
+- Optimize Github CI workflow (#526)
+- Revamp Readme and rename demo.toml to rumqttd.toml (#532)
 
-rumqttc
+rumqttd
+-------
+- Make router::Meter public (#521)
+- Expose prometheus scraping endpoints for router metricss (#522)
+- Make configuration file optional for running the broker and add subcommand to generate default configuration file (#523)
+- Use CA path in correct argument position (#529)
+------
+
+### R18
+---
+rumqttc v0.18.0
 -------
 - Add support for native-tls within rumqttc (#501)
 - Fixed panicking in `recv_timeout` and `try_recv` by entering tokio runtime context (#492, #497)
@@ -12,7 +24,6 @@ rumqttc
 
 rumqttd
 -------
-- Make router::Meter public (#521)
 - Add meters related to router, subscriptions, and connections (#508)
 - Allow multi-tenancy validation for mtls clients with `Org` set in certificates (#505)
 - Add `tracing` for structured, context-aware logging (#499, #503)
