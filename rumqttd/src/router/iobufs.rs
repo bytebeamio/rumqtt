@@ -59,7 +59,7 @@ pub struct Outgoing {
     /// Handle which is given to router to allow router to communicate with this connection
     pub(crate) handle: Sender<()>,
     /// The buffer to keep track of inflight packets.
-    pub(crate) inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
+    inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -175,7 +175,9 @@ impl Outgoing {
         Some(())
     }
 
-    pub fn retrasmission_map(&self) -> HashMap<FilterIdx, Cursor> {
+    // Here we are assuming that the first unique filter_idx we find while iterating will have the
+    // least corresponding cursor because of the way we insert into the inflight_buffer
+    pub fn retransmission_map(&self) -> HashMap<FilterIdx, Cursor> {
         let mut o = HashMap::new();
         for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
             if !o.contains_key(filter_idx) {
@@ -189,6 +191,36 @@ impl Outgoing {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
+    #[test]
+    fn retransmission_map_is_calculated_accurately() {
+        let (mut outgoing, _) = Outgoing::new("retransmission-test".to_string());
+        let mut result = HashMap::new();
+
+        result.insert(0, (0, 8));
+        result.insert(1, (0, 1));
+        result.insert(2, (1, 1));
+        result.insert(3, (1, 0));
+
+        let buf = vec![
+            (1, 0, (0, 8)),
+            (1, 0, (0, 10)),
+            (1, 1, (0, 1)),
+            (3, 1, (0, 4)),
+            (2, 2, (1, 1)),
+            (1, 2, (2, 6)),
+            (1, 2, (2, 1)),
+            (1, 3, (1, 0)),
+            (1, 3, (1, 1)),
+            (1, 3, (1, 3)),
+            (1, 3, (1, 3)),
+        ];
+
+        outgoing.inflight_buffer.extend(buf);
+        assert_eq!(outgoing.retransmission_map(), result);
+    }
+
     // use super::{Outgoing, MAX_INFLIGHT};
     // use crate::protocol::{Publish, QoS};
     // use crate::router::Forward;

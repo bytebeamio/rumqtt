@@ -339,7 +339,7 @@ impl Router {
         // self.readyqueue.remove(id);
 
         let inflight_data_requests = self.datalog.clean(id);
-        let retransmissions = outgoing.retrasmission_map();
+        let retransmissions = outgoing.retransmission_map();
 
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
@@ -368,15 +368,12 @@ impl Router {
                 .into_iter()
                 .for_each(|r| tracker.register_data_request(r));
 
-            debug!("{:?}, {:?} ", &tracker, retransmissions);
-
             for request in tracker.data_requests.iter_mut() {
                 if let Some(cursor) = retransmissions.get(&request.filter_idx) {
                     request.cursor = *cursor;
                 }
             }
 
-            debug!("{:?}, {:?} ", &tracker, retransmissions);
             self.graveyard
                 .save(tracker, connection.subscriptions, connection.events);
         } else {
