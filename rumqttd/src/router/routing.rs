@@ -1068,10 +1068,10 @@ fn forward_device_data(
     }
 
     // Fill and notify device data
-    let forwards = publishes.into_iter().map(|mut publish| {
+    let forwards = publishes.into_iter().map(|(mut publish, offset)| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
-            cursor: next,
+            cursor: offset,
             size: 0,
             publish,
         }

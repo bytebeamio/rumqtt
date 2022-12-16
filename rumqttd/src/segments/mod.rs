@@ -1,3 +1,4 @@
+use crate::Offset;
 use std::usize;
 use std::{collections::VecDeque, io};
 
@@ -186,7 +187,7 @@ where
         &self,
         mut start: (u64, u64),
         mut len: u64,
-        out: &mut Vec<T>,
+        out: &mut Vec<(T, Offset)>,
     ) -> io::Result<Position> {
         let mut cursor = start;
         let _orig_cursor = cursor;
@@ -217,11 +218,12 @@ where
             cursor.1 = curr_segment.absolute_offset;
         }
 
+        dbg!(&self.segments.len());
         while cursor.0 < self.tail {
             // `Segment::readv` handles conversion from absolute index to relative
             // index and it returns the absolute offset.
             // absolute cursor not to be confused with absolute offset
-            match curr_segment.readv(cursor.1, len, out)? {
+            match curr_segment.readv(cursor, len, out)? {
                 // an offset returned -> we didn't read till end -> len fulfilled -> return
                 SegmentPosition::Next(offset) => {
                     return Ok(Position::Next {
@@ -261,7 +263,7 @@ where
         // segment's `readv` then we should return `None` as well as not possible to read further,
         // whereas for older segments we simply jump onto the new one to read more.
 
-        match curr_segment.readv(cursor.1, len, out)? {
+        match curr_segment.readv(cursor, len, out)? {
             SegmentPosition::Next(v) => {
                 // debug!("start: {:?}, end: ({}, {})", orig_cursor, cursor.0, cursor.1 + v - 1);
                 Ok(Position::Next {

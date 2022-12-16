@@ -10,7 +10,7 @@ use tracing::{error, warn};
 use crate::{
     protocol::Packet,
     router::{FilterIdx, MAX_CHANNEL_CAPACITY},
-    Cursor, Notification, Offset,
+    Cursor, Notification,
 };
 
 use super::{Forward, IncomingMeter, OutgoingMeter};
