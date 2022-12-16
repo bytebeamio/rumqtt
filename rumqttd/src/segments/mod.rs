@@ -128,7 +128,7 @@ where
     #[allow(dead_code)]
     #[inline]
     pub fn len(&self) -> usize {
-        self.segments.len() as usize
+        self.segments.len()
     }
 
     /// Number of packets
@@ -218,7 +218,6 @@ where
             cursor.1 = curr_segment.absolute_offset;
         }
 
-        dbg!(&self.segments.len());
         while cursor.0 < self.tail {
             // `Segment::readv` handles conversion from absolute index to relative
             // index and it returns the absolute offset.
@@ -292,10 +291,10 @@ mod tests {
         Bytes::from(vec![id; size as usize])
     }
 
-    fn verify(expected_id: usize, expected_size: u64, out: Bytes) {
+    fn verify(expected_id: usize, expected_size: u64, out: (Bytes, Offset)) {
         let expected = Bytes::from(vec![expected_id as u8; expected_size as usize]);
         // dbg!(expected_id, &expected);
-        assert_eq!(out, expected);
+        assert_eq!(out.0, expected);
     }
 
     #[test]

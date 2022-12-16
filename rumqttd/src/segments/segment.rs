@@ -81,7 +81,6 @@ where
                 limit = self.len();
             }
             let tmp = std::iter::repeat(cursor.0).zip(cursor.1..cursor.1 + limit);
-            dbg!(&tmp);
             let o = self.data[idx as usize..limit as usize]
                 .iter()
                 .cloned()
