@@ -127,7 +127,7 @@ where
     #[allow(dead_code)]
     #[inline]
     pub fn len(&self) -> usize {
-        self.segments.len() as usize
+        self.segments.len()
     }
 
     /// Number of packets

@@ -68,7 +68,7 @@ impl Outgoing {
     pub(crate) fn new(client_id: String) -> (Self, Receiver<()>) {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
-        let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT as usize);
+        let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
 
         // Ensure that there won't be any new allocations
         assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
