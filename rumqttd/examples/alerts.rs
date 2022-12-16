@@ -59,11 +59,9 @@ fn main() {
         });
     }
 
-    thread::spawn(move || loop {
+    loop {
         let alert = alerts.poll();
         println!("Alert: {:?}", alert);
         thread::sleep(Duration::from_secs(1));
-    });
-
-    thread::sleep(Duration::from_secs(1000));
+    }
 }
