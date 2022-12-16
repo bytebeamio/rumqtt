@@ -328,7 +328,7 @@ impl Router {
         // Remove connection from router
         let mut connection = self.connections.remove(id);
         let _incoming = self.ibufs.remove(id);
-        let _outgoing = self.obufs.remove(id);
+        let outgoing = self.obufs.remove(id);
         let mut tracker = self.scheduler.remove(id);
         self.connection_map.remove(&client_id);
         self.ackslog.remove(id);
@@ -339,6 +339,7 @@ impl Router {
         // self.readyqueue.remove(id);
 
         let inflight_data_requests = self.datalog.clean(id);
+        let retransmissions = outgoing.retransmission_map();
 
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
@@ -366,6 +367,12 @@ impl Router {
             inflight_data_requests
                 .into_iter()
                 .for_each(|r| tracker.register_data_request(r));
+
+            for request in tracker.data_requests.iter_mut() {
+                if let Some(cursor) = retransmissions.get(&request.filter_idx) {
+                    request.cursor = *cursor;
+                }
+            }
 
             self.graveyard
                 .save(tracker, connection.subscriptions, connection.events);
@@ -1058,10 +1065,10 @@ fn forward_device_data(
     }
 
     // Fill and notify device data
-    let forwards = publishes.into_iter().map(|mut publish| {
+    let forwards = publishes.into_iter().map(|(mut publish, offset)| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
-            cursor: next,
+            cursor: offset,
             size: 0,
             publish,
         }
