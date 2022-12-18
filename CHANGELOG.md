@@ -12,6 +12,7 @@ rumqttd
 - Expose prometheus scraping endpoints for router metricss (#522)
 - Make configuration file optional for running the broker and add subcommand to generate default configuration file (#523)
 - Use CA path in correct argument position (#529)
+- Remove build.rs as it is not required now (#544)
 ------
 
 ### R18
@@ -23,7 +24,7 @@ rumqttc v0.18.0
 - Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
 - Remove `Connect` from `ConnectionError::StateError` (#541)
 
-rumqttd
+rumqttd v0.12.0-beta.2
 -------
 - Add meters related to router, subscriptions, and connections (#508)
 - Allow multi-tenancy validation for mtls clients with `Org` set in certificates (#505)
