@@ -1,10 +1,12 @@
 ### Unreleased
 ---
-misc
----
-- Remove rumqttd-old in favour of rumqttd (#530)
-- Optimize Github CI workflow (#526)
-- Revamp Readme and rename demo.toml to rumqttd.toml (#532)
+
+rumqttc
+-------
+- MQTTv5: Add processing of missing Mqtt subscribe options (#536)
+- Fix examples to stop printing error in loop (#540)
+- MQTTv5!: Remove `Connect` from `ConnectionError::StateError` (#541)
+- MQTTv5: Send last_will and login info with connect (#478)
 
 rumqttd
 -------
@@ -13,7 +15,14 @@ rumqttd
 - Make configuration file optional for running the broker and add subcommand to generate default configuration file (#523)
 - Use CA path in correct argument position (#529)
 - Remove build.rs as it is not required now (#544)
-------
+
+misc
+---
+- Remove rumqttd-old in favour of rumqttd (#530)
+- Optimize Github CI workflow (#526)
+- Revamp Readme and rename demo.toml to rumqttd.toml (#532)
+-----------
+
 
 ### R18
 ---
@@ -22,7 +31,6 @@ rumqttc v0.18.0
 - Add support for native-tls within rumqttc (#501)
 - Fixed panicking in `recv_timeout` and `try_recv` by entering tokio runtime context (#492, #497)
 - Removed unused dependencies and updated version of some of used libraries to fix dependabots warning (#475)
-- Remove `Connect` from `ConnectionError::StateError` (#541)
 
 rumqttd v0.12.0-beta.2
 -------
