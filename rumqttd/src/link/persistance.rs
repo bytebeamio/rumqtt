@@ -56,6 +56,7 @@ pub struct PersistanceLink<P: AsyncProtocol> {
     disk_handler: DiskHandler<P>,
     network_update_rx: Receiver<Network<P>>,
     connack: Notification,
+    inflight_publishes: VecDeque<Notification>,
 }
 
 pub(super) struct DiskHandler<P: AsyncProtocol> {
@@ -206,6 +207,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
                 disk_handler: DiskHandler::new(&client_id, protocol)?,
                 network_update_rx,
                 connack: notification,
+                inflight_publishes: VecDeque::with_capacity(100),
             },
         ))
     }
@@ -247,55 +249,75 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
                 o = self.link_rx.exchange(&mut self.notifications) => {
                     o?;
                     // TODO: write only publishes
-                    self.disk_handler.write(&mut self.notifications);
+                    self.write_to_disconnected_client().await?;
                 }
             }
         }
     }
 
-    async fn write_to_client(&mut self) -> Result<(), Error> {
-        // separate publish notifications out
-        let mut publish = VecDeque::new();
-        let mut non_publish = VecDeque::new();
-        let mut acked_publishes = VecDeque::new();
+    async fn write_to_disconnected_client(&mut self) -> Result<(), Error> {
         for notif in self.notifications.drain(..) {
             match notif {
                 Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
-                    publish.push_back(notif)
+                    self.inflight_publishes.push_back(notif)
                 }
-                Notification::AckDone => {
-                    // release all publishes in storage
-                    self.disk_handler.read(&mut acked_publishes);
+                _ => continue,
+            }
+        }
+
+        // write publishes to disk
+        if !self.inflight_publishes.is_empty() {
+            let acked_offsets = self.disk_handler.write(&mut self.inflight_publishes);
+            if let Err(e) = self.link_tx.persist(acked_offsets).await {
+                error!("Failed to inform router of read progress: {e}")
+            };
+        }
+        Ok(())
+    }
+
+    async fn write_to_active_client(&mut self) -> Result<(), Error> {
+        // separate notifications out
+        let mut non_publish = VecDeque::new();
+        // let mut acked_publishes = VecDeque::new();
+        for notif in self.notifications.drain(..) {
+            match notif {
+                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
+                    self.inflight_publishes.push_back(notif)
                 }
+                // Notification::AckDone => {
+                //     // release all publishes in storage
+                //     self.disk_handler.read(&mut acked_publishes);
+                // }
                 _ => non_publish.push_back(notif),
             }
         }
 
         // write non-publishes to network
-        let unscheduled = self.network.writev(&mut non_publish).await?;
-        self.network.writev(&mut acked_publishes).await?;
+        let mut unscheduled = self.network.writev(&mut non_publish).await?;
+        // write acked-publishes
+        // unscheduled = unscheduled || self.network.writev(&mut acked_publishes).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
 
         // write publishes to disk
-        if !publish.is_empty() {
-            let written = self.disk_handler.write(&mut publish);
-            if let Err(e) = self.link_tx.persist(written).await {
+        if !self.inflight_publishes.is_empty() {
+            let acked_offsets = self.disk_handler.write(&mut self.inflight_publishes);
+            if let Err(e) = self.link_tx.persist(acked_offsets).await {
                 error!("Failed to inform router of read progress: {e}")
             };
         }
         // read publishes from disk
-        // let mut buffer = VecDeque::new();
-        // self.disk_handler.read(&mut buffer);
+        let mut buffer = VecDeque::new();
+        self.disk_handler.read(&mut buffer);
 
         // TODO: if network write throws an error then this means we again got network I/O error
         // write publishes to network
 
-        // let unscheduled = self.network.writev(&mut acked_publishes).await?;
-        // if unscheduled {
-        //     self.link_rx.wake().await?;
-        // };
+        let unscheduled = self.network.writev(&mut buffer).await?;
+        if unscheduled {
+            self.link_rx.wake().await?;
+        };
 
         Ok(())
     }
@@ -336,7 +358,7 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
                     // exchange will through error if all senders to router are dropped
                     // which is not possible since Persistent Link always lives
                     o?;
-                    self.write_to_client().await?;
+                    self.write_to_active_client().await?;
                 }
             }
         }
