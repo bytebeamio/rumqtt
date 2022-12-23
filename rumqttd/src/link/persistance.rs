@@ -277,25 +277,21 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
 
     async fn write_to_active_client(&mut self) -> Result<(), Error> {
         // separate notifications out
-        let mut non_publish = VecDeque::new();
+        let mut unpersisted_messages = VecDeque::new();
         // let mut acked_publishes = VecDeque::new();
         for notif in self.notifications.drain(..) {
             match notif {
                 Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
                     self.inflight_publishes.push_back(notif)
                 }
-                // Notification::AckDone => {
-                //     // release all publishes in storage
-                //     self.disk_handler.read(&mut acked_publishes);
-                // }
-                _ => non_publish.push_back(notif),
+                Notification::AckDone => {
+                    continue;
+                }
+                _ => unpersisted_messages.push_back(notif),
             }
         }
 
-        // write non-publishes to network
-        let mut unscheduled = self.network.writev(&mut non_publish).await?;
-        // write acked-publishes
-        // unscheduled = unscheduled || self.network.writev(&mut acked_publishes).await?;
+        let unscheduled = self.network.writev(&mut unpersisted_messages).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
@@ -347,9 +343,12 @@ impl<P: AsyncProtocol> PersistanceLink<P> {
                         Ok(packet) => self.read_from_client(packet).await?,
                         // change state to disconnected on I/O connection errors and
                         // wait for a reconnection
-                        Err(e) => match e.kind() {
-                            io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset => return Ok(State::Disconnected),
-                            _ => return Err(e.into())
+                        Err(e) => {
+                            println!("some error while reading from the network? {e:?}");
+                            match e.kind() {
+                                io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset => return Ok(State::Disconnected),
+                                _ => return Err(e.into())
+                            }
                         }
                     };
                 }
