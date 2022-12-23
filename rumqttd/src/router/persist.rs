@@ -159,8 +159,6 @@ impl PublishState {
     fn update(&mut self, puback: PubAck, updates: HashMap<FilterIdx, Offset>) {
         self.pubacks.push(puback);
 
-        println!("{:?}", self.publish_offsets);
-
         let map_width = match self.publish_offsets.first() {
             Some(first) => first.len(),
             None => 0,
@@ -189,7 +187,6 @@ impl PublishState {
 
         for row in self.publish_offsets.iter_mut() {
             row.resize(map_width + 1, None);
-            println!("{row:?}");
         }
     }
 
@@ -267,8 +264,6 @@ impl Acker {
     }
 
     pub fn release_acks(&mut self) -> Vec<PubAck> {
-        // What about out of order acks? A_3, A_0, A_1, A_4, A_2, A_5, A_6, ...?
-
         let progress = self.sync();
         let mut acks_to_be_released = Vec::new();
 
@@ -303,7 +298,6 @@ impl Acker {
             }
         }
 
-        println!("progress is {progress:?}");
         progress
     }
 }
@@ -395,116 +389,6 @@ mod test {
     }
 
     #[test]
-    fn test_topic_marker_calculation() {
-        let read_state = Arc::new(Mutex::from(ReadState::default()));
-
-        // subscriber - 0
-        // reading on filter - 0
-        // read offset - 0, 0
-        read_state.lock().register_read(0, 0, (0, 0));
-        // subscriber - 1
-        // reading on filter - 1
-        // read offset - 0, 0
-        read_state.lock().register_read(1, 1, (0, 0));
-
-        let mut acker = Acker::new(read_state.clone());
-
-        // publisher - 1
-        // publishing on topic "A" that matches filter - 0 and 1
-        // on filter 0 offset is (0, 5)
-        // on filter 1 offset is (1, 10)
-        acker.register_write(
-            "A".into(),
-            PubAck {
-                pkid: 0,
-                reason: crate::protocol::PubAckReason::Success,
-            },
-            HashMap::from([(0, (0, 5)), (1, (1, 10))]),
-        );
-
-        acker.register_write(
-            "A".into(),
-            PubAck {
-                pkid: 1,
-                reason: crate::protocol::PubAckReason::Success,
-            },
-            HashMap::from([(0, (0, 8)), (1, (1, 15))]),
-        );
-
-        let acks = acker.release_acks();
-        println!("{acks:?}");
-
-        // subscriber - 0
-        // reading on filter - 0
-        // read offset - 0, 0
-        read_state.lock().register_read(0, 0, (0, 7));
-        // subscriber - 1
-        // reading on filter - 1
-        // read offset - 0, 0
-        read_state.lock().register_read(1, 1, (1, 11));
-
-        let acks = acker.release_acks();
-        // println!("{read_state:?}");
-        println!("{acks:?}");
-
-        // let publish_offsets = vec![vec![Some((0, 0))]];
-        // let filter_to_row_id = HashMap::from([(0, 0)]);
-        // let pubacks = vec![PubAck {
-        //     pkid: 0,
-        //     reason: crate::protocol::PubAckReason::Success,
-        // }];
-        // let read_marker_column = 0;
-
-        // let mut topic_state_read_map = PublishState {
-        //     publish_offsets,
-        //     filter_to_row_id,
-        //     pubacks,
-        //     read_marker_column,
-        // };
-
-        // let puback_updates = vec![
-        //     (
-        //         PubAck {
-        //             pkid: 1,
-        //             reason: crate::protocol::PubAckReason::Success,
-        //         },
-        //         HashMap::from([(0, (0, 1)), (1, (0, 2))]),
-        //     ),
-        //     (
-        //         PubAck {
-        //             pkid: 2,
-        //             reason: crate::protocol::PubAckReason::Success,
-        //         },
-        //         HashMap::from([(0, (0, 2)), (1, (0, 7))]),
-        //     ),
-        //     (
-        //         PubAck {
-        //             pkid: 3,
-        //             reason: crate::protocol::PubAckReason::Success,
-        //         },
-        //         HashMap::from([(0, (0, 3)), (1, (0, 10)), (2, (0, 22))]),
-        //     ),
-        // ];
-
-        // let prev = topic_state_read_map.read_marker_column;
-        // for (puback, update) in puback_updates {
-        //     topic_state_read_map.update(puback, update)
-        // }
-
-        // for row in &topic_state_read_map.publish_offsets {
-        //     println!("{:?}", row);
-        // }
-
-        // let updated_thresholds = HashMap::from([(0, (0, 3)), (1, (0, 11)), (2, (0, 24))]);
-        // topic_state_read_map.recompute_read_marker(&updated_thresholds);
-
-        // let curr = topic_state_read_map.read_marker_column;
-
-        // assert_eq!(prev, 0);
-        // assert_eq!(curr, 3);
-    }
-
-    #[test]
     fn puback_release_test() {
         // S1 subscribes on filter F1 with read marker: (0, 0), and on filter F2 with read marker: (0, 0)
         let read_state = Arc::new(Mutex::from(ReadState::default()));
@@ -529,7 +413,7 @@ mod test {
 
         // ASSERT -> P1 gets ack for 0 publishes ()
         let acks = acker.release_acks();
-        println!("{acks:?}");
+        // println!("{acks:?}");
         assert_eq!(acks.len(), 0);
 
         // S1 reads 4 messages from F1 with updated read marker: (0, 4), and 3 messages from F2 with updated read marker: (0, 3)
@@ -538,7 +422,7 @@ mod test {
 
         // ASSERT -> P1 gets ack for 3 publishes (A1, A2, A3)
         let acks = acker.release_acks();
-        println!("{acks:?}");
+        // println!("{acks:?}");
         assert_eq!(acks.len(), 3);
 
         // P1 publishes 5 messages on topic T. T maps to F1 and F2. Publish offset on F1: (0, 5), and on F2: (0, 5)
@@ -559,7 +443,7 @@ mod test {
 
         // ASSERT -> P1 gets ack for 2 publishes (A4, A5)
         let acks = acker.release_acks();
-        println!("{acks:?}");
+        // println!("{acks:?}");
         assert_eq!(acks.len(), 2);
 
         // S2 reads 2 messages from F2 with updated read marker: (0, 7)
@@ -567,7 +451,7 @@ mod test {
 
         // ASSERT -> P1 gets ack for 2 publishes (A6, A7)
         let acks = acker.release_acks();
-        println!("{acks:?}");
+        // println!("{acks:?}");
         assert_eq!(acks.len(), 2);
 
         // S1 reads 3 messages from F1 with updated read marker: (0, 10), and 2 messages from F2 with updated read marker: (0, 10)
@@ -576,7 +460,7 @@ mod test {
 
         // ASSERT -> P1 gets ack for 0 publishes ()
         let acks = acker.release_acks();
-        println!("{acks:?}");
+        // println!("{acks:?}");
         assert_eq!(acks.len(), 0);
 
         // S2 reads 3 messages from F2 with updated read marker: (0, 10)
@@ -584,7 +468,7 @@ mod test {
 
         // ASSERT -> P1 gets ack for 3 publishes (A8, A9, A10)
         let acks = acker.release_acks();
-        println!("{acks:?}");
+        // println!("{acks:?}");
         assert_eq!(acks.len(), 3);
     }
 }

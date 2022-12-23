@@ -368,7 +368,6 @@ mod tests {
 
         for i in 0..10 {
             let out = log.append(random_payload(i, packet_size));
-            println!("{out:?}");
         }
 
         assert_eq!(log.active_segment().len(), 10);
