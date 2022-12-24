@@ -346,7 +346,7 @@ async fn mqtt_connect(
     };
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.connect(connect, options).await?;
 
     // validate connack
     match network.read().await? {
@@ -375,7 +375,5 @@ pub(crate) async fn next_request(
     delay: Duration,
     requests: &mut VecDeque<Request>,
 ) -> Option<Request> {
-    // return next packet with a delay
-    time::sleep(delay).await;
     requests.pop_front()
 }

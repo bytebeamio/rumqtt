@@ -233,16 +233,15 @@ impl Broker {
                         }
                     };
 
-                    println!("Metrics = {:?}", metrics);
-                    std::thread::sleep(Duration::from_secs(timeout));
                     match metrics {
-                        Meter::Router(_, r) => {
+                        Meter::Router(_, ref r) => {
                             total_connections.set(r.total_connections as f64);
                             total_publishes.set(r.total_publishes as f64);
                             failed_publishes.set(r.failed_publishes as f64);
                         }
                         _ => panic!("We only request for router metrics"),
                     }
+                    std::thread::sleep(Duration::from_secs(timeout));
                 }
             })?;
         }
@@ -345,7 +344,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             match shadow {
                 #[cfg(feature = "websockets")]
                 true => task::spawn(shadow_connection(config, router_tx, network).instrument(
-                    tracing::info_span!(
+                    tracing::error_span!(
                         "shadow_connection",
                         client_id = field::Empty,
                         connection_id = field::Empty
@@ -353,7 +352,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 )),
                 _ => task::spawn(
                     remote(config, tenant_id, router_tx, network, protocol).instrument(
-                        tracing::info_span!(
+                        tracing::error_span!(
                             "remote_link",
                             client_id = field::Empty,
                             connection_id = field::Empty

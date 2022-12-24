@@ -6,57 +6,24 @@
 Rumqttd is a high performance MQTT broker written in Rust. It's light weight and embeddable, meaning
 you can use it as a library in your code and extend functionality
 
-## Currently supported features
-
-- MQTT 3.1.1
-- QoS 0 and 1
-- Retained messages
-- Connection via TLS
-- Last will
-- All MQTT 3.1.1 packets
-
-## Upcoming features
-
-- QoS 2
-- Retransmission after reconnect
-- MQTT 5
-
-
 ## Getting started
 
 You can directly run the broker by running the binary with a config file with:
 
 ```
-cargo run --release -- -c demo.toml
+cargo run --release -- -c rumqttd.toml
 
 ```
 
 Example config file is provided on the root of the repo.
 
 
-### Using Docker
-
-rumqttd can be used with docker by pulling the image from docker hub as follows:
-```bash
-docker pull bytebeamio/rumqttd
-```
-
-To use the rumqttd docker image with the included `demo.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
-```bash
-docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c demo.toml
-```
-
-One can also mount the local directory containing configs as a volume and use the appropriate config file as follows:
-```bash
-docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
-```
-
 #### Building the docker image
 
-In order to run rumqttd within a docker container, build the image by running `build_rumqttd_docker.sh` from the project's root directory. The shell script will use docker to build rumqttd and package it along in an [alpine](https://hub.docker.com/_/alpine) image. You can then run `rumqttd` with the included `demo.toml` as follows(ensure you are in the project's root directory):
+In order to run rumqttd within a docker container, build the image by running `build_rumqttd_docker.sh` from the project's root directory. The shell script will use docker to build rumqttd and package it along in an [alpine](https://hub.docker.com/_/alpine) image. You can then run `rumqttd` with the included `rumqttd.toml` as follows(ensure you are in the project's root directory):
 ```bash
 ./build_rumqttd_docker.sh
-docker run -p 1883:1883 -p 1884:1884 -it rumqttd -c demo.toml
+docker run -p 1883:1883 -p 1884:1884 -it rumqttd -c rumqttd.toml
 ```
 
 # How to use with TLS

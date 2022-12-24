@@ -1,3 +1,5 @@
+use crate::{Cursor, Offset};
+
 use super::Storage;
 use std::io;
 
@@ -57,13 +59,13 @@ where
     /// relative offset to absolute offset and vice-versa.
     pub(crate) fn readv(
         &self,
-        absolute_index: u64,
+        cursor: Cursor,
         len: u64,
-        out: &mut Vec<T>,
+        out: &mut Vec<(T, Offset)>,
     ) -> io::Result<SegmentPosition> {
         // this substraction can never overflow as checking of offset happens at
         // `CommitLog::readv`.
-        let idx = absolute_index - self.absolute_offset;
+        let idx = cursor.1 - self.absolute_offset;
 
         let mut ret: Option<u64>;
 
@@ -78,7 +80,12 @@ where
                 ret = None;
                 limit = self.len();
             }
-            out.extend(self.data[idx as usize..limit as usize].iter().cloned());
+            let offsets = std::iter::repeat(cursor.0).zip(cursor.1..cursor.1 + limit);
+            let o = self.data[idx as usize..limit as usize]
+                .iter()
+                .cloned()
+                .zip(offsets);
+            out.extend(o);
         }
 
         match ret {
@@ -135,11 +142,14 @@ mod tests {
         segment.push(Bytes::from_static(b"test9"));
         assert_eq!(segment.len(), 9);
 
-        let mut out: Vec<Bytes> = Vec::new();
-        let _ = segment.readv(0, 2, &mut out).unwrap();
+        let mut out: Vec<(Bytes, Offset)> = Vec::new();
+        let _ = segment.readv((0, 0), 2, &mut out).unwrap();
         assert_eq!(
             out,
-            vec![Bytes::from_static(b"test1"), Bytes::from_static(b"test2")]
+            vec![
+                (Bytes::from_static(b"test1"), (0, 0)),
+                (Bytes::from_static(b"test2"), (0, 1))
+            ]
         );
     }
 
@@ -157,8 +167,8 @@ mod tests {
         segment.push(vec![9u8]);
         assert_eq!(segment.len(), 9);
 
-        let mut out: Vec<Vec<u8>> = Vec::new();
-        let _ = segment.readv(0, 2, &mut out).unwrap();
-        assert_eq!(out, vec![vec![1u8], vec![2u8]]);
+        let mut out: Vec<(Vec<u8>, Offset)> = Vec::new();
+        let _ = segment.readv((0, 0), 2, &mut out).unwrap();
+        assert_eq!(out, vec![(vec![1u8], (0, 0)), (vec![2u8], (0, 1))]);
     }
 }

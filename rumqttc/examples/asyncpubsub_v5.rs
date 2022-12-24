@@ -22,12 +22,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         time::sleep(Duration::from_secs(3)).await;
     });
 
-    while let Ok(event) = dbg!(eventloop.lock().await.poll().await) {
-        dbg!("sad");
-        println!("{:?}", event);
+    loop {
+        let event = eventloop.lock().await.poll().await;
+        match &event {
+            Ok(v) => {
+                println!("Event = {:?}", v);
+            }
+            Err(e) => {
+                println!("Error = {:?}", e);
+                return Ok(());
+            }
+        }
     }
-
-    Ok(())
 }
 
 async fn requests(eventloop: Arc<Mutex<EventLoop>>) {

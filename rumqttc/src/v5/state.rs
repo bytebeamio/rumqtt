@@ -1,9 +1,9 @@
 use crate::v5::mqttbytes::PingReq;
+use crate::v5::PublishProperties;
 
 use super::mqttbytes::v5::Packet;
 use super::mqttbytes::{
-    self, ConnectReturnCode, PubAck, PubComp, PubRec, PubRel, Publish, PublishProperties, QoS,
-    Subscribe, Unsubscribe,
+    self, PubAck, PubComp, PubRec, PubRel, Publish, QoS, Subscribe, Unsubscribe,
 };
 use super::{Incoming, Outgoing, Request};
 use crate::v5::unsync::Event;
@@ -18,9 +18,6 @@ pub enum StateError {
     /// Io Error while state is passed to network
     #[error("Io error: {0:?}")]
     Io(#[from] io::Error),
-    /// Broker's error reply to client's connect packet
-    #[error("Connect return code: `{0:?}`")]
-    Connect(ConnectReturnCode),
     /// Invalid state for a given operation
     #[error("Invalid state for a given operation")]
     InvalidState,
