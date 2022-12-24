@@ -5,7 +5,8 @@ use super::mqttbytes::{
     self, ConnectReturnCode, PubAck, PubComp, PubRec, PubRel, Publish, PublishProperties, QoS,
     Subscribe, Unsubscribe,
 };
-use super::{Event, Incoming, Outgoing, Request};
+use super::{Incoming, Outgoing, Request};
+use crate::v5::unsync::Event;
 
 use bytes::BytesMut;
 use std::collections::VecDeque;

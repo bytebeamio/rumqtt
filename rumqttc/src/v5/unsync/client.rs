@@ -25,7 +25,6 @@ impl Client {
     pub fn new(options: MqttOptions, cap: usize) -> (Client, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
-        // let alias_mapping = HashMap::new();
 
         let client = Client {
             request_tx,
@@ -38,11 +37,7 @@ impl Client {
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
     pub fn from_senders(request_tx: Sender<Request>) -> Client {
-        // let alias_mapping = HashMap::new();
-        Client {
-            request_tx,
-            // alias_mapping
-        }
+        Client { request_tx }
     }
 
     pub fn publisher<S>(&self, topic: S) -> Publisher

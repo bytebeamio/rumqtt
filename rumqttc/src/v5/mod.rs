@@ -2,11 +2,11 @@ use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 
 mod client;
-mod eventloop;
+// mod eventloop;
 mod framed;
 pub mod mqttbytes;
 mod state;
-pub mod sync;
+// pub mod sync;
 pub mod unsync;
 
 #[cfg(feature = "use-rustls")]
@@ -14,7 +14,7 @@ pub use crate::tls::Error as TlsError;
 
 use crate::Transport;
 pub use client::ClientError;
-pub use eventloop::{ConnectionError, Event, EventLoop};
+// pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
 use mqttbytes::{v5::*, *};
