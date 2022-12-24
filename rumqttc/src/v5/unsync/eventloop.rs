@@ -231,14 +231,20 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            // TODO: remove throttle!
-            o = next_request(throttle, &mut self.requests), if !inflight_full && !pending && !collision => match o {
-                Some(request) => {
+            // o = next_request(&mut self.requests), if !inflight_full && !pending && !collision => match o {
+            //     Ok(request) => {
+            //         self.state.handle_outgoing_packet(request)?;
+            //         network.flush(&mut self.state.write).await?;
+            //         Ok(self.state.events.pop_front().unwrap())
+            //     }
+            //     Err(_) => Err(ConnectionError::RequestsDone),
+            // },
+            // TODO:
+            // we need some way to predict that there are no requests pending so we can return None
+            Some(request) = next_request(&mut self.requests), if !inflight_full && !pending && !collision =>  {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
                     Ok(self.state.events.pop_front().unwrap())
-                }
-                None => Err(ConnectionError::RequestsDone),
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
@@ -371,9 +377,6 @@ pub(crate) async fn next_pending(
 
 /// Returns the next request asynchronously to be used in select!
 /// This is a synchronous function but made async to make it fit in select!
-pub(crate) async fn next_request(
-    delay: Duration,
-    requests: &mut VecDeque<Request>,
-) -> Option<Request> {
+pub(crate) async fn next_request(requests: &mut VecDeque<Request>) -> Option<Request> {
     requests.pop_front()
 }

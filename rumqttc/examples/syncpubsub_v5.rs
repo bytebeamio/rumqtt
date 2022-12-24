@@ -1,7 +1,7 @@
 use rumqttc::v5::mqttbytes::{LastWill, QoS};
-use rumqttc::v5::{sync::Client};
+use rumqttc::v5::sync::Client;
 use rumqttc::v5::ConnectionError;
-use rumqttc::v5::{MqttOptions};
+use rumqttc::v5::MqttOptions;
 use std::thread;
 use std::time::Duration;
 
@@ -58,14 +58,7 @@ fn publish(client: Client) {
         let topic = format!("hello/{}/world", i);
         let qos = QoS::AtLeastOnce;
 
-<<<<<<< HEAD
-        client
-            .publisher(topic)
-            .publish(qos, true, payload)
-            .expect("publised message")
-=======
         let _ = client.publish(topic, qos, true, payload);
->>>>>>> main
     }
 
     thread::sleep(Duration::from_secs(1));

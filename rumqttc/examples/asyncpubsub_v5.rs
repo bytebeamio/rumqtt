@@ -37,20 +37,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(eventloop: Arc<Mutex<EventLoop>>) {
-    let mut eventloop = eventloop.lock().await;
+    // let mut eventloop = eventloop.lock().await;
     eventloop
+        .lock()
+        .await
         .subscribe("hello/world", QoS::AtMostOnce)
         .await
         .unwrap();
 
     for i in 1..=10 {
         eventloop
-            .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
+            .lock()
+            .await
+            .publish("hello/world", QoS::AtMostOnce, false, vec![1; i])
             .await
             .unwrap();
 
         time::sleep(Duration::from_secs(1)).await;
     }
 
-    time::sleep(Duration::from_secs(120)).await;
+    // time::sleep(Duration::from_secs(120)).await;
 }
