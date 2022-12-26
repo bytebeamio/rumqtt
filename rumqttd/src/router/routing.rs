@@ -993,16 +993,7 @@ impl Router {
 fn append_to_alertlog(alert: Alert, alertlog: &mut AlertLog) -> Result<Offset, RouterError> {
     let topic = alert.topic();
 
-    let filter_idxs = alertlog.matches(&topic);
-
-    // Create a filter dynamically
-    let filter_idxs = match filter_idxs {
-        Some(v) => v,
-        None => {
-            let (idx, _cursor) = alertlog.next_native_offset(&topic);
-            vec![idx]
-        }
-    };
+    let filter_idxs = alertlog.matches(&topic).expect("Should never be None");
 
     let mut o = (0, 0);
     for filter_idx in filter_idxs {

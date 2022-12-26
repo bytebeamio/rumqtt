@@ -111,26 +111,10 @@ pub struct AlertLog {
 
 impl AlertLog {
     pub fn new(config: RouterConfig) -> io::Result<AlertLog> {
-        let mut native = Slab::new();
-        let mut filter_indexes = HashMap::new();
+        let native = Slab::new();
+        let filter_indexes = HashMap::new();
         let publish_filters = HashMap::new();
         let offsets = HashMap::new();
-
-        let alert_filter = [
-            AlertTopic::Connect.to_string(),
-            AlertTopic::Disconnect.to_string(),
-            AlertTopic::Subscribe.to_string(),
-            AlertTopic::Unsubscribe.to_string(),
-        ];
-
-        for filter in alert_filter {
-            let data = AlertData::new(&filter, config.max_segment_size, config.max_segment_count);
-
-            // Add commitlog to datalog and add datalog index to filter to
-            // datalog index map
-            let idx = native.insert(data);
-            filter_indexes.insert(filter.to_owned(), idx);
-        }
 
         Ok(AlertLog {
             config,
