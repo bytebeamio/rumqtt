@@ -8,7 +8,7 @@ use std::error::Error;
 use std::time::Duration;
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
@@ -38,8 +38,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // get subscribed messages without acking
-    while let Ok(event) = eventloop.poll().await {
-        println!("{:?}", event);
+    loop {
+        let event = eventloop.poll().await;
+        match &event {
+            Ok(v) => {
+                println!("Event = {:?}", v);
+            }
+            Err(e) => {
+                println!("Error = {:?}", e);
+                break;
+            }
+        }
     }
 
     // create new broker connection
