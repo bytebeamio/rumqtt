@@ -200,7 +200,7 @@ impl AlertLog {
         filter: Filter,
         alert_id: ConnectionId,
         len: u64,
-    ) -> io::Result<Vec<Alert>> {
+    ) -> io::Result<Vec<(Alert, Offset)>> {
         let filter_idx = *self.filter_indexes.get(&filter).unwrap();
         let data = self.native.get(filter_idx).unwrap();
         let mut o = Vec::new();

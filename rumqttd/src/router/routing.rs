@@ -984,7 +984,7 @@ impl Router {
                 .native_readv(filter.to_string(), alert_id, 100)
                 .unwrap();
             for alert in alerts {
-                alert_sender.send((alert_id, alert)).unwrap();
+                alert_sender.send((alert_id, alert.0)).unwrap();
             }
         }
     }
