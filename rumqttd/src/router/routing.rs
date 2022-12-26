@@ -55,9 +55,9 @@ pub struct Router {
     config: RouterConfig,
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
-    /// List of connections
+    /// List of MeterLink's senders
     meters: Slab<Sender<(ConnectionId, Meter)>>,
-    /// List of connections
+    /// List of AleterLink's senders with their respective subscription Filter
     alerts: Slab<(Filter, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
     connections: Slab<Connection>,
@@ -71,7 +71,7 @@ pub struct Router {
     obufs: Slab<Outgoing>,
     /// Data log of all the subscriptions
     datalog: DataLog,
-    /// Data log of all the subscriptions
+    /// Data log of all the alert subscriptions
     alertlog: AlertLog,
     /// Acks log per connection
     ackslog: Slab<AckLog>,
