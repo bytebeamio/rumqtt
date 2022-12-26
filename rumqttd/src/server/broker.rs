@@ -130,8 +130,8 @@ impl Broker {
         Ok(link)
     }
 
-    pub fn alerts(&self, filter: Filter) -> Result<alerts::AlertLink, alerts::LinkError> {
-        let link = alerts::AlertLink::new(self.router_tx.clone(), filter)?;
+    pub fn alerts(&self, filter: Filter) -> Result<alerts::AlertsLink, alerts::LinkError> {
+        let link = alerts::AlertsLink::new(self.router_tx.clone(), filter)?;
         Ok(link)
     }
 

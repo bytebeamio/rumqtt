@@ -55,9 +55,9 @@ pub struct Router {
     config: RouterConfig,
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
-    /// List of MeterLink's senders
+    /// List of MetersLink's senders
     meters: Slab<Sender<(ConnectionId, Meter)>>,
-    /// List of AleterLink's senders with their respective subscription Filter
+    /// List of AlertsLink's senders with their respective subscription Filter
     alerts: Slab<(Filter, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
     connections: Slab<Connection>,
@@ -328,7 +328,7 @@ impl Router {
     fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filter: Filter) {
         let alert_id = self.alerts.insert((filter, tx));
         let (filter, tx) = self.alerts.get(alert_id).unwrap();
-        let _ = tx.try_send((alert_id, Alert::Connect("AlertLink".to_owned())));
+        let _ = tx.try_send((alert_id, Alert::Connect("AlertsLink".to_owned())));
         self.prepare_alert_filter(alert_id, filter.to_string());
     }
 

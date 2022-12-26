@@ -16,21 +16,21 @@ pub enum LinkError {
     Elapsed(#[from] tokio::time::error::Elapsed),
 }
 
-pub struct AlertLink {
+pub struct AlertsLink {
     _alert_id: ConnectionId,
     pub router_rx: Receiver<(ConnectionId, Alert)>,
 }
 
-impl AlertLink {
+impl AlertsLink {
     pub fn new(
         router_tx: Sender<(ConnectionId, Event)>,
         filter: Filter,
-    ) -> Result<AlertLink, LinkError> {
+    ) -> Result<AlertsLink, LinkError> {
         let (tx, rx) = flume::bounded(5);
         router_tx.send((0, Event::NewAlert(tx, filter)))?;
         let (_alert_id, _meter) = rx.recv()?;
 
-        let link = AlertLink {
+        let link = AlertsLink {
             _alert_id,
             router_rx: rx,
         };
