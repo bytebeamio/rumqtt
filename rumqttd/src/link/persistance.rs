@@ -46,7 +46,6 @@ pub enum Error {
 
 /// Orchestrates between Router and Network.
 pub struct PersistanceLink<P: Protocol> {
-    _connect: Connect,
     pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
     pub(crate) network: Network<P>,
@@ -172,7 +171,6 @@ impl<P: Protocol> PersistanceLink<P> {
         Ok((
             network_update_tx,
             PersistanceLink {
-                _connect: connect,
                 client_id: client_id.to_string(),
                 connection_id: id,
                 network,
