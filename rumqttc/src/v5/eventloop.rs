@@ -44,7 +44,7 @@ pub enum ConnectionError {
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("Connection refused, return code: {0:?}")]
+    #[error("Connection refused, return code: `{0:?}`")]
     ConnectionRefused(ConnectReturnCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
     NotConnAck(Box<Packet>),
@@ -298,7 +298,7 @@ async fn mqtt_connect(
     };
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.connect(connect, options).await?;
 
     // validate connack
     match network.read().await? {

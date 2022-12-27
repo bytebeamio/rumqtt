@@ -333,7 +333,7 @@ pub enum RetainForwardRule {
 
 impl Default for RetainForwardRule {
     fn default() -> Self {
-        Self::Never
+        Self::OnEverySubscribe
     }
 }
 

@@ -30,7 +30,7 @@ async fn main() {
         .init();
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let config = format!("{manifest_dir}/demo.toml");
+    let config = format!("{manifest_dir}/rumqttd.toml");
     let config = config::Config::builder()
         .add_source(config::File::with_name(&config))
         .build()

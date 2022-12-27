@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
@@ -70,7 +73,7 @@ impl Outgoing {
     pub(crate) fn new(client_id: String) -> (Self, Receiver<()>) {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
-        let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT as usize);
+        let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
 
         // Ensure that there won't be any new allocations
         assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
@@ -174,10 +177,53 @@ impl Outgoing {
 
         Some(())
     }
+
+    // Here we are assuming that the first unique filter_idx we find while iterating will have the
+    // least corresponding cursor because of the way we insert into the inflight_buffer
+    pub fn retransmission_map(&self) -> HashMap<FilterIdx, Cursor> {
+        let mut o = HashMap::new();
+        for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
+            if !o.contains_key(filter_idx) {
+                o.insert(*filter_idx, *cursor);
+            }
+        }
+
+        o
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
+    #[test]
+    fn retransmission_map_is_calculated_accurately() {
+        let (mut outgoing, _) = Outgoing::new("retransmission-test".to_string());
+        let mut result = HashMap::new();
+
+        result.insert(0, (0, 8));
+        result.insert(1, (0, 1));
+        result.insert(2, (1, 1));
+        result.insert(3, (1, 0));
+
+        let buf = vec![
+            (1, 0, (0, 8)),
+            (1, 0, (0, 10)),
+            (1, 1, (0, 1)),
+            (3, 1, (0, 4)),
+            (2, 2, (1, 1)),
+            (1, 2, (2, 6)),
+            (1, 2, (2, 1)),
+            (1, 3, (1, 0)),
+            (1, 3, (1, 1)),
+            (1, 3, (1, 3)),
+            (1, 3, (1, 3)),
+        ];
+
+        outgoing.inflight_buffer.extend(buf);
+        assert_eq!(outgoing.retransmission_map(), result);
+    }
+
     // use super::{Outgoing, MAX_INFLIGHT};
     // use crate::protocol::{Publish, QoS};
     // use crate::router::Forward;

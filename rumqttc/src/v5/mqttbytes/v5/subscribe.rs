@@ -111,6 +111,20 @@ mod filter {
         let mut options = 0;
         options |= filter.qos as u8;
 
+        if filter.nolocal {
+            options |= 0b0000_0100;
+        }
+
+        if filter.preserve_retain {
+            options |= 0b0000_1000;
+        }
+
+        options |= match filter.retain_forward_rule {
+            RetainForwardRule::OnEverySubscribe => 0b0000_0000,
+            RetainForwardRule::OnNewSubscribe => 0b0001_0000,
+            RetainForwardRule::Never => 0b0010_0000,
+        };
+
         write_mqtt_string(buffer, filter.path.as_str());
         buffer.put_u8(options);
     }
