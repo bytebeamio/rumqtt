@@ -17,6 +17,22 @@ async fn start_requests(count: u8, qos: QoS, delay: u64, client: AsyncClient) {
     }
 }
 
+async fn start_requests_with_payload(
+    count: u8,
+    qos: QoS,
+    delay: u64,
+    client: AsyncClient,
+    payload: usize,
+) {
+    for i in 1..=count {
+        let topic = "hello/world".to_owned();
+        let payload = vec![i; payload];
+
+        let _ = client.publish(topic, qos, false, payload).await;
+        time::sleep(Duration::from_secs(delay)).await;
+    }
+}
+
 async fn run(eventloop: &mut EventLoop, reconnect: bool) -> Result<(), ConnectionError> {
     'reconnect: loop {
         loop {
@@ -94,7 +110,7 @@ async fn idle_connection_triggers_pings_on_time() {
     let mut start = Instant::now();
 
     for _ in 0..3 {
-        let packet = broker.read_packet().await;
+        let packet = broker.read_packet().await.unwrap();
         match packet {
             Packet::PingReq => {
                 count += 1;
@@ -506,4 +522,40 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
     }
+}
+
+#[tokio::test]
+async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly() {
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
+    options.set_keep_alive(Duration::from_secs(5));
+
+    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    task::spawn(async move {
+        start_requests_with_payload(100, QoS::AtLeastOnce, 0, client, 5000).await;
+        time::sleep(Duration::from_secs(10)).await;
+    });
+
+    task::spawn(async move {
+        let mut broker = Broker::new(3002, 0).await;
+        while let Some(_) = broker.read_packet().await {
+            time::sleep(Duration::from_secs_f64(0.5)).await;
+        }
+    });
+
+    let handle = task::spawn(async move {
+        let res = run(&mut eventloop, false).await;
+        if let Err(e) = res {
+            match e {
+                ConnectionError::Timeout(_) => {
+                    assert!(eventloop.state.write.is_empty());
+                    assert!(eventloop.state.events.is_empty());
+                    println!("State is being clean properly");
+                }
+                _ => {
+                    println!("Couldn't fill the TCP send buffer to run this test properly. Try reducing the size of buffer.");
+                }
+            }
+        }
+    });
+    handle.await.unwrap();
 }

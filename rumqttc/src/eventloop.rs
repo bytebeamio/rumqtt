@@ -10,7 +10,7 @@ use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
 use async_tungstenite::tokio::connect_async_with_tls_connector;
 use flume::{bounded, Receiver, Sender};
-use tokio::net::TcpStream;
+use tokio::net::TcpSocket;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::select;
@@ -143,6 +143,7 @@ impl EventLoop {
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
+        let connection_timeout = Duration::from_secs(self.options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -156,7 +157,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                network.flush(&mut self.state.write).await?;
+                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // Pull next request from user requests channel.
@@ -186,7 +187,7 @@ impl EventLoop {
             o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
-                    network.flush(&mut self.state.write).await?;
+                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -195,7 +196,7 @@ impl EventLoop {
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                 self.state.handle_outgoing_packet(request)?;
-                network.flush(&mut self.state.write).await?;
+                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
@@ -205,7 +206,7 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
-                network.flush(&mut self.state.write).await?;
+                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -237,8 +238,12 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         Transport::Tcp => {
             let addr = options.broker_addr.as_str();
             let port = options.port;
-            let socket = TcpStream::connect((addr, port)).await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            let addr2 = format!("{}:{}", addr, port);
+            let socket = TcpSocket::new_v4()?;
+            socket.set_send_buffer_size(1024).unwrap();
+
+            let stream = socket.connect(addr2.to_string().parse().unwrap()).await?;
+            Network::new(stream, options.max_incoming_packet_size)
         }
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
