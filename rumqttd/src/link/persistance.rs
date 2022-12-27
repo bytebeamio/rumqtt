@@ -2,11 +2,11 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::Link;
-use crate::protocol::{AsyncProtocol, Connect, LastWill, Packet, self};
+use crate::protocol::{Protocol, Connect, LastWill, Packet, self};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
+use crate::disk::Storage;
 
-use disk::Storage;
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
 use tracing::{info, error, trace};
 use std::collections::{VecDeque};
@@ -45,7 +45,7 @@ pub enum Error {
 }
 
 /// Orchestrates between Router and Network.
-pub struct PersistanceLink<P: AsyncProtocol> {
+pub struct PersistanceLink<P: Protocol> {
     _connect: Connect,
     pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
@@ -58,12 +58,12 @@ pub struct PersistanceLink<P: AsyncProtocol> {
     connack: Notification,
 }
 
-pub(super) struct DiskHandler<P: AsyncProtocol> {
+pub(super) struct DiskHandler<P: Protocol> {
     storage: Storage,
     protocol: P,
 }
 
-impl<P: AsyncProtocol> DiskHandler<P> {
+impl<P: Protocol> DiskHandler<P> {
     fn new(client_id: &str, protocol: P) -> Result<Self, Error> {
         // TODO: take params from config
         let path = format!("/tmp/rumqttd/{}", &client_id);
@@ -129,7 +129,7 @@ impl<P: AsyncProtocol> DiskHandler<P> {
     }
 }
 
-impl<P: AsyncProtocol> PersistanceLink<P> {
+impl<P: Protocol> PersistanceLink<P> {
     pub async fn new(
         config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,

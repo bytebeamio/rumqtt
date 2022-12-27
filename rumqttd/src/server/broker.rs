@@ -9,7 +9,7 @@ use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 #[cfg(feature = "websockets")]
 use crate::protocol::ws::Ws;
-use crate::protocol::{AsyncProtocol, Connect, LastWill, Protocol};
+use crate::protocol::{Connect, LastWill, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
 use crate::{meters, ConnectionSettings, GetMeter, Meter};
@@ -173,11 +173,11 @@ impl Broker {
         for (_, config) in self.config.v4.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
             let link = match config.persistence {
-                true => {
+                Some(true) => {
                     let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
                     LinkType::Persistent(connection_map)
                 }
-                false => LinkType::Remote,
+                _ => LinkType::Remote,
             };
             let server = Server::new(config, self.router_tx.clone(), V4);
             server_thread.spawn(move || {
@@ -195,11 +195,11 @@ impl Broker {
         for (_, config) in self.config.v5.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
             let link = match config.persistence {
-                true => {
+                Some(true) => {
                     let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
                     LinkType::Persistent(connection_map)
                 }
-                false => LinkType::Remote,
+                _ => LinkType::Remote,
             };
             let server = Server::new(config, self.router_tx.clone(), V5);
             server_thread.spawn(move || {
@@ -303,22 +303,22 @@ struct Server<P> {
 }
 
 // #[derive(Clone, Copy)]
-pub enum LinkType<P: AsyncProtocol> {
+pub enum LinkType<P: Protocol> {
     #[cfg(feature = "websockets")]
     Shadow,
     Remote,
     Persistent(Arc<Mutex<PersistentConnectionMap<P>>>),
 }
 
-pub struct PersistentConnectionMap<P: AsyncProtocol>(HashMap<String, Sender<Network<P>>>);
+pub struct PersistentConnectionMap<P: Protocol>(HashMap<String, Sender<Network<P>>>);
 
-impl<P: AsyncProtocol> PersistentConnectionMap<P> {
+impl<P: Protocol> PersistentConnectionMap<P> {
     fn new() -> PersistentConnectionMap<P> {
         PersistentConnectionMap(HashMap::new())
     }
 }
 
-impl<P: AsyncProtocol> Server<P> {
+impl<P: Protocol> Server<P> {
     pub fn new(
         config: ServerSettings,
         router_tx: Sender<(ConnectionId, Event)>,
@@ -517,7 +517,7 @@ async fn shadow_connection(
     router_tx.send(message).ok();
 }
 
-async fn persistance<P: AsyncProtocol>(
+async fn persistance<P: Protocol>(
     config: Arc<ConnectionSettings>,
     tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
@@ -563,7 +563,7 @@ async fn persistance<P: AsyncProtocol>(
     }
 }
 
-async fn persistance_spawn<P: AsyncProtocol>(
+async fn persistance_spawn<P: Protocol>(
     config: Arc<ConnectionSettings>,
     router_tx: Sender<(ConnectionId, Event)>,
     tenant_id: Option<String>,

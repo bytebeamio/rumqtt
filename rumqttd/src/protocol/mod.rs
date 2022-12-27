@@ -748,10 +748,7 @@ pub enum Error {
     InsufficientBytes(usize),
 }
 
-pub trait Protocol {
+pub trait Protocol: Clone + Send + 'static {
     fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error>;
     fn write(&self, packet: Packet, write: &mut BytesMut) -> Result<usize, Error>;
 }
-
-pub trait AsyncProtocol: Protocol + Clone + Send + 'static {}
-impl<T> AsyncProtocol for T where T: Protocol + Clone + Send + 'static {}
