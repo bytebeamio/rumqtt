@@ -50,7 +50,7 @@ impl Storage {
 
     /// Removes a file with provided id
     fn remove(&self, id: u64) -> io::Result<()> {
-        let path = self.backup_path.join(&format!("backup@{}", id));
+        let path = self.backup_path.join(format!("backup@{}", id));
         fs::remove_file(path)?;
         Ok(())
     }
@@ -66,7 +66,7 @@ impl Storage {
     /// Also handles retention of previous files on disk
     fn open_next_write_file(&mut self) -> io::Result<NextFile> {
         let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
-        let next_file_path = self.backup_path.join(&format!("backup@{}", next_file_id));
+        let next_file_path = self.backup_path.join(format!("backup@{}", next_file_id));
         let next_file = OpenOptions::new()
             .write(true)
             .create(true)
