@@ -1,6 +1,8 @@
+use super::persist::{Acker, ReadState};
 use super::Ack;
+use parking_lot::Mutex;
 use slab::Slab;
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::protocol::{
     matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
@@ -12,6 +14,7 @@ use crate::segments::{CommitLog, Position};
 use crate::Storage;
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::sync::Arc;
 
 /// Stores 'device' data and 'actions' data in native commitlog
 /// organized by subscription filter. Device data is replicated
@@ -31,6 +34,7 @@ pub struct DataLog {
     retained_publishes: HashMap<Topic, Publish>,
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
+    pub read_state: Arc<Mutex<ReadState>>,
 }
 
 impl DataLog {
@@ -57,6 +61,7 @@ impl DataLog {
             publish_filters,
             filter_indexes,
             retained_publishes,
+            read_state: Default::default(),
         })
     }
 
@@ -277,14 +282,22 @@ pub struct AckLog {
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
     recorded: VecDeque<Publish>,
+    acker: Option<Acker>,
 }
 
 impl AckLog {
     /// New log
-    pub fn new() -> AckLog {
+    pub fn new(read_state: Arc<Mutex<ReadState>>, persistent: bool) -> AckLog {
+        let acker = if persistent {
+            Some(Acker::new(read_state))
+        } else {
+            None
+        };
+
         AckLog {
             committed: VecDeque::with_capacity(100),
             recorded: VecDeque::with_capacity(100),
+            acker,
         }
     }
 
@@ -298,7 +311,7 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    pub fn puback(&mut self, ack: PubAck) {
+    fn _puback(&mut self, ack: PubAck) {
         let ack = Ack::PubAck(ack);
         self.committed.push_back(ack);
     }
@@ -335,10 +348,46 @@ impl AckLog {
     pub fn readv(&mut self) -> &mut VecDeque<Ack> {
         &mut self.committed
     }
+
+    pub fn insert_pending_acks(
+        &mut self,
+        publish: Publish,
+        publish_offsets: HashMap<usize, Offset>,
+    ) {
+        let puback = PubAck {
+            pkid: publish.pkid,
+            reason: crate::protocol::PubAckReason::Success,
+        };
+
+        match &mut self.acker {
+            Some(acker) => acker.register_write(
+                String::from_utf8(publish.topic.to_vec()).unwrap(),
+                puback,
+                publish_offsets,
+            ),
+            None => self.committed.push_back(Ack::PubAck(puback)),
+        }
+    }
+
+    pub fn release_pending_acks(&mut self) {
+        if let Some(acker) = &mut self.acker {
+            let mut pubacks: VecDeque<Ack> =
+                acker.release_acks().into_iter().map(Ack::PubAck).collect();
+
+            debug!(
+                "Releasing acks, count: {}, pubacks: {:?}",
+                &pubacks.len(),
+                pubacks
+            );
+
+            self.committed.append(&mut pubacks);
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
+
     use super::DataLog;
     use crate::RouterConfig;
 

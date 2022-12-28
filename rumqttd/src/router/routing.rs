@@ -1,6 +1,6 @@
 use crate::protocol::{
-    ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    ConnAck, ConnectReturnCode, Packet, PingResp, PubComp, PubCompReason, PubRel, PubRelReason,
+    Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
@@ -21,7 +21,7 @@ use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
+    packetid, AckData, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
     MetricsRequest, Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY,
     MAX_SCHEDULE_ITERATIONS,
 };
@@ -222,6 +222,7 @@ impl Router {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
             Event::Metrics(metrics) => retrieve_metrics(self, metrics),
+            Event::AckData(ackdata) => self.register_ack_signal(id, ackdata),
         }
     }
 
@@ -258,7 +259,7 @@ impl Router {
             connection.events = saved.metrics;
             Tracker::new(client_id.clone())
         };
-        let ackslog = AckLog::new();
+        let ackslog = AckLog::new(self.datalog.read_state.clone(), connection.persistent);
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(v) => v.as_millis().to_string(),
@@ -418,7 +419,6 @@ impl Router {
 
                     let size = publish.len();
                     let qos = publish.qos;
-                    let pkid = publish.pkid;
 
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
@@ -436,14 +436,17 @@ impl Router {
 
                     match qos {
                         QoS::AtLeastOnce => {
-                            let puback = PubAck {
-                                pkid,
-                                reason: PubAckReason::Success,
-                            };
+                            // Note: If any subscriber chooses persistence then
+                            // all publishers will have to ack in deferred manner
 
-                            let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.puback(puback);
-                            force_ack = true;
+                            // let puback = PubAck {
+                            //     pkid,
+                            //     reason: PubAckReason::Success,
+                            // };
+                            //
+                            // let ackslog = self.ackslog.get_mut(id).unwrap();
+                            // ackslog.puback(puback);
+                            // force_ack = true;
                         }
                         QoS::ExactlyOnce => {
                             error!("QoS::ExactlyOnce is not yet supported");
@@ -469,12 +472,18 @@ impl Router {
                     // Try to append publish to commitlog
                     match append_to_commitlog(
                         id,
-                        publish,
+                        publish.clone(),
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
                     ) {
-                        Ok(_offset) => {
+                        Ok(offset_map) => {
+                            if let QoS::AtLeastOnce = qos {
+                                let ackslog = self.ackslog.get_mut(id).unwrap();
+                                ackslog.insert_pending_acks(publish, offset_map);
+                                force_ack = true;
+                            };
+
                             // Even if one of the data in the batch is appended to commitlog,
                             // set new data. This triggers notifications to wake waiters.
                             // Don't overwrite this flag to false if it is already true.
@@ -520,6 +529,13 @@ impl Router {
                         let qos = f.qos;
 
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
+                        // set in the datalog the info about which filters and from which cursor they have to persistent
+                        if connection.persistent {
+                            self.datalog
+                                .read_state
+                                .lock()
+                                .register_read(idx, id, cursor);
+                        }
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
                         self.datalog
                             .handle_retained_messages(&filter, &mut self.notifications);
@@ -768,6 +784,7 @@ impl Router {
 
         let ackslog = self.ackslog.get_mut(id).unwrap();
         let datalog = &mut self.datalog;
+        let connection = self.connections.get(id).unwrap();
 
         trace!("Consuming requests");
 
@@ -790,7 +807,7 @@ impl Router {
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing) {
+            match forward_device_data(&mut request, datalog, connection, outgoing) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -891,6 +908,47 @@ impl Router {
             }
         };
     }
+
+    fn register_ack_signal(&mut self, connection_id: ConnectionId, ackdata: AckData) {
+        let mut publishers_with_progress = HashSet::<ConnectionId>::new();
+
+        for (filter_idx, last_persisted_read_offset) in ackdata.read_map {
+            let progress = self.datalog.read_state.lock().register_read(
+                filter_idx,
+                connection_id,
+                last_persisted_read_offset,
+            );
+
+            match progress {
+                Some(_) => {
+                    let publishers = self
+                        .datalog
+                        .read_state
+                        .lock()
+                        .get_publishers_for_filter(filter_idx)
+                        .to_vec();
+
+                    publishers_with_progress.extend(publishers);
+                }
+                None => continue,
+            };
+        }
+
+        for publisher in publishers_with_progress {
+            let ackslog = self.ackslog.get_mut(publisher).unwrap();
+            ackslog.release_pending_acks();
+            let outgoing = self.obufs.get_mut(publisher).unwrap();
+
+            ack_device_data(ackslog, outgoing);
+        }
+
+        let outgoing = self.obufs.get_mut(connection_id).unwrap();
+        let mut buffer = outgoing.data_buffer.lock();
+
+        let ack_done = Notification::AckDone;
+        buffer.push_back(ack_done);
+        outgoing.handle.try_send(()).ok();
+    }
 }
 
 fn append_to_commitlog(
@@ -899,7 +957,7 @@ fn append_to_commitlog(
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
-) -> Result<Offset, RouterError> {
+) -> Result<HashMap<usize, Offset>, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
@@ -934,8 +992,9 @@ fn append_to_commitlog(
         None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
     };
 
-    let mut o = (0, 0);
+    let mut filter_offsets = HashMap::new();
     for filter_idx in filter_idxs {
+        datalog.read_state.lock().register_publisher(id, filter_idx);
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
         let (offset, filter) = datalog.append(publish.clone(), notifications);
         debug!(
@@ -943,11 +1002,11 @@ fn append_to_commitlog(
             "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
         );
 
-        o = offset;
+        filter_offsets.insert(filter_idx, offset);
     }
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
-    Ok(o)
+    Ok(filter_offsets)
 }
 
 /// Sweep ackslog for all the pending acks.
@@ -1001,6 +1060,7 @@ enum ConsumeStatus {
 fn forward_device_data(
     request: &mut DataRequest,
     datalog: &DataLog,
+    connection: &Connection,
     outgoing: &mut Outgoing,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
@@ -1012,7 +1072,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 && !outgoing.persistent {
+    let inflight_slots = if request.qos == 1 && !connection.persistent {
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
@@ -1068,8 +1128,9 @@ fn forward_device_data(
     let forwards = publishes.into_iter().map(|(mut publish, offset)| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
-            cursor: offset,
-            size: 0,
+            curr_cursor: offset,
+            next_cursor: next,
+            filter_idx,
             publish,
         }
     });

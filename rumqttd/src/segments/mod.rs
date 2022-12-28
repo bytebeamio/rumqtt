@@ -368,7 +368,7 @@ mod tests {
         let mut log = CommitLog::new(max_segment_size, 1).unwrap();
 
         for i in 0..10 {
-            log.append(random_payload(i, packet_size));
+            let out = log.append(random_payload(i, packet_size));
         }
 
         assert_eq!(log.active_segment().len(), 10);

@@ -1,18 +1,18 @@
 use crate::protocol::{
     ConnAck, Filter, LastWill, Packet, Publish, QoS, RetainForwardRule, Subscribe,
 };
-use crate::router::Ack;
 use crate::router::{
     iobufs::{Incoming, Outgoing},
     Connection, Event, Notification, ShadowRequest,
 };
-use crate::ConnectionId;
+use crate::router::{Ack, AckData, FilterIdx};
+use crate::{ConnectionId, Offset};
 use bytes::Bytes;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 use parking_lot::lock_api::MutexGuard;
 use parking_lot::{Mutex, RawMutex};
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::mem;
 use std::sync::Arc;
 use std::time::Instant;
@@ -88,10 +88,10 @@ impl Link {
         let (mut message, i, o, link_rx) =
             Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         if let Event::Connect {
-            ref mut outgoing, ..
+            ref mut connection, ..
         } = message
         {
-            outgoing.persistent = persistent;
+            connection.persistent = persistent;
         }
 
         router_tx.send((0, message))?;
@@ -290,6 +290,15 @@ impl LinkTx {
         });
 
         self.router_tx.try_send((self.connection_id, message))?;
+        Ok(())
+    }
+
+    pub async fn ack(&mut self, written: HashMap<FilterIdx, Offset>) -> Result<(), LinkError> {
+        let ack_data = Event::AckData(AckData { read_map: written });
+
+        self.router_tx
+            .send_async((self.connection_id, ack_data))
+            .await?;
         Ok(())
     }
 }

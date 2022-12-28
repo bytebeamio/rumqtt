@@ -12,13 +12,14 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId,
+    ConnectionId, Filter, Offset, RouterConfig, RouterId,
 };
 
 mod connection;
 mod graveyard;
 pub mod iobufs;
 mod logs;
+mod persist;
 mod routing;
 mod scheduler;
 mod waiters;
@@ -57,6 +58,12 @@ pub enum Event {
     Shadow(ShadowRequest),
     /// Get metrics of a connection or all connections
     Metrics(MetricsRequest),
+    AckData(AckData),
+}
+
+#[derive(Debug)]
+pub struct AckData {
+    pub(crate) read_map: HashMap<FilterIdx, Offset>,
 }
 
 /// Notification from router to connection
@@ -84,6 +91,7 @@ pub enum Notification {
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
+    AckDone,
 }
 
 type MaybePacket = Option<Packet>;
@@ -116,8 +124,9 @@ impl From<Notification> for MaybePacket {
 
 #[derive(Debug, Clone)]
 pub struct Forward {
-    pub cursor: (u64, u64),
-    pub size: usize,
+    pub curr_cursor: (u64, u64),
+    pub next_cursor: (u64, u64),
+    pub filter_idx: FilterIdx,
     pub publish: Publish,
 }
 

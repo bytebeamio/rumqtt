@@ -1,20 +1,20 @@
+use crate::disk::Storage;
 use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::Link;
-use crate::protocol::{Protocol, Connect, LastWill, Packet, self};
-use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings};
-use crate::disk::Storage;
+use crate::protocol::{self, Connect, LastWill, Packet, Protocol};
+use crate::router::{Event, FilterIdx, Notification};
+use crate::{ConnectionId, ConnectionSettings, Offset};
 
 use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
-use tracing::{info, error, trace};
-use std::collections::{VecDeque};
-use std::{io, fs};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
+use std::{fs, io};
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
+use tracing::{error, info, trace};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -55,6 +55,7 @@ pub struct PersistanceLink<P: Protocol> {
     disk_handler: DiskHandler<P>,
     network_update_rx: Receiver<Network<P>>,
     connack: Notification,
+    inflight_publishes: VecDeque<Notification>,
 }
 
 pub(super) struct DiskHandler<P: Protocol> {
@@ -74,19 +75,43 @@ impl<P: Protocol> DiskHandler<P> {
         })
     }
 
-    pub fn write(&mut self, notifications: &mut VecDeque<Notification>) {
+    pub fn write(
+        &mut self,
+        notifications: &mut VecDeque<Notification>,
+    ) -> HashMap<FilterIdx, Offset> {
+        // let ack_list = VecDeque::new();
+
+        let mut stored_filter_offset_map: HashMap<FilterIdx, Offset> = HashMap::new();
         for notif in notifications.drain(..) {
-            let packet_or_unscheduled = notif.into();
+            let packet_or_unscheduled = notif.clone().into();
             if let Some(packet) = packet_or_unscheduled {
                 if let Err(e) = self.protocol.write(packet, self.storage.writer()) {
                     error!("Failed to write to storage: {e}");
+                    continue;
                 }
 
                 if let Err(e) = self.storage.flush_on_overflow() {
                     error!("Failed to flush storage: {e}");
+                    continue;
+                }
+
+                match &notif {
+                    Notification::Forward(forward) => {
+                        stored_filter_offset_map
+                            .entry(forward.filter_idx)
+                            .and_modify(|cursor| {
+                                if forward.next_cursor > *cursor {
+                                    *cursor = forward.next_cursor
+                                }
+                            })
+                            .or_insert(forward.next_cursor);
+                    }
+                    _ => continue,
                 }
             }
         }
+
+        stored_filter_offset_map
     }
 
     pub fn read(&mut self, buffer: &mut VecDeque<Packet>) {
@@ -105,7 +130,7 @@ impl<P: Protocol> DiskHandler<P> {
                     let connection_buffer_length = buffer.len();
                     //TODO: Don't hardcode max_connection_buffer_len
                     if connection_buffer_length >= 100 {
-                        return 
+                        return
                     }
                 }
                 Err(protocol::Error::InsufficientBytes(_)) => {
@@ -180,6 +205,7 @@ impl<P: Protocol> PersistanceLink<P> {
                 disk_handler: DiskHandler::new(&client_id, protocol)?,
                 network_update_rx,
                 connack: notification,
+                inflight_publishes: VecDeque::with_capacity(100),
             },
         ))
     }
@@ -220,38 +246,68 @@ impl<P: Protocol> PersistanceLink<P> {
                 // write to disk
                 o = self.link_rx.exchange(&mut self.notifications) => {
                     o?;
-                    self.disk_handler.write(&mut self.notifications);
+                    // TODO: write only publishes
+                    self.write_to_disconnected_client().await?;
                 }
             }
         }
     }
 
-    async fn write_to_client(&mut self) -> Result<(), Error> {
-        // separate publish notifications out
-        let mut publish = VecDeque::new();
-        let mut non_publish = VecDeque::new();
+    async fn write_to_disconnected_client(&mut self) -> Result<(), Error> {
         for notif in self.notifications.drain(..) {
             match notif {
-                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => publish.push_back(notif),
-                _ => non_publish.push_back(notif),
+                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
+                    self.inflight_publishes.push_back(notif)
+                }
+                _ => continue,
             }
-        };
+        }
 
-        // write non-publishes to network
-        let unscheduled = self.network.writev(&mut non_publish).await?;
+        // write publishes to disk
+        if !self.inflight_publishes.is_empty() {
+            let acked_offsets = self.disk_handler.write(&mut self.inflight_publishes);
+            if let Err(e) = self.link_tx.ack(acked_offsets).await {
+                error!("Failed to inform router of read progress: {e}")
+            };
+        }
+        Ok(())
+    }
+
+    async fn write_to_active_client(&mut self) -> Result<(), Error> {
+        // separate notifications out
+        let mut unpersisted_messages = VecDeque::new();
+        // let mut acked_publishes = VecDeque::new();
+        for notif in self.notifications.drain(..) {
+            match notif {
+                Notification::Forward(_) | Notification::ForwardWithProperties(_, _) => {
+                    self.inflight_publishes.push_back(notif)
+                }
+                Notification::AckDone => {
+                    continue;
+                }
+                _ => unpersisted_messages.push_back(notif),
+            }
+        }
+
+        let unscheduled = self.network.writev(&mut unpersisted_messages).await?;
         if unscheduled {
             self.link_rx.wake().await?;
         };
 
         // write publishes to disk
-        if !publish.is_empty() { 
-            self.disk_handler.write(&mut publish);        
+        if !self.inflight_publishes.is_empty() {
+            let acked_offsets = self.disk_handler.write(&mut self.inflight_publishes);
+            if let Err(e) = self.link_tx.ack(acked_offsets).await {
+                error!("Failed to inform router of read progress: {e}")
+            };
         }
         // read publishes from disk
         let mut buffer = VecDeque::new();
         self.disk_handler.read(&mut buffer);
+
         // TODO: if network write throws an error then this means we again got network I/O error
         // write publishes to network
+
         let unscheduled = self.network.writev(&mut buffer).await?;
         if unscheduled {
             self.link_rx.wake().await?;
@@ -285,9 +341,12 @@ impl<P: Protocol> PersistanceLink<P> {
                         Ok(packet) => self.read_from_client(packet).await?,
                         // change state to disconnected on I/O connection errors and
                         // wait for a reconnection
-                        Err(e) => match e.kind() {
-                            io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset => return Ok(State::Disconnected),
-                            _ => return Err(e.into())
+                        Err(e) => {
+                            println!("some error while reading from the network? {e:?}");
+                            match e.kind() {
+                                io::ErrorKind::ConnectionAborted | io::ErrorKind::ConnectionReset => return Ok(State::Disconnected),
+                                _ => return Err(e.into())
+                            }
                         }
                     };
                 }
@@ -296,7 +355,7 @@ impl<P: Protocol> PersistanceLink<P> {
                     // exchange will through error if all senders to router are dropped
                     // which is not possible since Persistent Link always lives
                     o?;
-                    self.write_to_client().await?;
+                    self.write_to_active_client().await?;
                 }
             }
         }
