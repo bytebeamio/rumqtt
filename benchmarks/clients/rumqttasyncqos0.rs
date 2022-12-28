@@ -53,7 +53,7 @@ pub async fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Bo
     }
 
     let elapsed_ms = start.elapsed().as_millis();
-    let throughput = count as usize / elapsed_ms as usize;
+    let throughput = count / elapsed_ms as usize;
     let throughput = throughput * 1000;
     let print = common::Print {
         id: id.to_owned(),

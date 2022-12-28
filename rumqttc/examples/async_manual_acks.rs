@@ -36,7 +36,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         // get subscribed messages without acking
         let event = eventloop.poll().await;
-        println!("{:?}", event);
+        match &event {
+            Ok(notif) => {
+                println!("Event = {:?}", notif);
+            }
+            Err(error) => {
+                println!("Error = {:?}", error);
+                return Ok(());
+            }
+        }
         if let Err(_err) = event {
             // break loop on disconnection
             break;
@@ -49,7 +57,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         // previously published messages should be republished after reconnection.
         let event = eventloop.poll().await;
-        println!("{:?}", event);
+        match &event {
+            Ok(notif) => {
+                println!("Event = {:?}", notif);
+            }
+            Err(error) => {
+                println!("Error = {:?}", error);
+                return Ok(());
+            }
+        }
 
         if let Ok(Event::Incoming(Incoming::Publish(publish))) = event {
             // this time we will ack incoming publishes.

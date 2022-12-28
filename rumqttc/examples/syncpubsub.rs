@@ -15,13 +15,22 @@ fn main() {
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {
-        println!("{}. Notification = {:?}", i, notification);
+        match notification {
+            Ok(notif) => {
+                println!("{}. Notification = {:?}", i, notif);
+            }
+            Err(error) => {
+                println!("{}. Notification = {:?}", i, error);
+                return;
+            }
+        }
     }
 
     println!("Done with the stream!!");
 }
 
 fn publish(mut client: Client) {
+    thread::sleep(Duration::from_secs(1));
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..10_usize {
         let payload = vec![1; i];

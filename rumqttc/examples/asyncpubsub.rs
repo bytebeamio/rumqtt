@@ -20,7 +20,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         let event = eventloop.poll().await;
-        println!("{:?}", event.unwrap());
+        match &event {
+            Ok(v) => {
+                println!("Event = {:?}", v);
+            }
+            Err(e) => {
+                println!("Error = {:?}", e);
+                return Ok(());
+            }
+        }
     }
 }
 

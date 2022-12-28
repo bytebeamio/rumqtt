@@ -40,6 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
             Err(e) => {
                 println!("Error = {:?}", e);
+                return Ok(());
             }
         }
     }
