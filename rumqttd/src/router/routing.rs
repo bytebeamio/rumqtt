@@ -1129,7 +1129,7 @@ fn forward_device_data(
     let forwards = publishes.into_iter().map(|(mut publish, offset)| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
-            cursor: next,
+            cursor: offset,
             filter_idx,
             publish,
         }
