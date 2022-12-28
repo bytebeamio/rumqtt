@@ -14,7 +14,7 @@ mod disconnect;
 mod ping;
 mod puback;
 mod pubcomp;
-mod publish;
+pub mod publish;
 mod pubrec;
 mod pubrel;
 mod suback;

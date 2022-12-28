@@ -1,6 +1,7 @@
 // use crate::link::bridge;
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
+use crate::link::persistance::{self, PersistanceLink};
 use crate::link::remote::{self, RemoteLink};
 #[cfg(feature = "websockets")]
 use crate::link::shadow::{self, ShadowLink};
@@ -8,11 +9,13 @@ use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 #[cfg(feature = "websockets")]
 use crate::protocol::ws::Ws;
-use crate::protocol::Protocol;
+use crate::protocol::{Connect, LastWill, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
 use crate::{meters, ConnectionSettings, GetMeter, Meter};
 use flume::{RecvError, SendError, Sender};
+use futures_util::lock::Mutex;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument, Span};
@@ -50,6 +53,8 @@ pub enum Error {
     Accept(String),
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
+    #[error("Persistence error = {0}")]
+    Persistence(#[from] persistance::Error),
 }
 
 pub struct Broker {
@@ -132,8 +137,15 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let (link_tx, link_rx, _ack) =
-            Link::new(None, client_id, self.router_tx.clone(), true, None, false)?;
+        let (link_tx, link_rx, _ack) = Link::new(
+            None,
+            client_id,
+            self.router_tx.clone(),
+            true,
+            None,
+            false,
+            false,
+        )?;
         Ok((link_tx, link_rx))
     }
 
@@ -160,13 +172,20 @@ impl Broker {
         // spawn servers in a separate thread
         for (_, config) in self.config.v4.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
+            let link = match config.persistence {
+                Some(true) => {
+                    let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
+                    LinkType::Persistent(connection_map)
+                }
+                _ => LinkType::Remote,
+            };
             let server = Server::new(config, self.router_tx.clone(), V4);
             server_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(false).await {
+                    if let Err(e) = server.start(link).await {
                         error!(error=?e, "Remote link error");
                     }
                 });
@@ -175,13 +194,20 @@ impl Broker {
 
         for (_, config) in self.config.v5.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
+            let link = match config.persistence {
+                Some(true) => {
+                    let connection_map = Arc::new(Mutex::new(PersistentConnectionMap::new()));
+                    LinkType::Persistent(connection_map)
+                }
+                _ => LinkType::Remote,
+            };
             let server = Server::new(config, self.router_tx.clone(), V5);
             server_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(false).await {
+                    if let Err(e) = server.start(link).await {
                         error!(error=?e, "Remote link error");
                     }
                 });
@@ -203,7 +229,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(true).await {
+                    if let Err(e) = server.start(LinkType::Shadow).await {
                         error!(error=?e, "Remote link error");
                     }
                 });
@@ -276,7 +302,23 @@ struct Server<P> {
     protocol: P,
 }
 
-impl<P: Protocol + Clone + Send + 'static> Server<P> {
+// #[derive(Clone, Copy)]
+pub enum LinkType<P: Protocol> {
+    #[cfg(feature = "websockets")]
+    Shadow,
+    Remote,
+    Persistent(Arc<Mutex<PersistentConnectionMap<P>>>),
+}
+
+pub struct PersistentConnectionMap<P: Protocol>(HashMap<String, Sender<Network<P>>>);
+
+impl<P: Protocol> PersistentConnectionMap<P> {
+    fn new() -> PersistentConnectionMap<P> {
+        PersistentConnectionMap(HashMap::new())
+    }
+}
+
+impl<P: Protocol> Server<P> {
     pub fn new(
         config: ServerSettings,
         router_tx: Sender<(ConnectionId, Event)>,
@@ -303,7 +345,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&self, shadow: bool) -> Result<(), Error> {
+    async fn start(&self, link_type: LinkType<P>) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -341,16 +383,16 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             count += 1;
 
             let protocol = self.protocol.clone();
-            match shadow {
+            match &link_type {
                 #[cfg(feature = "websockets")]
-                true => task::spawn(shadow_connection(config, router_tx, network).instrument(
-                    tracing::error_span!(
+                LinkType::Shadow => task::spawn(
+                    shadow_connection(config, router_tx, network).instrument(tracing::error_span!(
                         "shadow_connection",
                         client_id = field::Empty,
                         connection_id = field::Empty
-                    ),
-                )),
-                _ => task::spawn(
+                    )),
+                ),
+                LinkType::Remote => task::spawn(
                     remote(config, tenant_id, router_tx, network, protocol).instrument(
                         tracing::error_span!(
                             "remote_link",
@@ -358,6 +400,15 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                             connection_id = field::Empty
                         ),
                     ),
+                ),
+                // TODO: Fix tracing for persistent links
+                LinkType::Persistent(map) => task::spawn(
+                    persistance(config, tenant_id, router_tx, network, protocol, map.clone())
+                        .instrument(tracing::error_span!(
+                            "persistent_link",
+                            client_id = field::Empty,
+                            connection_id = field::Empty
+                        )),
                 ),
             };
 
@@ -464,4 +515,114 @@ async fn shadow_connection(
     let disconnect = Event::Disconnect(disconnect);
     let message = (connection_id, disconnect);
     router_tx.send(message).ok();
+}
+
+async fn persistance<P: Protocol>(
+    config: Arc<ConnectionSettings>,
+    tenant_id: Option<String>,
+    router_tx: Sender<(ConnectionId, Event)>,
+    stream: Box<dyn N>,
+    protocol: P,
+    map: Arc<Mutex<PersistentConnectionMap<P>>>,
+) {
+    // create new connection and identify client
+    let mut network = Network::new(stream, config.max_payload_size, 100, protocol);
+    let (connect, lastwill) = PersistanceLink::peek_first_connect(config.clone(), &mut network)
+        .await
+        .unwrap();
+
+    let connection_map = &mut map.lock().await.0;
+
+    let existing = connection_map.contains_key(&connect.client_id);
+    if existing {
+        info!(
+            "Existing connection found! client id: {}",
+            connect.client_id
+        );
+        if let Err(e) = connection_map
+            .get_mut(&connect.client_id)
+            .unwrap()
+            .send(network)
+        {
+            error!(error=?e, "Remote link error");
+        }
+    } else {
+        info!("New connection found! client id: {}", connect.client_id);
+        connection_map.insert(connect.client_id.clone(), {
+            persistance_spawn(
+                config,
+                router_tx.clone(),
+                tenant_id,
+                connect,
+                lastwill,
+                network,
+            )
+            .await
+            .unwrap()
+        });
+    }
+}
+
+async fn persistance_spawn<P: Protocol>(
+    config: Arc<ConnectionSettings>,
+    router_tx: Sender<(ConnectionId, Event)>,
+    tenant_id: Option<String>,
+    connect: Connect,
+    lastwill: Option<LastWill>,
+    network: Network<P>,
+) -> Result<Sender<Network<P>>, Error> {
+    // Start the link
+    let (network_tx, mut link) = match PersistanceLink::new(
+        config,
+        router_tx.clone(),
+        tenant_id,
+        connect,
+        lastwill,
+        network,
+    )
+    .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            error!(error=?e, "Remote link error");
+            return Err(e.into());
+        }
+    };
+
+    tokio::spawn(async move {
+        let client_id = link.client_id.clone();
+        let connection_id = link.connection_id;
+        let mut execute_will = false;
+
+        match link.start().await {
+            // TODO: handle the connection map when the link drops -> we should remove
+            // client's entry from the connection map
+
+            // Connection get close. This shouldn't usually happen
+            Ok(_) => error!("{:15.15}[E] connection-stop", client_id),
+            // No need to send a disconnect message when disconnetion
+            // originated internally in the router
+            Err(persistance::Error::Link(e)) => {
+                info!("{:15.15}[E] {:20} {:?}", client_id, "router-drop", e);
+                return;
+            }
+            // Any other error
+            Err(e) => {
+                error!("{:15.15}[E] Disconnected!! {:?}", client_id, e);
+                execute_will = true;
+            }
+        };
+
+        let disconnect = Disconnection {
+            id: client_id,
+            execute_will,
+            pending: vec![],
+        };
+
+        let disconnect = Event::Disconnect(disconnect);
+        let message = (connection_id, disconnect);
+        router_tx.send(message).ok();
+    });
+
+    Ok(network_tx)
 }

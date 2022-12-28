@@ -16,6 +16,7 @@ use tracing_subscriber::{
 
 use std::net::SocketAddr;
 
+mod disk;
 mod link;
 pub mod protocol;
 mod router;
@@ -80,6 +81,7 @@ pub struct ServerSettings {
     pub tls: Option<TlsConfig>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
+    pub persistence: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
