@@ -130,6 +130,19 @@ impl Broker {
         Ok(link)
     }
 
+    /// Alerts of different kind are published on topic mentioned below. MQTT wildcards
+    /// can be used to subscribe to multiple types of alerts at the same time. This are seperated
+    /// from normal topics, so they are only available over AlertsLink
+    ///
+    /// /alerts/<alert_type>/<connection_id>
+    /// alert_kind can be of types:
+    ///     - "connect"
+    ///     - "disconnect"
+    ///     - "subscribe"
+    ///     - "unsubscribe"
+    ///
+    /// To get all the types of alerts for all connection, you can subscribe to:
+    /// - /alerts/#
     pub fn alerts(&self, filter: Filter) -> Result<alerts::AlertsLink, alerts::LinkError> {
         let link = alerts::AlertsLink::new(self.router_tx.clone(), filter)?;
         Ok(link)

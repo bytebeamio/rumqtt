@@ -46,6 +46,8 @@ pub enum RouterError {
     UnsupportedQoS(QoS),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
+    #[error("Invalid client_id {0}")]
+    InvalidClientId(String),
 }
 
 pub struct Router {
@@ -242,6 +244,10 @@ impl Router {
         outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
+        if let Err(err) = validate_clientid(&client_id) {
+            error!("Invalid client_id: {}", err);
+            return;
+        };
 
         let span = tracing::info_span!("incoming_connect", client_id);
         let _guard = span.enter();
@@ -778,13 +784,13 @@ impl Router {
 
     /// Apply filter and prepare this connection to receive subscription data
     fn prepare_alert_filter(&mut self, id: ConnectionId, filter: String) {
-        let _ = self.alertlog.next_native_offset(&filter);
+        let (_, offset) = self.alertlog.next_native_offset(&filter);
         let offsets = self
             .alertlog
             .offsets
             .entry(filter)
             .or_insert_with(HashMap::new);
-        offsets.entry(id).or_insert((0, 0));
+        offsets.entry(id).or_insert(offset);
     }
 
     /// Apply filter and prepare this connection to receive subscription data
@@ -984,7 +990,13 @@ impl Router {
                 .native_readv(filter.to_string(), alert_id, 100)
                 .unwrap();
             for alert in alerts {
-                alert_sender.send((alert_id, alert.0)).unwrap();
+                let res = alert_sender.try_send((alert_id, alert.0));
+                if res.is_err() {
+                    error!(
+                        "Cannot send Alert to the channel, Error: {:?}. Dropping alerts for alert_id: {}",
+                        res, alert_id
+                    );
+                }
             }
         }
     }
@@ -1325,6 +1337,16 @@ fn validate_subscription(
 
     if filter.path.starts_with('$') {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
+    }
+
+    Ok(())
+}
+
+fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
+    trace!("Validating Client ID = {}", client_id,);
+    // Ensure that only client devices of the tenant can
+    if "+$#/".chars().any(|c| client_id.contains(c)) {
+        return Err(RouterError::InvalidClientId(client_id.to_string()));
     }
 
     Ok(())

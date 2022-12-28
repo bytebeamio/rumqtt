@@ -45,6 +45,12 @@ fn main() {
         }
     });
 
+    let handle = thread::spawn(move || loop {
+        let alert = alerts.poll();
+        println!("Alert: {:?}", alert);
+        thread::sleep(Duration::from_secs(1));
+    });
+
     for i in 0..3 {
         let client_id = format!("client_{i}");
         let topic = format!("hello/{}/world", client_id);
@@ -59,9 +65,5 @@ fn main() {
         });
     }
 
-    loop {
-        let alert = alerts.poll();
-        println!("Alert: {:?}", alert);
-        thread::sleep(Duration::from_secs(1));
-    }
+    handle.join().unwrap();
 }
