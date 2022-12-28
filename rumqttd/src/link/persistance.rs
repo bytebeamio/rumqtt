@@ -266,7 +266,7 @@ impl<P: Protocol> PersistanceLink<P> {
         // write publishes to disk
         if !self.inflight_publishes.is_empty() {
             let acked_offsets = self.disk_handler.write(&mut self.inflight_publishes);
-            if let Err(e) = self.link_tx.persist(acked_offsets).await {
+            if let Err(e) = self.link_tx.ack(acked_offsets).await {
                 error!("Failed to inform router of read progress: {e}")
             };
         }
@@ -297,7 +297,7 @@ impl<P: Protocol> PersistanceLink<P> {
         // write publishes to disk
         if !self.inflight_publishes.is_empty() {
             let acked_offsets = self.disk_handler.write(&mut self.inflight_publishes);
-            if let Err(e) = self.link_tx.persist(acked_offsets).await {
+            if let Err(e) = self.link_tx.ack(acked_offsets).await {
                 error!("Failed to inform router of read progress: {e}")
             };
         }

@@ -45,7 +45,6 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
-        _persistent: bool,
     ) -> (
         Event,
         Arc<Mutex<VecDeque<Packet>>>,
@@ -86,22 +85,13 @@ impl Link {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (mut message, i, o, link_rx) = Link::prepare(
-            tenant_id,
-            client_id,
-            clean,
-            last_will,
-            dynamic_filters,
-            persistent,
-        );
+        let (mut message, i, o, link_rx) =
+            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         if let Event::Connect {
-            ref mut outgoing,
-            ref mut connection,
-            ..
+            ref mut connection, ..
         } = message
         {
             connection.persistent = persistent;
-            outgoing.persistent = persistent;
         }
 
         router_tx.send((0, message))?;
@@ -128,19 +118,12 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
-        persistent: bool,
     ) -> Result<(LinkTx, LinkRx, ConnAck), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx) = Link::prepare(
-            tenant_id,
-            client_id,
-            clean,
-            last_will,
-            dynamic_filters,
-            persistent,
-        );
+        let (message, i, o, link_rx) =
+            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
         router_tx.send_async((0, message)).await?;
 
         link_rx.recv_async().await?;
@@ -310,7 +293,7 @@ impl LinkTx {
         Ok(())
     }
 
-    pub async fn persist(&mut self, written: HashMap<FilterIdx, Offset>) -> Result<(), LinkError> {
+    pub async fn ack(&mut self, written: HashMap<FilterIdx, Offset>) -> Result<(), LinkError> {
         let ack_data = Event::AckData(AckData { read_map: written });
 
         self.router_tx

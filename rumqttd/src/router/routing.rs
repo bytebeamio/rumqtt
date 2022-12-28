@@ -259,7 +259,7 @@ impl Router {
             connection.events = saved.metrics;
             Tracker::new(client_id.clone())
         };
-        let ackslog = AckLog::new(self.datalog.read_state.clone(), outgoing.persistent);
+        let ackslog = AckLog::new(self.datalog.read_state.clone(), connection.persistent);
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(v) => v.as_millis().to_string(),
@@ -784,6 +784,7 @@ impl Router {
 
         let ackslog = self.ackslog.get_mut(id).unwrap();
         let datalog = &mut self.datalog;
+        let connection = self.connections.get(id).unwrap();
 
         trace!("Consuming requests");
 
@@ -806,7 +807,7 @@ impl Router {
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing) {
+            match forward_device_data(&mut request, datalog, connection, outgoing) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -1062,6 +1063,7 @@ enum ConsumeStatus {
 fn forward_device_data(
     request: &mut DataRequest,
     datalog: &DataLog,
+    connection: &Connection,
     outgoing: &mut Outgoing,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
@@ -1073,7 +1075,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 && !outgoing.persistent {
+    let inflight_slots = if request.qos == 1 && !connection.persistent {
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");

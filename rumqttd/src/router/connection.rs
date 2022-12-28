@@ -22,6 +22,7 @@ pub struct Connection {
     pub last_will: Option<LastWill>,
     /// Connection events
     pub events: ConnectionEvents,
+    /// Flag to identify if connection is persistent
     pub persistent: bool,
 }
 
