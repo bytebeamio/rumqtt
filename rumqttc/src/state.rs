@@ -34,7 +34,7 @@ pub enum StateError {
 
 /// State of the mqtt connection.
 // Design: Methods will just modify the state of the object without doing any network operations
-// Design: All inflight queues are maintained in a pre initialized vec with indexnas packet id.
+// Design: All inflight queues are maintained in a pre initialized vec with index as packet id.
 // This is done for 2 reasons
 // Bad acks or out of order acks aren't O(n) causing cpu spikes
 // Any missing acks from the broker are detected during the next recycled use of packet ids

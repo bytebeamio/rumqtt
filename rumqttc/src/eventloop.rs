@@ -236,13 +236,11 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
     let network = match options.transport() {
         Transport::Tcp => {
-            let addr = options.broker_addr.as_str();
-            let port = options.port;
-            let addr2 = format!("{}:{}", addr, port);
+            let addr = format!("{}:{}", options.broker_addr, options.port);
             let socket = TcpSocket::new_v4()?;
-            socket.set_send_buffer_size(1024).unwrap();
+            // socket.set_send_buffer_size(1024).unwrap();
 
-            let stream = socket.connect(addr2.to_string().parse().unwrap()).await?;
+            let stream = socket.connect(addr.to_string().parse().unwrap()).await?;
             Network::new(stream, options.max_incoming_packet_size)
         }
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
