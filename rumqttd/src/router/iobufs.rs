@@ -133,7 +133,7 @@ impl Outgoing {
             p.publish.pkid = self.last_pkid;
 
             self.inflight_buffer
-                .push_back((self.last_pkid, filter_idx, p.cursor));
+                .push_back((self.last_pkid, filter_idx, p.curr_cursor));
 
             // Place max pkid packet at index 0
             if self.last_pkid == MAX_PKID {

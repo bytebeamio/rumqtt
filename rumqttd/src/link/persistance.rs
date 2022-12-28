@@ -100,11 +100,11 @@ impl<P: Protocol> DiskHandler<P> {
                         stored_filter_offset_map
                             .entry(forward.filter_idx)
                             .and_modify(|cursor| {
-                                if forward.cursor > *cursor {
-                                    *cursor = forward.cursor
+                                if forward.next_cursor > *cursor {
+                                    *cursor = forward.next_cursor
                                 }
                             })
-                            .or_insert(forward.cursor);
+                            .or_insert(forward.next_cursor);
                     }
                     _ => continue,
                 }

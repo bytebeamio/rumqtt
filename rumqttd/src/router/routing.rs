@@ -940,9 +940,6 @@ impl Router {
             let outgoing = self.obufs.get_mut(publisher).unwrap();
 
             ack_device_data(ackslog, outgoing);
-
-            // self.scheduler
-            //     .reschedule(publisher, ScheduleReason::FreshData);
         }
 
         let outgoing = self.obufs.get_mut(connection_id).unwrap();
@@ -1131,7 +1128,8 @@ fn forward_device_data(
     let forwards = publishes.into_iter().map(|(mut publish, offset)| {
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
-            cursor: offset,
+            curr_cursor: offset,
+            next_cursor: next,
             filter_idx,
             publish,
         }

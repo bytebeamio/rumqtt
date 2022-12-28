@@ -124,7 +124,8 @@ impl From<Notification> for MaybePacket {
 
 #[derive(Debug, Clone)]
 pub struct Forward {
-    pub cursor: (u64, u64),
+    pub curr_cursor: (u64, u64),
+    pub next_cursor: (u64, u64),
     pub filter_idx: FilterIdx,
     pub publish: Publish,
 }
