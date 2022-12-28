@@ -1,3 +1,11 @@
+### R20-alpha
+---
+rumqttd v0.13.0-alpha
+-------
+- Add support for disk persistent connections (#489)
+- Add deferred acking of PUBLISH messages (#537)
+---
+
 ### R19
 ---
 rumqttc v0.19.0
