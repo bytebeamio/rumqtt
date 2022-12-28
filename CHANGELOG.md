@@ -15,6 +15,7 @@ rumqttd v0.12.1
 - Expose prometheus scraping endpoints for router metricss (#522)
 - Make configuration file optional for running the broker and add subcommand to generate default configuration file (#523)
 - Use CA path in correct argument position (#529)
+- Support retransmission after reconnect (#534)
 
 misc
 ---

@@ -129,7 +129,7 @@ for more information look at rumqttc's [README](https://github.com/bytebeamio/ru
 - [x] Retained messages
 - [x] Connection via TLS
 - [x] Last will
-- [ ] Retransmission after reconnect
+- [x] Retransmission after reconnect
 - [ ] QoS 2
 - [ ] MQTT 5
 
