@@ -238,7 +238,11 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         Transport::Tcp => {
             let addr = format!("{}:{}", options.broker_addr, options.port);
             let socket = TcpSocket::new_v4()?;
-            // socket.set_send_buffer_size(1024).unwrap();
+            if let Some(network_option) = options.network_option {
+                socket
+                    .set_send_buffer_size(network_option.tcp_send_buffer_size)
+                    .unwrap();
+            }
 
             let stream = socket.connect(addr.to_string().parse().unwrap()).await?;
             Network::new(stream, options.max_incoming_packet_size)

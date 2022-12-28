@@ -526,8 +526,9 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
 
 #[tokio::test]
 async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3004);
     options.set_keep_alive(Duration::from_secs(5));
+    options.set_network_option(NetworkOptions::new(1024));
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
     task::spawn(async move {
@@ -536,7 +537,7 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
     });
 
     task::spawn(async move {
-        let mut broker = Broker::new(3002, 0).await;
+        let mut broker = Broker::new(3004, 0).await;
         while let Some(_) = broker.read_packet().await {
             time::sleep(Duration::from_secs_f64(0.5)).await;
         }

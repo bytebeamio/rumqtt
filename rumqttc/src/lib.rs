@@ -348,6 +348,20 @@ impl From<ClientConfig> for TlsConfiguration {
     }
 }
 
+/// Provides a way to configure low level network connection configurations
+#[derive(Clone, Copy)]
+pub struct NetworkOptions {
+    tcp_send_buffer_size: u32,
+}
+
+impl NetworkOptions {
+    pub fn new(tcp_send_buffer_size: u32) -> Self {
+        NetworkOptions {
+            tcp_send_buffer_size,
+        }
+    }
+}
+
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
@@ -391,6 +405,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    network_option: Option<NetworkOptions>,
 }
 
 impl MqttOptions {
@@ -432,6 +447,7 @@ impl MqttOptions {
             last_will: None,
             conn_timeout: 5,
             manual_acks: false,
+            network_option: None,
         }
     }
 
@@ -611,6 +627,15 @@ impl MqttOptions {
     /// get manual acknowledgements
     pub fn manual_acks(&self) -> bool {
         self.manual_acks
+    }
+
+    pub fn network_option(&self) -> Option<NetworkOptions> {
+        self.network_option.clone()
+    }
+
+    pub fn set_network_option(&mut self, network_option: NetworkOptions) -> &mut Self {
+        self.network_option = Some(network_option);
+        self
     }
 }
 
