@@ -630,7 +630,7 @@ impl MqttOptions {
     }
 
     pub fn network_option(&self) -> Option<NetworkOptions> {
-        self.network_option.clone()
+        self.network_option
     }
 
     pub fn set_network_option(&mut self, network_option: NetworkOptions) -> &mut Self {
