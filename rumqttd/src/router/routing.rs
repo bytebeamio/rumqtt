@@ -50,6 +50,8 @@ pub enum RouterError {
     InvalidClientId(String),
 }
 
+type FilterWithOffset = (Filter, Offset);
+
 pub struct Router {
     id: RouterId,
     /// Id of this router. Used to index native commitlog to store data from
@@ -60,7 +62,7 @@ pub struct Router {
     /// List of MetersLink's senders
     meters: Slab<Sender<(ConnectionId, Meter)>>,
     /// List of AlertsLink's senders with their respective subscription Filter
-    alerts: Slab<((Filter, Offset), Sender<(ConnectionId, Alert)>)>,
+    alerts: Slab<(FilterWithOffset, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
