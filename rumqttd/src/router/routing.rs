@@ -60,7 +60,7 @@ pub struct Router {
     /// List of MetersLink's senders
     meters: Slab<Sender<(ConnectionId, Meter)>>,
     /// List of AlertsLink's senders with their respective subscription Filter
-    alerts: Slab<(Filter, Sender<(ConnectionId, Alert)>)>,
+    alerts: Slab<((Filter, Offset), Sender<(ConnectionId, Alert)>)>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
@@ -332,10 +332,10 @@ impl Router {
     }
 
     fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filter: Filter) {
-        let alert_id = self.alerts.insert((filter, tx));
-        let (filter, tx) = self.alerts.get(alert_id).unwrap();
+        let offset = self.prepare_alert_filter(filter.to_string());
+        let alert_id = self.alerts.insert(((filter, offset), tx));
+        let (_, tx) = self.alerts.get(alert_id).unwrap();
         let _ = tx.try_send((alert_id, Alert::Connect("AlertsLink".to_owned())));
-        self.prepare_alert_filter(alert_id, filter.to_string());
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
@@ -783,14 +783,9 @@ impl Router {
     }
 
     /// Apply filter and prepare this connection to receive subscription data
-    fn prepare_alert_filter(&mut self, id: ConnectionId, filter: String) {
+    fn prepare_alert_filter(&mut self, filter: String) -> Offset {
         let (_, offset) = self.alertlog.next_native_offset(&filter);
-        let offsets = self
-            .alertlog
-            .offsets
-            .entry(filter)
-            .or_insert_with(HashMap::new);
-        offsets.entry(id).or_insert(offset);
+        offset
     }
 
     /// Apply filter and prepare this connection to receive subscription data
@@ -983,11 +978,11 @@ impl Router {
         let span = tracing::info_span!("outgoing_alert");
         let _guard = span.enter();
 
-        for (alert_id, (filter, alert_sender)) in &self.alerts {
+        for (alert_id, ((filter, offset), alert_sender)) in &mut self.alerts {
             trace!("Reading from alertlog: {}", filter);
-            let alerts = self
+            let (alerts, next_offset) = self
                 .alertlog
-                .native_readv(filter.to_string(), alert_id, 100)
+                .native_readv(filter.to_string(), *offset, 100)
                 .unwrap();
             for alert in alerts {
                 let res = alert_sender.try_send((alert_id, alert.0));
@@ -998,6 +993,7 @@ impl Router {
                     );
                 }
             }
+            *offset = next_offset;
         }
     }
 }

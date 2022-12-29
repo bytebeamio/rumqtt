@@ -2,7 +2,7 @@ use slab::Slab;
 
 use crate::protocol::{matches, Subscribe, Unsubscribe};
 use crate::router::FilterIdx;
-use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
+use crate::{Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
 use crate::Storage;
@@ -104,9 +104,6 @@ pub struct AlertLog {
     filter_indexes: HashMap<Filter, FilterIdx>,
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
-    /// offsets of alert consumers
-    // here ConnectionId actually refers to alertsId which is a index into slab of alerts
-    pub offsets: HashMap<Filter, HashMap<ConnectionId, Offset>>,
 }
 
 impl AlertLog {
@@ -114,13 +111,11 @@ impl AlertLog {
         let native = Slab::new();
         let filter_indexes = HashMap::new();
         let publish_filters = HashMap::new();
-        let offsets = HashMap::new();
 
         Ok(AlertLog {
             config,
             native,
             publish_filters,
-            offsets,
             filter_indexes,
         })
     }
@@ -163,7 +158,6 @@ impl AlertLog {
                 // datalog index map
                 let idx = self.native.insert(data);
                 self.filter_indexes.insert(filter.to_owned(), idx);
-                self.offsets.insert(filter.to_owned(), HashMap::new());
 
                 // Match new filter to existing topics and add to publish_filters if it matches
                 for (topic, filters) in publish_filters.iter_mut() {
@@ -182,23 +176,19 @@ impl AlertLog {
     pub fn native_readv(
         &mut self,
         filter: Filter,
-        alert_id: ConnectionId,
+        offset: Offset,
         len: u64,
-    ) -> io::Result<Vec<(Alert, Offset)>> {
+    ) -> io::Result<(Vec<(Alert, Offset)>, Offset)> {
         let filter_idx = *self.filter_indexes.get(&filter).unwrap();
         let data = self.native.get(filter_idx).unwrap();
         let mut o = Vec::new();
 
-        let connection_map = self.offsets.get_mut(&filter).unwrap();
-        let offset = connection_map.get_mut(&alert_id).unwrap();
-
-        let next = data.log.readv(*offset, len, &mut o)?;
+        let next = data.log.readv(offset, len, &mut o)?;
         let next_offset = match next {
             Position::Next { start: _, end } => end,
             Position::Done { start: _, end } => end,
         };
-        *offset = next_offset;
-        Ok(o)
+        Ok((o, next_offset))
     }
 }
 
