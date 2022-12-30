@@ -143,8 +143,8 @@ impl Broker {
     ///
     /// To get all the types of alerts for all connection, you can subscribe to:
     /// - /alerts/#
-    pub fn alerts(&self, filter: Filter) -> Result<alerts::AlertsLink, alerts::LinkError> {
-        let link = alerts::AlertsLink::new(self.router_tx.clone(), filter)?;
+    pub fn alerts(&self, filters: Vec<Filter>) -> Result<alerts::AlertsLink, alerts::LinkError> {
+        let link = alerts::AlertsLink::new(self.router_tx.clone(), filters)?;
         Ok(link)
     }
 

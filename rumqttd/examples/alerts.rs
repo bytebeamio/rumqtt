@@ -16,7 +16,12 @@ fn main() {
     dbg!(&config);
 
     let broker = Broker::new(config);
-    let alerts = broker.alerts("/alerts/#".to_string()).unwrap();
+    let alerts = broker
+        .alerts(vec![
+            "/alerts/connect/+".to_string(),
+            "/alerts/subscribe/+".to_string(),
+        ])
+        .unwrap();
 
     let (mut link_tx, mut link_rx) = broker.link("consumer").unwrap();
     link_tx.subscribe("hello/+/world").unwrap();

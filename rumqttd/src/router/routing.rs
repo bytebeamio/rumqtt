@@ -62,7 +62,7 @@ pub struct Router {
     /// List of MetersLink's senders
     meters: Slab<Sender<(ConnectionId, Meter)>>,
     /// List of AlertsLink's senders with their respective subscription Filter
-    alerts: Slab<(FilterWithOffset, Sender<(ConnectionId, Alert)>)>,
+    alerts: Slab<(Vec<FilterWithOffset>, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
@@ -228,7 +228,7 @@ impl Router {
             } => self.handle_new_connection(connection, incoming, outgoing),
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::GetMeter(meter) => self.handle_get_meter(id, meter),
-            Event::NewAlert(tx, topic) => self.handle_new_alert(tx, topic),
+            Event::NewAlert(tx, filters) => self.handle_new_alert(tx, filters),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
@@ -333,9 +333,13 @@ impl Router {
         let _ = tx.try_send((meter_id, Meter::Router(self.id, self.router_meters.clone())));
     }
 
-    fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filter: Filter) {
-        let offset = self.prepare_alert_filter(filter.to_string());
-        let alert_id = self.alerts.insert(((filter, offset), tx));
+    fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filters: Vec<Filter>) {
+        let mut filter_with_offsets = Vec::new();
+        for filter in filters {
+            let offset = self.prepare_alert_filter(filter.to_string());
+            filter_with_offsets.push((filter, offset));
+        }
+        let alert_id = self.alerts.insert((filter_with_offsets, tx));
         let (_, tx) = self.alerts.get(alert_id).unwrap();
         let _ = tx.try_send((alert_id, Alert::Connect("AlertsLink".to_owned())));
     }
@@ -980,22 +984,24 @@ impl Router {
         let span = tracing::info_span!("outgoing_alert");
         let _guard = span.enter();
 
-        for (alert_id, ((filter, offset), alert_sender)) in &mut self.alerts {
-            trace!("Reading from alertlog: {}", filter);
-            let (alerts, next_offset) = self
-                .alertlog
-                .native_readv(filter.to_string(), *offset, 100)
-                .unwrap();
-            for alert in alerts {
-                let res = alert_sender.try_send((alert_id, alert.0));
-                if res.is_err() {
-                    error!(
+        for (alert_id, (filter_with_offsets, alert_sender)) in &mut self.alerts {
+            for (filter, offset) in filter_with_offsets {
+                trace!("Reading from alertlog: {}", filter);
+                let (alerts, next_offset) = self
+                    .alertlog
+                    .native_readv(filter.to_string(), *offset, 100)
+                    .unwrap();
+                for alert in alerts {
+                    let res = alert_sender.try_send((alert_id, alert.0));
+                    if res.is_err() {
+                        error!(
                         "Cannot send Alert to the channel, Error: {:?}. Dropping alerts for alert_id: {}",
                         res, alert_id
                     );
+                    }
                 }
+                *offset = next_offset;
             }
-            *offset = next_offset;
         }
     }
 }

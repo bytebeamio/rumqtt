@@ -24,10 +24,10 @@ pub struct AlertsLink {
 impl AlertsLink {
     pub fn new(
         router_tx: Sender<(ConnectionId, Event)>,
-        filter: Filter,
+        filters: Vec<Filter>,
     ) -> Result<AlertsLink, LinkError> {
         let (tx, rx) = flume::bounded(5);
-        router_tx.send((0, Event::NewAlert(tx, filter)))?;
+        router_tx.send((0, Event::NewAlert(tx, filters)))?;
         let (_alert_id, _meter) = rx.recv()?;
 
         let link = AlertsLink {

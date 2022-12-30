@@ -50,7 +50,7 @@ pub enum Event {
     /// Request for meter
     GetMeter(GetMeter),
     /// New Alert link
-    NewAlert(flume::Sender<(ConnectionId, Alert)>, Filter),
+    NewAlert(flume::Sender<(ConnectionId, Alert)>, Vec<Filter>),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog
