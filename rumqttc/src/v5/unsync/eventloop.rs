@@ -68,7 +68,7 @@ pub struct EventLoop {
     requests_rx: Receiver<Request>,
     /// Requests handle to send requests
     pub(crate) requests_tx: Sender<Request>,
-    requests: VecDeque<Request>,
+    // requests: VecDeque<Request>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
@@ -95,14 +95,14 @@ impl EventLoop {
         let pending = pending.into_iter();
         let max_inflight = options.inflight;
         let manual_acks = options.manual_acks;
-        let requests = VecDeque::with_capacity(cap);
+        // let requests = VecDeque::with_capacity(cap);
 
         EventLoop {
             options,
             state: MqttState::new(max_inflight, manual_acks),
             requests_tx,
             requests_rx,
-            requests,
+            // requests,
             pending,
             network: None,
             keepalive_timeout: None,
@@ -129,7 +129,10 @@ impl EventLoop {
             return Err(ClientError::Request(publish));
         }
 
-        self.requests.push_back(publish);
+        // self.requests.push_back(publish);
+
+        // TODO: This returns StateError
+        self.state.handle_outgoing_packet(publish);
 
         Ok(())
     }
@@ -143,7 +146,9 @@ impl EventLoop {
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter);
         let request = Request::Subscribe(subscribe);
-        self.requests.push_back(request);
+        // TODO: This returns StateError
+        self.state.handle_outgoing_packet(request);
+        // self.requests.push_back(request);
         Ok(())
     }
 
@@ -231,21 +236,21 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            // o = next_request(&mut self.requests), if !inflight_full && !pending && !collision => match o {
-            //     Ok(request) => {
-            //         self.state.handle_outgoing_packet(request)?;
-            //         network.flush(&mut self.state.write).await?;
-            //         Ok(self.state.events.pop_front().unwrap())
-            //     }
-            //     Err(_) => Err(ConnectionError::RequestsDone),
-            // },
-            // TODO:
-            // we need some way to predict that there are no requests pending so we can return None
-            Some(request) = next_request(&mut self.requests), if !inflight_full && !pending && !collision =>  {
+            o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
+                Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
                     Ok(self.state.events.pop_front().unwrap())
+                }
+                Err(_) => Err(ConnectionError::RequestsDone),
             },
+            // TODO:
+            // we need some way to predict that there are no requests pending so we can return None
+            // Some(request) = next_request(&mut self.requests), if !inflight_full && !pending && !collision =>  {
+            //         self.state.handle_outgoing_packet(request)?;
+            //         network.flush(&mut self.state.write).await?;
+            //         Ok(self.state.events.pop_front().unwrap())
+            // },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
@@ -375,8 +380,8 @@ pub(crate) async fn next_pending(
     pending.next()
 }
 
-/// Returns the next request asynchronously to be used in select!
-/// This is a synchronous function but made async to make it fit in select!
-pub(crate) async fn next_request(requests: &mut VecDeque<Request>) -> Option<Request> {
-    requests.pop_front()
-}
+// Returns the next request asynchronously to be used in select!
+// This is a synchronous function but made async to make it fit in select!
+// pub(crate) async fn next_request(requests: &mut VecDeque<Request>) -> Option<Request> {
+//     requests.pop_front()
+// }
