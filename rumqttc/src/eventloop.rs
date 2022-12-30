@@ -112,6 +112,10 @@ impl EventLoop {
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
+            debug!(
+                "self.network.is_none == true timeout={}\n",
+                self.options.connection_timeout()
+            );
             let (network, connack) = time::timeout(
                 Duration::from_secs(self.options.connection_timeout()),
                 connect(&self.options),

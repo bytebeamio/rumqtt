@@ -121,6 +121,8 @@ pub use mqttbytes::*;
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
+#[cfg(feature = "use-native-tls")]
+pub use tls::native_tls_config::TlsConnectorBuilder;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
@@ -318,6 +320,8 @@ pub enum TlsConfiguration {
         /// password for use with der
         password: String,
     },
+    #[cfg(feature = "use-native-tls")]
+    NativeTls(crate::tls::native_tls_config::TlsConnectorBuilder),
     #[cfg(feature = "use-rustls")]
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     Rustls(Arc<ClientConfig>),

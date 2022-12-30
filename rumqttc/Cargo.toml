@@ -52,3 +52,8 @@ rustls = "0.20"
 rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full", "macros"] }
+
+
+[[example]]
+name = "tls3"
+required-features = ["use-native-tls"]
