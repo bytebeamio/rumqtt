@@ -19,6 +19,7 @@ use tokio::time::{self, error::Elapsed, Instant, Sleep};
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
+use std::net::ToSocketAddrs;
 #[cfg(unix)]
 use std::path::Path;
 use std::pin::Pin;
@@ -236,17 +237,43 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
     let network = match options.transport() {
         Transport::Tcp => {
-            let addr = format!("{}:{}", options.broker_addr, options.port);
-            let socket = TcpSocket::new_v4()?;
-            if let Some(send_buff_size) = options.network_option.tcp_send_buffer_size {
-                socket.set_send_buffer_size(send_buff_size).unwrap();
-            }
-            if let Some(recv_buffer_size) = options.network_option.tcp_recv_buffer_size {
-                socket.set_recv_buffer_size(recv_buffer_size).unwrap();
+            let addrs = format!("{}:{}", options.broker_addr, options.port)
+                .to_socket_addrs()
+                .unwrap();
+
+            let mut last_err = None;
+            let mut stream = None;
+
+            for addr in addrs {
+                let socket = TcpSocket::new_v4()?;
+
+                if let Some(send_buff_size) = options.network_option.tcp_send_buffer_size {
+                    socket.set_send_buffer_size(send_buff_size).unwrap();
+                }
+                if let Some(recv_buffer_size) = options.network_option.tcp_recv_buffer_size {
+                    socket.set_recv_buffer_size(recv_buffer_size).unwrap();
+                }
+                match socket.connect(addr).await {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                    }
+                };
             }
 
-            let stream = socket.connect(addr.to_string().parse().unwrap()).await?;
-            Network::new(stream, options.max_incoming_packet_size)
+            if let Some(s) = stream {
+                Network::new(s, options.max_incoming_packet_size)
+            } else {
+                return Err(ConnectionError::Io(last_err.unwrap_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "could not resolve to any address",
+                    )
+                })));
+            }
         }
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {

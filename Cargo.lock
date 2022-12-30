@@ -2007,7 +2007,7 @@ dependencies = [
 
 [[package]]
 name = "rumqttd"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "bytes",
  "config",
