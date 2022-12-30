@@ -16,7 +16,7 @@ fn main() {
     dbg!(&config);
 
     let broker = Broker::new(config);
-    let alerts = broker
+    let mut alerts = broker
         .alerts(vec![
             "/alerts/connect/+".to_string(),
             "/alerts/subscribe/+".to_string(),
@@ -56,7 +56,7 @@ fn main() {
         thread::sleep(Duration::from_secs(1));
     });
 
-    for i in 0..3 {
+    for i in 0..5 {
         let client_id = format!("client_{i}");
         let topic = format!("hello/{}/world", client_id);
         let payload = vec![0u8; 1_000]; // 0u8 is one byte, so total ~1KB
