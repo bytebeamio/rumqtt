@@ -351,14 +351,24 @@ impl From<ClientConfig> for TlsConfiguration {
 /// Provides a way to configure low level network connection configurations
 #[derive(Clone, Copy)]
 pub struct NetworkOptions {
-    tcp_send_buffer_size: u32,
+    tcp_send_buffer_size: Option<u32>,
+    tcp_recv_buffer_size: Option<u32>,
 }
 
 impl NetworkOptions {
-    pub fn new(tcp_send_buffer_size: u32) -> Self {
+    pub fn new() -> Self {
         NetworkOptions {
-            tcp_send_buffer_size,
+            tcp_send_buffer_size: None,
+            tcp_recv_buffer_size: None,
         }
+    }
+
+    pub fn set_tcp_send_buffer_size(&mut self, size: u32) {
+        self.tcp_send_buffer_size = Some(size);
+    }
+
+    pub fn set_tcp_recv_buffer_size(&mut self, size: u32) {
+        self.tcp_recv_buffer_size = Some(size);
     }
 }
 

@@ -30,7 +30,7 @@ use std::vec::IntoIter;
 pub enum ConnectionError {
     #[error("Mqtt state: {0}")]
     MqttState(#[from] StateError),
-    #[error("Timeout")]
+    #[error("Network timeout")]
     Timeout(#[from] Elapsed),
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
@@ -143,7 +143,7 @@ impl EventLoop {
         let throttle = self.options.pending_throttle;
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
-        let connection_timeout = Duration::from_secs(self.options.connection_timeout());
+        let network_timeout = Duration::from_secs(self.options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -157,7 +157,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
+                time::timeout(network_timeout, network.flush(&mut self.state.write)).await??;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // Pull next request from user requests channel.
@@ -187,7 +187,7 @@ impl EventLoop {
             o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
-                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
+                time::timeout(network_timeout, network.flush(&mut self.state.write)).await??;
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -196,7 +196,7 @@ impl EventLoop {
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                 self.state.handle_outgoing_packet(request)?;
-                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
+                time::timeout(network_timeout, network.flush(&mut self.state.write)).await??;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
@@ -206,7 +206,7 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
-                time::timeout(connection_timeout, network.flush(&mut self.state.write)).await??;
+                time::timeout(network_timeout, network.flush(&mut self.state.write)).await??;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -239,9 +239,12 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let addr = format!("{}:{}", options.broker_addr, options.port);
             let socket = TcpSocket::new_v4()?;
             if let Some(network_option) = options.network_option {
-                socket
-                    .set_send_buffer_size(network_option.tcp_send_buffer_size)
-                    .unwrap();
+                if let Some(send_buff_size) = network_option.tcp_send_buffer_size {
+                    socket.set_send_buffer_size(send_buff_size).unwrap();
+                }
+                if let Some(recv_buffer_size) = network_option.tcp_recv_buffer_size {
+                    socket.set_recv_buffer_size(recv_buffer_size).unwrap();
+                }
             }
 
             let stream = socket.connect(addr.to_string().parse().unwrap()).await?;

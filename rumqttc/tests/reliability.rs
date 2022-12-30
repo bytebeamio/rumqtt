@@ -528,7 +528,9 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
 async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3004);
     options.set_keep_alive(Duration::from_secs(5));
-    options.set_network_option(NetworkOptions::new(1024));
+    let mut network_option = NetworkOptions::new();
+    network_option.set_tcp_send_buffer_size(1024);
+    options.set_network_option(network_option);
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
     task::spawn(async move {
@@ -549,7 +551,6 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
             match e {
                 ConnectionError::Timeout(_) => {
                     assert!(eventloop.state.write.is_empty());
-                    assert!(eventloop.state.events.is_empty());
                     println!("State is being clean properly");
                 }
                 _ => {

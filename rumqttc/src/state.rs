@@ -53,7 +53,7 @@ pub struct MqttState {
     /// Packet id of the last outgoing packet
     pub(crate) last_pkid: u16,
     /// Packet id of the last acked publish
-    pub(crate) last_acked_publish_pkid: u16,
+    pub(crate) last_puback: u16,
     /// Number of outgoing inflight publishes
     pub(crate) inflight: u16,
     /// Maximum number of allowed inflight
@@ -85,7 +85,7 @@ impl MqttState {
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: 0,
-            last_acked_publish_pkid: 0,
+            last_puback: 0,
             inflight: 0,
             max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
@@ -105,7 +105,7 @@ impl MqttState {
         let mut pending = Vec::with_capacity(100);
         let (first_half, second_half) = self
             .outgoing_pub
-            .split_at_mut(self.last_acked_publish_pkid as usize + 1);
+            .split_at_mut(self.last_puback as usize + 1);
 
         for publish in second_half.iter_mut().chain(first_half) {
             if let Some(publish) = publish.take() {
@@ -131,7 +131,6 @@ impl MqttState {
         self.collision_ping_count = 0;
         self.inflight = 0;
         self.write.clear();
-        self.events.clear();
         pending
     }
 
@@ -225,7 +224,7 @@ impl MqttState {
             .get_mut(puback.pkid as usize)
             .ok_or(StateError::Unsolicited(puback.pkid))?;
 
-        self.last_acked_publish_pkid = puback.pkid;
+        self.last_puback = puback.pkid;
         let v = match publish.take() {
             Some(_) => {
                 self.inflight -= 1;
@@ -816,11 +815,9 @@ mod test {
     fn state_should_be_clean_properly() {
         let mut mqtt = build_mqttstate();
         mqtt.write.put(&b"test"[..]);
-        mqtt.events.push_back(Event::Outgoing(Outgoing::Disconnect));
-        // After this clean state.write and state.events should be empty
+        // After this clean state.write should be empty
         mqtt.clean();
         assert!(mqtt.write.is_empty());
-        assert!(mqtt.events.is_empty());
     }
 
     #[test]
@@ -868,7 +865,7 @@ mod test {
         }
 
         mqtt.outgoing_pub = build_outgoing_pub();
-        mqtt.last_acked_publish_pkid = 3;
+        mqtt.last_puback = 3;
         let requests = mqtt.clean();
         let res = vec![6, 1, 2, 3];
         for (req, idx) in requests.iter().zip(res) {
@@ -880,7 +877,7 @@ mod test {
         }
 
         mqtt.outgoing_pub = build_outgoing_pub();
-        mqtt.last_acked_publish_pkid = 0;
+        mqtt.last_puback = 0;
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
         for (req, idx) in requests.iter().zip(res) {
@@ -892,7 +889,7 @@ mod test {
         }
 
         mqtt.outgoing_pub = build_outgoing_pub();
-        mqtt.last_acked_publish_pkid = 6;
+        mqtt.last_puback = 6;
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
         for (req, idx) in requests.iter().zip(res) {
