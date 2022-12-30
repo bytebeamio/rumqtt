@@ -349,7 +349,7 @@ impl From<ClientConfig> for TlsConfiguration {
 }
 
 /// Provides a way to configure low level network connection configurations
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
@@ -415,7 +415,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
-    network_option: Option<NetworkOptions>,
+    network_option: NetworkOptions,
 }
 
 impl MqttOptions {
@@ -457,7 +457,7 @@ impl MqttOptions {
             last_will: None,
             conn_timeout: 5,
             manual_acks: false,
-            network_option: None,
+            network_option: NetworkOptions::new(),
         }
     }
 
@@ -639,12 +639,12 @@ impl MqttOptions {
         self.manual_acks
     }
 
-    pub fn network_option(&self) -> Option<NetworkOptions> {
+    pub fn network_option(&self) -> NetworkOptions {
         self.network_option
     }
 
     pub fn set_network_option(&mut self, network_option: NetworkOptions) -> &mut Self {
-        self.network_option = Some(network_option);
+        self.network_option = network_option;
         self
     }
 }
