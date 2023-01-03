@@ -57,7 +57,7 @@ pub enum ConnectionError {
 /// Eventloop with all the state of a connection
 pub struct EventLoop {
     /// Options of the current mqtt connection
-    pub options: MqttOptions,
+    pub mqtt_options: MqttOptions,
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
@@ -85,15 +85,19 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(options: MqttOptions, network_options: NetworkOptions, cap: usize) -> EventLoop {
+    pub fn new(
+        mqtt_options: MqttOptions,
+        network_options: NetworkOptions,
+        cap: usize,
+    ) -> EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
-        let max_inflight = options.inflight;
-        let manual_acks = options.manual_acks;
+        let max_inflight = mqtt_options.inflight;
+        let manual_acks = mqtt_options.manual_acks;
 
         EventLoop {
-            options,
+            mqtt_options,
             state: MqttState::new(max_inflight, manual_acks),
             requests_tx,
             requests_rx,
@@ -119,7 +123,7 @@ impl EventLoop {
         if self.network.is_none() {
             let (network, connack) = match time::timeout(
                 Duration::from_secs(self.network_options.connection_timeout()),
-                connect(&self.options, self.network_options),
+                connect(&self.mqtt_options, self.network_options),
             )
             .await
             {
@@ -129,7 +133,7 @@ impl EventLoop {
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
+                self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
             }
 
             return Ok(Event::Incoming(connack));
@@ -148,8 +152,8 @@ impl EventLoop {
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
-        let inflight_full = self.state.inflight >= self.options.inflight;
-        let throttle = self.options.pending_throttle;
+        let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
+        let throttle = self.mqtt_options.pending_throttle;
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
         let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
@@ -221,7 +225,7 @@ impl EventLoop {
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = self.keepalive_timeout.as_mut().unwrap() => {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
+                timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
