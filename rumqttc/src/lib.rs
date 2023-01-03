@@ -670,9 +670,6 @@ pub enum OptionError {
     #[error("Invalid inflight value.")]
     Inflight,
 
-    #[error("Invalid conn-timeout value.")]
-    ConnTimeout,
-
     #[error("Unknown option: {0}")]
     Unknown(String),
 
@@ -797,14 +794,6 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.set_inflight(inflight);
         }
 
-        if let Some(conn_timeout) = queries
-            .remove("conn_timeout_secs")
-            .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
-            .transpose()?
-        {
-            options.set_connection_timeout(conn_timeout);
-        }
-
         if let Some((opt, _)) = queries.into_iter().next() {
             return Err(OptionError::Unknown(opt.into_owned()));
         }
@@ -925,10 +914,6 @@ mod test {
         assert_eq!(
             err("mqtt://host:42?client_id=foo&inflight_num=foo"),
             OptionError::Inflight
-        );
-        assert_eq!(
-            err("mqtt://host:42?client_id=foo&conn_timeout_secs=foo"),
-            OptionError::ConnTimeout
         );
     }
 
