@@ -400,15 +400,10 @@ async fn remote<P: Protocol>(
         Ok(_) => error!("connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
-        Err(remote::Error::Link(e)) => match e {
-            local::LinkError::Recv(RecvError::Disconnected) => {
-                return;
-            }
-            _ => {
-                error!(error=?e, "router-drop");
-                return;
-            }
-        },
+        Err(remote::Error::Link(e)) => {
+            error!(error=?e, "router-drop");
+            return;
+        }
         // Any other error
         Err(e) => {
             error!(error=?e,"Disconnected!!");
