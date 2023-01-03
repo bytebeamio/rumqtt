@@ -353,6 +353,7 @@ impl From<ClientConfig> for TlsConfiguration {
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
+    conn_timeout: u64,
 }
 
 impl NetworkOptions {
@@ -360,6 +361,7 @@ impl NetworkOptions {
         NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
+            conn_timeout: 5,
         }
     }
 
@@ -369,6 +371,17 @@ impl NetworkOptions {
 
     pub fn set_tcp_recv_buffer_size(&mut self, size: u32) {
         self.tcp_recv_buffer_size = Some(size);
+    }
+
+    /// set connection timeout in secs
+    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
+        self.conn_timeout = timeout;
+        self
+    }
+
+    /// get timeout in secs
+    pub fn connection_timeout(&self) -> u64 {
+        self.conn_timeout
     }
 }
 
@@ -410,12 +423,9 @@ pub struct MqttOptions {
     inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
-    /// Connection timeout
-    conn_timeout: u64,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
-    network_options: NetworkOptions,
 }
 
 impl MqttOptions {
@@ -455,9 +465,7 @@ impl MqttOptions {
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
-            conn_timeout: 5,
             manual_acks: false,
-            network_options: NetworkOptions::new(),
         }
     }
 
@@ -617,17 +625,6 @@ impl MqttOptions {
         self.inflight
     }
 
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
-        self
-    }
-
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
-    }
-
     /// set manual acknowledgements
     pub fn set_manual_acks(&mut self, manual_acks: bool) -> &mut Self {
         self.manual_acks = manual_acks;
@@ -637,15 +634,6 @@ impl MqttOptions {
     /// get manual acknowledgements
     pub fn manual_acks(&self) -> bool {
         self.manual_acks
-    }
-
-    pub fn network_options(&self) -> NetworkOptions {
-        self.network_options
-    }
-
-    pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
-        self.network_options = network_options;
-        self
     }
 }
 
@@ -842,7 +830,6 @@ impl Debug for MqttOptions {
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
-            .field("conn_timeout", &self.conn_timeout)
             .field("manual_acks", &self.manual_acks)
             .finish()
     }

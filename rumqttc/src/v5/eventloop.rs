@@ -1,7 +1,7 @@
 use super::framed::Network;
 use super::mqttbytes::{v5::*, *};
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
-use crate::eventloop::get_tcp_stream;
+use crate::eventloop::socket_connect;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
 
@@ -237,18 +237,16 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     let network = match options.transport() {
         Transport::Tcp => {
             let addr = format!("{}:{}", options.broker_addr, options.port);
-            let stream = get_tcp_stream(addr, options.network_options()).await?;
+            let stream = socket_connect(addr, options.network_options()).await?;
             Network::new(stream, options.max_incoming_packet_size)
         }
         #[cfg(any(feature = "use-native-tls", feature = "use-rustls"))]
         Transport::Tls(tls_config) => {
-            let socket = tls::tls_connect(
-                &options.broker_addr,
-                options.port,
-                &tls_config,
-                options.network_options(),
-            )
-            .await?;
+            let addr = format!("{}:{}", options.broker_addr, options.port);
+            let tcp_stream = socket_connect(addr, options.network_options()).await?;
+            let socket =
+                tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
+                    .await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]
