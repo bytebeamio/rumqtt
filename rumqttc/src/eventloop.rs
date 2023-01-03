@@ -236,7 +236,7 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 
 pub(crate) async fn get_tcp_stream(
     addrs: String,
-    network_options: &NetworkOptions,
+    network_options: NetworkOptions,
 ) -> io::Result<TcpStream> {
     let addrs = lookup_host(addrs).await?;
     let mut last_err = None;
@@ -274,12 +274,18 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     let network = match options.transport() {
         Transport::Tcp => {
             let addr = format!("{}:{}", options.broker_addr, options.port);
-            let stream = get_tcp_stream(addr, &options.network_option).await?;
+            let stream = get_tcp_stream(addr, options.network_options()).await?;
             Network::new(stream, options.max_incoming_packet_size)
         }
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
-            let socket = tls::tls_connect(&options.broker_addr, options.port, &tls_config).await?;
+            let socket = tls::tls_connect(
+                &options.broker_addr,
+                options.port,
+                &tls_config,
+                options.network_options(),
+            )
+            .await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]

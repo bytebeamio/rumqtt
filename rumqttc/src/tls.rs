@@ -1,5 +1,3 @@
-use tokio::net::TcpStream;
-
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
 #[cfg(feature = "use-rustls")]
@@ -13,6 +11,7 @@ use tokio_rustls::webpki;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::TlsConnector as RustlsConnector;
 
+use crate::eventloop::get_tcp_stream;
 #[cfg(feature = "use-rustls")]
 use crate::Key;
 #[cfg(feature = "use-rustls")]
@@ -23,7 +22,7 @@ use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 
 use crate::framed::N;
-use crate::TlsConfiguration;
+use crate::{NetworkOptions, TlsConfiguration};
 
 #[cfg(feature = "use-native-tls")]
 use tokio_native_tls::TlsConnector as NativeTlsConnector;
@@ -176,8 +175,10 @@ pub async fn tls_connect(
     addr: &str,
     port: u16,
     tls_config: &TlsConfiguration,
+    network_options: NetworkOptions,
 ) -> Result<Box<dyn N>, Error> {
-    let tcp = TcpStream::connect((addr, port)).await?;
+    let addrs = format!("{}:{}", addr, port);
+    let tcp = get_tcp_stream(addrs, network_options).await?;
 
     let tls: Box<dyn N> = match tls_config {
         #[cfg(feature = "use-rustls")]

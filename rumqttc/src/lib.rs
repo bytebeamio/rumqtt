@@ -415,7 +415,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
-    network_option: NetworkOptions,
+    network_options: NetworkOptions,
 }
 
 impl MqttOptions {
@@ -457,7 +457,7 @@ impl MqttOptions {
             last_will: None,
             conn_timeout: 5,
             manual_acks: false,
-            network_option: NetworkOptions::new(),
+            network_options: NetworkOptions::new(),
         }
     }
 
@@ -639,12 +639,12 @@ impl MqttOptions {
         self.manual_acks
     }
 
-    pub fn network_option(&self) -> NetworkOptions {
-        self.network_option
+    pub fn network_options(&self) -> NetworkOptions {
+        self.network_options
     }
 
-    pub fn set_network_option(&mut self, network_option: NetworkOptions) -> &mut Self {
-        self.network_option = network_option;
+    pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
+        self.network_options = network_options;
         self
     }
 }
