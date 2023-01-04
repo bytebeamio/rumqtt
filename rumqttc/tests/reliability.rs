@@ -78,8 +78,7 @@ async fn connection_should_timeout_on_time() {
 
     time::sleep(Duration::from_secs(1)).await;
     let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-    let network_options = NetworkOptions::new();
-    let mut eventloop = EventLoop::new(options, network_options, 5);
+    let mut eventloop = EventLoop::new(options, 5);
 
     let start = Instant::now();
     let o = eventloop.poll().await;
@@ -103,8 +102,7 @@ async fn idle_connection_triggers_pings_on_time() {
 
     // Create client eventloop and poll
     task::spawn(async move {
-        let network_options = NetworkOptions::new();
-        let mut eventloop = EventLoop::new(options, network_options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         run(&mut eventloop, false).await.unwrap();
     });
 
@@ -183,8 +181,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     options.set_keep_alive(Duration::from_secs(keep_alive));
 
     task::spawn(async move {
-        let network_options = NetworkOptions::new();
-        let mut eventloop = EventLoop::new(options, network_options, 5);
+        let mut eventloop = EventLoop::new(options, 5);
         run(&mut eventloop, false).await.unwrap();
     });
 
@@ -228,8 +225,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
 
     time::sleep(Duration::from_secs(1)).await;
     let start = Instant::now();
-    let network_options = NetworkOptions::new();
-    let mut eventloop = EventLoop::new(options, network_options, 5);
+    let mut eventloop = EventLoop::new(options, 5);
     loop {
         if let Err(e) = eventloop.poll().await {
             match e {
@@ -440,8 +436,7 @@ async fn next_poll_after_connect_failure_reconnects() {
     });
 
     time::sleep(Duration::from_secs(1)).await;
-    let network_options = NetworkOptions::new();
-    let mut eventloop = EventLoop::new(options, network_options, 5);
+    let mut eventloop = EventLoop::new(options, 5);
 
     match eventloop.poll().await {
         Err(ConnectionError::ConnectionRefused(ConnectReturnCode::BadUserNamePassword)) => (),
@@ -538,7 +533,7 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
     network_options.set_tcp_send_buffer_size(1024);
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
-    eventloop.network_options = network_options;
+    eventloop.set_network_options(network_options);
     task::spawn(async move {
         start_requests_with_payload(100, QoS::AtLeastOnce, 0, client, 5000).await;
         time::sleep(Duration::from_secs(10)).await;

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, NetworkOptions, Request};
+use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -49,8 +49,7 @@ impl AsyncClient {
     ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let network_options = NetworkOptions::new();
-        let eventloop = EventLoop::new(options, network_options, cap);
+        let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
 
         let client = AsyncClient { request_tx };

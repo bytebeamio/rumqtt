@@ -85,11 +85,7 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(
-        mqtt_options: MqttOptions,
-        network_options: NetworkOptions,
-        cap: usize,
-    ) -> EventLoop {
+    pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
@@ -104,7 +100,7 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
-            network_options,
+            network_options: NetworkOptions::new(),
         }
     }
 
@@ -253,14 +249,14 @@ impl EventLoop {
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(
-    options: &MqttOptions,
+    mqtt_options: &MqttOptions,
     network_options: NetworkOptions,
 ) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = network_connect(options, network_options).await?;
+    let mut network = network_connect(mqtt_options, network_options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(options, &mut network).await?;
+    let packet = mqtt_connect(mqtt_options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
