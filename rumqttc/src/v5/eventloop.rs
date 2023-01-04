@@ -1,6 +1,7 @@
 use super::framed::Network;
 use super::mqttbytes::{v5::*, *};
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
+use crate::eventloop::socket_connect;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
 
@@ -9,7 +10,6 @@ use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
 use async_tungstenite::tokio::connect_async_with_tls_connector;
 use flume::{bounded, Receiver, Sender};
-use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::select;
@@ -236,14 +236,17 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
     let network = match options.transport() {
         Transport::Tcp => {
-            let addr = options.broker_addr.as_str();
-            let port = options.port;
-            let socket = TcpStream::connect((addr, port)).await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            let addr = format!("{}:{}", options.broker_addr, options.port);
+            let stream = socket_connect(addr, options.network_options()).await?;
+            Network::new(stream, options.max_incoming_packet_size)
         }
         #[cfg(any(feature = "use-native-tls", feature = "use-rustls"))]
         Transport::Tls(tls_config) => {
-            let socket = tls::tls_connect(&options.broker_addr, options.port, &tls_config).await?;
+            let addr = format!("{}:{}", options.broker_addr, options.port);
+            let tcp_stream = socket_connect(addr, options.network_options()).await?;
+            let socket =
+                tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
+                    .await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]

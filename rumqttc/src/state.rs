@@ -52,6 +52,8 @@ pub struct MqttState {
     last_outgoing: Instant,
     /// Packet id of the last outgoing packet
     pub(crate) last_pkid: u16,
+    /// Packet id of the last acked publish
+    pub(crate) last_puback: u16,
     /// Number of outgoing inflight publishes
     pub(crate) inflight: u16,
     /// Maximum number of allowed inflight
@@ -83,6 +85,7 @@ impl MqttState {
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
             last_pkid: 0,
+            last_puback: 0,
             inflight: 0,
             max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
@@ -100,8 +103,11 @@ impl MqttState {
     /// Returns inflight outgoing packets and clears internal queues
     pub fn clean(&mut self) -> Vec<Request> {
         let mut pending = Vec::with_capacity(100);
-        // remove and collect pending publishes
-        for publish in self.outgoing_pub.iter_mut() {
+        let (first_half, second_half) = self
+            .outgoing_pub
+            .split_at_mut(self.last_puback as usize + 1);
+
+        for publish in second_half.iter_mut().chain(first_half) {
             if let Some(publish) = publish.take() {
                 let request = Request::Publish(publish);
                 pending.push(request);
@@ -124,6 +130,7 @@ impl MqttState {
         self.await_pingresp = false;
         self.collision_ping_count = 0;
         self.inflight = 0;
+        self.write.clear();
         pending
     }
 
@@ -216,6 +223,8 @@ impl MqttState {
             .outgoing_pub
             .get_mut(puback.pkid as usize)
             .ok_or(StateError::Unsolicited(puback.pkid))?;
+
+        self.last_puback = puback.pkid;
         let v = match publish.take() {
             Some(_) => {
                 self.inflight -= 1;
@@ -505,6 +514,7 @@ mod test {
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
     use crate::{Event, Incoming, Outgoing, Request};
+    use bytes::BufMut;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -799,5 +809,95 @@ mod test {
 
         // should ping
         mqtt.outgoing_ping().unwrap();
+    }
+
+    #[test]
+    fn state_should_be_clean_properly() {
+        let mut mqtt = build_mqttstate();
+        mqtt.write.put(&b"test"[..]);
+        // After this clean state.write should be empty
+        mqtt.clean();
+        assert!(mqtt.write.is_empty());
+    }
+
+    #[test]
+    fn clean_is_calculating_pending_correctly() {
+        let mut mqtt = build_mqttstate();
+
+        fn build_outgoing_pub() -> Vec<Option<Publish>> {
+            vec![
+                None,
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 1,
+                    payload: "".into(),
+                }),
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 2,
+                    payload: "".into(),
+                }),
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 3,
+                    payload: "".into(),
+                }),
+                None,
+                None,
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 6,
+                    payload: "".into(),
+                }),
+            ]
+        }
+
+        mqtt.outgoing_pub = build_outgoing_pub();
+        mqtt.last_puback = 3;
+        let requests = mqtt.clean();
+        let res = vec![6, 1, 2, 3];
+        for (req, idx) in requests.iter().zip(res) {
+            if let Request::Publish(publish) = req {
+                assert_eq!(publish.pkid, idx);
+            } else {
+                unreachable!()
+            }
+        }
+
+        mqtt.outgoing_pub = build_outgoing_pub();
+        mqtt.last_puback = 0;
+        let requests = mqtt.clean();
+        let res = vec![1, 2, 3, 6];
+        for (req, idx) in requests.iter().zip(res) {
+            if let Request::Publish(publish) = req {
+                assert_eq!(publish.pkid, idx);
+            } else {
+                unreachable!()
+            }
+        }
+
+        mqtt.outgoing_pub = build_outgoing_pub();
+        mqtt.last_puback = 6;
+        let requests = mqtt.clean();
+        let res = vec![1, 2, 3, 6];
+        for (req, idx) in requests.iter().zip(res) {
+            if let Request::Publish(publish) = req {
+                assert_eq!(publish.pkid, idx);
+            } else {
+                unreachable!()
+            }
+        }
     }
 }

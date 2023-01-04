@@ -1,7 +1,7 @@
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
 use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, Packet, Request, StateError};
+use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use crate::mqttbytes::v4::*;
@@ -10,15 +10,16 @@ use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
 use async_tungstenite::tokio::connect_async_with_tls_connector;
 use flume::{bounded, Receiver, Sender};
-use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
+use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
-use tokio::time::{self, error::Elapsed, Instant, Sleep};
+use tokio::time::{self, Instant, Sleep};
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
 use std::io;
+use std::net::SocketAddr;
 #[cfg(unix)]
 use std::path::Path;
 use std::pin::Pin;
@@ -30,8 +31,10 @@ use std::vec::IntoIter;
 pub enum ConnectionError {
     #[error("Mqtt state: {0}")]
     MqttState(#[from] StateError),
-    #[error("Timeout")]
-    Timeout(#[from] Elapsed),
+    #[error("Network timeout")]
+    NetworkTimeout,
+    #[error("Flush timeout")]
+    FlushTimeout,
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -54,7 +57,7 @@ pub enum ConnectionError {
 /// Eventloop with all the state of a connection
 pub struct EventLoop {
     /// Options of the current mqtt connection
-    pub options: MqttOptions,
+    pub mqtt_options: MqttOptions,
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
@@ -67,6 +70,7 @@ pub struct EventLoop {
     network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    pub network_options: NetworkOptions,
 }
 
 /// Events which can be yielded by the event loop
@@ -81,21 +85,22 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
+    pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
-        let max_inflight = options.inflight;
-        let manual_acks = options.manual_acks;
+        let max_inflight = mqtt_options.inflight;
+        let manual_acks = mqtt_options.manual_acks;
 
         EventLoop {
-            options,
+            mqtt_options,
             state: MqttState::new(max_inflight, manual_acks),
             requests_tx,
             requests_rx,
             pending,
             network: None,
             keepalive_timeout: None,
+            network_options: NetworkOptions::new(),
         }
     }
 
@@ -112,15 +117,19 @@ impl EventLoop {
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
-            let (network, connack) = time::timeout(
-                Duration::from_secs(self.options.connection_timeout()),
-                connect(&self.options),
+            let (network, connack) = match time::timeout(
+                Duration::from_secs(self.network_options.connection_timeout()),
+                connect(&self.mqtt_options, self.network_options),
             )
-            .await??;
+            .await
+            {
+                Ok(inner) => inner?,
+                Err(_) => return Err(ConnectionError::NetworkTimeout),
+            };
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
+                self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
             }
 
             return Ok(Event::Incoming(connack));
@@ -139,10 +148,11 @@ impl EventLoop {
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
-        let inflight_full = self.state.inflight >= self.options.inflight;
-        let throttle = self.options.pending_throttle;
+        let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
+        let throttle = self.mqtt_options.pending_throttle;
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
+        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -156,7 +166,10 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                network.flush(&mut self.state.write).await?;
+                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                    Ok(inner) => inner?,
+                    Err(_)=> return Err(ConnectionError::FlushTimeout),
+                };
                 Ok(self.state.events.pop_front().unwrap())
             },
             // Pull next request from user requests channel.
@@ -186,7 +199,10 @@ impl EventLoop {
             o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
-                    network.flush(&mut self.state.write).await?;
+                    match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                        Ok(inner) => inner?,
+                        Err(_)=> return Err(ConnectionError::FlushTimeout),
+                    };
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -195,20 +211,35 @@ impl EventLoop {
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                 self.state.handle_outgoing_packet(request)?;
-                network.flush(&mut self.state.write).await?;
+                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                    Ok(inner) => inner?,
+                    Err(_)=> return Err(ConnectionError::FlushTimeout),
+                };
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = self.keepalive_timeout.as_mut().unwrap() => {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
+                timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
-                network.flush(&mut self.state.write).await?;
+                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                    Ok(inner) => inner?,
+                    Err(_)=> return Err(ConnectionError::FlushTimeout),
+                };
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
+    }
+
+    pub fn network_options(&self) -> NetworkOptions {
+        self.network_options
+    }
+
+    pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
+        self.network_options = network_options;
+        self
     }
 }
 
@@ -217,12 +248,15 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(
+    mqtt_options: &MqttOptions,
+    network_options: NetworkOptions,
+) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = network_connect(options).await?;
+    let mut network = network_connect(mqtt_options, network_options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(options, &mut network).await?;
+    let packet = mqtt_connect(mqtt_options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
@@ -232,17 +266,60 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
     Ok((network, packet))
 }
 
-async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
+pub(crate) async fn socket_connect(
+    host: String,
+    network_options: NetworkOptions,
+) -> io::Result<TcpStream> {
+    let addrs = lookup_host(host).await?;
+    let mut last_err = None;
+
+    for addr in addrs {
+        let socket = match addr {
+            SocketAddr::V4(_) => TcpSocket::new_v4()?,
+            SocketAddr::V6(_) => TcpSocket::new_v6()?,
+        };
+
+        if let Some(send_buff_size) = network_options.tcp_send_buffer_size {
+            socket.set_send_buffer_size(send_buff_size).unwrap();
+        }
+        if let Some(recv_buffer_size) = network_options.tcp_recv_buffer_size {
+            socket.set_recv_buffer_size(recv_buffer_size).unwrap();
+        }
+
+        match socket.connect(addr).await {
+            Ok(s) => return Ok(s),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        };
+    }
+
+    Err(last_err.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "could not resolve to any address",
+        )
+    }))
+}
+
+async fn network_connect(
+    options: &MqttOptions,
+    network_options: NetworkOptions,
+) -> Result<Network, ConnectionError> {
     let network = match options.transport() {
         Transport::Tcp => {
-            let addr = options.broker_addr.as_str();
-            let port = options.port;
-            let socket = TcpStream::connect((addr, port)).await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            let addr = format!("{}:{}", options.broker_addr, options.port);
+            let tcp_stream = socket_connect(addr, network_options).await?;
+            Network::new(tcp_stream, options.max_incoming_packet_size)
         }
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
-            let socket = tls::tls_connect(&options.broker_addr, options.port, &tls_config).await?;
+            let addr = format!("{}:{}", options.broker_addr, options.port);
+            let tcp_stream = socket_connect(addr, network_options).await?;
+
+            let socket =
+                tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
+                    .await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]
