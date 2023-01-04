@@ -193,7 +193,10 @@ impl Router {
         }
 
         // A connection should not be scheduled multiple times
-        debug_assert!(self.scheduler.check_readyqueue_duplicates());
+        #[cfg(debug_assertions)]
+        if !self.scheduler.check_readyqueue_duplicates() {
+            warn!("Connection was scheduled multiple times in readyqueue, this shouldn't happen.");
+        }
 
         // Poll 100 connections which are ready in ready queue
         for _ in 0..100 {
