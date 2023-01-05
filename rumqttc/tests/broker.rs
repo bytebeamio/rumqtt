@@ -91,16 +91,19 @@ impl Broker {
     }
 
     /// Reads next packet from the stream
-    pub async fn read_packet(&mut self) -> Packet {
-        time::timeout(Duration::from_secs(30), async {
+    pub async fn read_packet(&mut self) -> Option<Packet> {
+        let _ = time::timeout(Duration::from_secs(30), async {
             let p = self.framed.readb(&mut self.incoming).await;
-            // println!("Broker read = {:?}", p);
-            p.unwrap();
+            if p.is_err() {
+                println!("Broker read = {:?}", p);
+            }
+            // Sometimes there can be a timeout on the connection so instead of unwrapping return
+            // an Option<Packet>
+            // p.unwrap()
         })
-        .await
-        .unwrap();
+        .await;
 
-        self.incoming.pop_front().unwrap()
+        self.incoming.pop_front()
     }
 
     /// Reads next packet from the stream

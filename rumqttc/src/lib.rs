@@ -348,6 +348,43 @@ impl From<ClientConfig> for TlsConfiguration {
     }
 }
 
+/// Provides a way to configure low level network connection configurations
+#[derive(Clone, Copy, Default)]
+pub struct NetworkOptions {
+    tcp_send_buffer_size: Option<u32>,
+    tcp_recv_buffer_size: Option<u32>,
+    conn_timeout: u64,
+}
+
+impl NetworkOptions {
+    pub fn new() -> Self {
+        NetworkOptions {
+            tcp_send_buffer_size: None,
+            tcp_recv_buffer_size: None,
+            conn_timeout: 5,
+        }
+    }
+
+    pub fn set_tcp_send_buffer_size(&mut self, size: u32) {
+        self.tcp_send_buffer_size = Some(size);
+    }
+
+    pub fn set_tcp_recv_buffer_size(&mut self, size: u32) {
+        self.tcp_recv_buffer_size = Some(size);
+    }
+
+    /// set connection timeout in secs
+    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
+        self.conn_timeout = timeout;
+        self
+    }
+
+    /// get timeout in secs
+    pub fn connection_timeout(&self) -> u64 {
+        self.conn_timeout
+    }
+}
+
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
 // are wrong (e.g empty client id) or aggressive (keep alive time)
@@ -386,8 +423,6 @@ pub struct MqttOptions {
     inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
-    /// Connection timeout
-    conn_timeout: u64,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
@@ -430,7 +465,6 @@ impl MqttOptions {
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
-            conn_timeout: 5,
             manual_acks: false,
         }
     }
@@ -591,17 +625,6 @@ impl MqttOptions {
         self.inflight
     }
 
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
-        self
-    }
-
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
-    }
-
     /// set manual acknowledgements
     pub fn set_manual_acks(&mut self, manual_acks: bool) -> &mut Self {
         self.manual_acks = manual_acks;
@@ -646,9 +669,6 @@ pub enum OptionError {
 
     #[error("Invalid inflight value.")]
     Inflight,
-
-    #[error("Invalid conn-timeout value.")]
-    ConnTimeout,
 
     #[error("Unknown option: {0}")]
     Unknown(String),
@@ -774,14 +794,6 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.set_inflight(inflight);
         }
 
-        if let Some(conn_timeout) = queries
-            .remove("conn_timeout_secs")
-            .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
-            .transpose()?
-        {
-            options.set_connection_timeout(conn_timeout);
-        }
-
         if let Some((opt, _)) = queries.into_iter().next() {
             return Err(OptionError::Unknown(opt.into_owned()));
         }
@@ -807,7 +819,6 @@ impl Debug for MqttOptions {
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
-            .field("conn_timeout", &self.conn_timeout)
             .field("manual_acks", &self.manual_acks)
             .finish()
     }
@@ -903,10 +914,6 @@ mod test {
         assert_eq!(
             err("mqtt://host:42?client_id=foo&inflight_num=foo"),
             OptionError::Inflight
-        );
-        assert_eq!(
-            err("mqtt://host:42?client_id=foo&conn_timeout_secs=foo"),
-            OptionError::ConnTimeout
         );
     }
 

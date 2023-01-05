@@ -1,5 +1,4 @@
 use tokio::net::TcpStream;
-
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
 #[cfg(feature = "use-rustls")]
@@ -174,11 +173,10 @@ pub async fn native_tls_connector(
 
 pub async fn tls_connect(
     addr: &str,
-    port: u16,
+    _port: u16,
     tls_config: &TlsConfiguration,
+    tcp: TcpStream,
 ) -> Result<Box<dyn N>, Error> {
-    let tcp = TcpStream::connect((addr, port)).await?;
-
     let tls: Box<dyn N> = match tls_config {
         #[cfg(feature = "use-rustls")]
         TlsConfiguration::Simple { .. } | TlsConfiguration::Rustls(_) => {
