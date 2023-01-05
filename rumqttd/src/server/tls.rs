@@ -59,6 +59,7 @@ pub enum Error {
     CertificateParse,
 }
 
+#[cfg(feature = "use-rustls")]
 /// Extract uid from certificate's subject organization field
 fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
