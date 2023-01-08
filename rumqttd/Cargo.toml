@@ -36,9 +36,9 @@ metrics-exporter-prometheus = "0.11.0"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["tokio-rustls", "rustls-pemfile", "x509-parser"]
-use-native-tls = ["tokio-native-tls" , "x509-parser"]
-websockets = ["tokio-tungstenite", "websocket-codec", "tokio-util", "futures-util"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:x509-parser"]
+use-native-tls = ["dep:tokio-native-tls" , "dep:x509-parser"]
+websockets = ["dep:tokio-tungstenite", "dep:websocket-codec", "dep:tokio-util", "dep:futures-util"]
 validate-tenant-prefix = []
 
 [dev-dependencies]
