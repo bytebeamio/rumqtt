@@ -232,20 +232,21 @@ impl Router {
         outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
+
+        let span = tracing::info_span!("incoming_connect", client_id);
+        let _guard = span.enter();
+
         // Check if same client_id already exists and if so, replace it with this new connection
         // ref: https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718032
 
         let connection_id = self.connection_map.iter().find(|(id, _)| id == &&client_id);
-        if let Some((client_id, connection_id)) = connection_id {
+        if let Some((_, connection_id)) = connection_id {
             debug!(
-                "Duplicate client_id: {}, dropping previous connection with connection_id: {}",
-                client_id, connection_id
+                "Duplicate client_id, dropping previous connection with connection_id: {}",
+                connection_id
             );
             self.handle_disconnection(*connection_id, true);
         }
-
-        let span = tracing::info_span!("incoming_connect", client_id);
-        let _guard = span.enter();
 
         if self.connections.len() >= self.config.max_connections {
             error!("no space for new connection");
