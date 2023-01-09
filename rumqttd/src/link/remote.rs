@@ -37,7 +37,7 @@ pub enum Error {
     #[error("ConnAck error {0}")]
     ConnectionAck(String),
     #[error("Authentication error")]
-    Authentication,
+    InvalidAuth,
     #[error("Channel try send error")]
     TrySend(#[from] TrySendError<(ConnectionId, Event)>),
     #[error("Link error = {0}")]
@@ -78,7 +78,7 @@ impl<P: Protocol> RemoteLink<P> {
             packet => return Err(Error::NotConnectPacket(packet)),
         };
 
-        // If configured in config file check for username and password
+        // If authentication is configured in config file check for username and password
         if let Some(auths) = &config.auth {
             // if authentication is configured and connect packet doesn't have login details return
             // an error
@@ -88,10 +88,10 @@ impl<P: Protocol> RemoteLink<P> {
                     .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
 
                 if !is_authenticated {
-                    return Err(Error::Authentication);
+                    return Err(Error::InvalidAuth);
                 }
             } else {
-                return Err(Error::Authentication);
+                return Err(Error::InvalidAuth);
             }
         }
 
