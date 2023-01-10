@@ -15,6 +15,7 @@ use crate::{
     ConnectionId, Filter, RouterConfig, RouterId,
 };
 
+mod alertlog;
 mod connection;
 mod graveyard;
 pub mod iobufs;
@@ -23,6 +24,7 @@ mod routing;
 mod scheduler;
 mod waiters;
 
+pub use alertlog::Alert;
 pub use connection::Connection;
 pub use routing::Router;
 pub use waiters::Waiters;
@@ -47,6 +49,8 @@ pub enum Event {
     NewMeter(flume::Sender<(ConnectionId, Meter)>),
     /// Request for meter
     GetMeter(GetMeter),
+    /// New Alert link
+    NewAlert(flume::Sender<(ConnectionId, Alert)>, Vec<Filter>),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog

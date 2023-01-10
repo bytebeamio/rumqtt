@@ -16,6 +16,7 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
+use super::alertlog::{Alert, AlertLog};
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
@@ -45,7 +46,11 @@ pub enum RouterError {
     UnsupportedQoS(QoS),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
+    #[error("Invalid client_id {0}")]
+    InvalidClientId(String),
 }
+
+type FilterWithOffsets = Vec<(Filter, Offset)>;
 
 pub struct Router {
     id: RouterId,
@@ -54,8 +59,10 @@ pub struct Router {
     config: RouterConfig,
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
-    /// List of connections
+    /// List of MetersLink's senders
     meters: Slab<Sender<(ConnectionId, Meter)>>,
+    /// List of AlertsLink's senders with their respective subscription Filter
+    alerts: Slab<(FilterWithOffsets, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
@@ -68,6 +75,8 @@ pub struct Router {
     obufs: Slab<Outgoing>,
     /// Data log of all the subscriptions
     datalog: DataLog,
+    /// Data log of all the alert subscriptions
+    alertlog: AlertLog,
     /// Acks log per connection
     ackslog: Slab<AckLog>,
     /// Scheduler to schedule connections
@@ -93,6 +102,7 @@ impl Router {
         let (router_tx, router_rx) = bounded(1000);
 
         let meters = Slab::with_capacity(10);
+        let alerts = Slab::with_capacity(10);
         let connections = Slab::with_capacity(config.max_connections);
         let ibufs = Slab::with_capacity(config.max_connections);
         let obufs = Slab::with_capacity(config.max_connections);
@@ -109,12 +119,14 @@ impl Router {
             config: config.clone(),
             graveyard: Graveyard::new(),
             meters,
+            alerts,
             connections,
             connection_map: Default::default(),
             subscription_map: Default::default(),
             ibufs,
             obufs,
-            datalog: DataLog::new(config).unwrap(),
+            datalog: DataLog::new(config.clone()).unwrap(),
+            alertlog: AlertLog::new(config).unwrap(),
             ackslog,
             scheduler: Scheduler::with_capacity(max_connections),
             notifications: VecDeque::with_capacity(1024),
@@ -206,6 +218,7 @@ impl Router {
             self.consume();
         }
 
+        self.send_all_alerts();
         Ok(())
     }
 
@@ -221,6 +234,7 @@ impl Router {
             } => self.handle_new_connection(connection, incoming, outgoing),
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::GetMeter(meter) => self.handle_get_meter(id, meter),
+            Event::NewAlert(tx, filters) => self.handle_new_alert(tx, filters),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
@@ -238,6 +252,10 @@ impl Router {
         outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
+        if let Err(err) = validate_clientid(&client_id) {
+            error!("Invalid client_id: {}", err);
+            return;
+        };
 
         let span = tracing::info_span!("incoming_connect", client_id);
         let _guard = span.enter();
@@ -306,6 +324,16 @@ impl Router {
             .check_tracker_duplicates(connection_id)
             .is_none());
 
+        let alert = Alert::Connect(client_id.clone());
+        match append_to_alertlog(alert, &mut self.alertlog) {
+            Ok(_offset) => {}
+            Err(e) => {
+                error!(
+                    reason = ?e, "Failed to append to alertlog"
+                );
+            }
+        }
+
         let ack = ConnAck {
             session_present: !clean_session && previous_session,
             code: ConnectReturnCode::Success,
@@ -326,6 +354,17 @@ impl Router {
         let _ = tx.try_send((meter_id, Meter::Router(self.id, self.router_meters.clone())));
     }
 
+    fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filters: Vec<Filter>) {
+        let mut filter_with_offsets = Vec::new();
+        for filter in filters {
+            let offset = self.prepare_alert_filter(filter.to_string());
+            filter_with_offsets.push((filter, offset));
+        }
+        let alert_id = self.alerts.insert((filter_with_offsets, tx));
+        let (_, tx) = self.alerts.get(alert_id).unwrap();
+        let _ = tx.try_send((alert_id, Alert::Connect("AlertsLink".to_owned())));
+    }
+
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
@@ -336,6 +375,15 @@ impl Router {
                 return;
             }
         };
+        let alert = Alert::Disconnect(client_id.clone());
+        match append_to_alertlog(alert, &mut self.alertlog) {
+            Ok(_offset) => {}
+            Err(e) => {
+                error!(
+                    reason = ?e, "Failed to append to alertlog"
+                );
+            }
+        }
 
         let span = tracing::info_span!("incoming_disconnect", client_id);
         let _guard = span.enter();
@@ -490,7 +538,7 @@ impl Router {
                     // Try to append publish to commitlog
                     match append_to_commitlog(
                         id,
-                        publish,
+                        publish.clone(),
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
@@ -518,32 +566,33 @@ impl Router {
 
                     // println!("{}, {}", self.router_metrics.total_publishes, pkid);
                 }
-                Packet::Subscribe(s, _) => {
+                Packet::Subscribe(subscribe, _) => {
                     let mut return_codes = Vec::new();
-                    let pkid = s.pkid;
+                    let pkid = subscribe.pkid;
                     // let len = s.len();
 
-                    for f in s.filters {
-                        let span = tracing::info_span!("subscribe", topic = f.path, pkid = s.pkid);
+                    for f in &subscribe.filters {
+                        let span =
+                            tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
 
                         info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if let Err(e) = validate_subscription(connection, &f) {
+                        if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
 
                             disconnect = true;
                             break;
                         }
 
-                        let filter = f.path;
+                        let filter = &f.path;
                         let qos = f.qos;
 
-                        let (idx, cursor) = self.datalog.next_native_offset(&filter);
+                        let (idx, cursor) = self.datalog.next_native_offset(filter);
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
                         self.datalog
-                            .handle_retained_messages(&filter, &mut self.notifications);
+                            .handle_retained_messages(filter, &mut self.notifications);
 
                         let code = match qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
@@ -552,6 +601,18 @@ impl Router {
                         };
 
                         return_codes.push(code);
+                    }
+
+                    let alert = Alert::Subscribe(client_id.clone(), subscribe);
+                    match append_to_alertlog(alert, &mut self.alertlog) {
+                        Ok(_offset) => {
+                            new_data = true;
+                        }
+                        Err(e) => {
+                            error!(
+                                reason = ?e, "Failed to append to alertlog"
+                            );
+                        }
                     }
 
                     // let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
@@ -565,12 +626,12 @@ impl Router {
                 Packet::Unsubscribe(unsubscribe, _) => {
                     let connection = self.connections.get_mut(id).unwrap();
                     let pkid = unsubscribe.pkid;
-                    for filter in unsubscribe.filters {
+                    for filter in &unsubscribe.filters {
                         let span = tracing::info_span!("unsubscribe", topic = filter, pkid);
                         let _guard = span.enter();
 
                         debug!("Removing subscription on filter {}", filter);
-                        if let Some(connection_ids) = self.subscription_map.get_mut(&filter) {
+                        if let Some(connection_ids) = self.subscription_map.get_mut(filter) {
                             let removed = connection_ids.remove(&id);
                             if !removed {
                                 continue;
@@ -579,7 +640,7 @@ impl Router {
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                             meter.subscribe_count -= 1;
 
-                            if !connection.subscriptions.remove(&filter) {
+                            if !connection.subscriptions.remove(filter) {
                                 warn!(
                                     pkid = unsubscribe.pkid,
                                     "Unsubscribe failed as filter was not subscribed previously"
@@ -594,9 +655,20 @@ impl Router {
                             };
                             let ackslog = self.ackslog.get_mut(id).unwrap();
                             ackslog.unsuback(unsuback);
-                            self.scheduler.untrack(id, &filter);
-                            self.datalog.remove_waiters_for_id(id, &filter);
+                            self.scheduler.untrack(id, filter);
+                            self.datalog.remove_waiters_for_id(id, filter);
                             force_ack = true;
+                        }
+                    }
+                    let alert = Alert::Unsubscribe(client_id.clone(), unsubscribe);
+                    match append_to_alertlog(alert, &mut self.alertlog) {
+                        Ok(_offset) => {
+                            new_data = true;
+                        }
+                        Err(e) => {
+                            error!(
+                                reason = ?e, "Failed to append to alertlog"
+                            );
                         }
                     }
                 }
@@ -689,6 +761,17 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
 
+                    let alert = Alert::Disconnect(client_id);
+                    match append_to_alertlog(alert, &mut self.alertlog) {
+                        Ok(_offset) => {
+                            new_data = true;
+                        }
+                        Err(e) => {
+                            error!(
+                                reason = ?e, "Failed to append to alertlog"
+                            );
+                        }
+                    }
                     disconnect = true;
                     execute_will = false;
                     break;
@@ -724,6 +807,12 @@ impl Router {
         if disconnect {
             self.handle_disconnection(id, execute_will);
         }
+    }
+
+    /// Apply filter and prepare this connection to receive subscription data
+    fn prepare_alert_filter(&mut self, filter: String) -> Offset {
+        let (_, offset) = self.alertlog.next_native_offset(&filter);
+        offset
     }
 
     /// Apply filter and prepare this connection to receive subscription data
@@ -912,6 +1001,51 @@ impl Router {
             }
         };
     }
+    fn send_all_alerts(&mut self) {
+        let span = tracing::info_span!("outgoing_alert");
+        let _guard = span.enter();
+
+        for (alert_id, (filter_with_offsets, alert_sender)) in &mut self.alerts {
+            for (filter, offset) in filter_with_offsets {
+                trace!("Reading from alertlog: {}", filter);
+                let (alerts, next_offset) = self
+                    .alertlog
+                    .native_readv(filter.to_string(), *offset, 100)
+                    .unwrap();
+                for alert in alerts {
+                    let res = alert_sender.try_send((alert_id, alert.0));
+                    if res.is_err() {
+                        error!(
+                        "Cannot send Alert to the channel, Error: {:?}. Dropping alerts for alert_id: {}",
+                        res, alert_id
+                    );
+                    }
+                }
+                *offset = next_offset;
+            }
+        }
+    }
+}
+
+fn append_to_alertlog(alert: Alert, alertlog: &mut AlertLog) -> Result<Offset, RouterError> {
+    let topic = alert.topic();
+
+    let filter_idxs = alertlog.matches(&topic).expect("Should never be None");
+
+    let mut o = (0, 0);
+    for filter_idx in filter_idxs {
+        let alertlog_entry = alertlog.native.get_mut(filter_idx).unwrap();
+        let (offset, filter) = alertlog_entry.append(alert.clone());
+        debug!(
+            "Appended to alertlog: {}[{}, {})",
+            filter, offset.0, offset.1,
+        );
+
+        o = offset;
+    }
+
+    // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
+    Ok(o)
 }
 
 fn append_to_commitlog(
@@ -1228,6 +1362,16 @@ fn validate_subscription(
 
     if filter.path.starts_with('$') {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
+    }
+
+    Ok(())
+}
+
+fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
+    trace!("Validating Client ID = {}", client_id,);
+    // Ensure that only client devices of the tenant can
+    if "+$#/".chars().any(|c| client_id.contains(c)) {
+        return Err(RouterError::InvalidClientId(client_id.to_string()));
     }
 
     Ok(())

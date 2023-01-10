@@ -1,4 +1,5 @@
 // pub mod bridge;
+pub mod alerts;
 pub mod console;
 pub mod local;
 pub mod meters;
