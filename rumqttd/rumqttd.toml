@@ -24,6 +24,10 @@ next_connection_delay_ms = 1
     max_inflight_count = 500
     max_inflight_size = 1024
     dynamic_filters = true
+ #   auth = { user1 = "p@ssw0rd", user2 = "password" }
+ #      [v4.1.connections.auth]
+ #      user1 = "p@ssw0rd"
+ #      user2 = "password"
 
 # Example configuration for a TLS enabled server
 [v4.2]

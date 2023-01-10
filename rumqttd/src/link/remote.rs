@@ -36,6 +36,8 @@ pub enum Error {
     NotConnectionAck,
     #[error("ConnAck error {0}")]
     ConnectionAck(String),
+    #[error("Authentication error")]
+    InvalidAuth,
     #[error("Channel try send error")]
     TrySend(#[from] TrySendError<(ConnectionId, Event)>),
     #[error("Link error = {0}")]
@@ -71,10 +73,27 @@ impl<P: Protocol> RemoteLink<P> {
         })
         .await??;
 
-        let (connect, lastwill) = match packet {
-            Packet::Connect(connect, _, lastwill, ..) => (connect, lastwill),
+        let (connect, lastwill, login) = match packet {
+            Packet::Connect(connect, _, lastwill, _, login) => (connect, lastwill, login),
             packet => return Err(Error::NotConnectPacket(packet)),
         };
+
+        // If authentication is configured in config file check for username and password
+        if let Some(auths) = &config.auth {
+            // if authentication is configured and connect packet doesn't have login details return
+            // an error
+            if let Some(login) = login {
+                let is_authenticated = auths
+                    .iter()
+                    .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
+
+                if !is_authenticated {
+                    return Err(Error::InvalidAuth);
+                }
+            } else {
+                return Err(Error::InvalidAuth);
+            }
+        }
 
         // When keep_alive feature is disabled client can live forever, which is not good in
         // distributed broker context so currenlty we don't allow it.
