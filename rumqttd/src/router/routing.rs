@@ -193,7 +193,13 @@ impl Router {
         }
 
         // A connection should not be scheduled multiple times
-        debug_assert!(self.scheduler.check_readyqueue_duplicates());
+        #[cfg(debug_assertions)]
+        if let Some(readyqueue) = self.scheduler.check_readyqueue_duplicates() {
+            warn!(
+                "Connection was scheduled multiple times in readyqueue: {:?}",
+                readyqueue
+            );
+        }
 
         // Poll 100 connections which are ready in ready queue
         for _ in 0..100 {
@@ -283,7 +289,10 @@ impl Router {
         assert_eq!(self.scheduler.add(tracker), connection_id);
 
         // Check if there are multiple data requests on same filter.
-        debug_assert!(self.scheduler.check_tracker_duplicates(connection_id));
+        debug_assert!(self
+            .scheduler
+            .check_tracker_duplicates(connection_id)
+            .is_none());
 
         let ack = ConnAck {
             session_present: !clean_session && previous_session,
@@ -741,7 +750,7 @@ impl Router {
 
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
-            debug_assert!(self.scheduler.check_tracker_duplicates(id))
+            debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
