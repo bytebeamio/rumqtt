@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.18.0"
+version = "0.19.0"
 description = "An efficient and robust mqtt client for your connected devices"
 license = "Apache-2.0"
 repository = "https://github.com/bytebeamio/rumqtt"
@@ -15,9 +15,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["tokio-rustls", "rustls-pemfile", "rustls-native-certs"]
-use-native-tls = ["tokio-native-tls", "native-tls"]
-websocket = ["async-tungstenite", "ws_stream_tungstenite", "http"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:rustls-native-certs"]
+use-native-tls = ["dep:tokio-native-tls", "dep:native-tls"]
+websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 
 [dependencies]
 futures = "0.3"
@@ -31,7 +31,7 @@ thiserror = "1"
 # Optional
 # rustls
 tokio-rustls = { version = "0.23", optional = true }
-rustls-pemfile = { version = "0.3", optional = true }
+rustls-pemfile = { version = "1", optional = true }
 rustls-native-certs = { version = "0.6", optional = true }
 # websockets
 async-tungstenite = { version = "0.16", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }

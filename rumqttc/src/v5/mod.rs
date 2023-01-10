@@ -9,7 +9,7 @@ mod state;
 
 #[cfg(feature = "use-rustls")]
 pub use crate::tls::Error as TlsError;
-use crate::Transport;
+use crate::{NetworkOptions, Transport};
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
@@ -81,6 +81,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    network_options: NetworkOptions,
 }
 
 impl MqttOptions {
@@ -122,6 +123,7 @@ impl MqttOptions {
             last_will: None,
             conn_timeout: 5,
             manual_acks: false,
+            network_options: NetworkOptions::new(),
         }
     }
 
@@ -301,6 +303,15 @@ impl MqttOptions {
     /// get manual acknowledgements
     pub fn manual_acks(&self) -> bool {
         self.manual_acks
+    }
+
+    pub fn network_options(&self) -> NetworkOptions {
+        self.network_options
+    }
+
+    pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
+        self.network_options = network_options;
+        self
     }
 }
 

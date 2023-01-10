@@ -59,6 +59,7 @@ pub enum Error {
     CertificateParse,
 }
 
+#[cfg(feature = "use-rustls")]
 /// Extract uid from certificate's subject organization field
 fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
@@ -130,14 +131,15 @@ impl TLSAcceptor {
             #[cfg(feature = "use-native-tls")]
             TLSAcceptor::NativeTLS { acceptor } => {
                 let stream = acceptor.accept(stream).await?;
-                let session = stream.get_ref();
-                let peer_certificate = session
-                    .peer_certificate()?
-                    .ok_or(Error::NoPeerCertificate)?
-                    .to_der()?;
-                let tenant_id = extract_tenant_id(&peer_certificate)?;
+                // native-tls doesn't support client certificate verification
+                // let session = stream.get_ref();
+                // let peer_certificate = session
+                //     .peer_certificate()?
+                //     .ok_or(Error::NoPeerCertificate)?
+                //     .to_der()?;
+                // let tenant_id = extract_tenant_id(&peer_certificate)?;
                 let network = Box::new(stream);
-                Ok((tenant_id, network))
+                Ok((None, network))
             }
         }
     }

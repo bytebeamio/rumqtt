@@ -205,7 +205,13 @@ impl Router {
         }
 
         // A connection should not be scheduled multiple times
-        debug_assert!(self.scheduler.check_readyqueue_duplicates());
+        #[cfg(debug_assertions)]
+        if let Some(readyqueue) = self.scheduler.check_readyqueue_duplicates() {
+            warn!(
+                "Connection was scheduled multiple times in readyqueue: {:?}",
+                readyqueue
+            );
+        }
 
         // Poll 100 connections which are ready in ready queue
         for _ in 0..100 {
@@ -254,6 +260,18 @@ impl Router {
         let span = tracing::info_span!("incoming_connect", client_id);
         let _guard = span.enter();
 
+        // Check if same client_id already exists and if so, replace it with this new connection
+        // ref: https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718032
+
+        let connection_id = self.connection_map.get(&client_id);
+        if let Some(connection_id) = connection_id {
+            debug!(
+                "Duplicate client_id, dropping previous connection with connection_id: {}",
+                connection_id
+            );
+            self.handle_disconnection(*connection_id, true);
+        }
+
         if self.connections.len() >= self.config.max_connections {
             error!("no space for new connection");
             // let ack = ConnectionAck::Failure("No space for new connection".to_owned());
@@ -301,7 +319,10 @@ impl Router {
         assert_eq!(self.scheduler.add(tracker), connection_id);
 
         // Check if there are multiple data requests on same filter.
-        debug_assert!(self.scheduler.check_tracker_duplicates(connection_id));
+        debug_assert!(self
+            .scheduler
+            .check_tracker_duplicates(connection_id)
+            .is_none());
 
         let alert = Alert::Connect(client_id.clone());
         match append_to_alertlog(alert, &mut self.alertlog) {
@@ -830,7 +851,7 @@ impl Router {
 
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
-            debug_assert!(self.scheduler.check_tracker_duplicates(id))
+            debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
