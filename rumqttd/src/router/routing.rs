@@ -242,6 +242,18 @@ impl Router {
         let span = tracing::info_span!("incoming_connect", client_id);
         let _guard = span.enter();
 
+        // Check if same client_id already exists and if so, replace it with this new connection
+        // ref: https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718032
+
+        let connection_id = self.connection_map.get(&client_id);
+        if let Some(connection_id) = connection_id {
+            debug!(
+                "Duplicate client_id, dropping previous connection with connection_id: {}",
+                connection_id
+            );
+            self.handle_disconnection(*connection_id, true);
+        }
+
         if self.connections.len() >= self.config.max_connections {
             error!("no space for new connection");
             // let ack = ConnectionAck::Failure("No space for new connection".to_owned());
