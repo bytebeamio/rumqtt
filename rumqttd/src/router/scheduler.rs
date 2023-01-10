@@ -197,24 +197,33 @@ impl Tracker {
 
 // Methods to check duplicates in trackers and schedulers
 impl Scheduler {
-    pub fn check_readyqueue_duplicates(&self) -> bool {
+    // Return a `Some` if duplicate were found, otherwise `None`
+    pub fn check_readyqueue_duplicates(&self) -> Option<&VecDeque<ConnectionId>> {
         let readyqueue = &self.readyqueue;
         // In _worst_ case where all elements are unique, the size of uniq will be same as len of readyqueue
         let mut uniq = HashSet::with_capacity(readyqueue.len());
-        readyqueue.iter().all(|x| uniq.insert(x))
+
+        let all_uniq = readyqueue.iter().all(|x| uniq.insert(x));
+
+        if !all_uniq {
+            Some(readyqueue)
+        } else {
+            None
+        }
     }
 
-    pub fn check_tracker_duplicates(&self, id: ConnectionId) -> bool {
+    // Return a `Some` if duplicate were found, otherwise `None`
+    pub fn check_tracker_duplicates(&self, id: ConnectionId) -> Option<&VecDeque<DataRequest>> {
         let tracker = self.trackers.get(id).unwrap();
         let tracker_data_req = tracker.get_data_requests();
         let mut uniq = HashSet::with_capacity(tracker_data_req.len());
 
-        let no_duplicates = tracker_data_req.iter().all(|x| uniq.insert(x.filter_idx));
+        let all_uniq = tracker_data_req.iter().all(|x| uniq.insert(x.filter_idx));
 
-        if !no_duplicates {
-            dbg!(&tracker.data_requests);
+        if !all_uniq {
+            Some(&tracker.data_requests)
+        } else {
+            None
         }
-
-        no_duplicates
     }
 }
