@@ -46,3 +46,19 @@ Update config files for rumqttd and rumqttc with the generated certificates:
 You may also use [certgen](https://github.com/minio/certgen), [tls-gen](https://github.com/rabbitmq/tls-gen) or [openssl](https://www.baeldung.com/openssl-self-signed-cert) to generate self-signed certificates, though we recommend using provision.
 
 **NOTE:** Mount the folders containing the generated tls certificates and the proper config file(with absolute paths to the certificate) to enable tls connections with rumqttd running inside docker.
+
+## Dynamically update log filter
+
+Log levels and filters can by dynamically updated without restarting broker.
+To update the filter, we can send a POST request to `/logs` endpoint, which is exposed by our console, with new filter as plaintext in body.
+For example, to get logs of rumqttd ( running locally and expose console at port 3030 ) with log level "debug", we can do:
+```sh
+curl -H "Content-Type: text/plain" -d "rumqttd=debug" 0.0.0.0:3030/logs
+```
+
+The general syntax for filter is:
+```
+target[span{field=value}]=level
+```
+So filter for logs of client with id "pub-001" which has occurred any any span will be `[{client_id=pub-001}]`. Know more about it [here](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/struct.EnvFilter.html#directives)
+

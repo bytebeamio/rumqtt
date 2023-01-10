@@ -1,12 +1,17 @@
 ### Unreleased
 ---
-
 rumqttc
 ---
 - `options` in `Eventloop` now is called `mqtt_options` (#545)
 - `ConnectionError` now has specific variant for type of `Timeout`, `FlushTimeout` and `NetworkTimeout` instead of generic `Timeout` for both (#545)
 - `conn_timeout` is moved into `NetworkOptions` (#545)
 - `NetworkOptions` added to provide a way to configure low level network configurations (#545)
+
+rumqttd
+---
+- Don't allow client's with empty client_id (#546)
+- Disconnect existing client on a new connection with similar client_id (#546)
+- Skip client certificate verification when using native-tls because it doesn't support it (#550)
 
 ### R19
 ---

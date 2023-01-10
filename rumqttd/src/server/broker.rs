@@ -332,9 +332,15 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 }
             };
 
-            info!(
-                name=?self.config.name, ?addr, count,"accept"
-            );
+            if let Some(tenant_id) = tenant_id.clone() {
+                info!(
+                    name=?self.config.name, ?addr, count, tenant_id, "accept"
+                );
+            } else {
+                info!(
+                    name=?self.config.name, ?addr, count, "accept"
+                );
+            }
 
             let config = config.clone();
             let router_tx = self.router_tx.clone();
@@ -380,13 +386,14 @@ async fn remote<P: Protocol>(
 ) {
     let network = Network::new(stream, config.max_payload_size, 100, protocol);
     // Start the link
-    let mut link = match RemoteLink::new(config, router_tx.clone(), tenant_id, network).await {
-        Ok(l) => l,
-        Err(e) => {
-            error!(error=?e, "Remote link error");
-            return;
-        }
-    };
+    let mut link =
+        match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(error=?e, "Remote link error");
+                return;
+            }
+        };
 
     let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
@@ -401,12 +408,20 @@ async fn remote<P: Protocol>(
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(remote::Error::Link(e)) => {
-            error!(error=?e, "router-drop");
+            if let Some(tenant_id) = tenant_id {
+                error!(error=?e, tenant_id, "router-drop");
+            } else {
+                error!(error=?e, "router-drop");
+            }
             return;
         }
         // Any other error
         Err(e) => {
-            error!(error=?e,"Disconnected!!");
+            if let Some(tenant_id) = tenant_id {
+                error!(error=?e, tenant_id, "Disconnected!!");
+            } else {
+                error!(error=?e,"Disconnected!!");
+            }
             execute_will = true;
         }
     };
