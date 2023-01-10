@@ -21,7 +21,7 @@ websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 
 [dependencies]
 futures = "0.3"
-tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
+tokio = { version = "1.23", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
 log = "0.4"
 pollster = "0.2"
