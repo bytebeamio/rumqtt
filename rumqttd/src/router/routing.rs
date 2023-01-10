@@ -239,8 +239,8 @@ impl Router {
         // Check if same client_id already exists and if so, replace it with this new connection
         // ref: https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718032
 
-        let connection_id = self.connection_map.iter().find(|(id, _)| id == &&client_id);
-        if let Some((_, connection_id)) = connection_id {
+        let connection_id = self.connection_map.get(&client_id);
+        if let Some(connection_id) = connection_id {
             debug!(
                 "Duplicate client_id, dropping previous connection with connection_id: {}",
                 connection_id
