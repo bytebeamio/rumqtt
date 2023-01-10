@@ -12,6 +12,7 @@ rumqttd
 - Don't allow client's with empty client_id (#546)
 - Disconnect existing client on a new connection with similar client_id (#546)
 - Skip client certificate verification when using native-tls because it doesn't support it (#550)
+- Add basic username and password authentication (#553)
 
 ### R19
 ---
