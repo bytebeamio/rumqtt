@@ -10,7 +10,7 @@ categories = ["network-programming"]
 repository = "https://github.com/bytebeamio/rumqtt/"
 
 [dependencies]
-tokio = { version = "1.4.0", features = ["rt", "time", "net", "io-util", "macros"]}
+tokio = { version = "1.0", features = ["rt", "time", "net", "io-util", "macros"]}
 serde = { version = "1.0.125", features = ["derive"] }
 serde_json = "1.0.66"
 bytes = { version = "1", features = ["serde"] }
@@ -42,7 +42,6 @@ websockets = ["dep:tokio-tungstenite", "dep:websocket-codec", "dep:tokio-util", 
 validate-tenant-prefix = []
 
 [dev-dependencies]
-tokio = { version = "1.4.0", features = ["rt", "time", "net", "io-util", "macros", "sync"]}
 pretty_env_logger = "0.4.0"
 config = "0.13"
 pretty_assertions = "1.3.0"

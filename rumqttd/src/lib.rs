@@ -89,6 +89,7 @@ pub struct ConnectionSettings {
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
     pub max_inflight_size: usize,
+    pub auth: Option<HashMap<String, String>>,
     #[serde(default)]
     pub dynamic_filters: bool,
 }
