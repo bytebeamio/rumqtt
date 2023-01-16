@@ -1,9 +1,11 @@
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::time;
+
+use std::{io, time::Duration};
 
 use crate::mqttbytes::{self, v4::*};
 use crate::Incoming;
-use std::io;
 
 /// Errors while handling network
 #[derive(Debug, thiserror::Error)]
@@ -12,6 +14,8 @@ pub enum NetworkError {
     Io(#[from] io::Error),
     #[error("Mqtt: {0}")]
     Mqtt(#[from] mqttbytes::Error),
+    #[error("Flush timeout")]
+    FlushTimeout,
 }
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -26,16 +30,23 @@ pub struct Network {
     max_incoming_size: usize,
     /// Maximum readv count
     pub(crate) max_readb_count: usize,
+    /// Duration within which a network flush must resolve
+    flush_timeout: Duration,
 }
 
 impl Network {
-    pub fn new(socket: impl N + 'static, max_incoming_size: usize) -> Network {
+    pub fn new(
+        socket: impl N + 'static,
+        max_incoming_size: usize,
+        flush_timeout: Duration,
+    ) -> Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
             max_readb_count: 10,
+            flush_timeout,
         }
     }
 
@@ -93,12 +104,16 @@ impl Network {
         Ok(len)
     }
 
-    pub async fn flush(&mut self, write: &mut BytesMut) -> io::Result<()> {
+    /// Flush write buffer contents to network within a timeout period
+    pub async fn flush(&mut self, write: &mut BytesMut) -> Result<(), NetworkError> {
         if write.is_empty() {
             return Ok(());
         }
 
-        self.socket.write_all(&write[..]).await?;
+        time::timeout(self.flush_timeout, self.socket.write_all(&write[..]))
+            .await
+            .map_err(|_| NetworkError::FlushTimeout)??;
+
         write.clear();
         Ok(())
     }

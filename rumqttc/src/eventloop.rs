@@ -33,8 +33,6 @@ pub enum ConnectionError {
     MqttState(#[from] StateError),
     #[error("Network timeout")]
     NetworkTimeout,
-    #[error("Flush timeout")]
-    FlushTimeout,
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -154,7 +152,6 @@ impl EventLoop {
         let throttle = self.mqtt_options.pending_throttle;
         let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
-        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -168,10 +165,7 @@ impl EventLoop {
             o = self.state.readb(network) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
+                network.flush(&mut self.state.write).await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // Pull next request from user requests channel.
@@ -201,10 +195,7 @@ impl EventLoop {
             o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
-                    match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
-                        Ok(inner) => inner?,
-                        Err(_)=> return Err(ConnectionError::FlushTimeout),
-                    };
+                    network.flush(&mut self.state.write).await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -213,10 +204,7 @@ impl EventLoop {
             // this branch when done with all the pending packets
             Some(request) = next_pending(throttle, &mut self.pending), if pending => {
                 self.state.handle_outgoing_packet(request)?;
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
+                network.flush(&mut self.state.write).await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
@@ -226,10 +214,7 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
+                network.flush(&mut self.state.write).await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -308,11 +293,16 @@ async fn network_connect(
     options: &MqttOptions,
     network_options: NetworkOptions,
 ) -> Result<Network, ConnectionError> {
+    let network_timeout = Duration::from_secs(network_options.connection_timeout());
     let network = match options.transport() {
         Transport::Tcp => {
             let addr = format!("{}:{}", options.broker_addr, options.port);
             let tcp_stream = socket_connect(addr, network_options).await?;
-            Network::new(tcp_stream, options.max_incoming_packet_size)
+            Network::new(
+                tcp_stream,
+                options.max_incoming_packet_size,
+                network_timeout,
+            )
         }
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
@@ -322,13 +312,13 @@ async fn network_connect(
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
                     .await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            Network::new(socket, options.max_incoming_packet_size, network_timeout)
         }
         #[cfg(unix)]
         Transport::Unix => {
             let file = options.broker_addr.as_str();
             let socket = UnixStream::connect(Path::new(file)).await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            Network::new(socket, options.max_incoming_packet_size, network_timeout)
         }
         #[cfg(feature = "websocket")]
         Transport::Ws => {
@@ -340,7 +330,11 @@ async fn network_connect(
 
             let (socket, _) = connect_async(request).await?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                network_timeout,
+            )
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
@@ -354,7 +348,11 @@ async fn network_connect(
 
             let (socket, _) = connect_async_with_tls_connector(request, Some(connector)).await?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                network_timeout,
+            )
         }
     };
 
