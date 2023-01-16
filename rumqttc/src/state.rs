@@ -1,12 +1,11 @@
-use crate::{Event, Incoming, Outgoing, Request};
-
-use crate::mqttbytes::v4::*;
-use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
+
 use std::collections::VecDeque;
 use std::{io, time::Instant};
 
 use crate::framed::{Network, NetworkError};
+use crate::mqttbytes::{self, v4::*, *};
+use crate::{Event, Incoming, Outgoing, Request};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]

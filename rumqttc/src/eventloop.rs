@@ -1,10 +1,3 @@
-use crate::framed::{Network, NetworkError};
-#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-use crate::tls;
-use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError, Transport};
-use crate::{MqttOptions, Outgoing};
-
-use crate::mqttbytes::v4::*;
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
@@ -18,13 +11,16 @@ use tokio::time::{self, Instant, Sleep};
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
-use std::io;
-use std::net::SocketAddr;
 #[cfg(unix)]
 use std::path::Path;
-use std::pin::Pin;
-use std::time::Duration;
-use std::vec::IntoIter;
+use std::{io, net::SocketAddr, pin::Pin, time::Duration, vec::IntoIter};
+
+use crate::framed::{Network, NetworkError};
+use crate::mqttbytes::v4::*;
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+use crate::tls;
+use crate::{Incoming, MqttOptions, MqttState, NetworkOptions, Outgoing, Packet};
+use crate::{Request, StateError, Transport};
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]

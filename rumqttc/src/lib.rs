@@ -112,21 +112,21 @@ mod state;
 mod tls;
 pub mod v5;
 
-pub use client::{
-    AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
-};
-pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use mqttbytes::v4::*;
-pub use mqttbytes::*;
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
-pub use state::{MqttState, StateError};
-#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{Certificate, ClientConfig, RootCertStore};
+
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
+pub use client::{RecvError, RecvTimeoutError, TryRecvError};
+pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use framed::NetworkError;
+pub use mqttbytes::{v4::*, *};
+pub use state::{MqttState, StateError};
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+pub use tls::Error as TlsError;
 
 pub type Incoming = Packet;
 
