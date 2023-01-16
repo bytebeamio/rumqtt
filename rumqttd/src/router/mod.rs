@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     protocol::{
-        ConnAck, PingResp, PubAck, PubAckProperties, PubComp, PubCompProperties, PubRec,
+        ConnAck, Packet, PingResp, PubAck, PubAckProperties, PubComp, PubCompProperties, PubRec,
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
@@ -88,6 +88,34 @@ pub enum Notification {
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
+}
+
+type MaybePacket = Option<Packet>;
+
+// We either get a Packet to write to buffer or we unschedule which is represented as `None`
+impl From<Notification> for MaybePacket {
+    fn from(notification: Notification) -> Self {
+        let packet: Packet;
+        match notification {
+            Notification::Forward(forward) => {
+                packet = Packet::Publish(forward.publish, None);
+            }
+            Notification::DeviceAck(ack) => match ack {
+                Ack::ConnAck(_, connack) => packet = Packet::ConnAck(connack, None),
+                Ack::PubAck(puback) => packet = Packet::PubAck(puback, None),
+                Ack::SubAck(suback) => packet = Packet::SubAck(suback, None),
+                Ack::PingResp(pingresp) => packet = Packet::PingResp(pingresp),
+                Ack::PubRec(pubrec) => packet = Packet::PubRec(pubrec, None),
+                Ack::PubRel(pubrel) => packet = Packet::PubRel(pubrel, None),
+                Ack::PubComp(pubcomp) => packet = Packet::PubComp(pubcomp, None),
+                Ack::UnsubAck(unsuback) => packet = Packet::UnsubAck(unsuback, None),
+                _ => unimplemented!(),
+            },
+            Notification::Unschedule => return None,
+            v => unreachable!("{:?}", v),
+        }
+        Some(packet)
+    }
 }
 
 #[derive(Debug, Clone)]

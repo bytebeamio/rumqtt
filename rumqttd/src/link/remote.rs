@@ -121,7 +121,8 @@ impl<P: Protocol> RemoteLink<P> {
         )?;
         let id = link_rx.id();
 
-        network.write(notification).await?;
+        let maybe_packet = notification.into();
+        network.write(maybe_packet).await?;
 
         Ok(RemoteLink {
             connect,
