@@ -1,7 +1,7 @@
+use crate::framed::{Network, NetworkError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
-use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
+use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError, Transport};
 use crate::{MqttOptions, Outgoing};
 
 use crate::mqttbytes::v4::*;
@@ -46,6 +46,8 @@ pub enum ConnectionError {
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
+    #[error("Network: {0}")]
+    Network(#[from] NetworkError),
     #[error("Connection refused, return code: `{0:?}`")]
     ConnectionRefused(ConnectReturnCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
@@ -163,7 +165,7 @@ impl EventLoop {
         // instead of returning a None event, we try again.
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state) => {
+            o = self.state.readb(network) => {
                 o?;
                 // flush all the acks and return first incoming packet
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
@@ -381,7 +383,7 @@ async fn mqtt_connect(
     network.connect(connect).await?;
 
     // validate connack
-    match network.read().await? {
+    match network.read(true).await? {
         Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
             Ok(Packet::ConnAck(connack))
         }
