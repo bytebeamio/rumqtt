@@ -85,7 +85,7 @@ async fn connection_should_timeout_on_time() {
     let elapsed = start.elapsed();
 
     dbg!(&o);
-    assert_matches!(o, Err(ConnectionError::NetworkTimeout));
+    assert_matches!(o, Err(ConnectionError::ConnectTimeout));
     assert_eq!(elapsed.as_secs(), 5);
 }
 

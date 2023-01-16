@@ -27,8 +27,8 @@ use crate::{Request, StateError, Transport};
 pub enum ConnectionError {
     #[error("Mqtt state: {0}")]
     MqttState(#[from] StateError),
-    #[error("Network timeout")]
-    NetworkTimeout,
+    #[error("Connect timeout")]
+    ConnectTimeout,
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -120,7 +120,7 @@ impl EventLoop {
             .await
             {
                 Ok(inner) => inner?,
-                Err(_) => return Err(ConnectionError::NetworkTimeout),
+                Err(_) => return Err(ConnectionError::ConnectTimeout),
             };
             self.network = Some(network);
 
