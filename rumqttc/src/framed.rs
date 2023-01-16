@@ -12,6 +12,10 @@ use crate::Incoming;
 pub enum NetworkError {
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
+    #[error("Connection closed by peer")]
+    ConnectionAborted,
+    #[error("Connection reset by peer")]
+    ConnectionReset,
     #[error("Mqtt: {0}")]
     Mqtt(#[from] mqttbytes::Error),
     #[error("Flush timeout")]
@@ -51,21 +55,15 @@ impl Network {
     }
 
     /// Reads more than 'required' bytes to frame a packet into self.read buffer
-    async fn read_bytes(&mut self, required: usize) -> io::Result<usize> {
+    async fn read_bytes(&mut self, required: usize) -> Result<usize, NetworkError> {
         let mut total_read = 0;
         loop {
             let read = self.socket.read_buf(&mut self.read).await?;
             if 0 == read {
                 return if self.read.is_empty() {
-                    Err(io::Error::new(
-                        io::ErrorKind::ConnectionAborted,
-                        "connection closed by peer",
-                    ))
+                    Err(NetworkError::ConnectionAborted)
                 } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::ConnectionReset,
-                        "connection reset by peer",
-                    ))
+                    Err(NetworkError::ConnectionReset)
                 };
             }
 
@@ -92,13 +90,9 @@ impl Network {
         }
     }
 
-
-    pub async fn connect(&mut self, connect: Connect) -> io::Result<usize> {
+    pub async fn connect(&mut self, connect: Connect) -> Result<usize, NetworkError> {
         let mut write = BytesMut::new();
-        let len = match connect.write(&mut write) {
-            Ok(size) => size,
-            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-        };
+        let len = connect.write(&mut write)?;
 
         self.socket.write_all(&write[..]).await?;
         Ok(len)
