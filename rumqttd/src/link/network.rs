@@ -128,33 +128,20 @@ impl<P: Protocol> Network<P> {
         }
     }
 
-    pub async fn write(&mut self, maybe_packet: Option<Packet>) -> Result<bool, Error> {
-        let mut unscheduled = false;
-        if let Some(packet) = maybe_packet {
-            Protocol::write(&self.protocol, packet, &mut self.write)?;
-        } else {
-            unscheduled = true;
-        }
+    pub async fn write(&mut self, packet: Packet) -> Result<(), Error> {
+        Protocol::write(&self.protocol, packet, &mut self.write)?;
         self.socket.write_all(&self.write).await?;
         self.write.clear();
-        Ok(unscheduled)
+        Ok(())
     }
 
-    pub async fn writev(
-        &mut self,
-        packets: impl Iterator<Item = Option<Packet>>,
-    ) -> Result<bool, Error> {
-        let mut o = false;
+    pub async fn writev(&mut self, packets: VecDeque<Packet>) -> Result<(), Error> {
         for packet in packets {
-            if let Some(packet) = packet {
-                Protocol::write(&self.protocol, packet, &mut self.write)?;
-            } else {
-                o = true
-            }
+            Protocol::write(&self.protocol, packet, &mut self.write)?;
         }
         self.socket.write_all(&self.write).await?;
         self.write.clear();
-        Ok(o)
+        Ok(())
     }
 }
 

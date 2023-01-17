@@ -63,7 +63,7 @@ where
             continue;
         }
 
-        let ping_req = Some(Packet::PingReq(PingReq));
+        let ping_req = Packet::PingReq(PingReq);
         debug!("bridge: recved suback from {}", config.addr);
 
         let mut ping_time = Instant::now();
@@ -155,7 +155,7 @@ async fn network_init<P: Protocol>(
         client_id: config.name.clone(),
         clean_session: true,
     };
-    let packet = Some(Packet::Connect(connect, None, None, None, None));
+    let packet = Packet::Connect(connect, None, None, None, None);
 
     send_and_recv(network, packet, |packet| {
         matches!(packet, Packet::ConnAck(..))
@@ -179,7 +179,7 @@ async fn network_init<P: Protocol>(
     }];
 
     let subscribe = Subscribe { pkid: 0, filters };
-    let packet = Some(Packet::Subscribe(subscribe, None));
+    let packet = Packet::Subscribe(subscribe, None);
     send_and_recv(network, packet, |packet| {
         matches!(packet, Packet::SubAck(..))
     })
@@ -188,7 +188,7 @@ async fn network_init<P: Protocol>(
 
 async fn send_and_recv<F: FnOnce(Packet) -> bool, P: Protocol>(
     network: &mut Network<P>,
-    send_packet: Option<Packet>,
+    send_packet: Packet,
     accept_recv: F,
 ) -> Result<(), BridgeError> {
     network.write(send_packet).await.unwrap();
