@@ -27,7 +27,7 @@ use crate::{
         local::{Link, LinkError},
         network::Network,
     },
-    protocol::{self, Connect, Packet, Protocol, QoS, RetainForwardRule, Subscribe},
+    protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
     BridgeConfig, ClientAuth, ConnectionId, Transport,
 };
@@ -40,7 +40,7 @@ pub async fn start<P>(
 where
     P: Protocol + Clone + Send + 'static,
 {
-    let (tx, _rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
+    let (mut tx, _rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
 
     let addr = match lookup_host(config.addr).await?.next() {
         Some(addr) => addr,
@@ -61,6 +61,57 @@ where
             warn!("bridge: unable to init connection, reconnecting - {}", e);
             sleep(Duration::from_secs(config.reconnection_delay)).await;
             continue;
+        }
+
+        let ping_req = Some(Packet::PingReq(PingReq));
+        debug!("bridge: recved suback from {}", config.addr);
+
+        let mut ping_time = Instant::now();
+        let mut timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+        let mut ping_unacked = false;
+
+        loop {
+            tokio::select! {
+                packet_res = network.read() => {
+                    // resetting timeout because tokio::select! consumes the old timeout future
+                    timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+                    let packet = match packet_res {
+                        Ok(v) => v,
+                        Err(e) => {
+                            warn!("bridge: unable to read from network stream, reconnecting - {}", e);
+                            sleep(Duration::from_secs(config.reconnection_delay)).await;
+                            continue 'outer;
+                        }
+                    };
+
+                    match packet {
+                        Packet::Publish(publish, publish_prop) => {
+                            tx.send(Packet::Publish(publish, publish_prop)).await?;
+                        }
+                        Packet::PingResp(_) => ping_unacked = false,
+                        packet => warn!("bridge: expected publish, got {:?}", packet),
+                    }
+                }
+                _ = timeout => {
+                    // retry connection if ping not acked till next timeout
+                    if ping_unacked {
+                        warn!("bridge: no response to ping, reconnecting");
+                        sleep(Duration::from_secs(config.reconnection_delay)).await;
+                        continue 'outer;
+                    }
+
+                    if let Err(e) = network.write(ping_req.clone()).await {
+                        warn!("bridge: unable to write PINGRES to network stream, reconnecting - {}", e);
+                        sleep(Duration::from_secs(config.reconnection_delay)).await;
+                        continue 'outer;
+                    };
+                    ping_unacked = true;
+
+                    ping_time = Instant::now();
+                    // resetting timeout because tokio::select! consumes the old timeout future
+                    timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+                }
+            }
         }
     }
 }

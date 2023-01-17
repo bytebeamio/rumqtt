@@ -142,12 +142,11 @@ impl<P: Protocol> Network<P> {
 
     pub async fn writev(
         &mut self,
-        notifications: &mut VecDeque<Notification>,
+        packets: impl Iterator<Item = Option<Packet>>,
     ) -> Result<bool, Error> {
         let mut o = false;
-        for notification in notifications.drain(..) {
-            let packet_or_unscheduled = notification.into();
-            if let Some(packet) = packet_or_unscheduled {
+        for packet in packets {
+            if let Some(packet) = packet {
                 Protocol::write(&self.protocol, packet, &mut self.write)?;
             } else {
                 o = true

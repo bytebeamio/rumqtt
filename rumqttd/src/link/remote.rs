@@ -158,7 +158,8 @@ impl<P: Protocol> RemoteLink<P> {
                 // due to previously received data request
                 o = self.link_rx.exchange(&mut self.notifications) => {
                     o?;
-                    let unscheduled = self.network.writev(&mut self.notifications).await?;
+                    let vec = self.notifications.drain(..).map(|notification| notification.into());
+                    let unscheduled = self.network.writev(vec).await?;
                     if unscheduled {
                         self.link_rx.wake().await?;
                     }
