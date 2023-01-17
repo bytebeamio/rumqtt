@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
 };
 
@@ -12,7 +12,7 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId,
+    ConnectionId, Filter, RouterConfig, RouterId, Topic,
 };
 
 mod alertlog;
@@ -46,7 +46,7 @@ pub enum Event {
         outgoing: iobufs::Outgoing,
     },
     /// New meter link
-    NewMeter(flume::Sender<(ConnectionId, Meter)>),
+    NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
     /// Request for meter
     GetMeter(GetMeter),
     /// New Alert link
@@ -241,10 +241,40 @@ pub struct SubscriptionMeter {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct MeterData {
+    count: usize,
+    size: usize,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct IncomingMeter {
-    pub publish_count: usize,
-    pub subscribe_count: usize,
-    pub total_size: usize,
+    pub publishes: HashMap<Topic, MeterData>,
+    pub subscribes: HashSet<Filter>,
+    total_publishes: MeterData,
+}
+
+impl IncomingMeter {
+    pub fn register_publish(&mut self, publish: &Publish) -> Result<(), std::str::Utf8Error> {
+        let meter = {
+            let topic = std::str::from_utf8(&publish.topic)?.to_string();
+            self.publishes.entry(topic).or_default()
+        };
+        meter.count += 1;
+        meter.size += publish.len();
+
+        self.total_publishes.count += 1;
+        self.total_publishes.size += publish.len();
+
+        Ok(())
+    }
+
+    pub fn register_subscription(&mut self, filter: Filter) -> bool {
+        self.subscribes.insert(filter)
+    }
+
+    pub fn unregister_subscription(&mut self, filter: &Filter) -> bool {
+        self.subscribes.remove(filter)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -252,6 +282,12 @@ pub struct OutgoingMeter {
     pub publish_count: usize,
     pub total_size: usize,
 }
+
+// #[derive(Debug, Default, Clone)]
+// pub struct ConnectionMeter {
+//     pub incoming_meter: IncomingMeter,
+//     pub outgoing_meter: OutgoingMeter,
+// }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConnectionEvents {
@@ -261,7 +297,7 @@ pub struct ConnectionEvents {
 #[derive(Debug, Clone)]
 pub enum GetMeter {
     Router,
-    Connection(String),
+    Connection(Option<String>),
     Subscription(String),
 }
 

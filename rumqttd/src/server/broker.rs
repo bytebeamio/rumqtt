@@ -252,13 +252,15 @@ impl Broker {
                         }
                     };
 
-                    match metrics {
-                        Meter::Router(_, ref r) => {
-                            total_connections.set(r.total_connections as f64);
-                            total_publishes.set(r.total_publishes as f64);
-                            failed_publishes.set(r.failed_publishes as f64);
+                    for m in metrics {
+                        match m {
+                            Meter::Router(_, ref r) => {
+                                total_connections.set(r.total_connections as f64);
+                                total_publishes.set(r.total_publishes as f64);
+                                failed_publishes.set(r.failed_publishes as f64);
+                            }
+                            _ => panic!("We only request for router metrics"),
                         }
-                        _ => panic!("We only request for router metrics"),
                     }
                     std::thread::sleep(Duration::from_secs(timeout));
                 }

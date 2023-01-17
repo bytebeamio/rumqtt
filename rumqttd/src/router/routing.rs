@@ -60,7 +60,7 @@ pub struct Router {
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
     /// List of MetersLink's senders
-    meters: Slab<Sender<(ConnectionId, Meter)>>,
+    meters: Slab<Sender<(ConnectionId, Vec<Meter>)>>,
     /// List of AlertsLink's senders with their respective subscription Filter
     alerts: Slab<(FilterWithOffsets, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
@@ -348,10 +348,13 @@ impl Router {
         self.router_meters.total_connections += 1;
     }
 
-    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Meter)>) {
+    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Vec<Meter>)>) {
         let meter_id = self.meters.insert(tx);
         let tx = &self.meters[meter_id];
-        let _ = tx.try_send((meter_id, Meter::Router(self.id, self.router_meters.clone())));
+        let _ = tx.try_send((
+            meter_id,
+            vec![Meter::Router(self.id, self.router_meters.clone())],
+        ));
     }
 
     fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filters: Vec<Filter>) {
@@ -485,7 +488,6 @@ impl Router {
                         tracing::info_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
-                    let size = publish.len();
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
@@ -561,10 +563,11 @@ impl Router {
                     };
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-                    meter.publish_count += 1;
-                    meter.total_size += size;
-
-                    // println!("{}, {}", self.router_metrics.total_publishes, pkid);
+                    if let Err(e) = meter.register_publish(&publish) {
+                        error!(
+                            reason = ?e, "Failed to write to incoming meter"
+                        );
+                    };
                 }
                 Packet::Subscribe(subscribe, _) => {
                     let mut return_codes = Vec::new();
@@ -638,7 +641,7 @@ impl Router {
                             }
 
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-                            meter.subscribe_count -= 1;
+                            meter.unregister_subscription(filter);
 
                             if !connection.subscriptions.remove(filter) {
                                 warn!(
@@ -841,7 +844,7 @@ impl Router {
 
         if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
-                filter,
+                filter: filter.clone(),
                 filter_idx,
                 qos,
                 cursor,
@@ -855,7 +858,7 @@ impl Router {
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-        meter.subscribe_count += 1;
+        meter.register_subscription(filter);
     }
 
     /// When a connection is ready, it should sweep native data from 'datalog',
@@ -976,14 +979,14 @@ impl Router {
         match meter {
             GetMeter::Router => {
                 let router_meters = Meter::Router(self.id, self.router_meters.clone());
-                let _ = meter_tx.try_send((meter_id, router_meters));
+                let _ = meter_tx.try_send((meter_id, vec![router_meters]));
             }
             GetMeter::Connection(client_id) => {
-                let connection_id = match self.connection_map.get(&client_id) {
+                let connection_id = match self.connection_map.get(&client_id.clone().unwrap()) {
                     Some(val) => val,
                     None => {
                         let meter = Meter::Connection("".to_owned(), None, None);
-                        let _ = meter_tx.try_send((meter_id, meter));
+                        let _ = meter_tx.try_send((meter_id, vec![meter]));
                         return;
                     }
                 };
@@ -991,13 +994,13 @@ impl Router {
                 // Update metrics
                 let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
                 let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
-                let meter = Meter::Connection(client_id, incoming_meter, outgoing_meter);
-                let _ = meter_tx.try_send((meter_id, meter));
+                let meter = Meter::Connection(client_id.unwrap(), incoming_meter, outgoing_meter);
+                let _ = meter_tx.try_send((meter_id, vec![meter]));
             }
             GetMeter::Subscription(filter) => {
                 let subscription_meter = self.datalog.meter(&filter);
                 let meter = Meter::Subscription(filter, subscription_meter);
-                let _ = meter_tx.try_send((meter_id, meter));
+                let _ = meter_tx.try_send((meter_id, vec![meter]));
             }
         };
     }
