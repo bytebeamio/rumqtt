@@ -1,12 +1,8 @@
-use bytes::BytesMut;
 use flume::Sender;
 
 use std::{
-    fs,
-    io::{self, BufReader, Cursor},
-    net::{AddrParseError, SocketAddr, ToSocketAddrs},
-    path::Path,
-    sync::Arc,
+    io,
+    net::{AddrParseError, SocketAddr},
     time::Duration,
 };
 
@@ -14,12 +10,7 @@ use tokio::{
     net::{lookup_host, TcpStream},
     time::{sleep, sleep_until, Instant},
 };
-use tokio_rustls::{
-    client::TlsStream,
-    rustls::{ClientConfig, Error as TLSError},
-    webpki::{self, DnsNameRef, InvalidDnsNameError},
-    TlsConnector,
-};
+use tokio_rustls::{rustls::Error as TLSError, webpki::InvalidDnsNameError};
 use tracing::*;
 
 use crate::{
@@ -27,10 +18,14 @@ use crate::{
         local::{Link, LinkError},
         network::Network,
     },
-    protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
-    router::Event,
-    BridgeConfig, ClientAuth, ConnectionId, Transport,
+    protocol::{
+        self, Connect, Packet, PingReq, PingResp, Protocol, QoS, RetainForwardRule, Subscribe,
+    },
+    router::{Ack, Event},
+    BridgeConfig, ConnectionId, Notification, Transport,
 };
+
+use super::network;
 
 pub async fn start<P>(
     config: BridgeConfig,
@@ -92,6 +87,27 @@ where
                         packet => warn!("bridge: expected publish, got {:?}", packet),
                     }
                 }
+                o = rx.next() => {
+                    let notif = match o {
+                        Ok(notif) => notif,
+                        Err(e) => {
+                            warn!("bridge: unable to write PINGRES to network stream, reconnecting - {}", e);
+                            sleep(Duration::from_secs(config.reconnection_delay)).await;
+                            continue 'outer;
+                        }
+                    };
+                    if let Some(notif) = notif {
+                        match notif {
+                            Notification::DeviceAck(ack) => {
+                                write_ack_to_network(ack, &mut network).await?;
+                            },
+                            _ => unreachable!("We should only get device acks"),
+                        }
+
+                    }
+                    timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+
+                }
                 _ = timeout => {
                     // retry connection if ping not acked till next timeout
                     if ping_unacked {
@@ -111,13 +127,45 @@ where
                     // resetting timeout because tokio::select! consumes the old timeout future
                     timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
                 }
-                Ok(Some(notif)) = rx.next() => {
-                    timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
-
-                }
             }
         }
     }
+}
+async fn write_ack_to_network<P: Protocol>(
+    ack: Ack,
+    network: &mut Network<P>,
+) -> Result<(), BridgeError> {
+    match ack {
+        Ack::ConnAck(_, _) => (),
+        Ack::PubAck(ack) => {
+            let puback = Packet::PubAck(ack, None);
+            network.write(puback).await?;
+        }
+        Ack::PubAckWithProperties(_, _) => todo!(),
+        Ack::SubAck(_) => (),
+        Ack::SubAckWithProperties(_, _) => todo!(),
+        Ack::PubRec(ack) => {
+            let pubrec = Packet::PubRec(ack, None);
+            network.write(pubrec).await?;
+        }
+        Ack::PubRecWithProperties(_, _) => todo!(),
+        Ack::PubRel(ack) => {
+            let pubrel = Packet::PubRel(ack, None);
+            network.write(pubrel).await?;
+        }
+        Ack::PubRelWithProperties(_, _) => todo!(),
+        Ack::PubComp(ack) => {
+            let pubcomp = Packet::PubComp(ack, None);
+            network.write(pubcomp).await?;
+        }
+        Ack::PubCompWithProperties(_, _) => todo!(),
+        Ack::UnsubAck(_) => (),
+        Ack::PingResp(_) => {
+            let pingresp = Packet::PingResp(PingResp);
+            network.write(pingresp).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn network_connect<P: Protocol>(
@@ -138,7 +186,7 @@ async fn network_connect<P: Protocol>(
                 protocol,
             ))
         }
-        Transport::Tls { ca, client_auth } => {
+        Transport::Tls {/*  ca, client_auth  */..} => {
             unimplemented!();
             // let socket = match tls_connect(config.url.clone(), config.port, &ca, client_auth).await
             // {
@@ -208,20 +256,18 @@ pub enum BridgeError {
     Addr(#[from] AddrParseError),
     #[error("I/O - {0}")]
     Io(#[from] io::Error),
+    #[error("Network - {0}")]
+    Network(#[from] network::Error),
     #[error("Web Pki - {0}")]
     WebPki(#[from] tokio_rustls::webpki::Error),
     #[error("DNS name - {0}")]
     DNSName(#[from] InvalidDnsNameError),
     #[error("TLS error - {0}")]
     TLS(#[from] TLSError),
-    #[error("No valid cert in chain")]
-    NoValidCertInChain,
     #[error("local link - {0}")]
     Link(#[from] LinkError),
     #[error("invalid qos")]
     InvalidQos,
-    #[error("invalid key")]
-    InvalidKey,
     #[error("invalid url")]
     InvalidUrl,
     #[error("invalid packet")]

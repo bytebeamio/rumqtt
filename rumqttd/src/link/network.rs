@@ -7,10 +7,7 @@ use std::{
 };
 use tokio::time::{error::Elapsed, Duration};
 
-use crate::{
-    protocol::{self, Packet, Protocol},
-    Notification,
-};
+use crate::protocol::{self, Packet, Protocol};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
