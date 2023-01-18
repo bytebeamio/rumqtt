@@ -40,7 +40,7 @@ pub async fn start<P>(
 where
     P: Protocol + Clone + Send + 'static,
 {
-    let (mut tx, _rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
+    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
 
     let addr = match lookup_host(config.addr).await?.next() {
         Some(addr) => addr,
@@ -110,6 +110,10 @@ where
                     ping_time = Instant::now();
                     // resetting timeout because tokio::select! consumes the old timeout future
                     timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+                }
+                Ok(Some(notif)) = rx.next() => {
+                    timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+
                 }
             }
         }
