@@ -248,8 +248,8 @@ pub struct MeterData {
 
 #[derive(Debug, Default, Clone)]
 pub struct IncomingMeter {
-    pub publishes: HashMap<Topic, MeterData>,
-    pub subscribes: HashSet<Filter>,
+    publishes: HashMap<Topic, MeterData>,
+    subscribes: HashSet<Filter>,
     total_publishes: MeterData,
 }
 
@@ -275,6 +275,14 @@ impl IncomingMeter {
     pub fn unregister_subscription(&mut self, filter: &Filter) -> bool {
         self.subscribes.remove(filter)
     }
+
+    pub fn get_total_count(&self) -> usize {
+        self.total_publishes.count
+    }
+
+    pub fn get_total_size(&self) -> usize {
+        self.total_publishes.size
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -298,7 +306,7 @@ pub struct ConnectionEvents {
 pub enum GetMeter {
     Router,
     Connection(Option<String>),
-    Subscription(String),
+    Subscription(Option<String>),
 }
 
 #[derive(Debug, Clone)]
