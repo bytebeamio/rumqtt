@@ -143,6 +143,26 @@ pub enum Ack {
     PingResp(PingResp),
 }
 
+impl From<Ack> for Packet {
+    fn from(value: Ack) -> Self {
+        match value {
+            Ack::ConnAck(_id, connack) => Packet::ConnAck(connack, None),
+            Ack::PubAck(puback) => Packet::PubAck(puback, None),
+            Ack::PubAckWithProperties(puback, prop) => Packet::PubAck(puback, Some(prop)),
+            Ack::SubAck(suback) => Packet::SubAck(suback, None),
+            Ack::SubAckWithProperties(suback, prop) => Packet::SubAck(suback, Some(prop)),
+            Ack::PubRec(pubrec) => Packet::PubRec(pubrec, None),
+            Ack::PubRecWithProperties(pubrec, prop) => Packet::PubRec(pubrec, Some(prop)),
+            Ack::PubRel(pubrel) => Packet::PubRel(pubrel, None),
+            Ack::PubRelWithProperties(pubrel, prop) => Packet::PubRel(pubrel, Some(prop)),
+            Ack::PubComp(pubcomp) => Packet::PubComp(pubcomp, None),
+            Ack::PubCompWithProperties(pubcomp, prop) => Packet::PubComp(pubcomp, Some(prop)),
+            Ack::UnsubAck(unsuback) => Packet::UnsubAck(unsuback, None),
+            Ack::PingResp(pingresp) => Packet::PingResp(pingresp),
+        }
+    }
+}
+
 fn packetid(ack: &Ack) -> u16 {
     match ack {
         Ack::ConnAck(..) => 0,

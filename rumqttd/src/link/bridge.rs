@@ -27,10 +27,8 @@ use crate::{
         local::{Link, LinkError},
         network::Network,
     },
-    protocol::{
-        self, Connect, Packet, PingReq, PingResp, Protocol, QoS, RetainForwardRule, Subscribe,
-    },
-    router::{Ack, Event},
+    protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
+    router::Event,
     BridgeConfig, ClientAuth, ConnectionId, Notification, Transport,
 };
 
@@ -103,7 +101,7 @@ where
                     if let Some(notif) = notif {
                         match notif {
                             Notification::DeviceAck(ack) => {
-                                write_ack_to_network(ack, &mut network).await?;
+                                network.write(ack.into()).await?;
                             },
                             _ => unreachable!("We should only get device acks"),
                         }
@@ -135,42 +133,6 @@ where
         }
     }
 }
-async fn write_ack_to_network<P: Protocol>(
-    ack: Ack,
-    network: &mut Network<P>,
-) -> Result<(), BridgeError> {
-    match ack {
-        Ack::ConnAck(_, _) => (),
-        Ack::PubAck(ack) => {
-            let puback = Packet::PubAck(ack, None);
-            network.write(puback).await?;
-        }
-        Ack::PubAckWithProperties(_, _) => todo!(),
-        Ack::SubAck(_) => (),
-        Ack::SubAckWithProperties(_, _) => todo!(),
-        Ack::PubRec(ack) => {
-            let pubrec = Packet::PubRec(ack, None);
-            network.write(pubrec).await?;
-        }
-        Ack::PubRecWithProperties(_, _) => todo!(),
-        Ack::PubRel(ack) => {
-            let pubrel = Packet::PubRel(ack, None);
-            network.write(pubrel).await?;
-        }
-        Ack::PubRelWithProperties(_, _) => todo!(),
-        Ack::PubComp(ack) => {
-            let pubcomp = Packet::PubComp(ack, None);
-            network.write(pubcomp).await?;
-        }
-        Ack::PubCompWithProperties(_, _) => todo!(),
-        Ack::UnsubAck(_) => (),
-        Ack::PingResp(_) => {
-            let pingresp = Packet::PingResp(PingResp);
-            network.write(pingresp).await?;
-        }
-    }
-    Ok(())
-}
 
 async fn network_connect<P: Protocol>(
     config: &BridgeConfig,
@@ -195,6 +157,7 @@ async fn network_connect<P: Protocol>(
                 Ok(v) => v,
                 Err(e) => return Err(BridgeError::Io(e)),
             };
+            // addr should be in format host:port
             let host = addr.split(':').next().unwrap();
             let socket = match tls_connect(host, &ca, client_auth, tcp_stream).await {
                 Ok(v) => v,
