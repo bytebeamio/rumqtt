@@ -18,8 +18,9 @@ fn main() {
     let broker = Broker::new(config);
     let mut alerts = broker
         .alerts(vec![
-            "/alerts/connect/+".to_string(),
-            "/alerts/subscribe/+".to_string(),
+            "/alerts/error/+".to_string(),
+            "/alerts/event/connect/+".to_string(),
+            "/alerts/event/subscribe/+".to_string(),
         ])
         .unwrap();
 

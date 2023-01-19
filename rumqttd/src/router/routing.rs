@@ -2,6 +2,7 @@ use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
     PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
+use crate::router::alertlog::{AlertError, AlertEvent};
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
 use crate::router::Forward;
@@ -324,7 +325,7 @@ impl Router {
             .check_tracker_duplicates(connection_id)
             .is_none());
 
-        let alert = Alert::Connect(client_id.clone());
+        let alert = Alert::event(client_id.clone(), AlertEvent::Connect);
         match append_to_alertlog(alert, &mut self.alertlog) {
             Ok(_offset) => {}
             Err(e) => {
@@ -365,7 +366,10 @@ impl Router {
         }
         let alert_id = self.alerts.insert((filter_with_offsets, tx));
         let (_, tx) = self.alerts.get(alert_id).unwrap();
-        let _ = tx.try_send((alert_id, Alert::Connect("AlertsLink".to_owned())));
+        let _ = tx.try_send((
+            alert_id,
+            Alert::event("AlertsLink".to_owned(), AlertEvent::Connect),
+        ));
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
@@ -378,7 +382,7 @@ impl Router {
                 return;
             }
         };
-        let alert = Alert::Disconnect(client_id.clone());
+        let alert = Alert::event(client_id.clone(), AlertEvent::Disconnect);
         match append_to_alertlog(alert, &mut self.alertlog) {
             Ok(_offset) => {}
             Err(e) => {
@@ -606,7 +610,7 @@ impl Router {
                         return_codes.push(code);
                     }
 
-                    let alert = Alert::Subscribe(client_id.clone(), subscribe);
+                    let alert = Alert::event(client_id.clone(), AlertEvent::Subscribe(subscribe));
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -663,7 +667,8 @@ impl Router {
                             force_ack = true;
                         }
                     }
-                    let alert = Alert::Unsubscribe(client_id.clone(), unsubscribe);
+                    let alert =
+                        Alert::event(client_id.clone(), AlertEvent::Unsubscribe(unsubscribe));
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -764,7 +769,7 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
 
-                    let alert = Alert::Disconnect(client_id);
+                    let alert = Alert::event(client_id, AlertEvent::Disconnect);
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -881,6 +886,7 @@ impl Router {
 
         let ackslog = self.ackslog.get_mut(id).unwrap();
         let datalog = &mut self.datalog;
+        let alertlog = &mut self.alertlog;
 
         trace!("Consuming requests");
 
@@ -903,7 +909,7 @@ impl Router {
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing) {
+            match forward_device_data(&mut request, datalog, outgoing, alertlog) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -1182,6 +1188,7 @@ fn forward_device_data(
     request: &mut DataRequest,
     datalog: &DataLog,
     outgoing: &mut Outgoing,
+    alertlog: &mut AlertLog,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
@@ -1219,11 +1226,26 @@ fn forward_device_data(
     };
 
     if start != request.cursor {
+        let error = format!(
+            "Read cursor start jumped from {:?} to {:?} on {}",
+            request.cursor, start, request.filter
+        );
+
         warn!(
             request_cursor = ?request.cursor,
             start_cursor = ?start,
-            "Read cursor start jumped from {:?} to {:?}", request.cursor, start,
+            error
         );
+
+        let alert = Alert::error(outgoing.client_id.clone(), AlertError::CursorJump(error));
+        match append_to_alertlog(alert, alertlog) {
+            Ok(_offset) => (),
+            Err(e) => {
+                error!(
+                    reason = ?e, "Failed to append to alertlog"
+                );
+            }
+        }
     }
 
     trace!(

@@ -242,8 +242,8 @@ pub struct SubscriptionMeter {
 
 #[derive(Debug, Default, Clone)]
 pub struct MeterData {
-    count: usize,
-    size: usize,
+    pub count: usize,
+    pub size: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -266,6 +266,10 @@ impl IncomingMeter {
         self.total_publishes.size += publish.len();
 
         Ok(())
+    }
+
+    pub fn get_topic_meters(&self) -> &HashMap<Topic, MeterData> {
+        &self.publishes
     }
 
     pub fn register_subscription(&mut self, filter: Filter) -> bool {
