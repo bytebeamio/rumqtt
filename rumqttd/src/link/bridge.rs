@@ -196,7 +196,7 @@ async fn network_connect<P: Protocol>(
                 Err(e) => return Err(BridgeError::Io(e)),
             };
             let host = addr.split(':').next().unwrap();
-            let socket = match tls_connect(&host, &ca, client_auth, tcp_stream).await {
+            let socket = match tls_connect(host, &ca, client_auth, tcp_stream).await {
                 Ok(v) => v,
                 Err(e) => return Err(e),
             };
@@ -341,7 +341,7 @@ pub enum BridgeError {
     #[error("DNS name - {0}")]
     DNSName(#[from] InvalidDnsNameError),
     #[error("TLS error - {0}")]
-    TLS(#[from] TLSError),
+    Tls(#[from] TLSError),
     #[error("local link - {0}")]
     Link(#[from] LinkError),
     #[error("invalid qos")]
