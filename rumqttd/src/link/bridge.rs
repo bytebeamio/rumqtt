@@ -1,18 +1,21 @@
 use flume::Sender;
 
+#[cfg(feature = "use-rustls")]
 use std::{
     fs,
-    io::{self, BufReader, Cursor},
-    net::AddrParseError,
+    io::{BufReader, Cursor},
     path::Path,
     sync::Arc,
-    time::Duration,
 };
+
+use std::{io, net::AddrParseError, time::Duration};
 
 use tokio::{
     net::TcpStream,
     time::{sleep, sleep_until, Instant},
 };
+
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::{
     rustls::{
         client::InvalidDnsNameError, Certificate, ClientConfig, Error as TLSError,
@@ -29,10 +32,15 @@ use crate::{
     },
     protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
-    BridgeConfig, ClientAuth, ConnectionId, Notification, Transport,
+    BridgeConfig, ConnectionId, Notification, Transport,
 };
 
-use super::network::{self, N};
+use super::network;
+
+#[cfg(feature = "use-rustls")]
+use super::network::N;
+#[cfg(feature = "use-rustls")]
+use crate::ClientAuth;
 
 pub async fn start<P>(
     config: BridgeConfig,
@@ -152,6 +160,7 @@ async fn network_connect<P: Protocol>(
                 protocol,
             ))
         }
+        #[cfg(feature = "use-rustls")]
         Transport::Tls { ca, client_auth } => {
             let tcp_stream = match TcpStream::connect(addr).await {
                 Ok(v) => v,
@@ -170,8 +179,13 @@ async fn network_connect<P: Protocol>(
                 protocol,
             ))
         }
+        #[cfg(not(feature = "use-rustls"))]
+        Transport::Tls { .. } => {
+            panic!("Need to enable use-rustls feature to use tls");
+        }
     }
 }
+#[cfg(feature = "use-rustls")]
 pub async fn tls_connect<P: AsRef<Path>>(
     host: &str,
     ca_file: P,
@@ -300,10 +314,13 @@ pub enum BridgeError {
     #[error("Network - {0}")]
     Network(#[from] network::Error),
     #[error("Web Pki - {0}")]
+    #[cfg(feature = "use-rustls")]
     WebPki(#[from] tokio_rustls::webpki::Error),
     #[error("DNS name - {0}")]
+    #[cfg(feature = "use-rustls")]
     DNSName(#[from] InvalidDnsNameError),
     #[error("TLS error - {0}")]
+    #[cfg(feature = "use-rustls")]
     Tls(#[from] TLSError),
     #[error("local link - {0}")]
     Link(#[from] LinkError),
@@ -311,6 +328,7 @@ pub enum BridgeError {
     InvalidQos,
     #[error("invalid packet")]
     InvalidPacket,
+    #[cfg(feature = "use-rustls")]
     #[error("invalid trust_anchor")]
     NoValidCertInChain,
 }
