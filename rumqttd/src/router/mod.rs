@@ -24,7 +24,7 @@ mod routing;
 mod scheduler;
 mod waiters;
 
-pub use alertlog::Alert;
+pub use alertlog::{Alert, AlertError, AlertEvent};
 pub use connection::Connection;
 pub use routing::Router;
 pub use waiters::Waiters;
