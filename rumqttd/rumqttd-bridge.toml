@@ -12,8 +12,8 @@ max_read_len = 10240
 max_connections = 10010
 
 [bridge]
-name = "bridge"
-addr = "0.0.0.0:1883"
+name = "bridge-1"
+addr = "127.0.0.1:1883"
 qos = 0
 sub_path = "#"
 reconnection_delay = 5

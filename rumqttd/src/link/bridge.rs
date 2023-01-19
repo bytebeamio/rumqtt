@@ -1,8 +1,11 @@
 use flume::Sender;
 
 use std::{
-    io,
+    fs,
+    io::{self, BufReader, Cursor},
     net::{AddrParseError, SocketAddr},
+    path::Path,
+    sync::Arc,
     time::Duration,
 };
 
@@ -10,7 +13,13 @@ use tokio::{
     net::{lookup_host, TcpStream},
     time::{sleep, sleep_until, Instant},
 };
-use tokio_rustls::{rustls::Error as TLSError, webpki::InvalidDnsNameError};
+use tokio_rustls::{
+    rustls::{
+        client::InvalidDnsNameError, Certificate, ClientConfig, Error as TLSError,
+        OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
+    },
+    webpki, TlsConnector,
+};
 use tracing::*;
 
 use crate::{
@@ -22,10 +31,10 @@ use crate::{
         self, Connect, Packet, PingReq, PingResp, Protocol, QoS, RetainForwardRule, Subscribe,
     },
     router::{Ack, Event},
-    BridgeConfig, ConnectionId, Notification, Transport,
+    BridgeConfig, ClientAuth, ConnectionId, Notification, Transport,
 };
 
-use super::network;
+use super::network::{self, N};
 
 pub async fn start<P>(
     config: BridgeConfig,
@@ -186,18 +195,91 @@ async fn network_connect<P: Protocol>(
                 protocol,
             ))
         }
-        Transport::Tls {/*  ca, client_auth  */..} => {
-            unimplemented!();
-            // let socket = match tls_connect(config.url.clone(), config.port, &ca, client_auth).await
-            // {
-            //     Ok(v) => v,
-            //     Err(e) => return Err((e, "unable to form TCP/TLS connection")),
-            // };
-            // Ok(Network::new(Box::new(socket), 5120))
+        Transport::Tls { ca, client_auth } => {
+            let tcp_stream = match TcpStream::connect(addr).await {
+                Ok(v) => v,
+                Err(e) => return Err(BridgeError::Io(e)),
+            };
+            let socket =
+                match tls_connect(config.addr.to_string(), &ca, client_auth, tcp_stream).await {
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
+                };
+            Ok(Network::new(
+                Box::new(socket),
+                config.connections.max_payload_size,
+                100,
+                protocol,
+            ))
         }
     }
 }
+pub async fn tls_connect<P: AsRef<Path>>(
+    broker_addr: String,
+    ca_file: P,
+    client_auth_opt: &Option<ClientAuth>,
+    tcp: TcpStream,
+) -> Result<Box<dyn N>, BridgeError> {
+    let mut root_cert_store = RootCertStore::empty();
 
+    let ca_certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?)))?;
+    let trust_anchors = ca_certs.iter().map_while(|cert| {
+        if let Ok(ta) = webpki::TrustAnchor::try_from_cert_der(&cert[..]) {
+            Some(OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            ))
+        } else {
+            None
+        }
+    });
+
+    root_cert_store.add_server_trust_anchors(trust_anchors);
+
+    if root_cert_store.is_empty() {
+        return Err(BridgeError::NoValidCertInChain);
+    }
+
+    let config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_cert_store);
+
+    let config = if let Some(ClientAuth {
+        certs: certs_path,
+        key: key_path,
+    }) = client_auth_opt
+    {
+        let read_certs =
+            rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))?;
+
+        let read_keys = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
+            key_path,
+        )?)))? {
+            Some(rustls_pemfile::Item::RSAKey(_)) => rustls_pemfile::rsa_private_keys(
+                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
+            )?,
+            Some(rustls_pemfile::Item::PKCS8Key(_)) => rustls_pemfile::pkcs8_private_keys(
+                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
+            )?,
+            None | Some(_) => return Err(BridgeError::NoValidCertInChain),
+        };
+
+        let read_key = match read_keys.first() {
+            Some(v) => v.clone(),
+            None => return Err(BridgeError::NoValidCertInChain),
+        };
+
+        let certs = read_certs.into_iter().map(Certificate).collect();
+        config.with_single_cert(certs, PrivateKey(read_key))?
+    } else {
+        config.with_no_client_auth()
+    };
+
+    let connector = TlsConnector::from(Arc::new(config));
+    let domain = ServerName::try_from(broker_addr.as_str())?;
+    Ok(Box::new(connector.connect(domain, tcp).await?))
+}
 async fn network_init<P: Protocol>(
     config: &BridgeConfig,
     network: &mut Network<P>,
@@ -272,4 +354,6 @@ pub enum BridgeError {
     InvalidUrl,
     #[error("invalid packet")]
     InvalidPacket,
+    #[error("invalid trust_anchor")]
+    NoValidCertInChain,
 }
