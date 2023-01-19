@@ -45,9 +45,9 @@ listen = "0.0.0.0:8883"
 next_connection_delay_ms = 10
     # tls config for rustls
     [v4.2.tls]
-    capath = "/etc/tls/ca.cert.pem"
-    certpath = "/etc/tls/server.cert.pem"
-    keypath = "/etc/tls/server.key.pem"
+    capath = "../../ca.cert.pem"
+    certpath = "../../localhost.cert.pem"
+    keypath = "../../localhost.key.pem"
     # settings for all the connections on this server
     [v4.2.connections]
     connection_timeout_ms = 60000

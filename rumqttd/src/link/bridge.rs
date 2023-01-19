@@ -3,14 +3,14 @@ use flume::Sender;
 use std::{
     fs,
     io::{self, BufReader, Cursor},
-    net::{AddrParseError, SocketAddr},
+    net::AddrParseError,
     path::Path,
     sync::Arc,
     time::Duration,
 };
 
 use tokio::{
-    net::{lookup_host, TcpStream},
+    net::TcpStream,
     time::{sleep, sleep_until, Instant},
 };
 use tokio_rustls::{
@@ -46,13 +46,8 @@ where
 {
     let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
 
-    let addr = match lookup_host(config.addr).await?.next() {
-        Some(addr) => addr,
-        None => return Err(BridgeError::InvalidUrl),
-    };
-
     'outer: loop {
-        let mut network = match network_connect(&config, &addr, protocol.clone()).await {
+        let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
             Ok(v) => v,
             Err(e) => {
                 warn!("bridge error: {}, retrying", e);
@@ -60,7 +55,7 @@ where
                 continue;
             }
         };
-        info!("bridge: connected to {}", &addr);
+        info!("bridge: connected to {}", &config.addr);
         if let Err(e) = network_init(&config, &mut network).await {
             warn!("bridge: unable to init connection, reconnecting - {}", e);
             sleep(Duration::from_secs(config.reconnection_delay)).await;
@@ -68,7 +63,7 @@ where
         }
 
         let ping_req = Packet::PingReq(PingReq);
-        debug!("bridge: recved suback from {}", config.addr);
+        debug!("bridge: recved suback from {}", &config.addr);
 
         let mut ping_time = Instant::now();
         let mut timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
@@ -179,7 +174,7 @@ async fn write_ack_to_network<P: Protocol>(
 
 async fn network_connect<P: Protocol>(
     config: &BridgeConfig,
-    addr: &SocketAddr,
+    addr: &str,
     protocol: P,
 ) -> Result<Network<P>, BridgeError> {
     match &config.transport {
@@ -200,11 +195,11 @@ async fn network_connect<P: Protocol>(
                 Ok(v) => v,
                 Err(e) => return Err(BridgeError::Io(e)),
             };
-            let socket =
-                match tls_connect(config.addr.to_string(), &ca, client_auth, tcp_stream).await {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
-                };
+            let host = addr.split(':').next().unwrap();
+            let socket = match tls_connect(&host, &ca, client_auth, tcp_stream).await {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
@@ -215,7 +210,7 @@ async fn network_connect<P: Protocol>(
     }
 }
 pub async fn tls_connect<P: AsRef<Path>>(
-    broker_addr: String,
+    host: &str,
     ca_file: P,
     client_auth_opt: &Option<ClientAuth>,
     tcp: TcpStream,
@@ -277,9 +272,10 @@ pub async fn tls_connect<P: AsRef<Path>>(
     };
 
     let connector = TlsConnector::from(Arc::new(config));
-    let domain = ServerName::try_from(broker_addr.as_str())?;
+    let domain = ServerName::try_from(host).unwrap();
     Ok(Box::new(connector.connect(domain, tcp).await?))
 }
+
 async fn network_init<P: Protocol>(
     config: &BridgeConfig,
     network: &mut Network<P>,
@@ -350,8 +346,6 @@ pub enum BridgeError {
     Link(#[from] LinkError),
     #[error("invalid qos")]
     InvalidQos,
-    #[error("invalid url")]
-    InvalidUrl,
     #[error("invalid packet")]
     InvalidPacket,
     #[error("invalid trust_anchor")]

@@ -13,7 +13,7 @@ max_connections = 10010
 
 [bridge]
 name = "bridge-1"
-addr = "127.0.0.1:1883"
+addr = "localhost:8883"
 qos = 0
 sub_path = "#"
 reconnection_delay = 5
@@ -27,6 +27,9 @@ timeout_delay = 5
     max_inflight_count = 500
     max_inflight_size = 1024
     dynamic_filters = true
+    [bridge.transport.tls]
+    ca = "../../ca.cert.pem"
+    client_auth = { certs = "../../test-1.cert.pem", key = "../../test-1.key.pem" }
 
 # Configuration of server and connections that it accepts
 [v4.1]

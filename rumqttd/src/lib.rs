@@ -85,7 +85,7 @@ pub struct ServerSettings {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeConfig {
     pub name: String,
-    pub addr: SocketAddr,
+    pub addr: String,
     pub qos: u8,
     pub sub_path: Filter,
     pub reconnection_delay: u64,
