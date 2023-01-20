@@ -50,26 +50,35 @@ pub async fn start<P>(
 where
     P: Protocol + Clone + Send + 'static,
 {
+    info!(
+        client_id = config.name,
+        remote_addr = &config.addr,
+        "Starting bridge with subscription on filter \"{}\"",
+        &config.sub_path,
+    );
     let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
 
     'outer: loop {
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
             Ok(v) => v,
             Err(e) => {
-                warn!("bridge error: {}, retrying", e);
+                error!("Error: {}, retrying", e);
                 sleep(Duration::from_secs(config.reconnection_delay)).await;
                 continue;
             }
         };
-        info!("bridge: connected to {}", &config.addr);
+        info!(remote_addr = &config.addr, "Connected to remote");
         if let Err(e) = network_init(&config, &mut network).await {
-            warn!("bridge: unable to init connection, reconnecting - {}", e);
+            warn!(
+                "Unable to connect and subscribe to remote broker, reconnecting - {}",
+                e
+            );
             sleep(Duration::from_secs(config.reconnection_delay)).await;
             continue;
         }
 
         let ping_req = Packet::PingReq(PingReq);
-        debug!("bridge: recved suback from {}", &config.addr);
+        debug!("Received suback from {}", &config.addr);
 
         let mut ping_time = Instant::now();
         let mut timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
@@ -83,7 +92,7 @@ where
                     let packet = match packet_res {
                         Ok(v) => v,
                         Err(e) => {
-                            warn!("bridge: unable to read from network stream, reconnecting - {}", e);
+                            warn!("Unable to read from network stream, reconnecting - {}", e);
                             sleep(Duration::from_secs(config.reconnection_delay)).await;
                             continue 'outer;
                         }
@@ -94,14 +103,15 @@ where
                             tx.send(Packet::Publish(publish, publish_prop)).await?;
                         }
                         Packet::PingResp(_) => ping_unacked = false,
-                        packet => warn!("bridge: expected publish, got {:?}", packet),
+                        // TODO: Handle incoming pubrel incase of QoS subscribe
+                        packet => warn!("Expected publish, got {:?}", packet),
                     }
                 }
                 o = rx.next() => {
                     let notif = match o {
                         Ok(notif) => notif,
                         Err(e) => {
-                            warn!("bridge: unable to write PINGRES to network stream, reconnecting - {}", e);
+                            warn!("Local link error, reconnecting - {}", e);
                             sleep(Duration::from_secs(config.reconnection_delay)).await;
                             continue 'outer;
                         }
@@ -121,13 +131,13 @@ where
                 _ = timeout => {
                     // retry connection if ping not acked till next timeout
                     if ping_unacked {
-                        warn!("bridge: no response to ping, reconnecting");
+                        warn!("No response to previous ping, reconnecting");
                         sleep(Duration::from_secs(config.reconnection_delay)).await;
                         continue 'outer;
                     }
 
                     if let Err(e) = network.write(ping_req.clone()).await {
-                        warn!("bridge: unable to write PINGRES to network stream, reconnecting - {}", e);
+                        warn!("Unable to write PINGREQ to network stream, reconnecting - {}", e);
                         sleep(Duration::from_secs(config.reconnection_delay)).await;
                         continue 'outer;
                     };
@@ -149,10 +159,7 @@ async fn network_connect<P: Protocol>(
 ) -> Result<Network<P>, BridgeError> {
     match &config.transport {
         Transport::Tcp => {
-            let socket = match TcpStream::connect(addr).await {
-                Ok(v) => v,
-                Err(e) => return Err(BridgeError::Io(e)),
-            };
+            let socket = TcpStream::connect(addr).await?;
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
@@ -162,16 +169,10 @@ async fn network_connect<P: Protocol>(
         }
         #[cfg(feature = "use-rustls")]
         Transport::Tls { ca, client_auth } => {
-            let tcp_stream = match TcpStream::connect(addr).await {
-                Ok(v) => v,
-                Err(e) => return Err(BridgeError::Io(e)),
-            };
+            let tcp_stream = TcpStream::connect(addr).await?;
             // addr should be in format host:port
             let host = addr.split(':').next().unwrap();
-            let socket = match tls_connect(host, &ca, client_auth, tcp_stream).await {
-                Ok(v) => v,
-                Err(e) => return Err(e),
-            };
+            let socket = tls_connect(host, &ca, client_auth, tcp_stream).await?;
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
@@ -324,11 +325,11 @@ pub enum BridgeError {
     Tls(#[from] TLSError),
     #[error("local link - {0}")]
     Link(#[from] LinkError),
-    #[error("invalid qos")]
+    #[error("Invalid qos")]
     InvalidQos,
-    #[error("invalid packet")]
+    #[error("Invalid packet")]
     InvalidPacket,
     #[cfg(feature = "use-rustls")]
-    #[error("invalid trust_anchor")]
+    #[error("Invalid trust_anchor")]
     NoValidCertInChain,
 }

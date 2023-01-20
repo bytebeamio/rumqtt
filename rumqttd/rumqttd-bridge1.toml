@@ -13,8 +13,8 @@ max_connections = 10010
 
 [bridge]
 name = "bridge-1"
-addr = "localhost:8883"
-qos = 0
+addr = "localhost:1883"
+qos = 1
 sub_path = "#"
 reconnection_delay = 5
 ping_delay = 5
@@ -27,14 +27,14 @@ timeout_delay = 5
     max_inflight_count = 500
     max_inflight_size = 1024
     dynamic_filters = true
-    [bridge.transport.tls]
-    ca = "../../ca.cert.pem"
-    client_auth = { certs = "../../test-1.cert.pem", key = "../../test-1.key.pem" }
+    # [bridge.transport.tls]
+    # ca = "../../ca.cert.pem"
+    # client_auth = { certs = "../../test-1.cert.pem", key = "../../test-1.key.pem" }
 
 # Configuration of server and connections that it accepts
 [v4.1]
 name = "v4-1"
-listen = "0.0.0.0:8888"
+listen = "0.0.0.0:9883"
 next_connection_delay_ms = 1
     [v4.1.connections]
     connection_timeout_ms = 60000
@@ -69,7 +69,7 @@ next_connection_delay_ms = 1
 #
 [v5.1]
 name = "v5-1"
-listen = "0.0.0.0:8889"
+listen = "0.0.0.0:9884"
 next_connection_delay_ms = 1
     [v5.1.connections]
     connection_timeout_ms = 60000
