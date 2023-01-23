@@ -74,7 +74,7 @@ fn main() {
         }
 
         // Commitlog meters
-        let request = GetMeter::Subscription("hello/+/world".to_owned());
+        let request = GetMeter::Subscription(Some("hello/+/world".to_owned()));
         let v = meters.get(request).unwrap();
         println!("{:#?}", v);
 
