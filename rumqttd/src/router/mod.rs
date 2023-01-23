@@ -295,12 +295,6 @@ pub struct OutgoingMeter {
     pub total_size: usize,
 }
 
-// #[derive(Debug, Default, Clone)]
-// pub struct ConnectionMeter {
-//     pub incoming_meter: IncomingMeter,
-//     pub outgoing_meter: OutgoingMeter,
-// }
-
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConnectionEvents {
     events: VecDeque<String>,
@@ -309,6 +303,8 @@ pub struct ConnectionEvents {
 #[derive(Debug, Clone)]
 pub enum GetMeter {
     Router,
+    // Associated data of None<String> type
+    // means get all meters
     Connection(Option<String>),
     Subscription(Option<String>),
 }
