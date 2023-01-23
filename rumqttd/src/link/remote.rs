@@ -121,7 +121,9 @@ impl<P: Protocol> RemoteLink<P> {
         )?;
         let id = link_rx.id();
 
-        network.write(notification).await?;
+        if let Some(packet) = notification.into() {
+            network.write(packet).await?;
+        }
 
         Ok(RemoteLink {
             connect,
@@ -157,7 +159,18 @@ impl<P: Protocol> RemoteLink<P> {
                 // due to previously received data request
                 o = self.link_rx.exchange(&mut self.notifications) => {
                     o?;
-                    let unscheduled = self.network.writev(&mut self.notifications).await?;
+                    let mut packets = VecDeque::new();
+                    let mut unscheduled = false;
+
+                    for notif in self.notifications.drain(..) {
+                        if let Some(packet) = notif.into() {
+                            packets.push_back(packet);
+                        } else {
+                            unscheduled = true;
+                        }
+
+                    }
+                    self.network.writev(packets).await?;
                     if unscheduled {
                         self.link_rx.wake().await?;
                     }

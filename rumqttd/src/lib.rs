@@ -86,6 +86,19 @@ pub struct ServerSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BridgeConfig {
+    pub name: String,
+    pub addr: String,
+    pub qos: u8,
+    pub sub_path: Filter,
+    pub reconnection_delay: u64,
+    pub ping_delay: u64,
+    pub connections: ConnectionSettings,
+    #[serde(default)]
+    pub transport: Transport,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
     pub throttle_delay_ms: u64,
@@ -130,19 +143,6 @@ impl ConsoleSettings {
     pub fn set_filter_reload_handle(&mut self, handle: ReloadHandle) {
         self.filter_handle.replace(handle);
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BridgeConfig {
-    pub url: String,
-    pub port: u16,
-    pub qos: u8,
-    pub sub_path: String,
-    pub reconnection_delay: u64,
-    pub ping_delay: u64,
-    pub timeout_delay: u64,
-    #[serde(default)]
-    pub transport: Transport,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     protocol::{
-        ConnAck, PingResp, PubAck, PubAckProperties, PubComp, PubCompProperties, PubRec,
+        ConnAck, Packet, PingResp, PubAck, PubAckProperties, PubComp, PubCompProperties, PubRec,
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
@@ -90,6 +90,24 @@ pub enum Notification {
     Unschedule,
 }
 
+type MaybePacket = Option<Packet>;
+
+// We either get a Packet to write to buffer or we unschedule which is represented as `None`
+impl From<Notification> for MaybePacket {
+    fn from(notification: Notification) -> Self {
+        let packet: Packet = match notification {
+            Notification::Forward(forward) => Packet::Publish(forward.publish, None),
+            Notification::DeviceAck(ack) => ack.into(),
+            Notification::Unschedule => return None,
+            v => {
+                tracing::error!("Unexpected notification here, it cannot be converted into Packet, Notification: {:?}", v);
+                return None;
+            }
+        };
+        Some(packet)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Forward {
     pub cursor: (u64, u64),
@@ -113,6 +131,26 @@ pub enum Ack {
     PubCompWithProperties(PubComp, PubCompProperties),
     UnsubAck(UnsubAck),
     PingResp(PingResp),
+}
+
+impl From<Ack> for Packet {
+    fn from(value: Ack) -> Self {
+        match value {
+            Ack::ConnAck(_id, connack) => Packet::ConnAck(connack, None),
+            Ack::PubAck(puback) => Packet::PubAck(puback, None),
+            Ack::PubAckWithProperties(puback, prop) => Packet::PubAck(puback, Some(prop)),
+            Ack::SubAck(suback) => Packet::SubAck(suback, None),
+            Ack::SubAckWithProperties(suback, prop) => Packet::SubAck(suback, Some(prop)),
+            Ack::PubRec(pubrec) => Packet::PubRec(pubrec, None),
+            Ack::PubRecWithProperties(pubrec, prop) => Packet::PubRec(pubrec, Some(prop)),
+            Ack::PubRel(pubrel) => Packet::PubRel(pubrel, None),
+            Ack::PubRelWithProperties(pubrel, prop) => Packet::PubRel(pubrel, Some(prop)),
+            Ack::PubComp(pubcomp) => Packet::PubComp(pubcomp, None),
+            Ack::PubCompWithProperties(pubcomp, prop) => Packet::PubComp(pubcomp, Some(prop)),
+            Ack::UnsubAck(unsuback) => Packet::UnsubAck(unsuback, None),
+            Ack::PingResp(pingresp) => Packet::PingResp(pingresp),
+        }
+    }
 }
 
 fn packetid(ack: &Ack) -> u16 {

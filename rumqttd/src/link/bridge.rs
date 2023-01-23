@@ -1,74 +1,87 @@
+use flume::Sender;
+
+#[cfg(feature = "use-rustls")]
 use std::{
     fs,
-    io::{self, BufReader, Cursor},
-    net::{AddrParseError, SocketAddr, ToSocketAddrs},
+    io::{BufReader, Cursor},
     path::Path,
     sync::Arc,
-    time::Duration,
 };
 
-use bytes::BytesMut;
-use flume::Sender;
-use log::*;
+use std::{io, net::AddrParseError, time::Duration};
+
 use tokio::{
     net::TcpStream,
     time::{sleep, sleep_until, Instant},
 };
+
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::{
-    client::TlsStream,
-    rustls::{internal::pemfile::*, ClientConfig, TLSError},
-    webpki::{self, DNSNameRef, InvalidDNSNameError},
-    TlsConnector,
+    rustls::{
+        client::InvalidDnsNameError, Certificate, ClientConfig, Error as TLSError,
+        OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
+    },
+    webpki, TlsConnector,
 };
+use tracing::*;
 
 use crate::{
     link::{
         local::{Link, LinkError},
         network::Network,
     },
+    protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
-    BridgeConfig, ClientAuth, ConnectionId, Transport, protocol::{v4::pingreq, Packet},
+    BridgeConfig, ConnectionId, Notification, Transport,
 };
 
-pub async fn bridge_launch(
+use super::network;
+
+#[cfg(feature = "use-rustls")]
+use super::network::N;
+#[cfg(feature = "use-rustls")]
+use crate::ClientAuth;
+
+pub async fn start<P>(
     config: BridgeConfig,
     router_tx: Sender<(ConnectionId, Event)>,
-) -> Result<(), BridgeError> {
-    // connect to local router
-    let (mut tx, _rx) = Link::new("bridge", router_tx, true)?;
+    protocol: P,
+) -> Result<(), BridgeError>
+where
+    P: Protocol + Clone + Send + 'static,
+{
+    let span = tracing::info_span!("bridge_link");
+    let _guard = span.enter();
 
-    // connecting to other router
-    let qos = match u8_to_qos(config.qos) {
-        Ok(v) => v,
-        Err(_e) => {
-            return Err(BridgeError::InvalidQos);
-        }
-    };
-    let addr = match (config.url.clone(), config.port).to_socket_addrs()?.next() {
-        Some(addr) => addr,
-        None => return Err(BridgeError::InvalidUrl),
-    };
+    info!(
+        client_id = config.name,
+        remote_addr = &config.addr,
+        "Starting bridge with subscription on filter \"{}\"",
+        &config.sub_path,
+    );
+    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
 
     'outer: loop {
-        let mut network = match netowrk_connect(&config, &addr).await {
+        let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
             Ok(v) => v,
-            Err((e, s)) => {
-                warn!("bridge: {}, retrying - {}", s, e);
+            Err(e) => {
+                error!(error=?e, "Error, retrying");
                 sleep(Duration::from_secs(config.reconnection_delay)).await;
                 continue;
             }
         };
-        info!("bridge: connected to {}", config.url);
-
-        if let Err(e) = network_init(&mut network, &config.sub_path, qos).await {
-            warn!("bridge: unable to init connection, reconnecting - {}", e);
+        info!(remote_addr = &config.addr, "Connected to remote");
+        if let Err(e) = network_init(&config, &mut network).await {
+            warn!(
+                "Unable to connect and subscribe to remote broker, reconnecting - {}",
+                e
+            );
             sleep(Duration::from_secs(config.reconnection_delay)).await;
             continue;
         }
 
-        let mut buf = BytesMut::with_capacity(2);
-        pingreq::write(&mut buf).unwrap();
-        debug!("bridge: recved suback from {}", config.url);
+        let ping_req = Packet::PingReq(PingReq);
+        debug!("Received suback from {}", &config.addr);
 
         let mut ping_time = Instant::now();
         let mut timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
@@ -82,30 +95,52 @@ pub async fn bridge_launch(
                     let packet = match packet_res {
                         Ok(v) => v,
                         Err(e) => {
-                            warn!("bridge: unable to read from network stream, reconnecting - {}", e);
+                            warn!("Unable to read from network stream, reconnecting - {}", e);
                             sleep(Duration::from_secs(config.reconnection_delay)).await;
                             continue 'outer;
                         }
                     };
 
                     match packet {
-                        Packet::Publish(publish) => {
-                            tx.send(Packet::Publish(publish)).await?;
+                        Packet::Publish(publish, publish_prop) => {
+                            tx.send(Packet::Publish(publish, publish_prop)).await?;
                         }
-                        Packet::PingResp => ping_unacked = false,
-                        packet => warn!("bridge: expected publish, got {:?}", packet),
+                        Packet::PingResp(_) => ping_unacked = false,
+                        // TODO: Handle incoming pubrel incase of QoS subscribe
+                        packet => warn!("Expected publish, got {:?}", packet),
                     }
+                }
+                o = rx.next() => {
+                    let notif = match o {
+                        Ok(notif) => notif,
+                        Err(e) => {
+                            warn!("Local link error, reconnecting - {}", e);
+                            sleep(Duration::from_secs(config.reconnection_delay)).await;
+                            continue 'outer;
+                        }
+                    };
+                    if let Some(notif) = notif {
+                        match notif {
+                            Notification::DeviceAck(ack) => {
+                                network.write(ack.into()).await?;
+                            },
+                            _ => unreachable!("We should only get device acks"),
+                        }
+
+                    }
+                    timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+
                 }
                 _ = timeout => {
                     // retry connection if ping not acked till next timeout
                     if ping_unacked {
-                        warn!("bridge: no response to ping, reconnecting");
+                        warn!("No response to previous ping, reconnecting");
                         sleep(Duration::from_secs(config.reconnection_delay)).await;
                         continue 'outer;
                     }
 
-                    if let Err(e) = network.write_all(&buf).await {
-                        warn!("bridge: unable to write PINGRES to network stream, reconnecting - {}", e);
+                    if let Err(e) = network.write(ping_req.clone()).await {
+                        warn!("Unable to write PINGREQ to network stream, reconnecting - {}", e);
                         sleep(Duration::from_secs(config.reconnection_delay)).await;
                         continue 'outer;
                     };
@@ -120,134 +155,184 @@ pub async fn bridge_launch(
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum BridgeError {
-    #[error("Addr - {0}")]
-    Addr(#[from] AddrParseError),
-    #[error("I/O - {0}")]
-    Io(#[from] io::Error),
-    #[error("Web Pki - {0}")]
-    WebPki(#[from] tokio_rustls::webpki::Error),
-    #[error("DNS name - {0}")]
-    DNSName(#[from] InvalidDNSNameError),
-    #[error("TLS error - {0}")]
-    TLS(#[from] TLSError),
-    #[error("No valid cert in chain")]
-    NoValidCertInChain,
-    #[error("local link - {0}")]
-    Link(#[from] LinkError),
-    #[error("invalid qos")]
-    InvalidQos,
-    #[error("invalid key")]
-    InvalidKey,
-    #[error("invalid url")]
-    InvalidUrl,
-    #[error("invalid packet")]
-    InvalidPacket,
-}
-
-// The cert handling functions return unit right now, this is a shortcut
-impl From<()> for BridgeError {
-    fn from(_: ()) -> Self {
-        BridgeError::NoValidCertInChain
-    }
-}
-
-async fn netowrk_connect(
+async fn network_connect<P: Protocol>(
     config: &BridgeConfig,
-    addr: &SocketAddr,
-) -> Result<Network, (BridgeError, &'static str)> {
+    addr: &str,
+    protocol: P,
+) -> Result<Network<P>, BridgeError> {
     match &config.transport {
         Transport::Tcp => {
-            let socket = match TcpStream::connect(addr).await {
-                Ok(v) => v,
-                Err(e) => return Err((BridgeError::Io(e), "unable to form TCP connection")),
-            };
-            Ok(Network::new(Box::new(socket), 5120))
+            let socket = TcpStream::connect(addr).await?;
+            Ok(Network::new(
+                Box::new(socket),
+                config.connections.max_payload_size,
+                100,
+                protocol,
+            ))
         }
+        #[cfg(feature = "use-rustls")]
         Transport::Tls { ca, client_auth } => {
-            let socket = match tls_connect(config.url.clone(), config.port, &ca, client_auth).await
-            {
-                Ok(v) => v,
-                Err(e) => return Err((e, "unable to form TCP/TLS connection")),
-            };
-            Ok(Network::new(Box::new(socket), 5120))
+            let tcp_stream = TcpStream::connect(addr).await?;
+            // addr should be in format host:port
+            let host = addr.split(':').next().unwrap();
+            let socket = tls_connect(host, &ca, client_auth, tcp_stream).await?;
+            Ok(Network::new(
+                Box::new(socket),
+                config.connections.max_payload_size,
+                100,
+                protocol,
+            ))
+        }
+        #[cfg(not(feature = "use-rustls"))]
+        Transport::Tls { .. } => {
+            panic!("Need to enable use-rustls feature to use tls");
         }
     }
 }
+#[cfg(feature = "use-rustls")]
+pub async fn tls_connect<P: AsRef<Path>>(
+    host: &str,
+    ca_file: P,
+    client_auth_opt: &Option<ClientAuth>,
+    tcp: TcpStream,
+) -> Result<Box<dyn N>, BridgeError> {
+    let mut root_cert_store = RootCertStore::empty();
 
-async fn send_and_recv<F: FnOnce(Packet) -> bool>(
-    network: &mut Network,
-    send_packet: &[u8],
+    let ca_certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?)))?;
+    let trust_anchors = ca_certs.iter().map_while(|cert| {
+        if let Ok(ta) = webpki::TrustAnchor::try_from_cert_der(&cert[..]) {
+            Some(OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            ))
+        } else {
+            None
+        }
+    });
+
+    root_cert_store.add_server_trust_anchors(trust_anchors);
+
+    if root_cert_store.is_empty() {
+        return Err(BridgeError::NoValidCertInChain);
+    }
+
+    let config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_cert_store);
+
+    let config = if let Some(ClientAuth {
+        certs: certs_path,
+        key: key_path,
+    }) = client_auth_opt
+    {
+        let read_certs =
+            rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))?;
+
+        let read_keys = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
+            key_path,
+        )?)))? {
+            Some(rustls_pemfile::Item::RSAKey(_)) => rustls_pemfile::rsa_private_keys(
+                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
+            )?,
+            Some(rustls_pemfile::Item::PKCS8Key(_)) => rustls_pemfile::pkcs8_private_keys(
+                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
+            )?,
+            None | Some(_) => return Err(BridgeError::NoValidCertInChain),
+        };
+
+        let read_key = match read_keys.first() {
+            Some(v) => v.clone(),
+            None => return Err(BridgeError::NoValidCertInChain),
+        };
+
+        let certs = read_certs.into_iter().map(Certificate).collect();
+        config.with_single_cert(certs, PrivateKey(read_key))?
+    } else {
+        config.with_no_client_auth()
+    };
+
+    let connector = TlsConnector::from(Arc::new(config));
+    let domain = ServerName::try_from(host).unwrap();
+    Ok(Box::new(connector.connect(domain, tcp).await?))
+}
+
+async fn network_init<P: Protocol>(
+    config: &BridgeConfig,
+    network: &mut Network<P>,
+) -> Result<(), BridgeError> {
+    let connect = Connect {
+        keep_alive: 10,
+        client_id: config.name.clone(),
+        clean_session: true,
+    };
+    let packet = Packet::Connect(connect, None, None, None, None);
+
+    send_and_recv(network, packet, |packet| {
+        matches!(packet, Packet::ConnAck(..))
+    })
+    .await?;
+
+    // connecting to other router
+    let qos = match config.qos {
+        0 => QoS::AtMostOnce,
+        1 => QoS::AtLeastOnce,
+        2 => QoS::ExactlyOnce,
+        _ => return Err(BridgeError::InvalidQos),
+    };
+
+    let filters = vec![protocol::Filter {
+        path: config.sub_path.clone(),
+        qos,
+        nolocal: false,
+        preserve_retain: false,
+        retain_forward_rule: RetainForwardRule::Never,
+    }];
+
+    let subscribe = Subscribe { pkid: 0, filters };
+    let packet = Packet::Subscribe(subscribe, None);
+    send_and_recv(network, packet, |packet| {
+        matches!(packet, Packet::SubAck(..))
+    })
+    .await
+}
+
+async fn send_and_recv<F: FnOnce(Packet) -> bool, P: Protocol>(
+    network: &mut Network<P>,
+    send_packet: Packet,
     accept_recv: F,
 ) -> Result<(), BridgeError> {
-    network.write_all(send_packet).await?;
+    network.write(send_packet).await.unwrap();
     match accept_recv(network.read().await?) {
         true => Ok(()),
         false => Err(BridgeError::InvalidPacket),
     }
 }
 
-async fn network_init(network: &mut Network, sub_path: &str, qos: QoS) -> Result<(), BridgeError> {
-    let mut buf = BytesMut::new();
-    Connect::new("bytebeam-bridge").write(&mut buf).unwrap();
-    send_and_recv(network, &buf, |packet| matches!(packet, Packet::ConnAck(_))).await?;
-
-    buf.clear();
-    let _len = subscribe::write(
-        vec![SubscribeFilter {
-            path: sub_path.to_owned(),
-            qos,
-        }],
-        1,
-        &mut buf,
-    );
-    send_and_recv(network, &buf, |packet| matches!(packet, Packet::SubAck(_))).await
-}
-
-// TODO: Try to replicate rumqttc
-pub async fn tls_connect<P: AsRef<Path>>(
-    broker_addr: String,
-    port: u16,
-    ca_file: P,
-    client_auth_opt: &Option<ClientAuth>,
-) -> Result<TlsStream<TcpStream>, BridgeError> {
-    let mut config = ClientConfig::new();
-    config
-        .root_store
-        .add_pem_file(&mut BufReader::new(Cursor::new(fs::read(ca_file)?)))?;
-
-    if let Some(ClientAuth {
-        certs: certs_path,
-        key: key_path,
-    }) = client_auth_opt
-    {
-        let read_certs = certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))?;
-
-        let read_keys = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
-            key_path,
-        )?)))? {
-            Some(rustls_pemfile::Item::RSAKey(_)) => {
-                rsa_private_keys(&mut BufReader::new(Cursor::new(fs::read(key_path)?)))?
-            }
-            Some(rustls_pemfile::Item::PKCS8Key(_)) => {
-                pkcs8_private_keys(&mut BufReader::new(Cursor::new(fs::read(key_path)?)))?
-            }
-            None | Some(_) => return Err(BridgeError::InvalidKey),
-        };
-
-        let read_key = match read_keys.first() {
-            Some(v) => v.clone(),
-            None => return Err(BridgeError::InvalidKey),
-        };
-
-        config.set_single_client_cert(read_certs, read_key)?;
-    }
-
-    let connector = TlsConnector::from(Arc::new(config));
-    let addr = broker_addr.clone();
-    let domain = DNSNameRef::try_from_ascii_str(&broker_addr)?;
-    let tcp = TcpStream::connect((addr, port)).await?;
-    let tls = connector.connect(domain, tcp).await?;
-    Ok(tls)
+#[derive(Debug, thiserror::Error)]
+pub enum BridgeError {
+    #[error("Addr - {0}")]
+    Addr(#[from] AddrParseError),
+    #[error("I/O - {0}")]
+    Io(#[from] io::Error),
+    #[error("Network - {0}")]
+    Network(#[from] network::Error),
+    #[error("Web Pki - {0}")]
+    #[cfg(feature = "use-rustls")]
+    WebPki(#[from] tokio_rustls::webpki::Error),
+    #[error("DNS name - {0}")]
+    #[cfg(feature = "use-rustls")]
+    DNSName(#[from] InvalidDnsNameError),
+    #[error("TLS error - {0}")]
+    #[cfg(feature = "use-rustls")]
+    Tls(#[from] TLSError),
+    #[error("local link - {0}")]
+    Link(#[from] LinkError),
+    #[error("Invalid qos")]
+    InvalidQos,
+    #[error("Invalid packet")]
+    InvalidPacket,
+    #[cfg(feature = "use-rustls")]
+    #[error("Invalid trust_anchor")]
+    NoValidCertInChain,
 }

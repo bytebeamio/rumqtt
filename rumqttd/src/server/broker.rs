@@ -1,5 +1,5 @@
 use crate::link::alerts::{self};
-// use crate::link::bridge;
+use crate::link::bridge;
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, RemoteLink};
@@ -167,22 +167,20 @@ impl Broker {
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
         // spawn bridge in a separate thread
-        // if let Some(bridge_config) = self.config.bridge.clone() {
-        //     let router_tx = self.router_tx.clone();
-        //     thread::Builder::new()
-        //         .name("bridge-thread".to_string())
-        //         .spawn(move || {
-        //             let mut runtime = tokio::runtime::Builder::new_current_thread();
-        //             let runtime = runtime.enable_all().build().unwrap();
-        //             let router_tx = router_tx.clone();
+        if let Some(bridge_config) = self.config.bridge.clone() {
+            let bridge_thread = thread::Builder::new().name(bridge_config.name.clone());
+            let router_tx = self.router_tx.clone();
+            bridge_thread.spawn(move || {
+                let mut runtime = tokio::runtime::Builder::new_current_thread();
+                let runtime = runtime.enable_all().build().unwrap();
 
-        //             runtime.block_on(async move {
-        //                 if let Err(e) = bridge::bridge_launch(bridge_config, router_tx).await {
-        //                     error!("bridge: {:?}", e);
-        //                 };
-        //             });
-        //         })?;
-        // }
+                runtime.block_on(async move {
+                    if let Err(e) = bridge::start(bridge_config, router_tx, V4).await {
+                        error!(error=?e, "Bridge Link error");
+                    };
+                });
+            })?;
+        }
 
         // spawn servers in a separate thread
         for (_, config) in self.config.v4.clone() {
