@@ -95,17 +95,15 @@ type MaybePacket = Option<Packet>;
 // We either get a Packet to write to buffer or we unschedule which is represented as `None`
 impl From<Notification> for MaybePacket {
     fn from(notification: Notification) -> Self {
-        let packet: Packet;
-        match notification {
-            Notification::Forward(forward) => {
-                packet = Packet::Publish(forward.publish, None);
-            }
-            Notification::DeviceAck(ack) => {
-                packet = ack.into();
-            }
+        let packet: Packet = match notification {
+            Notification::Forward(forward) => Packet::Publish(forward.publish, None),
+            Notification::DeviceAck(ack) => ack.into(),
             Notification::Unschedule => return None,
-            v => unreachable!("{:?}", v),
-        }
+            v => {
+                tracing::error!("Unexpected notification here, it cannot be converted into Packet, Notification: {:?}", v);
+                return None;
+            }
+        };
         Some(packet)
     }
 }

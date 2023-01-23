@@ -168,7 +168,7 @@ impl Broker {
 
                 runtime.block_on(async move {
                     if let Err(e) = bridge::start(bridge_config, router_tx, V4).await {
-                        error!("bridge: {:?}", e);
+                        error!(error=?e, "Bridge Link error");
                     };
                 });
             })?;

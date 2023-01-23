@@ -50,6 +50,9 @@ pub async fn start<P>(
 where
     P: Protocol + Clone + Send + 'static,
 {
+    let span = tracing::info_span!("bridge_link");
+    let _guard = span.enter();
+
     info!(
         client_id = config.name,
         remote_addr = &config.addr,
@@ -62,7 +65,7 @@ where
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
             Ok(v) => v,
             Err(e) => {
-                error!("Error: {}, retrying", e);
+                error!(error=?e, "Error, retrying");
                 sleep(Duration::from_secs(config.reconnection_delay)).await;
                 continue;
             }
