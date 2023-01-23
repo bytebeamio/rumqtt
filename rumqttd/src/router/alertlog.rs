@@ -9,83 +9,101 @@ use crate::Storage;
 use std::collections::HashMap;
 use std::io;
 
-pub enum AlertTopic {
-    Connect,
-    Disconnect,
-    Subscribe,
-    Unsubscribe,
+#[derive(Debug, Clone)]
+pub enum AlertError {
+    CursorJump(String),
 }
 
-impl ToString for AlertTopic {
-    fn to_string(&self) -> String {
+impl AlertError {
+    pub fn topic(&self) -> String {
         match self {
-            Self::Connect => String::from("/alerts/connect"),
-            Self::Disconnect => String::from("/alerts/disconnect"),
-            Self::Subscribe => String::from("/alerts/subscribe"),
-            Self::Unsubscribe => String::from("/alerts/unsubscribe"),
+            AlertError::CursorJump(_) => "/error".to_string(),
+        }
+    }
+}
+
+impl Storage for AlertError {
+    fn size(&self) -> usize {
+        match self {
+            Self::CursorJump(message) => message.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AlertEvent {
+    Connect,
+    Disconnect,
+    Subscribe(Subscribe),
+    Unsubscribe(Unsubscribe),
+}
+
+impl AlertEvent {
+    pub fn topic(&self) -> String {
+        match self {
+            Self::Connect => "/event/connect".to_string(),
+            Self::Disconnect => "/event/disconnect".to_string(),
+            Self::Subscribe(_) => "/event/subscribe".to_string(),
+            Self::Unsubscribe(_) => "/event/unsubscribe".to_string(),
+        }
+    }
+}
+
+impl Storage for AlertEvent {
+    fn size(&self) -> usize {
+        match self {
+            Self::Connect => 0,
+            Self::Disconnect => 0,
+            Self::Subscribe(subscribe) => {
+                let mut size = 0;
+                size += 2;
+                for filter in &subscribe.filters {
+                    size += filter.path.len();
+                }
+                size
+            }
+            Self::Unsubscribe(unsubscribe) => {
+                let mut size = 0;
+                size += 2;
+                for filter in &unsubscribe.filters {
+                    size += filter.len();
+                }
+                size
+            }
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Alert {
-    Connect(String),
-    Disconnect(String),
-    Subscribe(String, Subscribe),
-    Unsubscribe(String, Unsubscribe),
+    Event(String, AlertEvent),
+    Error(String, AlertError),
 }
 
 impl Alert {
-    // Topic prefix to which alerts are published to
-    pub fn topic_prefix(&self) -> String {
-        match self {
-            Self::Connect(_) => AlertTopic::Connect.to_string(),
-            Self::Disconnect(_) => AlertTopic::Disconnect.to_string(),
-            Self::Subscribe(_, _) => AlertTopic::Subscribe.to_string(),
-            Self::Unsubscribe(_, _) => AlertTopic::Unsubscribe.to_string(),
-        }
+    pub fn event(client_id: String, event: AlertEvent) -> Self {
+        Alert::Event(client_id, event)
     }
 
-    pub fn topic(&self) -> String {
+    pub fn error(client_id: String, error: AlertError) -> Self {
+        Alert::Error(client_id, error)
+    }
+}
+
+impl Storage for Alert {
+    fn size(&self) -> usize {
         match self {
-            Self::Connect(client_id) => {
-                format!("{}/{}", AlertTopic::Connect.to_string(), client_id)
-            }
-            Self::Disconnect(client_id) => {
-                format!("{}/{}", AlertTopic::Disconnect.to_string(), client_id)
-            }
-            Self::Subscribe(client_id, _) => {
-                format!("{}/{}", AlertTopic::Subscribe.to_string(), client_id)
-            }
-            Self::Unsubscribe(client_id, _) => {
-                format!("{}/{}", AlertTopic::Unsubscribe.to_string(), client_id)
-            }
+            Alert::Event(client_id, event) => client_id.len() + event.size(),
+            Alert::Error(client_id, alert) => client_id.len() + alert.size(),
         }
     }
 }
 
-// Rough calculation of size of a alert
-impl Storage for Alert {
-    fn size(&self) -> usize {
+impl Alert {
+    pub fn topic(&self) -> String {
         match self {
-            Alert::Connect(client_id) => client_id.len(),
-            Alert::Disconnect(client_id) => client_id.len(),
-            Alert::Subscribe(client_id, subscribe) => {
-                let mut size = 0;
-                size += 2;
-                for filter in &subscribe.filters {
-                    size += filter.path.len();
-                }
-                size + client_id.len()
-            }
-            Alert::Unsubscribe(client_id, unsubscribe) => {
-                let mut size = 0;
-                size += 2;
-                for filter in &unsubscribe.filters {
-                    size += filter.len();
-                }
-                size + client_id.len()
-            }
+            Alert::Event(client_id, event) => format!("/alerts{}/{client_id}", event.topic()),
+            Alert::Error(client_id, error) => format!("/alerts{}/{client_id}", error.topic()),
         }
     }
 }

@@ -68,18 +68,18 @@ fn main() {
         // Publisher meters
         for i in 0..5 {
             let client_id = format!("client_{i}");
-            let request = GetMeter::Connection(client_id);
+            let request = GetMeter::Connection(Some(client_id));
             let v = meters.get(request).unwrap();
             println!("{:#?}", v);
         }
 
         // Commitlog meters
-        let request = GetMeter::Subscription("hello/+/world".to_owned());
+        let request = GetMeter::Subscription(Some("hello/+/world".to_owned()));
         let v = meters.get(request).unwrap();
         println!("{:#?}", v);
 
         // Consumer meters
-        let request = GetMeter::Connection("consumer".to_owned());
+        let request = GetMeter::Connection(Some("consumer".to_owned()));
         let v = meters.get(request).unwrap();
         println!("{:#?}", v);
 

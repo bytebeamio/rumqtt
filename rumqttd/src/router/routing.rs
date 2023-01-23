@@ -2,6 +2,7 @@ use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
     PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
+use crate::router::alertlog::{AlertError, AlertEvent};
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
 use crate::router::Forward;
@@ -60,7 +61,7 @@ pub struct Router {
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
     /// List of MetersLink's senders
-    meters: Slab<Sender<(ConnectionId, Meter)>>,
+    meters: Slab<Sender<(ConnectionId, Vec<Meter>)>>,
     /// List of AlertsLink's senders with their respective subscription Filter
     alerts: Slab<(FilterWithOffsets, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
@@ -324,7 +325,7 @@ impl Router {
             .check_tracker_duplicates(connection_id)
             .is_none());
 
-        let alert = Alert::Connect(client_id.clone());
+        let alert = Alert::event(client_id.clone(), AlertEvent::Connect);
         match append_to_alertlog(alert, &mut self.alertlog) {
             Ok(_offset) => {}
             Err(e) => {
@@ -348,10 +349,13 @@ impl Router {
         self.router_meters.total_connections += 1;
     }
 
-    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Meter)>) {
+    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Vec<Meter>)>) {
         let meter_id = self.meters.insert(tx);
         let tx = &self.meters[meter_id];
-        let _ = tx.try_send((meter_id, Meter::Router(self.id, self.router_meters.clone())));
+        let _ = tx.try_send((
+            meter_id,
+            vec![Meter::Router(self.id, self.router_meters.clone())],
+        ));
     }
 
     fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filters: Vec<Filter>) {
@@ -362,7 +366,10 @@ impl Router {
         }
         let alert_id = self.alerts.insert((filter_with_offsets, tx));
         let (_, tx) = self.alerts.get(alert_id).unwrap();
-        let _ = tx.try_send((alert_id, Alert::Connect("AlertsLink".to_owned())));
+        let _ = tx.try_send((
+            alert_id,
+            Alert::event("AlertsLink".to_owned(), AlertEvent::Connect),
+        ));
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
@@ -375,7 +382,7 @@ impl Router {
                 return;
             }
         };
-        let alert = Alert::Disconnect(client_id.clone());
+        let alert = Alert::event(client_id.clone(), AlertEvent::Disconnect);
         match append_to_alertlog(alert, &mut self.alertlog) {
             Ok(_offset) => {}
             Err(e) => {
@@ -485,7 +492,6 @@ impl Router {
                         tracing::info_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
-                    let size = publish.len();
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
@@ -561,10 +567,11 @@ impl Router {
                     };
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-                    meter.publish_count += 1;
-                    meter.total_size += size;
-
-                    // println!("{}, {}", self.router_metrics.total_publishes, pkid);
+                    if let Err(e) = meter.register_publish(&publish) {
+                        error!(
+                            reason = ?e, "Failed to write to incoming meter"
+                        );
+                    };
                 }
                 Packet::Subscribe(subscribe, _) => {
                     let mut return_codes = Vec::new();
@@ -603,7 +610,7 @@ impl Router {
                         return_codes.push(code);
                     }
 
-                    let alert = Alert::Subscribe(client_id.clone(), subscribe);
+                    let alert = Alert::event(client_id.clone(), AlertEvent::Subscribe(subscribe));
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -638,7 +645,7 @@ impl Router {
                             }
 
                             let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-                            meter.subscribe_count -= 1;
+                            meter.unregister_subscription(filter);
 
                             if !connection.subscriptions.remove(filter) {
                                 warn!(
@@ -660,7 +667,8 @@ impl Router {
                             force_ack = true;
                         }
                     }
-                    let alert = Alert::Unsubscribe(client_id.clone(), unsubscribe);
+                    let alert =
+                        Alert::event(client_id.clone(), AlertEvent::Unsubscribe(unsubscribe));
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -761,7 +769,7 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
 
-                    let alert = Alert::Disconnect(client_id);
+                    let alert = Alert::event(client_id, AlertEvent::Disconnect);
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
@@ -841,7 +849,7 @@ impl Router {
 
         if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
-                filter,
+                filter: filter.clone(),
                 filter_idx,
                 qos,
                 cursor,
@@ -855,7 +863,7 @@ impl Router {
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-        meter.subscribe_count += 1;
+        meter.register_subscription(filter);
     }
 
     /// When a connection is ready, it should sweep native data from 'datalog',
@@ -878,6 +886,7 @@ impl Router {
 
         let ackslog = self.ackslog.get_mut(id).unwrap();
         let datalog = &mut self.datalog;
+        let alertlog = &mut self.alertlog;
 
         trace!("Consuming requests");
 
@@ -900,7 +909,7 @@ impl Router {
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing) {
+            match forward_device_data(&mut request, datalog, outgoing, alertlog) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -976,27 +985,49 @@ impl Router {
         match meter {
             GetMeter::Router => {
                 let router_meters = Meter::Router(self.id, self.router_meters.clone());
-                let _ = meter_tx.try_send((meter_id, router_meters));
+                let _ = meter_tx.try_send((meter_id, vec![router_meters]));
             }
             GetMeter::Connection(client_id) => {
-                let connection_id = match self.connection_map.get(&client_id) {
-                    Some(val) => val,
-                    None => {
-                        let meter = Meter::Connection("".to_owned(), None, None);
-                        let _ = meter_tx.try_send((meter_id, meter));
-                        return;
+                let connections = match client_id {
+                    Some(client_id) => {
+                        if let Some(connection_id) = self.connection_map.get(&client_id) {
+                            vec![(client_id, connection_id)]
+                        } else {
+                            let meter = Meter::Connection("".to_owned(), None, None);
+                            let _ = meter_tx.try_send((meter_id, vec![meter]));
+                            return;
+                        }
                     }
+                    // send meters for all connections
+                    None => self
+                        .connection_map
+                        .iter()
+                        .map(|(k, v)| (k.to_owned(), v))
+                        .collect(),
                 };
 
                 // Update metrics
-                let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
-                let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
-                let meter = Meter::Connection(client_id, incoming_meter, outgoing_meter);
+                let mut meter = Vec::new();
+                for (client_id, connection_id) in connections {
+                    let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
+                    let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
+                    meter.push(Meter::Connection(client_id, incoming_meter, outgoing_meter));
+                }
+
                 let _ = meter_tx.try_send((meter_id, meter));
             }
             GetMeter::Subscription(filter) => {
-                let subscription_meter = self.datalog.meter(&filter);
-                let meter = Meter::Subscription(filter, subscription_meter);
+                let filters = match filter {
+                    Some(filter) => vec![filter],
+                    None => self.subscription_map.keys().map(|k| k.to_owned()).collect(),
+                };
+
+                let mut meter = Vec::new();
+                for filter in filters {
+                    let subscription_meter = self.datalog.meter(&filter);
+                    meter.push(Meter::Subscription(filter, subscription_meter));
+                }
+
                 let _ = meter_tx.try_send((meter_id, meter));
             }
         };
@@ -1157,6 +1188,7 @@ fn forward_device_data(
     request: &mut DataRequest,
     datalog: &DataLog,
     outgoing: &mut Outgoing,
+    alertlog: &mut AlertLog,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
@@ -1194,11 +1226,26 @@ fn forward_device_data(
     };
 
     if start != request.cursor {
+        let error = format!(
+            "Read cursor start jumped from {:?} to {:?} on {}",
+            request.cursor, start, request.filter
+        );
+
         warn!(
             request_cursor = ?request.cursor,
             start_cursor = ?start,
-            "Read cursor start jumped from {:?} to {:?}", request.cursor, start,
+            error
         );
+
+        let alert = Alert::error(outgoing.client_id.clone(), AlertError::CursorJump(error));
+        match append_to_alertlog(alert, alertlog) {
+            Ok(_offset) => (),
+            Err(e) => {
+                error!(
+                    reason = ?e, "Failed to append to alertlog"
+                );
+            }
+        }
     }
 
     trace!(

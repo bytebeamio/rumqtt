@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
 };
 
@@ -12,7 +12,7 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId,
+    ConnectionId, Filter, RouterConfig, RouterId, Topic,
 };
 
 mod alertlog;
@@ -24,7 +24,7 @@ mod routing;
 mod scheduler;
 mod waiters;
 
-pub use alertlog::Alert;
+pub use alertlog::{Alert, AlertError, AlertEvent};
 pub use connection::Connection;
 pub use routing::Router;
 pub use waiters::Waiters;
@@ -46,7 +46,7 @@ pub enum Event {
         outgoing: iobufs::Outgoing,
     },
     /// New meter link
-    NewMeter(flume::Sender<(ConnectionId, Meter)>),
+    NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
     /// Request for meter
     GetMeter(GetMeter),
     /// New Alert link
@@ -241,10 +241,52 @@ pub struct SubscriptionMeter {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct MeterData {
+    pub count: usize,
+    pub size: usize,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct IncomingMeter {
-    pub publish_count: usize,
-    pub subscribe_count: usize,
-    pub total_size: usize,
+    publishes: HashMap<Topic, MeterData>,
+    subscribes: HashSet<Filter>,
+    total_publishes: MeterData,
+}
+
+impl IncomingMeter {
+    pub fn register_publish(&mut self, publish: &Publish) -> Result<(), std::str::Utf8Error> {
+        let meter = {
+            let topic = std::str::from_utf8(&publish.topic)?.to_string();
+            self.publishes.entry(topic).or_default()
+        };
+        meter.count += 1;
+        meter.size += publish.len();
+
+        self.total_publishes.count += 1;
+        self.total_publishes.size += publish.len();
+
+        Ok(())
+    }
+
+    pub fn get_topic_meters(&self) -> &HashMap<Topic, MeterData> {
+        &self.publishes
+    }
+
+    pub fn register_subscription(&mut self, filter: Filter) -> bool {
+        self.subscribes.insert(filter)
+    }
+
+    pub fn unregister_subscription(&mut self, filter: &Filter) -> bool {
+        self.subscribes.remove(filter)
+    }
+
+    pub fn get_total_count(&self) -> usize {
+        self.total_publishes.count
+    }
+
+    pub fn get_total_size(&self) -> usize {
+        self.total_publishes.size
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -261,8 +303,10 @@ pub struct ConnectionEvents {
 #[derive(Debug, Clone)]
 pub enum GetMeter {
     Router,
-    Connection(String),
-    Subscription(String),
+    // Associated data of None<String> type
+    // means get all meters
+    Connection(Option<String>),
+    Subscription(Option<String>),
 }
 
 #[derive(Debug, Clone)]

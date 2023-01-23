@@ -19,7 +19,7 @@ pub enum LinkError {
 pub struct MetersLink {
     pub(crate) meter_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,
-    router_rx: Receiver<(ConnectionId, Meter)>,
+    router_rx: Receiver<(ConnectionId, Vec<Meter>)>,
 }
 
 impl MetersLink {
@@ -51,14 +51,14 @@ impl MetersLink {
         Ok(link)
     }
 
-    pub fn get(&self, meter: GetMeter) -> Result<Meter, LinkError> {
+    pub fn get(&self, meter: GetMeter) -> Result<Vec<Meter>, LinkError> {
         self.router_tx
             .send((self.meter_id, Event::GetMeter(meter)))?;
         let (_meter_id, meter) = self.router_rx.recv()?;
         Ok(meter)
     }
 
-    pub async fn fetch(&self, meter: GetMeter) -> Result<Meter, LinkError> {
+    pub async fn fetch(&self, meter: GetMeter) -> Result<Vec<Meter>, LinkError> {
         self.router_tx
             .send_async((self.meter_id, Event::GetMeter(meter)))
             .await?;
