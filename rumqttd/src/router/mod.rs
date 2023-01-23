@@ -100,17 +100,9 @@ impl From<Notification> for MaybePacket {
             Notification::Forward(forward) => {
                 packet = Packet::Publish(forward.publish, None);
             }
-            Notification::DeviceAck(ack) => match ack {
-                Ack::ConnAck(_, connack) => packet = Packet::ConnAck(connack, None),
-                Ack::PubAck(puback) => packet = Packet::PubAck(puback, None),
-                Ack::SubAck(suback) => packet = Packet::SubAck(suback, None),
-                Ack::PingResp(pingresp) => packet = Packet::PingResp(pingresp),
-                Ack::PubRec(pubrec) => packet = Packet::PubRec(pubrec, None),
-                Ack::PubRel(pubrel) => packet = Packet::PubRel(pubrel, None),
-                Ack::PubComp(pubcomp) => packet = Packet::PubComp(pubcomp, None),
-                Ack::UnsubAck(unsuback) => packet = Packet::UnsubAck(unsuback, None),
-                _ => unimplemented!(),
-            },
+            Notification::DeviceAck(ack) => {
+                packet = ack.into();
+            }
             Notification::Unschedule => return None,
             v => unreachable!("{:?}", v),
         }
