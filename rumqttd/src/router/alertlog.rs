@@ -17,7 +17,7 @@ pub enum AlertError {
 impl AlertError {
     pub fn topic(&self) -> String {
         match self {
-            AlertError::CursorJump(_) => format!("/error"),
+            AlertError::CursorJump(_) => "/error".to_string(),
         }
     }
 }
@@ -41,10 +41,10 @@ pub enum AlertEvent {
 impl AlertEvent {
     pub fn topic(&self) -> String {
         match self {
-            Self::Connect => format!("/event/connect"),
-            Self::Disconnect => format!("/event/disconnect"),
-            Self::Subscribe(_) => format!("/event/subscribe"),
-            Self::Unsubscribe(_) => format!("/event/unsubscribe"),
+            Self::Connect => "/event/connect".to_string(),
+            Self::Disconnect => "/event/disconnect".to_string(),
+            Self::Subscribe(_) => "/event/subscribe".to_string(),
+            Self::Unsubscribe(_) => "/event/unsubscribe".to_string(),
         }
     }
 }
