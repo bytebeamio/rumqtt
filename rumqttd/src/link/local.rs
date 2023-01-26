@@ -45,6 +45,7 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        is_bridge: bool,
     ) -> (
         Event,
         Arc<Mutex<VecDeque<Packet>>>,
@@ -57,6 +58,7 @@ impl Link {
             clean,
             last_will,
             dynamic_filters,
+            is_bridge,
         );
         let incoming = Incoming::new(client_id.to_string());
         let (outgoing, link_rx) = Outgoing::new(client_id.to_string());
@@ -80,12 +82,19 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        is_bridge: bool,
     ) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx) =
-            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
+        let (message, i, o, link_rx) = Link::prepare(
+            tenant_id,
+            client_id,
+            clean,
+            last_will,
+            dynamic_filters,
+            is_bridge,
+        );
         router_tx.send((0, message))?;
 
         link_rx.recv()?;
@@ -110,12 +119,19 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        is_bridge: bool,
     ) -> Result<(LinkTx, LinkRx, ConnAck), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx) =
-            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
+        let (message, i, o, link_rx) = Link::prepare(
+            tenant_id,
+            client_id,
+            clean,
+            last_will,
+            dynamic_filters,
+            is_bridge,
+        );
         router_tx.send_async((0, message)).await?;
 
         link_rx.recv_async().await?;

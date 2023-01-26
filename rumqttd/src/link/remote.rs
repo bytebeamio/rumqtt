@@ -118,6 +118,7 @@ impl<P: Protocol> RemoteLink<P> {
             clean_session,
             lastwill,
             dynamic_filters,
+            connect.is_bridge,
         )?;
         let id = link_rx.id();
 

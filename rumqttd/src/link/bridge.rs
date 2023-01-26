@@ -1,3 +1,4 @@
+use bytes::{BufMut, Bytes, BytesMut};
 use flume::Sender;
 
 #[cfg(feature = "use-rustls")]
@@ -30,7 +31,9 @@ use crate::{
         local::{Link, LinkError},
         network::Network,
     },
-    protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
+    protocol::{
+        self, Connect, Packet, PingReq, Protocol, Publish, QoS, RetainForwardRule, Subscribe,
+    },
     router::Event,
     BridgeConfig, ConnectionId, Notification, Transport,
 };
@@ -59,7 +62,7 @@ where
         "Starting bridge with subscription on filter \"{}\"",
         &config.sub_path,
     );
-    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
+    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true, true)?;
 
     'outer: loop {
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
@@ -103,7 +106,10 @@ where
 
                     match packet {
                         Packet::Publish(publish, publish_prop) => {
-                            tx.send(Packet::Publish(publish, publish_prop)).await?;
+                            let new_publish = update_topic(publish, config.name.clone());
+                            let packet = Packet::Publish(new_publish, publish_prop);
+                            dbg!(&packet);
+                            tx.send(packet).await?;
                         }
                         Packet::PingResp(_) => ping_unacked = false,
                         // TODO: Handle incoming pubrel incase of QoS subscribe
@@ -153,6 +159,20 @@ where
             }
         }
     }
+}
+
+// topic is mapped from `hello/world` to `$bridge/bridge-name/hello/world`
+// TODO: Currently `/hello/world` would be mapped to `$bridge/bridge-name//hello/world` see if this behaves
+// correctly with router
+fn update_topic(mut publish: Publish, bridge_name: String) -> Publish {
+    let mut new_topic = BytesMut::new();
+    new_topic.put(&b"$bridge/"[..]);
+    new_topic.put(Bytes::from(bridge_name));
+    new_topic.put(&b"/"[..]);
+    new_topic.put(publish.topic);
+
+    publish.topic = new_topic.freeze();
+    publish
 }
 
 async fn network_connect<P: Protocol>(
@@ -265,6 +285,7 @@ async fn network_init<P: Protocol>(
         keep_alive: 10,
         client_id: config.name.clone(),
         clean_session: true,
+        is_bridge: true,
     };
     let packet = Packet::Connect(connect, None, None, None, None);
 

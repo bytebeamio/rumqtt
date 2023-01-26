@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use bytes::BytesMut;
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
 use tracing::{error, warn};
@@ -142,6 +143,11 @@ impl Outgoing {
 
             self.meter.publish_count += 1;
             self.meter.total_size += p.publish.topic.len() + p.publish.payload.len();
+            // if p.publish.topic.starts_with(b"$bridge") {
+            //     // if in $bridge/bridge_name/X convert to X
+            //     let old_topic = p.publish.topic;
+            //     let new_toipc = update_topic(old_topic);
+            // }
             buffer.push_back(Notification::Forward(p));
         }
 
@@ -188,6 +194,11 @@ impl Outgoing {
         o
     }
 }
+
+// fn update_topic(old_topic: Bytes) -> Bytes {
+//     let new_topic = BytesMut::new();
+//     let topic = old_topic;
+// }
 
 #[cfg(test)]
 mod test {

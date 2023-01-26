@@ -37,7 +37,8 @@ pub fn read(
         return Err(Error::InvalidProtocol);
     }
 
-    if protocol_level != 4 {
+    // 132 indicates that this is a connect packet from Bridge
+    if protocol_level != 4 && protocol_level != 132 {
         return Err(Error::InvalidProtocolLevel(protocol_level));
     }
 
@@ -54,6 +55,7 @@ pub fn read(
         keep_alive,
         client_id,
         clean_session,
+        is_bridge: protocol_level == 132,
     };
 
     Ok((connect, login, last_will))
@@ -70,7 +72,11 @@ pub fn write(
     let count = write_remaining_length(buffer, len)?;
     write_mqtt_string(buffer, "MQTT");
 
-    buffer.put_u8(0x04);
+    if !connect.is_bridge {
+        buffer.put_u8(0x04);
+    } else {
+        buffer.put_u8(0x84)
+    }
     let flags_index = 1 + count + 2 + 4 + 1;
 
     let mut connect_flags = 0;

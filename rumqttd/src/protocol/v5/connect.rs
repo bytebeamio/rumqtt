@@ -27,7 +27,7 @@ pub fn read(
         return Err(Error::InvalidProtocol);
     }
 
-    if protocol_level != 5 {
+    if protocol_level != 5 && protocol_level != 133 {
         return Err(Error::InvalidProtocolLevel(protocol_level));
     }
 
@@ -45,6 +45,7 @@ pub fn read(
         keep_alive,
         client_id,
         clean_session,
+        is_bridge: protocol_level == 133,
     };
 
     Ok((connect, properties, will, willproperties, login))
