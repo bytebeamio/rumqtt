@@ -142,6 +142,8 @@ impl Outgoing {
 
             self.meter.publish_count += 1;
             self.meter.total_size += p.publish.topic.len() + p.publish.payload.len();
+            // TODO: for messages received by the client that where from bridge, strip
+            // `$bridge/bridge-name` prefix
             // if p.publish.topic.starts_with(b"$bridge") {
             //     // if in $bridge/bridge_name/X convert to X
             //     let old_topic = p.publish.topic;
