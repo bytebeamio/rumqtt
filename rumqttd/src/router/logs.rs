@@ -30,6 +30,9 @@ pub struct DataLog {
     filter_indexes: HashMap<Filter, FilterIdx>,
     retained_publishes: HashMap<Topic, Publish>,
     /// List of filters associated with a topic
+    /// for e.g.
+    /// there are four subscriptions filters index starting with 0: #, foo/# ,hello/+, +/+
+    /// so topic hello/world will have indexs: {"hello/world": [0, 2, 3]}
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
 }
 
@@ -95,12 +98,11 @@ impl DataLog {
 
     // TODO: Currently returning a Option<Vec> instead of Option<&Vec> due to Rust borrow checker
     // limitation
+    //
+    // Returns to which filter_idxs in native to append a message for this topic
     pub fn matches(&mut self, topic: &str) -> Option<Vec<usize>> {
-        dbg!(&self.publish_filters);
-        dbg!(&self.filter_indexes);
-        dbg!(&topic);
         match &self.publish_filters.get(topic) {
-            Some(v) => dbg!(Some(v.to_vec())),
+            Some(v) => Some(v.to_vec()),
             None => {
                 let v: Vec<usize> = self
                     .filter_indexes
@@ -113,7 +115,7 @@ impl DataLog {
                     self.publish_filters.insert(topic.to_owned(), v.clone());
                 }
 
-                dbg!(Some(v))
+                Some(v)
             }
         }
     }

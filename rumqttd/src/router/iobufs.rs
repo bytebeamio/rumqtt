@@ -3,7 +3,6 @@ use std::{
     sync::Arc,
 };
 
-use bytes::BytesMut;
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
 use tracing::{error, warn};

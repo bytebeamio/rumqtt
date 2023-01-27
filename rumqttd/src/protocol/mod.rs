@@ -660,7 +660,7 @@ pub fn valid_filter(filter: &str) -> bool {
 /// during a subscribe (should ideally use type system to avoid this assumption)
 /// **NOTE**: # shouldn't match $X $bridge/#
 pub fn matches(topic: &str, filter: &str) -> bool {
-    if !topic.is_empty() /* && !topic.starts_with("$bridge") && */ topic[..1].contains('$') {
+    if topic.starts_with('$') {
         return false;
     }
 

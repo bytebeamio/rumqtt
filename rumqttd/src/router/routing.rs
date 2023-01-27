@@ -1100,10 +1100,11 @@ fn append_to_commitlog(
     connections: &mut Slab<Connection>,
 ) -> Result<Offset, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
+    let connection = &connections[id];
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connections[id].tenant_prefix {
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
         if !topic.starts_with(tenant_prefix) {
             return Err(RouterError::BadTenant(
                 tenant_prefix.to_owned(),
@@ -1128,7 +1129,7 @@ fn append_to_commitlog(
         Some(v) => v,
         // NOTE: DataLog::matches never returns `None` so this branch is never triggered making
         // `dynamic_filters` usesless
-        None if connections[id].dynamic_filters => {
+        None if connection.dynamic_filters => {
             let (idx, _cursor) = datalog.next_native_offset(topic);
             vec![idx]
         }
