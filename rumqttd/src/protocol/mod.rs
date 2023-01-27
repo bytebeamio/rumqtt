@@ -659,13 +659,15 @@ pub fn valid_filter(filter: &str) -> bool {
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe (should ideally use type system to avoid this assumption)
 /// **NOTE**: # shouldn't match $X $bridge/#
-pub fn matches(topic: &str, filter: &str) -> bool {
-    if topic.starts_with('$') {
-        return false;
-    }
-
+pub fn matches(topic: &str, filter: &str, is_bridge: bool) -> bool {
+    dbg!(&topic, &filter, is_bridge);
     let mut topics = topic.split('/');
     let mut filters = filter.split('/');
+
+    if (is_bridge && topic.starts_with("$bridge") && filter.starts_with("$bridge")) {
+    } else if topic.starts_with('$') {
+        return false;
+    }
 
     for f in filters.by_ref() {
         // "#" being the last element is validated by the broker with 'valid_filter'

@@ -1101,6 +1101,7 @@ fn append_to_commitlog(
 ) -> Result<Offset, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
     let connection = &connections[id];
+    let is_bridge = connection.is_bridge;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
@@ -1122,7 +1123,8 @@ fn append_to_commitlog(
     publish.retain = false;
     let pkid = publish.pkid;
 
-    let filter_idxs = datalog.matches(topic);
+    let filter_idxs = datalog.matches(topic, is_bridge);
+    dbg!(&filter_idxs);
 
     // Create a dynamic filter if dynamic_filters are enabled for this connection
     let filter_idxs = match filter_idxs {

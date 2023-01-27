@@ -146,7 +146,7 @@ impl AlertLog {
                 let v: Vec<usize> = self
                     .filter_indexes
                     .iter()
-                    .filter(|(filter, _)| matches(topic, filter))
+                    .filter(|(filter, _)| matches(topic, filter, false /*fix this*/))
                     .map(|(_, filter_idx)| *filter_idx)
                     .collect();
 
@@ -179,7 +179,7 @@ impl AlertLog {
 
                 // Match new filter to existing topics and add to publish_filters if it matches
                 for (topic, filters) in publish_filters.iter_mut() {
-                    if matches(topic, filter) {
+                    if matches(topic, filter, false /*fix this*/) {
                         filters.push(idx);
                     }
                 }
