@@ -53,7 +53,7 @@ async fn main() {
     for i in 0..PUBLISHERS {
         let c = barrier.clone();
         let client_id = format!("publisher_{i}");
-        let topic = format!("hello/{}/world", client_id);
+        let topic = format!("hello/{client_id}/world");
         let payload = vec![0u8; 1_000]; // 0u8 is one byte, so total ~1KB
         let (mut link_tx, _link_rx) = broker.link(&client_id).unwrap();
 

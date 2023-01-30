@@ -39,7 +39,7 @@ fn main() {
                     );
                 }
                 v => {
-                    println!("{:?}", v);
+                    println!("{v:?}");
                 }
             }
         }
@@ -47,7 +47,7 @@ fn main() {
 
     for i in 0..5 {
         let client_id = format!("client_{i}");
-        let topic = format!("hello/{}/world", client_id);
+        let topic = format!("hello/{client_id}/world");
         let payload = vec![0u8; 1_000]; // 0u8 is one byte, so total ~1KB
         let (mut link_tx, _link_rx) = broker.link(&client_id).expect("New link should be made");
 
@@ -63,25 +63,25 @@ fn main() {
         // Router meters
         let request = GetMeter::Router;
         let v = meters.get(request).unwrap();
-        println!("{:#?}", v);
+        println!("{v:#?}");
 
         // Publisher meters
         for i in 0..5 {
             let client_id = format!("client_{i}");
             let request = GetMeter::Connection(Some(client_id));
             let v = meters.get(request).unwrap();
-            println!("{:#?}", v);
+            println!("{v:#?}");
         }
 
         // Commitlog meters
         let request = GetMeter::Subscription(Some("hello/+/world".to_owned()));
         let v = meters.get(request).unwrap();
-        println!("{:#?}", v);
+        println!("{v:#?}");
 
         // Consumer meters
         let request = GetMeter::Connection(Some("consumer".to_owned()));
         let v = meters.get(request).unwrap();
-        println!("{:#?}", v);
+        println!("{v:#?}");
 
         thread::sleep(Duration::from_secs(5));
     }

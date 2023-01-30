@@ -79,7 +79,7 @@ where
     /// filesystem as well.
     pub fn new(max_segment_size: usize, max_mem_segments: usize) -> io::Result<Self> {
         if max_segment_size < 1024 {
-            panic!("given max_segment_size {} bytes < 1KB", max_segment_size);
+            panic!("given max_segment_size {max_segment_size} bytes < 1KB");
         }
 
         if max_mem_segments < 1 {

@@ -22,7 +22,7 @@ pub struct Broker {
 impl Broker {
     /// Create a new broker which accepts 1 mqtt connection
     pub async fn new(port: u16, connack: u8) -> Broker {
-        let addr = format!("127.0.0.1:{}", port);
+        let addr = format!("127.0.0.1:{port}");
         let listener = TcpListener::bind(&addr).await.unwrap();
 
         let (stream, _) = listener.accept().await.unwrap();
@@ -95,7 +95,7 @@ impl Broker {
         let _ = time::timeout(Duration::from_secs(30), async {
             let p = self.framed.readb(&mut self.incoming).await;
             if p.is_err() {
-                println!("Broker read = {:?}", p);
+                println!("Broker read = {p:?}");
             }
             // Sometimes there can be a timeout on the connection so instead of unwrapping return
             // an Option<Packet>

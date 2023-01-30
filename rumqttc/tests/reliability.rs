@@ -37,7 +37,7 @@ async fn run(eventloop: &mut EventLoop, reconnect: bool) -> Result<(), Connectio
     'reconnect: loop {
         loop {
             let o = eventloop.poll().await;
-            println!("Polled = {:?}", o);
+            println!("Polled = {o:?}");
             match o {
                 Ok(_) => continue,
                 Err(_) if reconnect => continue 'reconnect,
@@ -55,7 +55,7 @@ async fn _tick(
     'reconnect: loop {
         for i in 0..count {
             let o = eventloop.poll().await;
-            println!("{}. Polled = {:?}", i, o);
+            println!("{i}. Polled = {o:?}");
             match o {
                 Ok(_) => continue,
                 Err(_) if reconnect => continue 'reconnect,
@@ -116,7 +116,7 @@ async fn idle_connection_triggers_pings_on_time() {
             Packet::PingReq => {
                 count += 1;
                 let elapsed = start.elapsed();
-                assert_eq!(elapsed.as_secs(), keep_alive as u64);
+                assert_eq!(elapsed.as_secs(), { keep_alive });
                 broker.pingresp().await;
                 start = Instant::now();
             }
@@ -164,7 +164,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
                 break;
             }
 
-            assert_eq!(start.elapsed().as_secs(), keep_alive as u64);
+            assert_eq!(start.elapsed().as_secs(), { keep_alive });
             broker.pingresp().await;
             start = Instant::now();
         }
@@ -203,7 +203,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
                 break;
             }
 
-            assert_eq!(start.elapsed().as_secs(), keep_alive as u64);
+            assert_eq!(start.elapsed().as_secs(), { keep_alive });
             broker.pingresp().await;
             start = Instant::now();
         }
@@ -356,7 +356,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
         match eventloop.poll().await.unwrap() {
             Event::Outgoing(Outgoing::AwaitAck(1)) => break,
             v => {
-                println!("Poll = {:?}", v);
+                println!("Poll = {v:?}");
                 continue;
             }
         }
@@ -365,7 +365,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     loop {
         let start = Instant::now();
         let event = eventloop.poll().await.unwrap();
-        println!("Poll = {:?}", event);
+        println!("Poll = {event:?}");
 
         match event {
             Event::Outgoing(Outgoing::Publish(ack)) => {
@@ -541,7 +541,7 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
 
     task::spawn(async move {
         let mut broker = Broker::new(3004, 0).await;
-        while let Some(_) = broker.read_packet().await {
+        while (broker.read_packet().await).is_some() {
             time::sleep(Duration::from_secs_f64(0.5)).await;
         }
     });
