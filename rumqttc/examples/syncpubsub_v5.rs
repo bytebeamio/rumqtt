@@ -21,12 +21,12 @@ fn main() {
             Err(ConnectionError::Io(error))
                 if error.kind() == std::io::ErrorKind::ConnectionRefused =>
             {
-                println!("Failed to connect to the server. Make sure correct client is configured properly!\nError: {:?}", error);
+                println!("Failed to connect to the server. Make sure correct client is configured properly!\nError: {error:?}");
                 return;
             }
             _ => {}
         }
-        println!("{}. Notification = {:?}", i, notification);
+        println!("{i}. Notification = {notification:?}");
     }
 
     println!("Done with the stream!!");
@@ -36,7 +36,7 @@ fn publish(client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..10_usize {
         let payload = vec![1; i];
-        let topic = format!("hello/{}/world", i);
+        let topic = format!("hello/{i}/world");
         let qos = QoS::AtLeastOnce;
 
         let _ = client.publish(topic, qos, true, payload);

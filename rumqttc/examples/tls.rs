@@ -35,11 +35,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("Topic: {}, Payload: {:?}", p.topic, p.payload);
             }
             Ok(Event::Incoming(i)) => {
-                println!("Incoming = {:?}", i);
+                println!("Incoming = {i:?}");
             }
-            Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
+            Ok(Event::Outgoing(o)) => println!("Outgoing = {o:?}"),
             Err(e) => {
-                println!("Error = {:?}", e);
+                println!("Error = {e:?}");
                 return Ok(());
             }
         }

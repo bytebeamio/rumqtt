@@ -42,10 +42,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let event = eventloop.poll().await;
         match &event {
             Ok(v) => {
-                println!("Event = {:?}", v);
+                println!("Event = {v:?}");
             }
             Err(e) => {
-                println!("Error = {:?}", e);
+                println!("Error = {e:?}");
                 break;
             }
         }
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (client, mut eventloop) = create_conn();
 
     while let Ok(event) = eventloop.poll().await {
-        println!("{:?}", event);
+        println!("{event:?}");
 
         if let Event::Incoming(packet) = event {
             let publish = match *packet {
