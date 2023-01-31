@@ -33,10 +33,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         match eventloop.poll().await {
             Ok(v) => {
-                println!("Event = {:?}", v);
+                println!("Event = {v:?}");
             }
             Err(e) => {
-                println!("Error = {:?}", e);
+                println!("Error = {e:?}");
                 break;
             }
         }

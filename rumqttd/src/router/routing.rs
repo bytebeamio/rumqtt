@@ -299,7 +299,7 @@ impl Router {
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(v) => v.as_millis().to_string(),
-            Err(e) => format!("Time error = {:?}", e),
+            Err(e) => format!("Time error = {e:?}"),
         };
 
         let event = "connection at ".to_owned() + &time + ", clean = " + &clean_session.to_string();
@@ -427,7 +427,7 @@ impl Router {
         // Add disconnection event to metrics
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(v) => v.as_millis().to_string(),
-            Err(e) => format!("Time error = {:?}", e),
+            Err(e) => format!("Time error = {e:?}"),
         };
 
         let event = "disconnection at ".to_owned() + &time;
@@ -1383,7 +1383,7 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
         }
     };
 
-    println!("{:#?}", message);
+    println!("{message:#?}");
 }
 
 fn validate_subscription(

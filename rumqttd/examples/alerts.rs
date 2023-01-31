@@ -45,7 +45,7 @@ fn main() {
                     );
                 }
                 v => {
-                    println!("{:?}", v);
+                    println!("{v:?}");
                 }
             }
         }
@@ -53,13 +53,13 @@ fn main() {
 
     let handle = thread::spawn(move || loop {
         let alert = alerts.poll();
-        println!("Alert: {:?}", alert);
+        println!("Alert: {alert:?}");
         thread::sleep(Duration::from_secs(1));
     });
 
     for i in 0..5 {
         let client_id = format!("client_{i}");
-        let topic = format!("hello/{}/world", client_id);
+        let topic = format!("hello/{client_id}/world");
         let payload = vec![0u8; 1_000]; // 0u8 is one byte, so total ~1KB
         let (mut link_tx, _link_rx) = broker.link(&client_id).expect("New link should be made");
 

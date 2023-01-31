@@ -44,7 +44,7 @@ fn main() {
                 );
             }
             v => {
-                println!("{:?}", v);
+                println!("{v:?}");
             }
         }
     }

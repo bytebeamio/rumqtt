@@ -17,10 +17,10 @@ fn main() {
     for (i, notification) in connection.iter().enumerate() {
         match notification {
             Ok(notif) => {
-                println!("{}. Notification = {:?}", i, notif);
+                println!("{i}. Notification = {notif:?}");
             }
             Err(error) => {
-                println!("{}. Notification = {:?}", i, error);
+                println!("{i}. Notification = {error:?}");
                 return;
             }
         }
@@ -34,7 +34,7 @@ fn publish(mut client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..10_usize {
         let payload = vec![1; i];
-        let topic = format!("hello/{}/world", i);
+        let topic = format!("hello/{i}/world");
         let qos = QoS::AtLeastOnce;
 
         client.publish(topic, qos, true, payload).unwrap();

@@ -16,15 +16,15 @@ fn main() {
     thread::spawn(move || publish(client));
 
     if let Ok(notification) = connection.recv() {
-        println!("Notification = {:?}", notification);
+        println!("Notification = {notification:?}");
     }
 
     if let Ok(notification) = connection.try_recv() {
-        println!("Notification = {:?}", notification);
+        println!("Notification = {notification:?}");
     }
 
     if let Ok(notification) = connection.recv_timeout(Duration::from_secs(10)) {
-        println!("Notification = {:?}", notification);
+        println!("Notification = {notification:?}");
     }
 }
 
@@ -32,7 +32,7 @@ fn publish(client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..3 {
         let payload = vec![1; i];
-        let topic = format!("hello/{}/world", i);
+        let topic = format!("hello/{i}/world");
         let qos = QoS::AtLeastOnce;
 
         client.publish(topic, qos, true, payload).unwrap();

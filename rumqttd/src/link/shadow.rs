@@ -120,7 +120,7 @@ impl ShadowLink {
                             pong = true;
                         }
                         packet => {
-                            let error = format!("Expecting connect text. Received = {:?}", packet);
+                            let error = format!("Expecting connect text. Received = {packet:?}");
                             let error = io::Error::new(io::ErrorKind::InvalidData, error);
                             return Err(Error::Io(error));
                         }
@@ -305,7 +305,7 @@ impl Network {
                 return Err(Error::Io(error));
             }
             packet => {
-                let error = format!("Expecting connect text. Received = {:?}", packet);
+                let error = format!("Expecting connect text. Received = {packet:?}");
                 let error = io::Error::new(io::ErrorKind::InvalidData, error);
                 return Err(Error::Io(error));
             }
