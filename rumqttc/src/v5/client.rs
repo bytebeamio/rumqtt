@@ -2,7 +2,9 @@
 //! async eventloop.
 use std::time::Duration;
 
-use super::mqttbytes::{Filter, PubAck, PubRec, Publish, QoS, Subscribe, Unsubscribe};
+use super::mqttbytes::{
+    Filter, PubAck, PubRec, Publish, PublishProperties, QoS, Subscribe, Unsubscribe,
+};
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use crate::valid_topic;
 
@@ -79,7 +81,31 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(publish, None);
+        if !valid_topic(&topic) {
+            return Err(ClientError::Request(publish));
+        }
+        self.request_tx.send_async(publish).await?;
+        Ok(())
+    }
+
+    /// Sends a MQTT Publish with properties to the `EventLoop`.
+    pub async fn publish_with_props<S, P>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: P,
+        properties: Option<PublishProperties>,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        P: Into<Bytes>,
+    {
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
+        publish.retain = retain;
+        let publish = Request::Publish(publish, properties);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
@@ -102,7 +128,7 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(publish, None);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
@@ -143,7 +169,7 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(publish, None);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }

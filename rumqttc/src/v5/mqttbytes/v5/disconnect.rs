@@ -252,9 +252,9 @@ impl DisconnectProperties {
 }
 
 impl Disconnect {
-    pub fn new() -> Self {
+    pub fn new(reason: DisconnectReasonCode) -> Self {
         Self {
-            reason_code: DisconnectReasonCode::NormalDisconnection,
+            reason_code: reason,
             properties: None,
         }
     }
@@ -296,7 +296,7 @@ impl Disconnect {
         };
 
         if fixed_header.remaining_len == 0 {
-            return Ok(Self::new());
+            return Ok(Self::new(DisconnectReasonCode::NormalDisconnection));
         }
 
         let reason_code = read_u8(&mut bytes)?;
@@ -333,12 +333,6 @@ impl Disconnect {
     }
 }
 
-impl Default for Disconnect {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use bytes::BytesMut;
@@ -354,7 +348,7 @@ mod test {
             0xE0, // Packet type
             0x00, // Remaining length
         ];
-        let expected = Disconnect::new();
+        let expected = Disconnect::new(DisconnectReasonCode::NormalDisconnection);
 
         buffer.extend_from_slice(&packet_bytes[..]);
 
@@ -368,7 +362,7 @@ mod test {
     #[test]
     fn disconnect1_encoding_works() {
         let mut buffer = BytesMut::new();
-        let disconnect = Disconnect::new();
+        let disconnect = Disconnect::new(DisconnectReasonCode::NormalDisconnection);
         let expected = [
             0xE0, // Packet type
             0x00, // Remaining length

@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::mqttbytes::v5::Packet;
-use super::mqttbytes::{self, Connect, Login};
+use super::mqttbytes::{self, Connect, ConnectProperties, Login};
 use super::{Incoming, MqttOptions, MqttState, StateError};
 use std::io;
 
@@ -103,7 +103,12 @@ impl Network {
             username: l.0,
             password: l.1,
         });
-        let len = match Packet::Connect(connect, None, last_will, None, login).write(&mut write) {
+
+        let mut conn_props = ConnectProperties::new();
+        conn_props.set_topic_alias_max(options.topic_alias_max.into());
+        let len = match Packet::Connect(connect, conn_props.into(), last_will, None, login)
+            .write(&mut write)
+        {
             Ok(size) => size,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };

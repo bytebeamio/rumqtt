@@ -1,13 +1,16 @@
 use std::slice::Iter;
 
-use self::{disconnect::Disconnect, ping::pingreq};
+pub use self::{
+    disconnect::{Disconnect, DisconnectReasonCode},
+    ping::pingreq,
+};
 
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 mod connack;
 mod connect;
-mod disconnect;
+pub mod disconnect;
 mod ping;
 mod puback;
 mod pubcomp;
@@ -28,7 +31,7 @@ pub enum Packet {
         Option<LastWillProperties>,
         Option<Login>,
     ),
-    ConnAck(ConnAck),
+    ConnAck(ConnAck, Option<ConnAckProperties>),
     Publish(Publish, Option<PublishProperties>),
     PubAck(PubAck, Option<PubAckProperties>),
     PingReq(PingReq),
@@ -81,8 +84,8 @@ impl Packet {
                 Packet::Unsubscribe(unsubscribe)
             }
             PacketType::ConnAck => {
-                let (connack, _) = connack::read(fixed_header, packet)?;
-                Packet::ConnAck(connack)
+                let (connack, props) = connack::read(fixed_header, packet)?;
+                Packet::ConnAck(connack, props)
             }
             PacketType::PubAck => {
                 let (puback, properties) = puback::read(fixed_header, packet)?;
@@ -126,7 +129,7 @@ impl Packet {
                 subscribe::write(subscription, properties, write)
             }
             Self::Unsubscribe(unsubscribe) => unsubscribe::write(unsubscribe, &None, write),
-            Self::ConnAck(ack) => connack::write(ack, &None, write),
+            Self::ConnAck(ack, props) => connack::write(ack, props, write),
             Self::PubAck(ack, properties) => puback::write(ack, properties, write),
             Self::SubAck(ack, properties) => suback::write(ack, properties, write),
             Self::UnsubAck(unsuback) => unsuback::write(unsuback, &None, write),

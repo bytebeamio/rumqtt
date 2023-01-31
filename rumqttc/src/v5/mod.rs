@@ -24,7 +24,7 @@ use crate::Outgoing;
 /// handled one by one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    Publish(Publish),
+    Publish(Publish, Option<PublishProperties>),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
@@ -82,6 +82,8 @@ pub struct MqttOptions {
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
     network_options: NetworkOptions,
+    // `topic_alias_maximum` sent via CONNECT
+    topic_alias_max: u16,
 }
 
 impl MqttOptions {
@@ -124,6 +126,7 @@ impl MqttOptions {
             conn_timeout: 5,
             manual_acks: false,
             network_options: NetworkOptions::new(),
+            topic_alias_max: 0,
         }
     }
 
@@ -311,6 +314,15 @@ impl MqttOptions {
 
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
+        self
+    }
+
+    pub fn topic_alias_max(&self) -> u16 {
+        self.topic_alias_max
+    }
+
+    pub fn set_topic_alias_max(&mut self, topic_alias_max: u16) -> &mut Self {
+        self.topic_alias_max = topic_alias_max;
         self
     }
 }

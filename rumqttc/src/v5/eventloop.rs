@@ -124,7 +124,7 @@ impl EventLoop {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(Box::new(connack)));
+            self.state.handle_incoming_packet(connack)?;
         }
 
         match self.select().await {
@@ -305,10 +305,10 @@ async fn mqtt_connect(
 
     // validate connack
     match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            Ok(Packet::ConnAck(connack))
+        Incoming::ConnAck(connack, props) if connack.code == ConnectReturnCode::Success => {
+            Ok(Packet::ConnAck(connack, props))
         }
-        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        Incoming::ConnAck(connack, _props) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
     }
 }
