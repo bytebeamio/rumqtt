@@ -1124,7 +1124,6 @@ fn append_to_commitlog(
     let pkid = publish.pkid;
 
     let filter_idxs = datalog.matches(topic, is_bridge);
-    dbg!(&filter_idxs);
 
     // Create a dynamic filter if dynamic_filters are enabled for this connection
     let filter_idxs = match filter_idxs {

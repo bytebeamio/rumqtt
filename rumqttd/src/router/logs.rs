@@ -107,7 +107,7 @@ impl DataLog {
                 let v: Vec<usize> = self
                     .filter_indexes
                     .iter()
-                    .filter(|(filter, _)| dbg!(matches(topic, filter, is_bridge)))
+                    .filter(|(filter, _)| matches(topic, filter, is_bridge))
                     .map(|(_, filter_idx)| *filter_idx)
                     .collect();
 

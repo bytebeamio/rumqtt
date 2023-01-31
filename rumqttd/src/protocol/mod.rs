@@ -660,7 +660,6 @@ pub fn valid_filter(filter: &str) -> bool {
 /// during a subscribe (should ideally use type system to avoid this assumption)
 /// **NOTE**: # shouldn't match $X $bridge/#
 pub fn matches(topic: &str, filter: &str, is_bridge: bool) -> bool {
-    dbg!(&topic, &filter, is_bridge);
     let mut topics = topic.split('/');
     let mut filters = filter.split('/');
 

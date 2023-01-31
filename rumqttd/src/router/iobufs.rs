@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use bytes::Bytes;
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
 use tracing::{error, warn};
@@ -115,7 +116,16 @@ impl Outgoing {
         let publishes = publishes;
 
         if qos == 0 {
-            for p in publishes {
+            for mut p in publishes {
+                // TODO: for messages received by the client that where from bridge, strip
+                // `$bridge/bridge-name` prefix
+                if p.publish.topic.starts_with(b"$bridge") {
+                    // if in $bridge/bridge_name/X convert to X
+                    dbg!(&p.publish.topic);
+                    let old_topic = p.publish.topic;
+                    let new_topic = update_topic(old_topic);
+                    p.publish.topic = new_topic;
+                }
                 self.meter.publish_count += 1;
                 buffer.push_back(Notification::Forward(p));
                 // self.meter.total_size += p.len();
@@ -142,13 +152,12 @@ impl Outgoing {
 
             self.meter.publish_count += 1;
             self.meter.total_size += p.publish.topic.len() + p.publish.payload.len();
-            // TODO: for messages received by the client that where from bridge, strip
-            // `$bridge/bridge-name` prefix
-            // if p.publish.topic.starts_with(b"$bridge") {
-            //     // if in $bridge/bridge_name/X convert to X
-            //     let old_topic = p.publish.topic;
-            //     let new_toipc = update_topic(old_topic);
-            // }
+            if p.publish.topic.starts_with(b"$bridge") {
+                // if in $bridge/bridge_name/X convert to X
+                let old_topic = p.publish.topic;
+                let new_topic = update_topic(old_topic);
+                p.publish.topic = new_topic;
+            }
             buffer.push_back(Notification::Forward(p));
         }
 
@@ -196,10 +205,16 @@ impl Outgoing {
     }
 }
 
-// fn update_topic(old_topic: Bytes) -> Bytes {
-//     let new_topic = BytesMut::new();
-//     let topic = old_topic;
-// }
+fn update_topic(old_topic: Bytes) -> Bytes {
+    let old_topic = String::from_utf8(old_topic.to_vec()).unwrap();
+    let new_topic = old_topic
+        .split('/')
+        .skip(2)
+        .collect::<Vec<_>>()
+        .as_slice()
+        .join("/");
+    Bytes::from(new_topic)
+}
 
 #[cfg(test)]
 mod test {
