@@ -24,7 +24,6 @@ futures = "0.3"
 tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
 log = "0.4"
-pollster = "0.2"
 flume = "0.10"
 thiserror = "1"
 

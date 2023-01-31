@@ -12,7 +12,7 @@ fn create_conn() -> (AsyncClient, EventLoop) {
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
-        .set_clean_session(false);
+        .set_clean_start(false);
 
     AsyncClient::new(mqttoptions, 10)
 }
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // subscribe example topic
     client
-        .subscribe("hello/world", QoS::AtLeastOnce)
+        .subscribe_with_properties("hello/world", QoS::AtLeastOnce, None)
         .await
         .unwrap();
 
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         if let Event::Incoming(packet) = event {
             let publish = match packet {
-                Packet::Publish(publish, _) => publish,
+                Packet::Publish(publish) => publish,
                 _ => continue,
             };
             // this time we will ack incoming publishes.
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn requests(client: &AsyncClient) {
     for i in 1..=10 {
         client
-            .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
+            .publish_with_properties("hello/world", QoS::AtLeastOnce, false, vec![1; i], None)
             .await
             .unwrap();
 
