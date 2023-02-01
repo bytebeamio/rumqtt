@@ -108,7 +108,6 @@ where
                         Packet::Publish(publish, publish_prop) => {
                             let new_publish = update_topic(publish, config.name.clone());
                             let packet = Packet::Publish(new_publish, publish_prop);
-                            dbg!(&packet);
                             tx.send(packet).await?;
                         }
                         Packet::PingResp(_) => ping_unacked = false,

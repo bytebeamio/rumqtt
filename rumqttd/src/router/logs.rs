@@ -263,7 +263,6 @@ where
         item: T,
         notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     ) -> (Offset, &Filter) {
-        dbg!(&self.filter);
         let size = item.size();
         let offset = self.log.append(item);
         if let Some(mut parked) = self.waiters.take() {
