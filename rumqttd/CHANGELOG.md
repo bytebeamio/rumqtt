@@ -1,3 +1,6 @@
+# rumqttd 0.12.4 (Feb 1, 2023)
+- Client id with tenant prefix should be set globally (#564) 
+
 # rumqttd 0.12.3 (Jan 23, 2023)
 - Restructure AlertsLink and MetersLink to support writing to Clickhouse (#557)
 - Add one way bridging support via BridgeLink (#558)
