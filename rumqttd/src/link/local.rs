@@ -58,8 +58,8 @@ impl Link {
             last_will,
             dynamic_filters,
         );
-        let incoming = Incoming::new(client_id.to_string());
-        let (outgoing, link_rx) = Outgoing::new(client_id.to_string());
+        let incoming = Incoming::new(connection.client_id.to_owned());
+        let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
         let outgoing_data_buffer = outgoing.buffer();
         let incoming_data_buffer = incoming.buffer();
 
