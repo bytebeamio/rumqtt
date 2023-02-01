@@ -117,11 +117,8 @@ impl Outgoing {
 
         if qos == 0 {
             for mut p in publishes {
-                // TODO: for messages received by the client that where from bridge, strip
-                // `$bridge/bridge-name` prefix
                 if p.publish.topic.starts_with(b"$bridge") {
-                    // if in $bridge/bridge_name/X convert to X
-                    dbg!(&p.publish.topic);
+                    // if in format $bridge/bridge_name/X convert to X
                     let old_topic = p.publish.topic;
                     let new_topic = update_topic(old_topic);
                     p.publish.topic = new_topic;

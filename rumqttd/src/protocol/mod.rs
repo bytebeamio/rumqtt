@@ -664,7 +664,7 @@ pub fn matches(topic: &str, filter: &str, is_bridge: bool) -> bool {
     let mut filters = filter.split('/');
 
     if topic.starts_with('$')
-        && !(is_bridge && topic.starts_with("$bridge") && filter.starts_with("$bridge"))
+        && !(is_bridge && filter.starts_with("$bridge") && topic.starts_with("$bridge"))
     {
         return false;
     }
