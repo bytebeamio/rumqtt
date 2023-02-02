@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
-use tracing::trace;
+use tracing::{trace, Span};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -69,7 +69,7 @@ impl<P: Protocol> RemoteLink<P> {
         let dynamic_filters = config.dynamic_filters;
         let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
             let packet = network.read().await?;
-            Ok::<_, io::Error>(packet)
+            Ok::<_, network::Error>(packet)
         })
         .await??;
 
@@ -77,6 +77,7 @@ impl<P: Protocol> RemoteLink<P> {
             Packet::Connect(connect, _, lastwill, _, login) => (connect, lastwill, login),
             packet => return Err(Error::NotConnectPacket(packet)),
         };
+        Span::current().record("client_id", &connect.client_id);
 
         // If authentication is configured in config file check for username and password
         if let Some(auths) = &config.auth {
@@ -120,6 +121,7 @@ impl<P: Protocol> RemoteLink<P> {
             dynamic_filters,
         )?;
         let id = link_rx.id();
+        Span::current().record("connection_id", id);
 
         if let Some(packet) = notification.into() {
             network.write(packet).await?;

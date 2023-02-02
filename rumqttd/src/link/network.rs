@@ -86,7 +86,7 @@ impl<P: Protocol> Network<P> {
     }
 
     /// Waits on network for 1 packet
-    pub async fn read(&mut self) -> Result<Packet, io::Error> {
+    pub async fn read(&mut self) -> Result<Packet, Error> {
         loop {
             let required = match Protocol::read_mut(
                 &mut self.protocol,
@@ -95,7 +95,7 @@ impl<P: Protocol> Network<P> {
             ) {
                 Ok(packet) => return Ok(packet),
                 Err(protocol::Error::InsufficientBytes(required)) => required,
-                Err(e) => return Err(io::Error::new(ErrorKind::InvalidData, e.to_string())),
+                Err(e) => return Err(e.into()),
             };
 
             // read more packets until a frame can be created. This function
