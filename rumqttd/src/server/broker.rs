@@ -198,41 +198,45 @@ impl Broker {
             })?;
         }
 
-        for (_, config) in self.config.v5.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
-            let server = Server::new(config, self.router_tx.clone(), V5);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        if let Some(v5_config) = &self.config.v5 {
+            for (_, config) in v5_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let server = Server::new(config, self.router_tx.clone(), V5);
+                server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
 
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Remote link error");
-                    }
-                });
-            })?;
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Remote).await {
+                            error!(error=?e, "Remote link error");
+                        }
+                    });
+                })?;
+            }
         }
 
         #[cfg(feature = "websockets")]
-        for (_, config) in self.config.ws.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
-            let server = Server::new(
-                config,
-                self.router_tx.clone(),
-                Ws {
-                    codec: MessageCodec::server(),
-                },
-            );
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        if let Some(ws_config) = &self.config.ws {
+            for (_, config) in ws_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let server = Server::new(
+                    config,
+                    self.router_tx.clone(),
+                    Ws {
+                        codec: MessageCodec::server(),
+                    },
+                );
+                server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
 
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Shadow).await {
-                        error!(error=?e, "Remote link error");
-                    }
-                });
-            })?;
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Shadow).await {
+                            error!(error=?e, "Remote link error");
+                        }
+                    });
+                })?;
+            }
         }
 
         if let Some(prometheus_setting) = &self.config.prometheus {
