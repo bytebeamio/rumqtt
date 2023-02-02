@@ -192,7 +192,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, protocol=?V4, "Server error");
+                        error!(error=?e, "Server error - V4");
                     }
                 });
             })?;
@@ -208,7 +208,7 @@ impl Broker {
 
                     runtime.block_on(async {
                         if let Err(e) = server.start(LinkType::Remote).await {
-                            error!(error=?e, protocol=?V5, "Server error");
+                            error!(error=?e, "Server error - V5");
                         }
                     });
                 })?;
@@ -232,7 +232,7 @@ impl Broker {
 
                     runtime.block_on(async {
                         if let Err(e) = server.start(LinkType::Shadow).await {
-                            error!(error=?e, protocol=?Ws, "Server error");
+                            error!(error=?e, "Server error - WS");
                         }
                     });
                 })?;
@@ -466,6 +466,8 @@ async fn shadow_connection(
     stream: Box<dyn N>,
 ) {
     // Start the link
+
+    use tracing::Span;
     let mut link = match ShadowLink::new(config, router_tx.clone(), stream).await {
         Ok(l) => l,
         Err(e) => {
