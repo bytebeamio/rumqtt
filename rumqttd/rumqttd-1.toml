@@ -11,7 +11,7 @@ max_segment_count = 10
 max_read_len = 10240
 max_connections = 10010
 
-[bridge]
+[bridge.1]
 name = "bridge-1"
 addr = "localhost:9883"
 qos = 0
@@ -19,7 +19,7 @@ sub_path = "#"
 reconnection_delay = 5
 ping_delay = 5
 timeout_delay = 5
-    [bridge.connections]
+    [bridge.1.connections]
     connection_timeout_ms = 60000
     max_client_id_len = 256
     throttle_delay_ms = 0

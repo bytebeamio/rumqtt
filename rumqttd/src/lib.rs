@@ -49,7 +49,7 @@ pub struct Config {
     pub ws: HashMap<String, ServerSettings>,
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
-    pub bridge: Option<BridgeConfig>,
+    pub bridge: HashMap<String, BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
 }
 
