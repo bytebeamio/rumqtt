@@ -74,7 +74,7 @@ where
             }
         };
         info!(remote_addr = &config.addr, "Connected to remote");
-        if let Err(e) = network_init(&config, &mut network).await {
+        if let Err(e) = network_init(&config, &mut network, config.try_private).await {
             warn!(
                 "Unable to connect and subscribe to remote broker, reconnecting - {}",
                 e
@@ -279,12 +279,22 @@ pub async fn tls_connect<P: AsRef<Path>>(
 async fn network_init<P: Protocol>(
     config: &BridgeConfig,
     network: &mut Network<P>,
+    try_private: Option<bool>,
 ) -> Result<(), BridgeError> {
-    let connect = Connect {
-        keep_alive: 10,
-        client_id: config.name.clone(),
-        clean_session: true,
-        is_bridge: true,
+    let connect = if let Some(true) = try_private {
+        Connect {
+            keep_alive: 10,
+            client_id: config.name.clone(),
+            clean_session: true,
+            is_bridge: true,
+        }
+    } else {
+        Connect {
+            keep_alive: 10,
+            client_id: config.name.clone(),
+            clean_session: true,
+            is_bridge: false,
+        }
     };
     let packet = Packet::Connect(connect, None, None, None, None);
 

@@ -49,7 +49,7 @@ pub struct Config {
     pub ws: HashMap<String, ServerSettings>,
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
-    pub bridge: HashMap<String, BridgeConfig>,
+    pub bridge: Option<HashMap<String, BridgeConfig>>,
     pub prometheus: Option<PrometheusSetting>,
 }
 
@@ -94,6 +94,8 @@ pub struct BridgeConfig {
     pub reconnection_delay: u64,
     pub ping_delay: u64,
     pub connections: ConnectionSettings,
+    #[serde(default)]
+    pub try_private: Option<bool>,
     #[serde(default)]
     pub transport: Transport,
 }

@@ -174,19 +174,21 @@ impl Broker {
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
         // spawn bridge in a separate thread
-        for (_, config) in self.config.bridge.clone() {
-            let bridge_thread = thread::Builder::new().name(config.name.clone());
-            let router_tx = self.router_tx.clone();
-            bridge_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        if let Some(bridge_map) = self.config.bridge.clone() {
+            for (_, config) in bridge_map {
+                let bridge_thread = thread::Builder::new().name(config.name.clone());
+                let router_tx = self.router_tx.clone();
+                bridge_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
 
-                runtime.block_on(async move {
-                    if let Err(e) = bridge::start(config, router_tx, V4).await {
-                        error!(error=?e, "Bridge Link error");
-                    };
-                });
-            })?;
+                    runtime.block_on(async move {
+                        if let Err(e) = bridge::start(config, router_tx, V4).await {
+                            error!(error=?e, "Bridge Link error");
+                        };
+                    });
+                })?;
+            }
         }
 
         // spawn servers in a separate thread

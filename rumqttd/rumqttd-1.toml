@@ -19,6 +19,7 @@ sub_path = "#"
 reconnection_delay = 5
 ping_delay = 5
 timeout_delay = 5
+try_private = true
     [bridge.1.connections]
     connection_timeout_ms = 60000
     max_client_id_len = 256
