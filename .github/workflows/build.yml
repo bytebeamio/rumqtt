@@ -2,6 +2,7 @@ on:
   pull_request:
     branches:
       - main
+      - mqtt5-client
     paths:
       - '**.rs'
       - 'Cargo.*'
