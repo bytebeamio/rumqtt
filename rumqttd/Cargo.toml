@@ -10,7 +10,7 @@ categories = ["network-programming"]
 repository = "https://github.com/bytebeamio/rumqtt/"
 
 [dependencies]
-tokio = { version = "1.24", features = ["rt", "time", "net", "io-util", "macros"]}
+tokio = { version = "1.0", features = ["rt", "time", "net", "io-util", "macros"]}
 serde = { version = "1.0.125", features = ["derive"] }
 serde_json = "1.0.66"
 bytes = { version = "1", features = ["serde"] }
