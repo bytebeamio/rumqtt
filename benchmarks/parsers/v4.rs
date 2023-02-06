@@ -5,10 +5,6 @@ use std::time::Instant;
 
 mod common;
 
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
 fn main() {
     pretty_env_logger::init();
     let count = 1024 * 1024;

@@ -8,10 +8,6 @@ use tokio::time;
 
 mod common;
 
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     // pretty_env_logger::init();

@@ -19,9 +19,6 @@ tokio = { version = "1", features = ["full"] }
 # paho-mqtt = { git = "https://github.com/eclipse/paho.mqtt.rust" }
 # paho-mqtt = "0.7"
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-jemallocator = "0.3"
-
 [[bin]]
 name = "rumqttasync"
 path = "clients/rumqttasync.rs"

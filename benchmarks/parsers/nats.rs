@@ -4,9 +4,6 @@ use std::time::Instant;
 
 mod common;
 
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
 fn main() {
     let count = 1024 * 1024;
     let payload_size = 1024;
