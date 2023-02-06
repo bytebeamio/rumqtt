@@ -1,36 +1,36 @@
 use config::FileFormat;
 use rumqttd::Broker;
 
-use structopt::StructOpt;
+use clap::Parser;
 
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
-#[derive(StructOpt)]
-#[structopt(name = "rumqttd")]
-#[structopt(about = "A high performance, lightweight and embeddable MQTT broker written in Rust.")]
-#[structopt(author = "tekjar <raviteja@bytebeam.io>")]
+#[derive(Parser)]
+#[command(name = "rumqttd")]
+#[command(about = "A high performance, lightweight and embeddable MQTT broker written in Rust.")]
+#[command(author = "tekjar <raviteja@bytebeam.io>")]
 struct CommandLine {
     /// path to config file
-    #[structopt(short, long)]
+    #[arg(short, long)]
     config: Option<String>,
-    #[structopt(subcommand)]
+    #[command(subcommand)]
     command: Option<Command>,
     /// log level (v: info, vv: debug, vvv: trace)
-    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     verbose: u8,
     /// launch without printing banner
-    #[structopt(short, long)]
+    #[arg(short, long)]
     quiet: bool,
 }
 
-#[derive(StructOpt)]
+#[derive(Parser)]
 enum Command {
     /// Write default configuration file to stdout
     GenerateConfig,
 }
 
 fn main() {
-    let commandline: CommandLine = CommandLine::from_args();
+    let commandline: CommandLine = CommandLine::parse();
 
     if let Some(Command::GenerateConfig) = commandline.command {
         println!("{RUMQTTD_DEFAULT_CONFIG}");
