@@ -16,7 +16,7 @@ use crate::{meters, ConnectionSettings, Filter, GetMeter, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{error, field, info, Instrument, Span};
+use tracing::{error, field, info, Instrument};
 #[cfg(feature = "websockets")]
 use websocket_codec::MessageCodec;
 
@@ -192,7 +192,7 @@ impl Broker {
 
                 runtime.block_on(async {
                     if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Remote link error");
+                        error!(error=?e, "Server error - V4");
                     }
                 });
             })?;
@@ -208,7 +208,7 @@ impl Broker {
 
                     runtime.block_on(async {
                         if let Err(e) = server.start(LinkType::Remote).await {
-                            error!(error=?e, "Remote link error");
+                            error!(error=?e, "Server error - V5");
                         }
                     });
                 })?;
@@ -232,7 +232,7 @@ impl Broker {
 
                     runtime.block_on(async {
                         if let Err(e) = server.start(LinkType::Shadow).await {
-                            error!(error=?e, "Remote link error");
+                            error!(error=?e, "Server error - WS");
                         }
                     });
                 })?;
@@ -370,15 +370,9 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 }
             };
 
-            if let Some(tenant_id) = tenant_id.clone() {
-                info!(
-                    name=?self.config.name, ?addr, count, tenant_id, "accept"
-                );
-            } else {
-                info!(
-                    name=?self.config.name, ?addr, count, "accept"
-                );
-            }
+            info!(
+                name=?self.config.name, ?addr, count, tenant=?tenant_id, "accept"
+            );
 
             let config = config.clone();
             let router_tx = self.router_tx.clone();
@@ -395,11 +389,12 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                     )),
                 ),
                 LinkType::Remote => task::spawn(
-                    remote(config, tenant_id, router_tx, network, protocol).instrument(
+                    remote(config, tenant_id.clone(), router_tx, network, protocol).instrument(
                         tracing::error_span!(
                             "remote_link",
+                            ?tenant_id,
                             client_id = field::Empty,
-                            connection_id = field::Empty
+                            connection_id = field::Empty,
                         ),
                     ),
                 ),
@@ -433,12 +428,9 @@ async fn remote<P: Protocol>(
             }
         };
 
-    let client_id = link.client_id.clone();
+    let client_id = link.client_id.to_owned();
     let connection_id = link.connection_id;
     let mut execute_will = false;
-
-    Span::current().record("client_id", &client_id);
-    Span::current().record("connection_id", connection_id);
 
     match link.start().await {
         // Connection get close. This shouldn't usually happen
@@ -446,20 +438,12 @@ async fn remote<P: Protocol>(
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
         Err(remote::Error::Link(e)) => {
-            if let Some(tenant_id) = tenant_id {
-                error!(error=?e, tenant_id, "router-drop");
-            } else {
-                error!(error=?e, "router-drop");
-            }
+            error!(error=?e, "router-drop");
             return;
         }
         // Any other error
         Err(e) => {
-            if let Some(tenant_id) = tenant_id {
-                error!(error=?e, tenant_id, "Disconnected!!");
-            } else {
-                error!(error=?e,"Disconnected!!");
-            }
+            error!(error=?e, "Disconnected!!");
             execute_will = true;
         }
     };
@@ -482,10 +466,12 @@ async fn shadow_connection(
     stream: Box<dyn N>,
 ) {
     // Start the link
+
+    use tracing::Span;
     let mut link = match ShadowLink::new(config, router_tx.clone(), stream).await {
         Ok(l) => l,
         Err(e) => {
-            error!(reason=?e, "Remote link error");
+            error!(reason=?e, "Shadow link error");
             return;
         }
     };
