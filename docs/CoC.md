@@ -1,6 +1,6 @@
 # Code of Conduct
 
-We follow the [Rust Community's Code of Condut][rust-coc] unless otherwise altered by the following document.
+We follow the [Rust Community's Code of Conduct][rust-coc] unless otherwise altered by the following document.
 
 - All reports and complaints of harassment or other forms of abuse shall be made to a member of the [Bytebeam GitHub organisation][git-org] or to [contact@bytebeam.io][email].
 
