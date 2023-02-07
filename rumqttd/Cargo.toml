@@ -28,16 +28,16 @@ x509-parser = {version= "0.9.2", optional = true}
 futures-util = { version = "0.3.16", optional = true}
 parking_lot = "0.11.2"
 config = "0.13"
-structopt = "0.3.26"
 tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="0.3.16", features=["env-filter"] }
 metrics = "0.20.1"
 metrics-exporter-prometheus = "0.11.0"
+clap = { version = "4.1.4", features = ["derive"] }
 
 [features]
 default = ["use-rustls"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:x509-parser"]
-use-native-tls = ["dep:tokio-native-tls" , "dep:x509-parser"]
+use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websockets = ["dep:tokio-tungstenite", "dep:websocket-codec", "dep:tokio-util", "dep:futures-util"]
 validate-tenant-prefix = []
 
