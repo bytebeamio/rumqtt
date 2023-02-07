@@ -266,7 +266,7 @@ impl Router {
 
         let connection_id = self.connection_map.get(&client_id);
         if let Some(connection_id) = connection_id {
-            debug!(
+            error!(
                 "Duplicate client_id, dropping previous connection with connection_id: {}",
                 connection_id
             );
