@@ -5,10 +5,6 @@ use std::time::{Duration, Instant};
 
 mod common;
 
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
 fn main() {
     pretty_env_logger::init();
     let guard = pprof::ProfilerGuard::new(100).unwrap();
