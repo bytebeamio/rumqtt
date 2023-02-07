@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- `structopt` is in maintainance mode, we now use `clap` instead
 
 ### Deprecated
 
@@ -22,13 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-
-# [rumqttd 0.12.4] - Feb 1, 2023
+# [rumqttd 0.12.4] - 01-02-2023
 
 ### Fixed
 - Client id with tenant prefix should be set globally (#564) 
 
-# [rumqttd 0.12.3] - Jan 23, 2023
+# [rumqttd 0.12.3] - 23-01-2023
 
 ### Added
 - Add one way bridging support via BridgeLink (#558)
@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Restructure AlertsLink and MetersLink to support writing to Clickhouse (#557)
 
-# [rumqttd 0.12.2] - Jan 16, 2023
+# [rumqttd 0.12.2] - 16-01-2023
 
 ### Added
 - Add AlertLink to get alerts about router events (#538)
