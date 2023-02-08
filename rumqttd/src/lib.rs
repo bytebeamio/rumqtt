@@ -108,6 +108,7 @@ pub struct ConnectionSettings {
     pub auth: Option<HashMap<String, String>>,
     #[serde(default)]
     pub dynamic_filters: bool,
+    pub allow_duplicate_client_id: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

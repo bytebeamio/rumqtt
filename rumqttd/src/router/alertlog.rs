@@ -6,18 +6,21 @@ use crate::{Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
 use crate::Storage;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 #[derive(Debug, Clone)]
 pub enum AlertError {
     CursorJump(String),
+    // client_id -> Set<dev_ids>
+    DuplicateClientId(String, HashSet<String>),
 }
 
 impl AlertError {
     pub fn topic(&self) -> String {
         match self {
             AlertError::CursorJump(_) => "/error".to_string(),
+            AlertError::DuplicateClientId(_, _) => "/duplicate_client_id".to_string(),
         }
     }
 }
@@ -26,6 +29,9 @@ impl Storage for AlertError {
     fn size(&self) -> usize {
         match self {
             Self::CursorJump(message) => message.len(),
+            Self::DuplicateClientId(id, client_ids) => client_ids
+                .into_iter()
+                .fold(id.len(), |acc, new_id| acc + new_id.len()),
         }
     }
 }

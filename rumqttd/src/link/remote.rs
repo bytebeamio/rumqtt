@@ -119,6 +119,7 @@ impl<P: Protocol> RemoteLink<P> {
             clean_session,
             lastwill,
             dynamic_filters,
+            config.allow_duplicate_client_id,
         )?;
         let id = link_rx.id();
         Span::current().record("connection_id", id);

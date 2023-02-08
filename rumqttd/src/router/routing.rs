@@ -96,6 +96,8 @@ pub struct Router {
     router_meters: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
+    /// map of client_id to actual device ids
+    id_to_actual: HashMap<String, HashSet<String>>,
 }
 
 impl Router {
@@ -135,6 +137,7 @@ impl Router {
             router_tx,
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
+            id_to_actual: HashMap::new(),
         }
     }
 
@@ -264,13 +267,15 @@ impl Router {
         // Check if same client_id already exists and if so, replace it with this new connection
         // ref: https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718032
 
-        let connection_id = self.connection_map.get(&client_id);
-        if let Some(connection_id) = connection_id {
-            error!(
-                "Duplicate client_id, dropping previous connection with connection_id: {}",
-                connection_id
-            );
-            self.handle_disconnection(*connection_id, true);
+        if !connection.allow_duplicate_client_id {
+            let connection_id = self.connection_map.get(&client_id);
+            if let Some(connection_id) = connection_id {
+                error!(
+                    "Duplicate client_id, dropping previous connection with connection_id: {}",
+                    connection_id
+                );
+                self.handle_disconnection(*connection_id, true);
+            }
         }
 
         if self.connections.len() >= self.config.max_connections {
@@ -488,6 +493,35 @@ impl Router {
         for packet in packets.drain(0..) {
             match packet {
                 Packet::Publish(publish, _) => {
+                    let topic = String::from_utf8(publish.topic.to_vec()).unwrap();
+                    // only do logging logic if actual device_id is extracted properly
+                    if let Some(actual_device_id) = topic.split('/').nth(3) {
+                        let actual_device_id = actual_device_id.to_string();
+                        let dev_ids = self.id_to_actual.entry(client_id.clone()).or_insert({
+                            let mut set = HashSet::new();
+                            set.insert(actual_device_id.clone());
+                            set
+                        });
+
+                        if !dev_ids.contains(&actual_device_id) {
+                            dev_ids.insert(actual_device_id.clone());
+                            let alert = Alert::error(
+                                client_id.clone(),
+                                AlertError::DuplicateClientId(client_id.clone(), dev_ids.clone()),
+                            );
+                            match append_to_alertlog(alert, &mut self.alertlog) {
+                                Ok(_offset) => {
+                                    new_data = true;
+                                }
+                                Err(e) => {
+                                    error!(
+                                        reason = ?e, "Failed to append to alertlog"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
                     let span =
                         tracing::info_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
@@ -769,7 +803,7 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
 
-                    let alert = Alert::event(client_id, AlertEvent::Disconnect);
+                    let alert = Alert::event(client_id.clone(), AlertEvent::Disconnect);
                     match append_to_alertlog(alert, &mut self.alertlog) {
                         Ok(_offset) => {
                             new_data = true;
