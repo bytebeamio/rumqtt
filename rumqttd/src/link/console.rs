@@ -144,5 +144,5 @@ async fn logs(State(console): State<Arc<ConsoleLink>>, data: String) -> impl Int
         }
         return Response::new(data);
     }
-    return Response::builder().status(404).body("".to_owned()).unwrap();
+    Response::builder().status(404).body("".to_owned()).unwrap()
 }
