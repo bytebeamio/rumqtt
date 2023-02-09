@@ -987,35 +987,35 @@ impl Router {
                 let router_meters = Meter::Router(self.id, self.router_meters.clone());
                 let _ = meter_tx.try_send((meter_id, vec![router_meters]));
             }
-            GetMeter::Connection(client_id) => {
-                let connections = match client_id {
-                    Some(client_id) => {
-                        if let Some(connection_id) = self.connection_map.get(&client_id) {
-                            vec![(client_id, connection_id)]
-                        } else {
-                            let meter = Meter::Connection("".to_owned(), None, None);
-                            let _ = meter_tx.try_send((meter_id, vec![meter]));
-                            return;
-                        }
-                    }
-                    // send meters for all connections
-                    None => self
-                        .connection_map
-                        .iter()
-                        .map(|(k, v)| (k.to_owned(), v))
-                        .collect(),
-                };
+            // GetMeter::Connection(client_id) => {
+            //     let connections = match client_id {
+            //         Some(client_id) => {
+            //             if let Some(connection_id) = self.connection_map.get(&client_id) {
+            //                 vec![(client_id, connection_id)]
+            //             } else {
+            //                 let meter = Meter::Connection("".to_owned(), None, None);
+            //                 let _ = meter_tx.try_send((meter_id, vec![meter]));
+            //                 return;
+            //             }
+            //         }
+            //         // send meters for all connections
+            //         None => self
+            //             .connection_map
+            //             .iter()
+            //             .map(|(k, v)| (k.to_owned(), v))
+            //             .collect(),
+            //     };
 
-                // Update metrics
-                let mut meter = Vec::new();
-                for (client_id, connection_id) in connections {
-                    let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
-                    let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
-                    meter.push(Meter::Connection(client_id, incoming_meter, outgoing_meter));
-                }
+            //     // Update metrics
+            //     let mut meter = Vec::new();
+            //     for (client_id, connection_id) in connections {
+            //         let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
+            //         let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
+            //         meter.push(Meter::Connection(client_id, incoming_meter, outgoing_meter));
+            //     }
 
-                let _ = meter_tx.try_send((meter_id, meter));
-            }
+            //     let _ = meter_tx.try_send((meter_id, meter));
+            // }
             GetMeter::Subscription(filter) => {
                 let filters = match filter {
                     Some(filter) => vec![filter],

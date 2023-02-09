@@ -341,16 +341,31 @@ pub struct ConnectionEvents {
 #[derive(Debug, Clone)]
 pub enum GetMeter {
     Router,
-    // Associated data of None<String> type
+    // Disable Connection meter temporarily.
+    // MeterLink is used in a pull based data flow.
+    // In a typical setup with many connections to
+    // router, such data flow puts a lot of load on
+    // the consumer of Connection meter.
+    //
+    // Connection meter can enabled when
+    // - Connection data can be aggregated in a way
+    //   that does not put load on consumer of
+    //   connection meter
+    // - MetersLink allows to consume data in a push
+    //   based data flow (like .poll() interface
+    //   instead of request-response)
+    //
+    // Connection(Option<String>),
+
+    // Note: Associated data of None<String> type
     // means get all meters
-    Connection(Option<String>),
     Subscription(Option<String>),
 }
 
 #[derive(Debug, Clone)]
 pub enum Meter {
     Router(usize, RouterMeter),
-    Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
+    // Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
     Subscription(String, Option<SubscriptionMeter>),
 }
 
