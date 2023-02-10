@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Print version number with `--version` cli flag (#578)
 
 ### Changed
 
@@ -24,10 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [rumqttd 0.12.5]
 
 ### Changed
-- `structopt` is in maintainance mode, we now use `clap` instead
+- `structopt` is in maintainance mode, we now use `clap` instead (#571)
 
 ### Fixed
-- Use `error` instead of `debug` to log message related to duplicate client_id
+- Use `error` instead of `debug` to log message related to duplicate client_id (#572)
 
 ## [rumqttd 0.12.4] - 01-02-2023
 

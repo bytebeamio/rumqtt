@@ -6,6 +6,7 @@ use clap::Parser;
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
 #[derive(Parser)]
+#[command(version)]
 #[command(name = "rumqttd")]
 #[command(about = "A high performance, lightweight and embeddable MQTT broker written in Rust.")]
 #[command(author = "tekjar <raviteja@bytebeam.io>")]
