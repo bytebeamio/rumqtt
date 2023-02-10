@@ -1,101 +1,122 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-fn len(pubcomp: &PubComp, properties: &Option<PubCompProperties>) -> usize {
-    let mut len = 2 + 1; // pkid + reason
-
-    // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
-    // and there are no Properties. In this case the PUBCOMP has a Remaining Length of 2.
-    // <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901154>
-    if pubcomp.reason == PubCompReason::Success && properties.is_none() {
-        return 2;
-    }
-
-    if let Some(p) = properties {
-        let properties_len = properties::len(p);
-        let properties_len_len = len_len(properties_len);
-        len += properties_len_len + properties_len;
-    } else {
-        len += 1;
-    }
-
-    len
+/// Return code in PubComp
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PubCompReason {
+    Success,
+    PacketIdentifierNotFound,
 }
 
-pub fn read(
-    fixed_header: FixedHeader,
-    mut bytes: Bytes,
-) -> Result<(PubComp, Option<PubCompProperties>), Error> {
-    let variable_header_index = fixed_header.fixed_header_len;
-    bytes.advance(variable_header_index);
-    let pkid = read_u16(&mut bytes)?;
+/// QoS2 Assured publish complete, in response to PUBREL packet
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubComp {
+    pub pkid: u16,
+    pub reason: PubCompReason,
+    pub properties: Option<PubCompProperties>,
+}
 
-    if fixed_header.remaining_len == 2 {
-        return Ok((
-            PubComp {
+impl PubComp {
+    pub fn new(pkid: u16, properties: Option<PubCompProperties>) -> Self {
+        Self {
+            pkid,
+            reason: PubCompReason::Success,
+            properties,
+        }
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 2 + 1; // pkid + reason
+
+        // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
+        // and there are no Properties. In this case the PUBCOMP has a Remaining Length of 2.
+        // <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901154>
+        if self.reason == PubCompReason::Success && self.properties.is_none() {
+            return 2;
+        }
+
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            len += 1;
+        }
+
+        len
+    }
+
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubComp, Error> {
+        let variable_header_index = fixed_header.fixed_header_len;
+        bytes.advance(variable_header_index);
+        let pkid = read_u16(&mut bytes)?;
+
+        if fixed_header.remaining_len == 2 {
+            return Ok(PubComp {
                 pkid,
                 reason: PubCompReason::Success,
-            },
-            None,
-        ));
-    }
+                properties: None,
+            });
+        }
 
-    let ack_reason = read_u8(&mut bytes)?;
-    if fixed_header.remaining_len < 4 {
-        return Ok((
-            PubComp {
+        let ack_reason = read_u8(&mut bytes)?;
+        if fixed_header.remaining_len < 4 {
+            return Ok(PubComp {
                 pkid,
                 reason: reason(ack_reason)?,
-            },
-            None,
-        ));
+                properties: None,
+            });
+        }
+
+        let properties = PubCompProperties::read(&mut bytes)?;
+        let puback = PubComp {
+            pkid,
+            reason: reason(ack_reason)?,
+            properties,
+        };
+
+        Ok(puback)
     }
 
-    let puback = PubComp {
-        pkid,
-        reason: reason(ack_reason)?,
-    };
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let len = self.len();
+        buffer.put_u8(0x70);
+        let count = write_remaining_length(buffer, len)?;
+        buffer.put_u16(self.pkid);
 
-    let properties = properties::read(&mut bytes)?;
-    Ok((puback, properties))
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubCompReason::Success && self.properties.is_none() {
+            return Ok(4);
+        }
+
+        buffer.put_u8(code(self.reason));
+
+        if let Some(p) = &self.properties {
+            p.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
+
+        Ok(1 + count + len)
+    }
 }
 
-pub fn write(
-    pubcomp: &PubComp,
-    properties: &Option<PubCompProperties>,
-    buffer: &mut BytesMut,
-) -> Result<usize, Error> {
-    let len = len(pubcomp, properties);
-    buffer.put_u8(0x70);
-    let count = write_remaining_length(buffer, len)?;
-    buffer.put_u16(pubcomp.pkid);
-
-    // If there are no properties during success, sending reason code is optional
-    if pubcomp.reason == PubCompReason::Success && properties.is_none() {
-        return Ok(4);
-    }
-
-    buffer.put_u8(code(pubcomp.reason));
-
-    if let Some(p) = properties {
-        properties::write(p, buffer)?;
-    } else {
-        write_remaining_length(buffer, 0)?;
-    }
-
-    Ok(1 + count + len)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubCompProperties {
+    pub reason_string: Option<String>,
+    pub user_properties: Vec<(String, String)>,
 }
 
-mod properties {
-    use super::*;
-    pub fn len(properties: &PubCompProperties) -> usize {
+impl PubCompProperties {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             len += 1 + 2 + reason.len();
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             len += 1 + 2 + key.len() + 2 + value.len();
         }
 
@@ -140,16 +161,16 @@ mod properties {
         }))
     }
 
-    pub fn write(properties: &PubCompProperties, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = len(properties);
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
         write_remaining_length(buffer, len)?;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             buffer.put_u8(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
@@ -158,6 +179,7 @@ mod properties {
         Ok(())
     }
 }
+
 /// Connection return code type
 fn reason(num: u8) -> Result<PubCompReason, Error> {
     let code = match num {

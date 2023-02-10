@@ -1,4 +1,7 @@
-use rumqttc::v5::mqttbytes::{PublishProperties, QoS};
+use rumqttc::v5::mqttbytes::{
+    v5::{ConnectProperties, PublishProperties},
+    QoS,
+};
 use tokio::{task, time};
 
 use rumqttc::v5::{AsyncClient, MqttOptions};
@@ -9,9 +12,12 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
+    let mut conn_props = ConnectProperties::new();
+    conn_props.set_topic_alias_max(10.into());
+
     let mut mqttoptions = MqttOptions::new("test-1", "broker.emqx.io", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
-    mqttoptions.set_topic_alias_max(10);
+    mqttoptions.set_connect_properties(conn_props);
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
     task::spawn(async move {
@@ -28,12 +34,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn requests(client: AsyncClient) {
     client
-        .subscribe("hello/world", QoS::AtMostOnce)
+        .subscribe("hello/world", QoS::AtMostOnce, None)
         .await
         .unwrap();
 
     client
-        .subscribe("bye/world", QoS::AtMostOnce)
+        .subscribe("bye/world", QoS::AtMostOnce, None)
         .await
         .unwrap();
 
@@ -41,7 +47,7 @@ async fn requests(client: AsyncClient) {
     props.topic_alias = Some(28);
 
     client
-        .publish_with_props(
+        .publish(
             "hello/world",
             QoS::ExactlyOnce,
             false,
@@ -55,7 +61,7 @@ async fn requests(client: AsyncClient) {
     other.topic_alias = Some(51);
 
     client
-        .publish_with_props(
+        .publish(
             "bye/world",
             QoS::ExactlyOnce,
             false,
@@ -72,7 +78,7 @@ async fn requests(client: AsyncClient) {
             props.clone()
         };
         client
-            .publish_with_props("", QoS::ExactlyOnce, false, vec![1; i], Some(properties))
+            .publish("", QoS::ExactlyOnce, false, vec![1; i], Some(properties))
             .await
             .unwrap();
 

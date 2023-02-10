@@ -1,8 +1,19 @@
 use std::slice::Iter;
 
 pub use self::{
+    connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
+    connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
     disconnect::{Disconnect, DisconnectReasonCode},
-    ping::pingreq,
+    ping::{PingReq, PingResp},
+    puback::{PubAck, PubAckProperties},
+    pubcomp::{PubComp, PubCompProperties},
+    publish::{Publish, PublishProperties},
+    pubrec::{PubRec, PubRecProperties},
+    pubrel::{PubRel, PubRelProperties},
+    suback::{SubAck, SubAckProperties},
+    subscribe::{Filter, Subscribe, SubscribeProperties},
+    unsuback::{UnsubAck, UnsubAckProperties},
+    unsubscribe::{Unsubscribe, UnsubscribeProperties},
 };
 
 use super::*;
@@ -10,7 +21,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 mod connack;
 mod connect;
-pub mod disconnect;
+mod disconnect;
 mod ping;
 mod puback;
 mod pubcomp;
@@ -24,23 +35,17 @@ mod unsubscribe;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
-    Connect(
-        Connect,
-        Option<ConnectProperties>,
-        Option<LastWill>,
-        Option<LastWillProperties>,
-        Option<Login>,
-    ),
-    ConnAck(ConnAck, Option<ConnAckProperties>),
-    Publish(Publish, Option<PublishProperties>),
-    PubAck(PubAck, Option<PubAckProperties>),
+    Connect(Connect, Option<LastWill>, Option<Login>),
+    ConnAck(ConnAck),
+    Publish(Publish),
+    PubAck(PubAck),
     PingReq(PingReq),
     PingResp(PingResp),
-    Subscribe(Subscribe, Option<SubscribeProperties>),
-    SubAck(SubAck, Option<SubAckProperties>),
-    PubRec(PubRec, Option<PubRecProperties>),
-    PubRel(PubRel, Option<PubRelProperties>),
-    PubComp(PubComp, Option<PubCompProperties>),
+    Subscribe(Subscribe),
+    SubAck(SubAck),
+    PubRec(PubRec),
+    PubRel(PubRel),
+    PubComp(PubComp),
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
@@ -67,48 +72,47 @@ impl Packet {
         let packet = packet.freeze();
         let packet = match packet_type {
             PacketType::Connect => {
-                let (connect, properties, will, willproperties, login) =
-                    connect::read(fixed_header, packet)?;
-                Packet::Connect(connect, properties, will, willproperties, login)
+                let (connect, will, login) = Connect::read(fixed_header, packet)?;
+                Packet::Connect(connect, will, login)
             }
             PacketType::Publish => {
-                let (publish, properties) = publish::read(fixed_header, packet)?;
-                Packet::Publish(publish, properties)
+                let publish = Publish::read(fixed_header, packet)?;
+                Packet::Publish(publish)
             }
             PacketType::Subscribe => {
-                let (subscribe, properties) = subscribe::read(fixed_header, packet)?;
-                Packet::Subscribe(subscribe, properties)
+                let subscribe = Subscribe::read(fixed_header, packet)?;
+                Packet::Subscribe(subscribe)
             }
             PacketType::Unsubscribe => {
-                let (unsubscribe, _) = unsubscribe::read(fixed_header, packet)?;
+                let unsubscribe = Unsubscribe::read(fixed_header, packet)?;
                 Packet::Unsubscribe(unsubscribe)
             }
             PacketType::ConnAck => {
-                let (connack, props) = connack::read(fixed_header, packet)?;
-                Packet::ConnAck(connack, props)
+                let connack = ConnAck::read(fixed_header, packet)?;
+                Packet::ConnAck(connack)
             }
             PacketType::PubAck => {
-                let (puback, properties) = puback::read(fixed_header, packet)?;
-                Packet::PubAck(puback, properties)
+                let puback = PubAck::read(fixed_header, packet)?;
+                Packet::PubAck(puback)
             }
             PacketType::PubRec => {
-                let (pubrec, properties) = pubrec::read(fixed_header, packet)?;
-                Packet::PubRec(pubrec, properties)
+                let pubrec = PubRec::read(fixed_header, packet)?;
+                Packet::PubRec(pubrec)
             }
             PacketType::PubRel => {
-                let (pubrel, properties) = pubrel::read(fixed_header, packet)?;
-                Packet::PubRel(pubrel, properties)
+                let pubrel = PubRel::read(fixed_header, packet)?;
+                Packet::PubRel(pubrel)
             }
             PacketType::PubComp => {
-                let (pubcomp, properties) = pubcomp::read(fixed_header, packet)?;
-                Packet::PubComp(pubcomp, properties)
+                let pubcomp = PubComp::read(fixed_header, packet)?;
+                Packet::PubComp(pubcomp)
             }
             PacketType::SubAck => {
-                let (suback, properties) = suback::read(fixed_header, packet)?;
-                Packet::SubAck(suback, properties)
+                let suback = SubAck::read(fixed_header, packet)?;
+                Packet::SubAck(suback)
             }
             PacketType::UnsubAck => {
-                let (unsuback, _) = unsuback::read(fixed_header, packet)?;
+                let unsuback = UnsubAck::read(fixed_header, packet)?;
                 Packet::UnsubAck(unsuback)
             }
             PacketType::PingReq => Packet::PingReq(PingReq),
@@ -124,23 +128,19 @@ impl Packet {
 
     pub fn write(&self, write: &mut BytesMut) -> Result<usize, Error> {
         match self {
-            Self::Publish(publish, properties) => publish::write(publish, properties, write),
-            Self::Subscribe(subscription, properties) => {
-                subscribe::write(subscription, properties, write)
-            }
-            Self::Unsubscribe(unsubscribe) => unsubscribe::write(unsubscribe, &None, write),
-            Self::ConnAck(ack, props) => connack::write(ack, props, write),
-            Self::PubAck(ack, properties) => puback::write(ack, properties, write),
-            Self::SubAck(ack, properties) => suback::write(ack, properties, write),
-            Self::UnsubAck(unsuback) => unsuback::write(unsuback, &None, write),
-            Self::PubRec(pubrec, properties) => pubrec::write(pubrec, properties, write),
-            Self::PubRel(pubrel, properties) => pubrel::write(pubrel, properties, write),
-            Self::PubComp(pubcomp, properties) => pubcomp::write(pubcomp, properties, write),
-            Self::Connect(connect, properties, will, will_properties, login) => {
-                connect::write(connect, will, will_properties, login, properties, write)
-            }
-            Self::PingReq(_) => pingreq::write(write),
-            Self::PingResp(_) => ping::pingresp::write(write),
+            Self::Publish(publish) => publish.write(write),
+            Self::Subscribe(subscription) => subscription.write(write),
+            Self::Unsubscribe(unsubscribe) => unsubscribe.write(write),
+            Self::ConnAck(ack) => ack.write(write),
+            Self::PubAck(ack) => ack.write(write),
+            Self::SubAck(ack) => ack.write(write),
+            Self::UnsubAck(unsuback) => unsuback.write(write),
+            Self::PubRec(pubrec) => pubrec.write(write),
+            Self::PubRel(pubrel) => pubrel.write(write),
+            Self::PubComp(pubcomp) => pubcomp.write(write),
+            Self::Connect(connect, will, login) => connect.write(will, login, write),
+            Self::PingReq(_) => PingReq::write(write),
+            Self::PingResp(_) => PingResp::write(write),
             Self::Disconnect(disconnect) => disconnect.write(write),
         }
     }

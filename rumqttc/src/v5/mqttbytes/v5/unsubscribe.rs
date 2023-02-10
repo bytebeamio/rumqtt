@@ -1,77 +1,96 @@
 use super::*;
 use bytes::{Buf, Bytes};
 
-pub fn len(unsubscribe: &Unsubscribe, properties: &Option<UnsubscribeProperties>) -> usize {
-    // Packet id + length of filters (unlike subscribe, this just a string.
-    // Hence 2 is prefixed for len per filter)
-    let mut len = 2 + unsubscribe.filters.iter().fold(0, |s, t| 2 + s + t.len());
-
-    if let Some(p) = properties {
-        let properties_len = properties::len(p);
-        let properties_len_len = len_len(properties_len);
-        len += properties_len_len + properties_len;
-    } else {
-        // just 1 byte representing 0 len
-        len += 1;
-    }
-
-    len
+/// Unsubscribe packet
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Unsubscribe {
+    pub pkid: u16,
+    pub filters: Vec<String>,
+    pub properties: Option<UnsubscribeProperties>,
 }
 
-pub fn read(
-    fixed_header: FixedHeader,
-    mut bytes: Bytes,
-) -> Result<(Unsubscribe, Option<UnsubscribeProperties>), Error> {
-    let variable_header_index = fixed_header.fixed_header_len;
-    bytes.advance(variable_header_index);
-
-    let pkid = read_u16(&mut bytes)?;
-    let properties = properties::read(&mut bytes)?;
-
-    let mut filters = Vec::with_capacity(1);
-    while bytes.has_remaining() {
-        let filter = read_mqtt_string(&mut bytes)?;
-        filters.push(filter);
+impl Unsubscribe {
+    pub fn new<S: Into<String>>(filter: S, properties: Option<UnsubscribeProperties>) -> Self {
+        Self {
+            filters: vec![filter.into()],
+            properties,
+            ..Default::default()
+        }
     }
 
-    let unsubscribe = Unsubscribe { pkid, filters };
-    Ok((unsubscribe, properties))
+    fn len(&self) -> usize {
+        // Packet id + length of filters (unlike subscribe, this just a string.
+        // Hence 2 is prefixed for len per filter)
+        let mut len = 2 + self.filters.iter().fold(0, |s, t| 2 + s + t.len());
+
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
+        }
+
+        len
+    }
+
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe, Error> {
+        let variable_header_index = fixed_header.fixed_header_len;
+        bytes.advance(variable_header_index);
+
+        let pkid = read_u16(&mut bytes)?;
+        let properties = UnsubscribeProperties::read(&mut bytes)?;
+
+        let mut filters = Vec::with_capacity(1);
+        while bytes.has_remaining() {
+            let filter = read_mqtt_string(&mut bytes)?;
+            filters.push(filter);
+        }
+
+        let unsubscribe = Unsubscribe {
+            pkid,
+            filters,
+            properties,
+        };
+        Ok(unsubscribe)
+    }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        buffer.put_u8(0xA2);
+
+        // write remaining length
+        let remaining_len = self.len();
+        let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
+
+        // write packet id
+        buffer.put_u16(self.pkid);
+
+        if let Some(p) = &self.properties {
+            p.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
+
+        // write filters
+        for filter in self.filters.iter() {
+            write_mqtt_string(buffer, filter);
+        }
+
+        Ok(1 + remaining_len_bytes + remaining_len)
+    }
 }
 
-pub fn write(
-    unsubscribe: &Unsubscribe,
-    properties: &Option<UnsubscribeProperties>,
-    buffer: &mut BytesMut,
-) -> Result<usize, Error> {
-    buffer.put_u8(0xA2);
-
-    // write remaining length
-    let remaining_len = len(unsubscribe, properties);
-    let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
-
-    // write packet id
-    buffer.put_u16(unsubscribe.pkid);
-
-    if let Some(p) = properties {
-        properties::write(p, buffer)?;
-    } else {
-        write_remaining_length(buffer, 0)?;
-    }
-
-    // write filters
-    for filter in unsubscribe.filters.iter() {
-        write_mqtt_string(buffer, filter);
-    }
-
-    Ok(1 + remaining_len_bytes + remaining_len)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsubscribeProperties {
+    pub user_properties: Vec<(String, String)>,
 }
 
-mod properties {
-    use super::*;
-    pub fn len(properties: &UnsubscribeProperties) -> usize {
+impl UnsubscribeProperties {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             len += 1 + 2 + key.len() + 2 + value.len();
         }
 
@@ -108,11 +127,11 @@ mod properties {
         Ok(Some(UnsubscribeProperties { user_properties }))
     }
 
-    pub fn write(properties: &UnsubscribeProperties, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = len(properties);
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
         write_remaining_length(buffer, len)?;
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);

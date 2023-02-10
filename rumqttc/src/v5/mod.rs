@@ -14,7 +14,7 @@ pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
-use mqttbytes::{v5::*, *};
+use mqttbytes::v5::*;
 
 pub type Incoming = Packet;
 
@@ -24,7 +24,7 @@ use crate::Outgoing;
 /// handled one by one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    Publish(Publish, Option<PublishProperties>),
+    Publish(Publish),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
@@ -78,12 +78,12 @@ pub struct MqttOptions {
     last_will: Option<LastWill>,
     /// Connection timeout
     conn_timeout: u64,
+    /// Connect Properties
+    connect_properties: Option<ConnectProperties>,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
     network_options: NetworkOptions,
-    // `topic_alias_maximum` sent via CONNECT
-    topic_alias_max: u16,
 }
 
 impl MqttOptions {
@@ -124,9 +124,9 @@ impl MqttOptions {
             inflight: 100,
             last_will: None,
             conn_timeout: 5,
+            connect_properties: None,
             manual_acks: false,
             network_options: NetworkOptions::new(),
-            topic_alias_max: 0,
         }
     }
 
@@ -297,6 +297,17 @@ impl MqttOptions {
         self.conn_timeout
     }
 
+    /// set connection properties
+    pub fn set_connect_properties(&mut self, properties: ConnectProperties) -> &mut Self {
+        self.connect_properties = Some(properties);
+        self
+    }
+
+    /// get connection properties
+    pub fn connect_properties(&self) -> Option<ConnectProperties> {
+        self.connect_properties.clone()
+    }
+
     /// set manual acknowledgements
     pub fn set_manual_acks(&mut self, manual_acks: bool) -> &mut Self {
         self.manual_acks = manual_acks;
@@ -314,15 +325,6 @@ impl MqttOptions {
 
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
-        self
-    }
-
-    pub fn topic_alias_max(&self) -> u16 {
-        self.topic_alias_max
-    }
-
-    pub fn set_topic_alias_max(&mut self, topic_alias_max: u16) -> &mut Self {
-        self.topic_alias_max = topic_alias_max;
         self
     }
 }
@@ -522,6 +524,7 @@ impl Debug for MqttOptions {
             .field("last_will", &self.last_will)
             .field("conn_timeout", &self.conn_timeout)
             .field("manual_acks", &self.manual_acks)
+            .field("connect properties", &self.connect_properties)
             .finish()
     }
 }

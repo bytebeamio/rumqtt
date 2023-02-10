@@ -1,80 +1,109 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-pub fn len(suback: &SubAck, properties: &Option<SubAckProperties>) -> usize {
-    let mut len = 2 + suback.return_codes.len();
-
-    if let Some(p) = properties {
-        let properties_len = properties::len(p);
-        let properties_len_len = len_len(properties_len);
-        len += properties_len_len + properties_len;
-    } else {
-        // just 1 byte representing 0 len
-        len += 1;
-    }
-
-    len
+/// Acknowledgement to subscribe
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubAck {
+    pub pkid: u16,
+    pub return_codes: Vec<SubscribeReasonCode>,
+    pub properties: Option<SubAckProperties>,
 }
 
-pub fn read(
-    fixed_header: FixedHeader,
-    mut bytes: Bytes,
-) -> Result<(SubAck, Option<SubAckProperties>), Error> {
-    let variable_header_index = fixed_header.fixed_header_len;
-    bytes.advance(variable_header_index);
+impl SubAck {
+    fn len(&self) -> usize {
+        let mut len = 2 + self.return_codes.len();
 
-    let pkid = read_u16(&mut bytes)?;
-    let properties = properties::read(&mut bytes)?;
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
+        }
 
-    if !bytes.has_remaining() {
-        return Err(Error::MalformedPacket);
+        len
     }
 
-    let mut return_codes = Vec::new();
-    while bytes.has_remaining() {
-        let return_code = read_u8(&mut bytes)?;
-        return_codes.push(reason(return_code)?);
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<SubAck, Error> {
+        let variable_header_index = fixed_header.fixed_header_len;
+        bytes.advance(variable_header_index);
+
+        let pkid = read_u16(&mut bytes)?;
+        let properties = SubAckProperties::read(&mut bytes)?;
+
+        if !bytes.has_remaining() {
+            return Err(Error::MalformedPacket);
+        }
+
+        let mut return_codes = Vec::new();
+        while bytes.has_remaining() {
+            let return_code = read_u8(&mut bytes)?;
+            return_codes.push(reason(return_code)?);
+        }
+
+        let suback = SubAck {
+            pkid,
+            return_codes,
+            properties,
+        };
+
+        Ok(suback)
     }
 
-    let suback = SubAck { pkid, return_codes };
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        buffer.put_u8(0x90);
+        let remaining_len = self.len();
+        let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
 
-    Ok((suback, properties))
+        buffer.put_u16(self.pkid);
+
+        if let Some(p) = &self.properties {
+            p.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
+
+        let p: Vec<u8> = self.return_codes.iter().map(|&c| code(c)).collect();
+
+        buffer.extend_from_slice(&p);
+        Ok(1 + remaining_len_bytes + remaining_len)
+    }
 }
 
-pub fn write(
-    suback: &SubAck,
-    properties: &Option<SubAckProperties>,
-    buffer: &mut BytesMut,
-) -> Result<usize, Error> {
-    buffer.put_u8(0x90);
-    let remaining_len = len(suback, properties);
-    let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
-
-    buffer.put_u16(suback.pkid);
-
-    if let Some(p) = properties {
-        properties::write(p, buffer)?;
-    } else {
-        write_remaining_length(buffer, 0)?;
-    }
-
-    let p: Vec<u8> = suback.return_codes.iter().map(|&c| code(c)).collect();
-
-    buffer.extend_from_slice(&p);
-    Ok(1 + remaining_len_bytes + remaining_len)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscribeReasonCode {
+    QoS0,
+    QoS1,
+    QoS2,
+    Success(QoS),
+    Failure,
+    Unspecified,
+    ImplementationSpecific,
+    NotAuthorized,
+    TopicFilterInvalid,
+    PkidInUse,
+    QuotaExceeded,
+    SharedSubscriptionsNotSupported,
+    SubscriptionIdNotSupported,
+    WildcardSubscriptionsNotSupported,
 }
 
-mod properties {
-    use super::*;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubAckProperties {
+    pub reason_string: Option<String>,
+    pub user_properties: Vec<(String, String)>,
+}
 
-    pub fn len(properties: &SubAckProperties) -> usize {
+impl SubAckProperties {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             len += 1 + 2 + reason.len();
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             len += 1 + 2 + key.len() + 2 + value.len();
         }
 
@@ -119,16 +148,16 @@ mod properties {
         }))
     }
 
-    pub fn write(properties: &SubAckProperties, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = len(properties);
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
         write_remaining_length(buffer, len)?;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             buffer.put_u8(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);

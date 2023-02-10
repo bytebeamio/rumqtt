@@ -1,5 +1,5 @@
 use super::framed::Network;
-use super::mqttbytes::{v5::*, *};
+use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
@@ -24,7 +24,7 @@ use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
 
-use super::mqttbytes::ConnectReturnCode;
+use super::mqttbytes::v5::ConnectReturnCode;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -293,11 +293,13 @@ async fn mqtt_connect(
     let keep_alive = options.keep_alive().as_secs() as u16;
     let clean_session = options.clean_session();
     let client_id = options.client_id();
+    let properties = options.connect_properties();
 
     let connect = Connect {
         keep_alive,
         client_id,
         clean_session,
+        properties,
     };
 
     // send mqtt connect packet
@@ -305,10 +307,10 @@ async fn mqtt_connect(
 
     // validate connack
     match network.read().await? {
-        Incoming::ConnAck(connack, props) if connack.code == ConnectReturnCode::Success => {
-            Ok(Packet::ConnAck(connack, props))
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+            Ok(Packet::ConnAck(connack))
         }
-        Incoming::ConnAck(connack, _props) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
     }
 }
