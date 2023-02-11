@@ -125,7 +125,7 @@ impl Broker {
     // }
 
     // Link to get meters
-    pub fn meters(&self) -> Result<meters::MetersLink, meters::LinkError> {
+    pub fn meters(&self) -> Result<meters::MetersLink, meters::MetersError> {
         let link = meters::MetersLink::new(self.router_tx.clone())?;
         Ok(link)
     }
@@ -243,38 +243,41 @@ impl Broker {
             let port = prometheus_setting.port;
             let timeout = prometheus_setting.interval;
             let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
-            let meter_link = self.meters().unwrap();
-            metrics_thread.spawn(move || {
-                let builder = PrometheusBuilder::new()
-                    .with_http_listener(SocketAddr::new("127.0.0.1".parse().unwrap(), port));
-                builder.install().unwrap();
+            if let Ok(meter_link) = self.meters() {
+                metrics_thread.spawn(move || {
+                    let builder = PrometheusBuilder::new()
+                        .with_http_listener(SocketAddr::new("127.0.0.1".parse().unwrap(), port));
+                    builder.install().unwrap();
 
-                let total_publishes = register_gauge!("metrics.router.total_publishes");
-                let total_connections = register_gauge!("metrics.router.total_connections");
-                let failed_publishes = register_gauge!("metrics.router.failed_publishes");
-                loop {
-                    let request = GetMeter::Router;
-                    let metrics = match meter_link.get(request) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!("Data link receive error = {:?}", e);
-                            break;
-                        }
-                    };
-
-                    for m in metrics {
-                        match m {
-                            Meter::Router(_, ref r) => {
-                                total_connections.set(r.total_connections as f64);
-                                total_publishes.set(r.total_publishes as f64);
-                                failed_publishes.set(r.failed_publishes as f64);
+                    let total_publishes = register_gauge!("metrics.router.total_publishes");
+                    let total_connections = register_gauge!("metrics.router.total_connections");
+                    let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+                    loop {
+                        let request = GetMeter::Router;
+                        let metrics = match meter_link.get(request) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                error!("Data link receive error = {:?}", e);
+                                break;
                             }
-                            _ => panic!("We only request for router metrics"),
+                        };
+
+                        for m in metrics {
+                            match m {
+                                Meter::Router(_, ref r) => {
+                                    total_connections.set(r.total_connections as f64);
+                                    total_publishes.set(r.total_publishes as f64);
+                                    failed_publishes.set(r.failed_publishes as f64);
+                                }
+                                _ => panic!("We only request for router metrics"),
+                            }
                         }
+                        std::thread::sleep(Duration::from_secs(timeout));
                     }
-                    std::thread::sleep(Duration::from_secs(timeout));
-                }
-            })?;
+                })?;
+            } else {
+                error!("Could initialize MetersLink");
+            };
         }
 
         // for (_, config) in self.config.shadows.clone() {

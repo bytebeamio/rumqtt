@@ -3,7 +3,7 @@ use crate::ConnectionId;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 
 #[derive(Debug, thiserror::Error)]
-pub enum LinkError {
+pub enum MetersError {
     #[error("Channel try send error")]
     TrySend(#[from] TrySendError<(ConnectionId, Event)>),
     #[error("Channel send error")]
@@ -14,22 +14,22 @@ pub enum LinkError {
     RecvTimeout(#[from] RecvTimeoutError),
     #[error("Timeout = {0}")]
     Elapsed(#[from] tokio::time::error::Elapsed),
+    #[error("Meterslink is already in use")]
+    Unavailable,
 }
 
 pub struct MetersLink {
-    pub(crate) meter_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,
-    router_rx: Receiver<(ConnectionId, Vec<Meter>)>,
+    router_rx: Receiver<Vec<Meter>>,
 }
 
 impl MetersLink {
-    pub fn new(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
+    pub fn new(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, MetersError> {
         let (tx, rx) = flume::bounded(5);
         router_tx.send((0, Event::NewMeter(tx)))?;
-        let (meter_id, _meter) = rx.recv()?;
+        let _meter = rx.recv().map_err(|_| MetersError::Unavailable)?;
 
         let link = MetersLink {
-            meter_id,
             router_tx,
             router_rx: rx,
         };
@@ -37,13 +37,12 @@ impl MetersLink {
         Ok(link)
     }
 
-    pub async fn init(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
+    pub async fn init(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, MetersError> {
         let (tx, rx) = flume::bounded(5);
         router_tx.send((0, Event::NewMeter(tx)))?;
-        let (meter_id, _meter) = rx.recv_async().await?;
+        let _meter = rx.recv_async().await?;
 
         let link = MetersLink {
-            meter_id,
             router_tx,
             router_rx: rx,
         };
@@ -51,18 +50,17 @@ impl MetersLink {
         Ok(link)
     }
 
-    pub fn get(&self, meter: GetMeter) -> Result<Vec<Meter>, LinkError> {
-        self.router_tx
-            .send((self.meter_id, Event::GetMeter(meter)))?;
-        let (_meter_id, meter) = self.router_rx.recv()?;
+    pub fn get(&self, meter: GetMeter) -> Result<Vec<Meter>, MetersError> {
+        self.router_tx.send((0, Event::GetMeter(meter)))?;
+        let meter = self.router_rx.recv()?;
         Ok(meter)
     }
 
-    pub async fn fetch(&self, meter: GetMeter) -> Result<Vec<Meter>, LinkError> {
+    pub async fn fetch(&self, meter: GetMeter) -> Result<Vec<Meter>, MetersError> {
         self.router_tx
-            .send_async((self.meter_id, Event::GetMeter(meter)))
+            .send_async((0, Event::GetMeter(meter)))
             .await?;
-        let (_meter_id, meter) = self.router_rx.recv_async().await?;
+        let meter = self.router_rx.recv_async().await?;
         Ok(meter)
     }
 }

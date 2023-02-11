@@ -23,7 +23,7 @@ use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
+    packetid, Connection, DataRequest, Delta, Event, FilterIdx, GetMeter, Meter, MetricsReply,
     MetricsRequest, Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY,
     MAX_SCHEDULE_ITERATIONS,
 };
@@ -60,8 +60,8 @@ pub struct Router {
     config: RouterConfig,
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
-    /// List of MetersLink's senders
-    meters: Slab<Sender<(ConnectionId, Vec<Meter>)>>,
+    /// Sender end of channel to the MetersLink
+    meters: Option<Sender<Vec<Meter>>>,
     /// List of AlertsLink's senders with their respective subscription Filter
     alerts: Slab<(FilterWithOffsets, Sender<(ConnectionId, Alert)>)>,
     /// List of connections
@@ -93,7 +93,7 @@ pub struct Router {
     /// with this router
     router_tx: Sender<(ConnectionId, Event)>,
     /// Router metrics
-    router_meters: RouterMeter,
+    router_meters: Delta<RouterMeter>,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
 }
@@ -102,24 +102,23 @@ impl Router {
     pub fn new(router_id: RouterId, config: RouterConfig) -> Router {
         let (router_tx, router_rx) = bounded(1000);
 
-        let meters = Slab::with_capacity(10);
         let alerts = Slab::with_capacity(10);
         let connections = Slab::with_capacity(config.max_connections);
         let ibufs = Slab::with_capacity(config.max_connections);
         let obufs = Slab::with_capacity(config.max_connections);
         let ackslog = Slab::with_capacity(config.max_connections);
 
-        let router_metrics = RouterMeter {
+        let router_metrics = Delta::from(RouterMeter {
             router_id,
             ..RouterMeter::default()
-        };
+        });
 
         let max_connections = config.max_connections;
         Router {
             id: router_id,
             config: config.clone(),
             graveyard: Graveyard::new(),
-            meters,
+            meters: Default::default(),
             alerts,
             connections,
             connection_map: Default::default(),
@@ -234,7 +233,7 @@ impl Router {
                 outgoing,
             } => self.handle_new_connection(connection, incoming, outgoing),
             Event::NewMeter(tx) => self.handle_new_meter(tx),
-            Event::GetMeter(meter) => self.handle_get_meter(id, meter),
+            Event::GetMeter(meter) => self.handle_get_meter(meter),
             Event::NewAlert(tx, filters) => self.handle_new_alert(tx, filters),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
@@ -346,16 +345,16 @@ impl Router {
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
 
-        self.router_meters.total_connections += 1;
+        self.router_meters.set().total_connections += 1;
     }
 
-    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Vec<Meter>)>) {
-        let meter_id = self.meters.insert(tx);
-        let tx = &self.meters[meter_id];
-        let _ = tx.try_send((
-            meter_id,
-            vec![Meter::Router(self.id, self.router_meters.clone())],
-        ));
+    fn handle_new_meter(&mut self, tx: Sender<Vec<Meter>>) {
+        if self.meters.is_some() {
+            return;
+        }
+
+        let tx = self.meters.insert(tx);
+        let _ = tx.try_send(vec![Meter::Router(self.id, self.router_meters.get())]);
     }
 
     fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filters: Vec<Filter>) {
@@ -457,7 +456,7 @@ impl Router {
             self.graveyard
                 .save(Tracker::new(client_id), HashSet::new(), connection.events);
         }
-        self.router_meters.total_connections -= 1;
+        self.router_meters.set().total_connections -= 1;
     }
 
     /// Handles new incoming data on a topic
@@ -539,7 +538,7 @@ impl Router {
                         }
                     };
 
-                    self.router_meters.total_publishes += 1;
+                    self.router_meters.set().total_publishes += 1;
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -560,7 +559,7 @@ impl Router {
                             error!(
                                 reason = ?e, "Failed to append to commitlog"
                             );
-                            self.router_meters.failed_publishes += 1;
+                            self.router_meters.set().failed_publishes += 1;
                             disconnect = true;
                             break;
                         }
@@ -752,7 +751,8 @@ impl Router {
                             error!(
                                 reason = ?e, "Failed to append to commitlog"
                             );
-                            self.router_meters.failed_publishes += 1;
+
+                            self.router_meters.set().failed_publishes += 1;
                             disconnect = true;
                             break;
                         }
@@ -974,18 +974,25 @@ impl Router {
                 error!(
                     reason = ?e, "Failed to append to commitlog"
                 );
-                self.router_meters.failed_publishes += 1;
+                self.router_meters.set().failed_publishes += 1;
                 // Removed disconnect = true from here because we disconnect anyways
             }
         };
     }
 
-    fn handle_get_meter(&self, meter_id: ConnectionId, meter: router::GetMeter) {
-        let meter_tx = &self.meters[meter_id];
+    fn handle_get_meter(&mut self, meter: router::GetMeter) {
+        let meter_tx = match self.meters {
+            Some(ref tx) => tx,
+            None => {
+                error!("Data requested from Meter without initialisation");
+                return;
+            }
+        };
+
         match meter {
             GetMeter::Router => {
-                let router_meters = Meter::Router(self.id, self.router_meters.clone());
-                let _ = meter_tx.try_send((meter_id, vec![router_meters]));
+                let router_meters = Meter::Router(self.id, self.router_meters.get());
+                let _ = meter_tx.try_send(vec![router_meters]);
             }
             // GetMeter::Connection(client_id) => {
             //     let connections = match client_id {
@@ -1028,7 +1035,7 @@ impl Router {
                     meter.push(Meter::Subscription(filter, subscription_meter));
                 }
 
-                let _ = meter_tx.try_send((meter_id, meter));
+                let _ = meter_tx.try_send(meter);
             }
         };
     }
@@ -1324,7 +1331,7 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
 fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
     let message = match metrics {
         MetricsRequest::Config => MetricsReply::Config(router.config.clone()),
-        MetricsRequest::Router => MetricsReply::Router(router.router_meters.clone()),
+        MetricsRequest::Router => MetricsReply::Router(router.router_meters.get()),
         MetricsRequest::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
                 let c = router

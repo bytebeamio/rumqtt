@@ -46,7 +46,7 @@ pub enum Event {
         outgoing: iobufs::Outgoing,
     },
     /// New meter link
-    NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
+    NewMeter(flume::Sender<Vec<Meter>>),
     /// Request for meter
     GetMeter(GetMeter),
     /// New Alert link
@@ -261,6 +261,37 @@ pub struct ShadowReply {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct Delta<T>
+where
+    T: std::ops::Sub<Output = T> + Default,
+{
+    last_read: T,
+    curr: T,
+}
+
+impl<T> Delta<T>
+where
+    T: std::ops::Sub<Output = T> + Copy + Default,
+{
+    pub fn from(data: T) -> Self {
+        Self {
+            last_read: data,
+            curr: data,
+        }
+    }
+
+    pub fn set(&mut self) -> &mut T {
+        &mut self.curr
+    }
+
+    pub fn get(&mut self) -> T {
+        self.curr = self.last_read;
+
+        self.curr - self.last_read
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct RouterMeter {
     pub router_id: RouterId,
     pub total_connections: usize,
@@ -269,13 +300,41 @@ pub struct RouterMeter {
     pub failed_publishes: usize,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+impl std::ops::Sub for RouterMeter {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        RouterMeter {
+            router_id: self.router_id,
+            total_connections: self.total_connections - rhs.total_connections,
+            total_subscriptions: self.total_subscriptions - rhs.total_subscriptions,
+            total_publishes: self.total_publishes - rhs.total_publishes,
+            failed_publishes: self.failed_publishes - rhs.failed_publishes,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct SubscriptionMeter {
     pub count: usize,
     pub total_size: usize,
     pub head_and_tail_id: (u64, u64),
     pub append_offset: (u64, u64),
     pub read_offset: usize,
+}
+
+impl std::ops::Sub for SubscriptionMeter {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        SubscriptionMeter {
+            count: self.count - rhs.count,
+            total_size: self.total_size - rhs.total_size,
+            head_and_tail_id: self.head_and_tail_id,
+            append_offset: self.append_offset,
+            read_offset: self.read_offset,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]

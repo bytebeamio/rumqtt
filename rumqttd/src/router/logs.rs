@@ -1,4 +1,4 @@
-use super::Ack;
+use super::{Ack, Delta};
 use slab::Slab;
 use tracing::trace;
 
@@ -60,10 +60,10 @@ impl DataLog {
         })
     }
 
-    pub fn meter(&self, filter: &str) -> Option<SubscriptionMeter> {
+    pub fn meter(&mut self, filter: &str) -> Option<SubscriptionMeter> {
         self.native
-            .get(*self.filter_indexes.get(filter)?)
-            .map(|data| data.meter.clone())
+            .get_mut(*self.filter_indexes.get(filter)?)
+            .map(|data| data.meter.get())
     }
 
     pub fn waiters(&self, filter: &Filter) -> Option<&Waiters<DataRequest>> {
@@ -228,7 +228,7 @@ pub struct Data<T> {
     filter: Filter,
     pub log: CommitLog<T>,
     pub waiters: Waiters<DataRequest>,
-    meter: SubscriptionMeter,
+    meter: Delta<SubscriptionMeter>,
 }
 
 impl<T> Data<T>
@@ -239,12 +239,12 @@ where
         let log = CommitLog::new(max_segment_size, max_mem_segments).unwrap();
 
         let waiters = Waiters::with_capacity(10);
-        let metrics = SubscriptionMeter::default();
+
         Data {
             filter: filter.to_owned(),
             log,
             waiters,
-            meter: metrics,
+            meter: Default::default(),
         }
     }
 
@@ -261,10 +261,11 @@ where
             notifications.append(&mut parked);
         }
 
-        self.meter.count += 1;
-        self.meter.append_offset = offset;
-        self.meter.total_size += size;
-        self.meter.head_and_tail_id = self.log.head_and_tail();
+        let meter = self.meter.set();
+        meter.count += 1;
+        meter.append_offset = offset;
+        meter.total_size += size;
+        meter.head_and_tail_id = self.log.head_and_tail();
 
         (offset, &self.filter)
     }
