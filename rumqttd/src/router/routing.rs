@@ -345,7 +345,7 @@ impl Router {
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
 
-        self.router_meters.set().total_connections += 1;
+        self.router_meters.set().active_connections += 1;
     }
 
     fn handle_new_meter(&mut self, tx: Sender<Vec<Meter>>) {
@@ -456,7 +456,7 @@ impl Router {
             self.graveyard
                 .save(Tracker::new(client_id), HashSet::new(), connection.events);
         }
-        self.router_meters.set().total_connections -= 1;
+        self.router_meters.set().active_connections -= 1;
     }
 
     /// Handles new incoming data on a topic

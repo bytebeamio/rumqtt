@@ -265,7 +265,7 @@ impl Broker {
                         for m in metrics {
                             match m {
                                 Meter::Router(_, ref r) => {
-                                    total_connections.set(r.total_connections as f64);
+                                    total_connections.set(r.active_connections as f64);
                                     total_publishes.set(r.total_publishes as f64);
                                     failed_publishes.set(r.failed_publishes as f64);
                                 }

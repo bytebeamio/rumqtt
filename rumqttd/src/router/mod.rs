@@ -295,8 +295,8 @@ where
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct RouterMeter {
     pub router_id: RouterId,
-    pub total_connections: isize,
-    pub total_subscriptions: usize,
+    pub active_connections: isize,
+    pub active_subscriptions: isize,
     pub total_publishes: usize,
     pub failed_publishes: usize,
 }
@@ -307,8 +307,8 @@ impl std::ops::Sub for RouterMeter {
     fn sub(self, rhs: Self) -> Self::Output {
         RouterMeter {
             router_id: self.router_id,
-            total_connections: self.total_connections - rhs.total_connections,
-            total_subscriptions: self.total_subscriptions - rhs.total_subscriptions,
+            active_connections: self.active_connections - rhs.active_connections,
+            active_subscriptions: self.active_subscriptions - rhs.active_subscriptions,
             total_publishes: self.total_publishes - rhs.total_publishes,
             failed_publishes: self.failed_publishes - rhs.failed_publishes,
         }
