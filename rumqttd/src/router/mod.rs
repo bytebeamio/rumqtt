@@ -285,16 +285,17 @@ where
     }
 
     pub fn get(&mut self) -> T {
-        self.curr = self.last_read;
+        let diff = self.curr - self.last_read;
+        self.last_read = self.curr;
 
-        self.curr - self.last_read
+        diff
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct RouterMeter {
     pub router_id: RouterId,
-    pub total_connections: usize,
+    pub total_connections: isize,
     pub total_subscriptions: usize,
     pub total_publishes: usize,
     pub failed_publishes: usize,
