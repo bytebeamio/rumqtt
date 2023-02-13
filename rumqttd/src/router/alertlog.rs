@@ -2,6 +2,7 @@ use crate::RouterConfig;
 use std::collections::VecDeque;
 
 pub mod alert {
+    #[derive(Debug, Clone)]
     pub enum Alert {
         Warn(Warn),
         Error(Error),
@@ -52,5 +53,9 @@ impl AlertLog {
         if self.alerts.len() >= 100 {
             self.alerts.pop_front();
         }
+    }
+
+    pub fn take(&mut self) -> VecDeque<Alert> {
+        self.alerts.split_off(0)
     }
 }

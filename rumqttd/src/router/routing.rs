@@ -241,7 +241,7 @@ impl Router {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
             Event::SendAlerts => {
-                dbg!()
+                self.send_alerts();
             }
             Event::SendMeters => {
                 self.send_meters();
@@ -929,6 +929,18 @@ impl Router {
         for link in self.meters.iter() {
             if let Err(e) = link.1.try_send((0, meters.clone())) {
                 error!("Failed to send meter. Error = {:?}", e);
+            }
+        }
+    }
+
+    fn send_alerts(&mut self) {
+        let alerts = self.alertlog.take();
+        if alerts.len() > 0 {
+            let alerts: Vec<Alert> = alerts.into();
+            for link in self.alerts.iter() {
+                if let Err(e) = link.1.try_send(alerts.clone()) {
+                    error!("Failed to send meter. Error = {:?}", e);
+                }
             }
         }
     }
