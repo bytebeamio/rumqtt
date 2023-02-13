@@ -12,7 +12,7 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Filter, Meter};
+use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -166,7 +166,7 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
-        {
+        if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
             timer_thread.spawn(move || {
@@ -174,7 +174,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async move {
-                    timer::start(router_tx).await;
+                    timer::start(metrics_config, router_tx).await;
                 });
             })?;
         }
@@ -267,10 +267,12 @@ impl Broker {
                 let total_connections = register_gauge!("metrics.router.total_connections");
                 let failed_publishes = register_gauge!("metrics.router.failed_publishes");
                 loop {
-                    let (_, metrics) = match meter_link.recv() {
-                        Ok(v) => v,
+                    let metrics = match meter_link.recv() {
+                        Ok((_id, meters)) => meters,
                         Err(e) => {
-                            error!("Data link receive error = {:?}", e);
+                            error!(
+                                "Unable to receive meters link data for prometheus listener: {e}"
+                            );
                             break;
                         }
                     };
@@ -282,7 +284,7 @@ impl Broker {
                                 total_publishes.set(r.total_publishes as f64);
                                 failed_publishes.set(r.failed_publishes as f64);
                             }
-                            _ => panic!("We only request for router metrics"),
+                            _ => continue,
                         }
                     }
                     std::thread::sleep(Duration::from_secs(timeout));

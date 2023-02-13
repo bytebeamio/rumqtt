@@ -17,8 +17,7 @@ pub enum LinkError {
 }
 
 pub struct MetersLink {
-    pub(crate) meter_id: ConnectionId,
-    router_tx: Sender<(ConnectionId, Event)>,
+    pub(crate) _meter_id: ConnectionId,
     router_rx: Receiver<(ConnectionId, Vec<Meter>)>,
 }
 
@@ -26,11 +25,10 @@ impl MetersLink {
     pub fn new(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
         let (tx, rx) = flume::bounded(5);
         router_tx.send((0, Event::NewMeter(tx)))?;
-        let (meter_id, _meter) = rx.recv()?;
+        let (_meter_id, _meter) = rx.recv()?;
 
         let link = MetersLink {
-            meter_id,
-            router_tx,
+            _meter_id,
             router_rx: rx,
         };
 
@@ -40,11 +38,10 @@ impl MetersLink {
     pub async fn init(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
         let (tx, rx) = flume::bounded(5);
         router_tx.send((0, Event::NewMeter(tx)))?;
-        let (meter_id, _meter) = rx.recv_async().await?;
+        let (_meter_id, _meter) = rx.recv_async().await?;
 
         let link = MetersLink {
-            meter_id,
-            router_tx,
+            _meter_id,
             router_rx: rx,
         };
 

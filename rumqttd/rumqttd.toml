@@ -86,3 +86,9 @@ interval = 1
 
 [console]
 listen = "0.0.0.0:3030"
+
+# [metrics]
+#     [metrics.alerts]
+#     push_interval = 1
+#     [metrics.meters]
+#     push_interval = 1

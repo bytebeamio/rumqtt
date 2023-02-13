@@ -919,7 +919,7 @@ impl Router {
         meters.push(router_meters);
         for f in self.subscription_map.keys() {
             let filter = f.to_owned();
-            if let Some(meter) = self.datalog.meter(&f) {
+            if let Some(meter) = self.datalog.meter(f) {
                 let subscription_meter = Meter::Subscription(filter, meter.clone());
                 meters.push(subscription_meter);
                 meter.reset();
