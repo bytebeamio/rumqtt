@@ -280,6 +280,13 @@ pub struct SubscriptionMeter {
     pub read_offset: usize,
 }
 
+impl SubscriptionMeter {
+    pub fn reset(&mut self) {
+        self.count = 0;
+        self.total_size = 0;
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct MeterData {
     pub count: usize,
@@ -344,7 +351,7 @@ pub struct ConnectionEvents {
 pub enum Meter {
     Router(usize, RouterMeter),
     Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
-    Subscription(String, Option<SubscriptionMeter>),
+    Subscription(String, SubscriptionMeter),
 }
 
 #[derive(Debug, Clone)]

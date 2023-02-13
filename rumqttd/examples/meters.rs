@@ -1,4 +1,4 @@
-use rumqttd::{Broker, Config, GetMeter, Notification};
+use rumqttd::{Broker, Config, Notification};
 use std::{thread, time::Duration};
 
 fn main() {
@@ -61,28 +61,7 @@ fn main() {
 
     loop {
         // Router meters
-        let request = GetMeter::Router;
-        let v = meters.get(request).unwrap();
+        let v = meters.recv().unwrap();
         println!("{v:#?}");
-
-        // Publisher meters
-        for i in 0..5 {
-            let client_id = format!("client_{i}");
-            let request = GetMeter::Connection(Some(client_id));
-            let v = meters.get(request).unwrap();
-            println!("{v:#?}");
-        }
-
-        // Commitlog meters
-        let request = GetMeter::Subscription(Some("hello/+/world".to_owned()));
-        let v = meters.get(request).unwrap();
-        println!("{v:#?}");
-
-        // Consumer meters
-        let request = GetMeter::Connection(Some("consumer".to_owned()));
-        let v = meters.get(request).unwrap();
-        println!("{v:#?}");
-
-        thread::sleep(Duration::from_secs(5));
     }
 }

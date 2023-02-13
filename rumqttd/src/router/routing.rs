@@ -244,7 +244,7 @@ impl Router {
                 dbg!()
             }
             Event::SendMeters => {
-                dbg!()
+                self.send_meters();
             }
             Event::Metrics(metrics) => retrieve_metrics(self, metrics),
         }
@@ -983,6 +983,26 @@ impl Router {
             }
         };
     }
+
+    fn send_meters(&mut self) {
+        let mut meters = Vec::with_capacity(10);
+        let router_meters = Meter::Router(self.id, self.router_meters.clone());
+        meters.push(router_meters);
+        for f in self.subscription_map.keys() {
+            let filter = f.to_owned();
+            if let Some(meter) = self.datalog.meter(&f) {
+                let subscription_meter = Meter::Subscription(filter, meter.clone());
+                meters.push(subscription_meter);
+                meter.reset();
+            }
+        }
+
+        for link in self.meters.iter() {
+            if let Err(e) = link.1.try_send((0, meters.clone())) {
+                error!("Failed to send meter. Error = {:?}", e);
+            }
+        }
+    }
 }
 
 fn append_to_alertlog(alert: Alert, alertlog: &mut AlertLog) -> Result<Offset, RouterError> {
@@ -1291,7 +1311,8 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
         }
         MetricsRequest::Subscription(filter) => {
             let metrics = router.datalog.meter(&filter);
-            MetricsReply::Subscription(metrics)
+            // MetricsReply::Subscription(metrics)
+            unimplemented!()
         }
         MetricsRequest::Waiters(filter) => {
             let metrics = router.datalog.waiters(&filter).map(|v| {

@@ -1,5 +1,5 @@
 use super::Ack;
-use slab::Slab;
+use slab::{IterMut, Slab};
 use tracing::trace;
 
 use crate::protocol::{
@@ -60,10 +60,9 @@ impl DataLog {
         })
     }
 
-    pub fn meter(&self, filter: &str) -> Option<SubscriptionMeter> {
-        self.native
-            .get(*self.filter_indexes.get(filter)?)
-            .map(|data| data.meter.clone())
+    pub fn meter(&mut self, filter: &str) -> Option<&mut SubscriptionMeter> {
+        let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
+        Some(&mut data.meter)
     }
 
     pub fn waiters(&self, filter: &Filter) -> Option<&Waiters<DataRequest>> {

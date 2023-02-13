@@ -50,4 +50,14 @@ impl MetersLink {
 
         Ok(link)
     }
+
+    pub fn recv(&self) -> Result<(ConnectionId, Vec<Meter>), LinkError> {
+        let o = self.router_rx.recv()?;
+        Ok(o)
+    }
+
+    pub async fn next(&self) -> Result<(ConnectionId, Vec<Meter>), LinkError> {
+        let o = self.router_rx.recv_async().await?;
+        Ok(o)
+    }
 }
