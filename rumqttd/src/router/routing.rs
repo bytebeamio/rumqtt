@@ -2,7 +2,7 @@ use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
     PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
-use crate::router::alertlog::{AlertError, AlertEvent};
+use crate::router::alertlog::{alert, cursorjump};
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
 use crate::router::Forward;
@@ -62,7 +62,7 @@ pub struct Router {
     /// List of MetersLink's senders
     meters: Slab<Sender<(ConnectionId, Vec<Meter>)>>,
     /// List of AlertsLink's senders with their respective subscription Filter
-    alerts: Slab<(FilterWithOffsets, Sender<(ConnectionId, Alert)>)>,
+    alerts: Slab<Sender<Vec<Alert>>>,
     /// List of connections
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
@@ -126,7 +126,7 @@ impl Router {
             ibufs,
             obufs,
             datalog: DataLog::new(config.clone()).unwrap(),
-            alertlog: AlertLog::new(config).unwrap(),
+            alertlog: AlertLog::new(config),
             ackslog,
             scheduler: Scheduler::with_capacity(max_connections),
             notifications: VecDeque::with_capacity(1024),
@@ -233,7 +233,7 @@ impl Router {
                 outgoing,
             } => self.handle_new_connection(connection, incoming, outgoing),
             Event::NewMeter(tx) => self.handle_new_meter(tx),
-            Event::NewAlert(tx, filters) => self.handle_new_alert(tx, filters),
+            Event::NewAlert(tx) => self.handle_new_alert(tx),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
@@ -329,16 +329,6 @@ impl Router {
             .check_tracker_duplicates(connection_id)
             .is_none());
 
-        let alert = Alert::event(client_id.clone(), AlertEvent::Connect);
-        match append_to_alertlog(alert, &mut self.alertlog) {
-            Ok(_offset) => {}
-            Err(e) => {
-                error!(
-                    reason = ?e, "Failed to append to alertlog"
-                );
-            }
-        }
-
         let ack = ConnAck {
             session_present: !clean_session && previous_session,
             code: ConnectReturnCode::Success,
@@ -362,18 +352,8 @@ impl Router {
         ));
     }
 
-    fn handle_new_alert(&mut self, tx: Sender<(ConnectionId, Alert)>, filters: Vec<Filter>) {
-        let mut filter_with_offsets = Vec::new();
-        for filter in filters {
-            let offset = self.prepare_alert_filter(filter.to_string());
-            filter_with_offsets.push((filter, offset));
-        }
-        let alert_id = self.alerts.insert((filter_with_offsets, tx));
-        let (_, tx) = self.alerts.get(alert_id).unwrap();
-        let _ = tx.try_send((
-            alert_id,
-            Alert::event("AlertsLink".to_owned(), AlertEvent::Connect),
-        ));
+    fn handle_new_alert(&mut self, tx: Sender<Vec<Alert>>) {
+        let _alert_id = self.alerts.insert(tx);
     }
 
     fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
@@ -386,15 +366,6 @@ impl Router {
                 return;
             }
         };
-        let alert = Alert::event(client_id.clone(), AlertEvent::Disconnect);
-        match append_to_alertlog(alert, &mut self.alertlog) {
-            Ok(_offset) => {}
-            Err(e) => {
-                error!(
-                    reason = ?e, "Failed to append to alertlog"
-                );
-            }
-        }
 
         let span = tracing::info_span!("incoming_disconnect", client_id);
         let _guard = span.enter();
@@ -614,18 +585,6 @@ impl Router {
                         return_codes.push(code);
                     }
 
-                    let alert = Alert::event(client_id.clone(), AlertEvent::Subscribe(subscribe));
-                    match append_to_alertlog(alert, &mut self.alertlog) {
-                        Ok(_offset) => {
-                            new_data = true;
-                        }
-                        Err(e) => {
-                            error!(
-                                reason = ?e, "Failed to append to alertlog"
-                            );
-                        }
-                    }
-
                     // let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     // meter.total_size += len;
 
@@ -669,18 +628,6 @@ impl Router {
                             self.scheduler.untrack(id, filter);
                             self.datalog.remove_waiters_for_id(id, filter);
                             force_ack = true;
-                        }
-                    }
-                    let alert =
-                        Alert::event(client_id.clone(), AlertEvent::Unsubscribe(unsubscribe));
-                    match append_to_alertlog(alert, &mut self.alertlog) {
-                        Ok(_offset) => {
-                            new_data = true;
-                        }
-                        Err(e) => {
-                            error!(
-                                reason = ?e, "Failed to append to alertlog"
-                            );
                         }
                     }
                 }
@@ -772,18 +719,6 @@ impl Router {
                 Packet::Disconnect(_, _) => {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
-
-                    let alert = Alert::event(client_id, AlertEvent::Disconnect);
-                    match append_to_alertlog(alert, &mut self.alertlog) {
-                        Ok(_offset) => {
-                            new_data = true;
-                        }
-                        Err(e) => {
-                            error!(
-                                reason = ?e, "Failed to append to alertlog"
-                            );
-                        }
-                    }
                     disconnect = true;
                     execute_will = false;
                     break;
@@ -819,12 +754,6 @@ impl Router {
         if disconnect {
             self.handle_disconnection(id, execute_will);
         }
-    }
-
-    /// Apply filter and prepare this connection to receive subscription data
-    fn prepare_alert_filter(&mut self, filter: String) -> Offset {
-        let (_, offset) = self.alertlog.next_native_offset(&filter);
-        offset
     }
 
     /// Apply filter and prepare this connection to receive subscription data
@@ -1005,27 +934,6 @@ impl Router {
     }
 }
 
-fn append_to_alertlog(alert: Alert, alertlog: &mut AlertLog) -> Result<Offset, RouterError> {
-    let topic = alert.topic();
-
-    let filter_idxs = alertlog.matches(&topic).expect("Should never be None");
-
-    let mut o = (0, 0);
-    for filter_idx in filter_idxs {
-        let alertlog_entry = alertlog.native.get_mut(filter_idx).unwrap();
-        let (offset, filter) = alertlog_entry.append(alert.clone());
-        debug!(
-            "Appended to alertlog: {}[{}, {})",
-            filter, offset.0, offset.1,
-        );
-
-        o = offset;
-    }
-
-    // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
-    Ok(o)
-}
-
 fn append_to_commitlog(
     id: ConnectionId,
     mut publish: Publish,
@@ -1184,15 +1092,8 @@ fn forward_device_data(
             error
         );
 
-        let alert = Alert::error(outgoing.client_id.clone(), AlertError::CursorJump(error));
-        match append_to_alertlog(alert, alertlog) {
-            Ok(_offset) => (),
-            Err(e) => {
-                error!(
-                    reason = ?e, "Failed to append to alertlog"
-                );
-            }
-        }
+        let alert = alert::cursorjump(&request.filter, 0);
+        alertlog.log(alert);
     }
 
     trace!(

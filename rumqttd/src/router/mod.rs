@@ -24,12 +24,11 @@ mod routing;
 mod scheduler;
 mod waiters;
 
-pub use alertlog::{Alert, AlertError, AlertEvent};
+pub use alertlog::{Alert, Error, Warn};
 pub use connection::Connection;
 pub use routing::Router;
 pub use waiters::Waiters;
 
-use self::scheduler::Tracker;
 pub const MAX_SCHEDULE_ITERATIONS: usize = 100;
 pub const MAX_CHANNEL_CAPACITY: usize = 200;
 
@@ -48,7 +47,7 @@ pub enum Event {
     /// New meter link
     NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
     /// New alert link
-    NewAlert(flume::Sender<(ConnectionId, Alert)>, Vec<Filter>),
+    NewAlert(flume::Sender<Vec<Alert>>),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog

@@ -151,8 +151,8 @@ impl Broker {
     ///     - /alerts/error/#                         // alert type 'error'
     ///     - /alerts/#                             // all alerts
     ///     - /alerts/event/#                       // alert type 'event'
-    pub fn alerts(&self, filters: Vec<Filter>) -> Result<alerts::AlertsLink, alerts::LinkError> {
-        let link = alerts::AlertsLink::new(self.router_tx.clone(), filters)?;
+    pub fn alerts(&self) -> Result<alerts::AlertsLink, alerts::LinkError> {
+        let link = alerts::AlertsLink::new(self.router_tx.clone())?;
         Ok(link)
     }
 

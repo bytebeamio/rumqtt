@@ -1,5 +1,5 @@
 use super::Ack;
-use slab::{IterMut, Slab};
+use slab::Slab;
 use tracing::trace;
 
 use crate::protocol::{
