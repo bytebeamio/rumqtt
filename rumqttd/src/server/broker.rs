@@ -1,10 +1,10 @@
 use crate::link::alerts::{self};
-use crate::link::bridge;
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, RemoteLink};
 #[cfg(feature = "websockets")]
 use crate::link::shadow::{self, ShadowLink};
+use crate::link::{bridge, timer};
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 #[cfg(feature = "websockets")]
@@ -166,6 +166,19 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
+        {
+            let timer_thread = thread::Builder::new().name("timer".to_owned());
+            let router_tx = self.router_tx.clone();
+            timer_thread.spawn(move || {
+                let mut runtime = tokio::runtime::Builder::new_current_thread();
+                let runtime = runtime.enable_all().build().unwrap();
+
+                runtime.block_on(async move {
+                    timer::start(router_tx).await;
+                });
+            })?;
+        }
+
         // spawn bridge in a separate thread
         if let Some(bridge_config) = self.config.bridge.clone() {
             let bridge_thread = thread::Builder::new().name(bridge_config.name.clone());

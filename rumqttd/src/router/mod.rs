@@ -57,6 +57,10 @@ pub enum Event {
     Disconnect(Disconnection),
     /// Shadow
     Shadow(ShadowRequest),
+    /// Collect and send alerts to all alerts links
+    SendAlerts,
+    /// Collect and send meters to all meters links
+    SendMeters,
     /// Get metrics of a connection or all connections
     Metrics(MetricsRequest),
 }

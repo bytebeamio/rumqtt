@@ -240,6 +240,12 @@ impl Router {
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
             }
+            Event::SendAlerts => {
+                dbg!()
+            }
+            Event::SendMeters => {
+                dbg!()
+            }
             Event::Metrics(metrics) => retrieve_metrics(self, metrics),
         }
     }
