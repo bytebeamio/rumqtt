@@ -62,7 +62,7 @@ pub enum Event {
     /// Collect and send meters to all meters links
     SendMeters,
     /// Get metrics of a connection or all connections
-    Metrics(MetricsRequest),
+    PrintStatus(Print),
 }
 
 /// Notification from router to connection
@@ -85,8 +85,6 @@ pub enum Notification {
         offset: (u64, u64),
         payload: Bytes,
     },
-    /// All metrics
-    Metrics(MetricsReply),
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
@@ -355,7 +353,7 @@ pub enum Meter {
 }
 
 #[derive(Debug, Clone)]
-pub enum MetricsRequest {
+pub enum Print {
     Config,
     Router,
     ReadyQueue,
@@ -363,16 +361,4 @@ pub enum MetricsRequest {
     Subscriptions,
     Subscription(Filter),
     Waiters(Filter),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MetricsReply {
-    Config(RouterConfig),
-    Router(RouterMeter),
-    Connection(Option<(ConnectionEvents, Tracker)>),
-    Subscriptions(HashMap<Filter, Vec<String>>),
-    Subscription(Option<SubscriptionMeter>),
-    Waiters(Option<VecDeque<(String, DataRequest)>>),
-    ReadyQueue(VecDeque<ConnectionId>),
 }

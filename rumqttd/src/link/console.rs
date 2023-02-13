@@ -1,5 +1,5 @@
 use crate::link::local::{Link, LinkRx};
-use crate::router::{Event, MetricsRequest};
+use crate::router::{Event, Print};
 use crate::{ConnectionId, ConsoleSettings};
 use flume::Sender;
 use rouille::{router, try_or_400};
@@ -42,7 +42,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::json(&console.config.clone())
             },
             (GET) (/router) => {
-                let event = Event::Metrics(MetricsRequest::Router);
+                let event = Event::PrintStatus(Print::Router);
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
                     return rouille::Response::empty_404()
@@ -51,7 +51,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/device/{id: String}) => {
-                let event = Event::Metrics(MetricsRequest::Connection(id));
+                let event = Event::PrintStatus(Print::Connection(id));
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
                     return rouille::Response::empty_404()
@@ -60,7 +60,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/subscriptions) => {
-                let event = Event::Metrics(MetricsRequest::Subscriptions);
+                let event = Event::PrintStatus(Print::Subscriptions);
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
                     return rouille::Response::empty_404()
@@ -70,7 +70,7 @@ pub fn start(console: Arc<ConsoleLink>) {
             },
             (GET) (/subscription/{filter: String}) => {
                 let filter = filter.replace('.', "/");
-                let event = Event::Metrics(MetricsRequest::Subscription(filter));
+                let event = Event::PrintStatus(Print::Subscription(filter));
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
                     return rouille::Response::empty_404()
@@ -80,7 +80,7 @@ pub fn start(console: Arc<ConsoleLink>) {
             },
             (GET) (/waiters/{filter: String}) => {
                 let filter = filter.replace('.', "/");
-                let event = Event::Metrics(MetricsRequest::Waiters(filter));
+                let event = Event::PrintStatus(Print::Waiters(filter));
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
                     return rouille::Response::empty_404()
@@ -89,7 +89,7 @@ pub fn start(console: Arc<ConsoleLink>) {
                 rouille::Response::text("OK").with_status_code(200)
             },
             (GET) (/readyqueue) => {
-                let event = Event::Metrics(MetricsRequest::ReadyQueue);
+                let event = Event::PrintStatus(Print::ReadyQueue);
                 let message = (console.connection_id, event);
                 if console.router_tx.send(message).is_err() {
                     return rouille::Response::empty_404()

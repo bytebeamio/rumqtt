@@ -23,8 +23,8 @@ use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, Meter, MetricsReply, MetricsRequest,
-    Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
+    packetid, Connection, DataRequest, Event, FilterIdx, Meter, Notification, Print, RouterMeter,
+    ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
 };
 
 #[derive(Error, Debug)]
@@ -246,7 +246,7 @@ impl Router {
             Event::SendMeters => {
                 self.send_meters();
             }
-            Event::Metrics(metrics) => retrieve_metrics(self, metrics),
+            Event::PrintStatus(metrics) => print_status(self, metrics),
         }
     }
 
@@ -1268,17 +1268,17 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
     }
 }
 
-fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
+fn print_status(router: &mut Router, metrics: Print) {
     match metrics {
-        MetricsRequest::Config => {
+        Print::Config => {
             let config = router.config.clone();
             println!("{config:#?}");
         }
-        MetricsRequest::Router => {
+        Print::Router => {
             let metrics = router.router_meters.clone();
             println!("{metrics:#?}");
         }
-        MetricsRequest::Connection(id) => {
+        Print::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
                 let c = router
                     .connections
@@ -1299,7 +1299,7 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
 
             println!("{metrics:#?}");
         }
-        MetricsRequest::Subscriptions => {
+        Print::Subscriptions => {
             let metrics: HashMap<Filter, Vec<String>> = router
                 .subscription_map
                 .iter()
@@ -1315,11 +1315,11 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
 
             println!("{metrics:#?}");
         }
-        MetricsRequest::Subscription(filter) => {
+        Print::Subscription(filter) => {
             let metrics = router.datalog.meter(&filter);
             println!("{metrics:#?}");
         }
-        MetricsRequest::Waiters(filter) => {
+        Print::Waiters(filter) => {
             if let Some(waiters) = router.datalog.waiters(&filter) {
                 let v: Vec<(String, DataRequest)> = waiters
                     .waiters()
@@ -1330,7 +1330,7 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
                 println!("{v:#?}");
             }
         }
-        MetricsRequest::ReadyQueue => {
+        Print::ReadyQueue => {
             let metrics = router.scheduler.readyqueue.clone();
             println!("{metrics:#?}");
         }
