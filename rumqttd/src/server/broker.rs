@@ -166,7 +166,7 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
-        {
+        if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
             timer_thread.spawn(move || {
@@ -174,7 +174,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async move {
-                    timer::start(router_tx).await;
+                    timer::start(metrics_config, router_tx).await;
                 });
             })?;
         }

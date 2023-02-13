@@ -49,6 +49,7 @@ pub struct Config {
     pub console: ConsoleSettings,
     pub bridge: Option<BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
+    pub metrics: Option<HashMap<MetricType, MetricSettings>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -164,4 +165,16 @@ impl Default for Transport {
 pub struct ClientAuth {
     certs: PathBuf,
     key: PathBuf,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MetricType {
+    Meters,
+    Alerts,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MetricSettings {
+    push_interval: u64,
 }
