@@ -36,7 +36,7 @@ pub use link::local;
 pub use link::meters;
 
 pub use router::{
-    Alert, AlertError, AlertEvent, GetMeter, IncomingMeter, Meter, Notification, OutgoingMeter,
+    Alert, AlertError, AlertEvent, IncomingMeter, Meter, Notification, OutgoingMeter,
 };
 pub use server::Broker;
 

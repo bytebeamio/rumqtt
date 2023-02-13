@@ -47,9 +47,7 @@ pub enum Event {
     },
     /// New meter link
     NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
-    /// Request for meter
-    GetMeter(GetMeter),
-    /// New Alert link
+    /// New alert link
     NewAlert(flume::Sender<(ConnectionId, Alert)>, Vec<Filter>),
     /// Connection ready to receive more data
     Ready,
@@ -336,15 +334,6 @@ pub struct OutgoingMeter {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConnectionEvents {
     events: VecDeque<String>,
-}
-
-#[derive(Debug, Clone)]
-pub enum GetMeter {
-    Router,
-    // Associated data of None<String> type
-    // means get all meters
-    Connection(Option<String>),
-    Subscription(Option<String>),
 }
 
 #[derive(Debug, Clone)]

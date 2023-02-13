@@ -1,4 +1,4 @@
-use crate::router::{Event, GetMeter, Meter};
+use crate::router::{Event, Meter};
 use crate::ConnectionId;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 
@@ -49,20 +49,5 @@ impl MetersLink {
         };
 
         Ok(link)
-    }
-
-    pub fn get(&self, meter: GetMeter) -> Result<Vec<Meter>, LinkError> {
-        self.router_tx
-            .send((self.meter_id, Event::GetMeter(meter)))?;
-        let (_meter_id, meter) = self.router_rx.recv()?;
-        Ok(meter)
-    }
-
-    pub async fn fetch(&self, meter: GetMeter) -> Result<Vec<Meter>, LinkError> {
-        self.router_tx
-            .send_async((self.meter_id, Event::GetMeter(meter)))
-            .await?;
-        let (_meter_id, meter) = self.router_rx.recv_async().await?;
-        Ok(meter)
     }
 }

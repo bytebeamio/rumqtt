@@ -12,7 +12,7 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Filter, GetMeter, Meter};
+use crate::{meters, ConnectionSettings, Filter, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -252,28 +252,28 @@ impl Broker {
                 let total_publishes = register_gauge!("metrics.router.total_publishes");
                 let total_connections = register_gauge!("metrics.router.total_connections");
                 let failed_publishes = register_gauge!("metrics.router.failed_publishes");
-                loop {
-                    let request = GetMeter::Router;
-                    let metrics = match meter_link.get(request) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!("Data link receive error = {:?}", e);
-                            break;
-                        }
-                    };
-
-                    for m in metrics {
-                        match m {
-                            Meter::Router(_, ref r) => {
-                                total_connections.set(r.total_connections as f64);
-                                total_publishes.set(r.total_publishes as f64);
-                                failed_publishes.set(r.failed_publishes as f64);
-                            }
-                            _ => panic!("We only request for router metrics"),
-                        }
-                    }
-                    std::thread::sleep(Duration::from_secs(timeout));
-                }
+                // loop {
+                //     let request = GetMeter::Router;
+                //     let metrics = match meter_link.get(request) {
+                //         Ok(v) => v,
+                //         Err(e) => {
+                //             error!("Data link receive error = {:?}", e);
+                //             break;
+                //         }
+                //     };
+                //
+                //     for m in metrics {
+                //         match m {
+                //             Meter::Router(_, ref r) => {
+                //                 total_connections.set(r.total_connections as f64);
+                //                 total_publishes.set(r.total_publishes as f64);
+                //                 failed_publishes.set(r.failed_publishes as f64);
+                //             }
+                //             _ => panic!("We only request for router metrics"),
+                //         }
+                //     }
+                //     std::thread::sleep(Duration::from_secs(timeout));
+                // }
             })?;
         }
 

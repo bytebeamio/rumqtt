@@ -23,9 +23,8 @@ use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
 use super::{
-    packetid, Connection, DataRequest, Event, FilterIdx, GetMeter, Meter, MetricsReply,
-    MetricsRequest, Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY,
-    MAX_SCHEDULE_ITERATIONS,
+    packetid, Connection, DataRequest, Event, FilterIdx, Meter, MetricsReply, MetricsRequest,
+    Notification, RouterMeter, ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
 };
 
 #[derive(Error, Debug)]
@@ -219,7 +218,7 @@ impl Router {
             self.consume();
         }
 
-        self.send_all_alerts();
+        // self.send_all_alerts();
         Ok(())
     }
 
@@ -234,7 +233,6 @@ impl Router {
                 outgoing,
             } => self.handle_new_connection(connection, incoming, outgoing),
             Event::NewMeter(tx) => self.handle_new_meter(tx),
-            Event::GetMeter(meter) => self.handle_get_meter(id, meter),
             Event::NewAlert(tx, filters) => self.handle_new_alert(tx, filters),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
@@ -978,83 +976,6 @@ impl Router {
                 // Removed disconnect = true from here because we disconnect anyways
             }
         };
-    }
-
-    fn handle_get_meter(&self, meter_id: ConnectionId, meter: router::GetMeter) {
-        let meter_tx = &self.meters[meter_id];
-        match meter {
-            GetMeter::Router => {
-                let router_meters = Meter::Router(self.id, self.router_meters.clone());
-                let _ = meter_tx.try_send((meter_id, vec![router_meters]));
-            }
-            GetMeter::Connection(client_id) => {
-                let connections = match client_id {
-                    Some(client_id) => {
-                        if let Some(connection_id) = self.connection_map.get(&client_id) {
-                            vec![(client_id, connection_id)]
-                        } else {
-                            let meter = Meter::Connection("".to_owned(), None, None);
-                            let _ = meter_tx.try_send((meter_id, vec![meter]));
-                            return;
-                        }
-                    }
-                    // send meters for all connections
-                    None => self
-                        .connection_map
-                        .iter()
-                        .map(|(k, v)| (k.to_owned(), v))
-                        .collect(),
-                };
-
-                // Update metrics
-                let mut meter = Vec::new();
-                for (client_id, connection_id) in connections {
-                    let incoming_meter = self.ibufs.get(*connection_id).map(|v| v.meter.clone());
-                    let outgoing_meter = self.obufs.get(*connection_id).map(|v| v.meter.clone());
-                    meter.push(Meter::Connection(client_id, incoming_meter, outgoing_meter));
-                }
-
-                let _ = meter_tx.try_send((meter_id, meter));
-            }
-            GetMeter::Subscription(filter) => {
-                let filters = match filter {
-                    Some(filter) => vec![filter],
-                    None => self.subscription_map.keys().map(|k| k.to_owned()).collect(),
-                };
-
-                let mut meter = Vec::new();
-                for filter in filters {
-                    let subscription_meter = self.datalog.meter(&filter);
-                    meter.push(Meter::Subscription(filter, subscription_meter));
-                }
-
-                let _ = meter_tx.try_send((meter_id, meter));
-            }
-        };
-    }
-    fn send_all_alerts(&mut self) {
-        let span = tracing::info_span!("outgoing_alert");
-        let _guard = span.enter();
-
-        for (alert_id, (filter_with_offsets, alert_sender)) in &mut self.alerts {
-            for (filter, offset) in filter_with_offsets {
-                trace!("Reading from alertlog: {}", filter);
-                let (alerts, next_offset) = self
-                    .alertlog
-                    .native_readv(filter.to_string(), *offset, 100)
-                    .unwrap();
-                for alert in alerts {
-                    let res = alert_sender.try_send((alert_id, alert.0));
-                    if res.is_err() {
-                        error!(
-                        "Cannot send Alert to the channel, Error: {:?}. Dropping alerts for alert_id: {}",
-                        res, alert_id
-                    );
-                    }
-                }
-                *offset = next_offset;
-            }
-        }
     }
 }
 
