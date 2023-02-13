@@ -1269,9 +1269,15 @@ fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: Shado
 }
 
 fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
-    let message = match metrics {
-        MetricsRequest::Config => MetricsReply::Config(router.config.clone()),
-        MetricsRequest::Router => MetricsReply::Router(router.router_meters.clone()),
+    match metrics {
+        MetricsRequest::Config => {
+            let config = router.config.clone();
+            println!("{config:#?}");
+        }
+        MetricsRequest::Router => {
+            let metrics = router.router_meters.clone();
+            println!("{metrics:#?}");
+        }
         MetricsRequest::Connection(id) => {
             let metrics = router.connection_map.get(&id).map(|v| {
                 let c = router
@@ -1291,7 +1297,7 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
                     .map(|v| (v.metrics, v.tracker)),
             };
 
-            MetricsReply::Connection(metrics)
+            println!("{metrics:#?}");
         }
         MetricsRequest::Subscriptions => {
             let metrics: HashMap<Filter, Vec<String>> = router
@@ -1307,31 +1313,28 @@ fn retrieve_metrics(router: &mut Router, metrics: MetricsRequest) {
                 })
                 .collect();
 
-            MetricsReply::Subscriptions(metrics)
+            println!("{metrics:#?}");
         }
         MetricsRequest::Subscription(filter) => {
             let metrics = router.datalog.meter(&filter);
-            // MetricsReply::Subscription(metrics)
-            unimplemented!()
+            println!("{metrics:#?}");
         }
         MetricsRequest::Waiters(filter) => {
-            let metrics = router.datalog.waiters(&filter).map(|v| {
-                // Convert (connection id, data request) list to (device id, data request) list
-                v.waiters()
+            if let Some(waiters) = router.datalog.waiters(&filter) {
+                let v: Vec<(String, DataRequest)> = waiters
+                    .waiters()
                     .iter()
                     .map(|(id, request)| (router.obufs[*id].client_id.clone(), request.clone()))
-                    .collect()
-            });
+                    .collect();
 
-            MetricsReply::Waiters(metrics)
+                println!("{v:#?}");
+            }
         }
         MetricsRequest::ReadyQueue => {
             let metrics = router.scheduler.readyqueue.clone();
-            MetricsReply::ReadyQueue(metrics)
+            println!("{metrics:#?}");
         }
     };
-
-    println!("{message:#?}");
 }
 
 fn validate_subscription(
