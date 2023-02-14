@@ -1,6 +1,6 @@
 use crate::router::{Event, Meter};
 use crate::ConnectionId;
-use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
+use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryRecvError, TrySendError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -14,6 +14,8 @@ pub enum LinkError {
     RecvTimeout(#[from] RecvTimeoutError),
     #[error("Timeout = {0}")]
     Elapsed(#[from] tokio::time::error::Elapsed),
+    #[error("Channel try_recv error")]
+    TryRecv(#[from] TryRecvError),
 }
 
 pub struct MetersLink {
@@ -22,7 +24,7 @@ pub struct MetersLink {
 
 impl MetersLink {
     pub fn new(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
-        let (tx, rx) = flume::bounded(5);
+        let (tx, rx) = flume::bounded(100);
 
         router_tx.send((0, Event::NewMeter(tx)))?;
         let link = MetersLink { router_rx: rx };
@@ -30,7 +32,7 @@ impl MetersLink {
     }
 
     pub async fn init(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
-        let (tx, rx) = flume::bounded(5);
+        let (tx, rx) = flume::bounded(100);
 
         router_tx.send_async((0, Event::NewMeter(tx))).await?;
         let link = MetersLink { router_rx: rx };
@@ -38,7 +40,7 @@ impl MetersLink {
     }
 
     pub fn recv(&self) -> Result<Vec<Meter>, LinkError> {
-        let o = self.router_rx.recv()?;
+        let o = self.router_rx.try_recv()?;
         Ok(o)
     }
 

@@ -918,20 +918,23 @@ impl Router {
             }
         }
 
-        for (_meter_id, link) in self.meters.iter() {
-            if let Err(e) = link.try_send(meters.clone()) {
-                error!("Failed to send meter. Error = {:?}", e);
+        if !meters.is_empty() {
+            for (meter_id, link) in self.meters.iter() {
+                if let Err(e) = link.try_send(meters.clone()) {
+                    error!(meter_id, "Failed to send meter. Error = {:?}", e);
+                }
             }
         }
     }
 
     fn send_alerts(&mut self) {
         let alerts = self.alertlog.take();
+
         if !alerts.is_empty() {
             let alerts: Vec<Alert> = alerts.into();
-            for (_meter_id, link) in self.alerts.iter() {
+            for (meter_id, link) in self.alerts.iter() {
                 if let Err(e) = link.try_send(alerts.clone()) {
-                    error!("Failed to send meter. Error = {:?}", e);
+                    error!(meter_id, "Failed to send alert. Error = {:?}", e);
                 }
             }
         }

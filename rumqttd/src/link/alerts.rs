@@ -1,6 +1,6 @@
 use crate::router::{Alert, Event};
 use crate::ConnectionId;
-use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
+use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryRecvError, TrySendError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -14,6 +14,8 @@ pub enum LinkError {
     RecvTimeout(#[from] RecvTimeoutError),
     #[error("Timeout = {0}")]
     Elapsed(#[from] tokio::time::error::Elapsed),
+    #[error("Channel try_recv error")]
+    TryRecv(#[from] TryRecvError),
 }
 
 pub struct AlertsLink {
@@ -29,7 +31,7 @@ impl AlertsLink {
     }
 
     pub fn recv(&self) -> Result<Vec<Alert>, LinkError> {
-        let o = self.router_rx.recv()?;
+        let o = self.router_rx.try_recv()?;
         Ok(o)
     }
 
