@@ -12,7 +12,7 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId, Topic,
+    ConnectionId, Filter, RouterId, Topic,
 };
 
 mod alertlog;
@@ -24,7 +24,7 @@ mod routing;
 mod scheduler;
 mod waiters;
 
-pub use alertlog::{Alert, Error, Warn};
+pub use alertlog::Alert;
 pub use connection::Connection;
 pub use routing::Router;
 pub use waiters::Waiters;
@@ -261,6 +261,8 @@ pub struct ShadowReply {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RouterMeter {
+    pub timestamp: u128,
+    pub sequence: usize,
     pub router_id: RouterId,
     pub total_connections: usize,
     pub total_subscriptions: usize,
@@ -268,17 +270,57 @@ pub struct RouterMeter {
     pub failed_publishes: usize,
 }
 
+impl RouterMeter {
+    pub fn get(&mut self) -> Option<Self> {
+        if self.total_publishes > 0 || self.failed_publishes > 0 {
+            self.timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            self.sequence += 1;
+
+            let meter = self.clone();
+            self.reset();
+
+            Some(meter)
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
+        self.total_publishes = 0;
+        self.failed_publishes = 0;
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SubscriptionMeter {
+    pub timestamp: u128,
+    pub sequence: usize,
     pub count: usize,
     pub total_size: usize,
-    pub head_and_tail_id: (u64, u64),
-    pub append_offset: (u64, u64),
-    pub read_offset: usize,
 }
 
 impl SubscriptionMeter {
-    pub fn reset(&mut self) {
+    pub fn get(&mut self) -> Option<Self> {
+        if self.count > 0 {
+            self.timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            self.sequence += 1;
+
+            let meter = self.clone();
+            self.reset();
+
+            Some(meter)
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
         self.count = 0;
         self.total_size = 0;
     }

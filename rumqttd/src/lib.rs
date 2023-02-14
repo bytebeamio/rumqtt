@@ -35,7 +35,7 @@ pub use link::alerts;
 pub use link::local;
 pub use link::meters;
 
-pub use router::{Alert, Error, IncomingMeter, Meter, Notification, OutgoingMeter, Warn};
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
 pub use server::Broker;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]

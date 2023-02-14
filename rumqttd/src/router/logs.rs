@@ -261,9 +261,7 @@ where
         }
 
         self.meter.count += 1;
-        self.meter.append_offset = offset;
         self.meter.total_size += size;
-        self.meter.head_and_tail_id = self.log.head_and_tail();
 
         (offset, &self.filter)
     }

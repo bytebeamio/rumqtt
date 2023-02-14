@@ -2,7 +2,7 @@ use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
     PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
-use crate::router::alertlog::{alert, cursorjump};
+use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
 use crate::router::Forward;
@@ -49,8 +49,6 @@ pub enum RouterError {
     #[error("Invalid client_id {0}")]
     InvalidClientId(String),
 }
-
-type FilterWithOffsets = Vec<(Filter, Offset)>;
 
 pub struct Router {
     id: RouterId,
@@ -910,19 +908,18 @@ impl Router {
 
     fn send_meters(&mut self) {
         let mut meters = Vec::with_capacity(10);
-        let router_meters = Meter::Router(self.id, self.router_meters.clone());
-        meters.push(router_meters);
+        if let Some(router_meter) = self.router_meters.get() {
+            meters.push(Meter::Router(self.id, router_meter));
+        }
         for f in self.subscription_map.keys() {
             let filter = f.to_owned();
-            if let Some(meter) = self.datalog.meter(f) {
-                let subscription_meter = Meter::Subscription(filter, meter.clone());
-                meters.push(subscription_meter);
-                meter.reset();
+            if let Some(subscription_meter) = self.datalog.meter(f).and_then(|meter| meter.get()) {
+                meters.push(Meter::Subscription(filter, subscription_meter));
             }
         }
 
-        for link in self.meters.iter() {
-            if let Err(e) = link.1.try_send(meters.clone()) {
+        for (_meter_id, link) in self.meters.iter() {
+            if let Err(e) = link.try_send(meters.clone()) {
                 error!("Failed to send meter. Error = {:?}", e);
             }
         }
@@ -930,10 +927,10 @@ impl Router {
 
     fn send_alerts(&mut self) {
         let alerts = self.alertlog.take();
-        if alerts.len() > 0 {
+        if !alerts.is_empty() {
             let alerts: Vec<Alert> = alerts.into();
-            for link in self.alerts.iter() {
-                if let Err(e) = link.1.try_send(alerts.clone()) {
+            for (_meter_id, link) in self.alerts.iter() {
+                if let Err(e) = link.try_send(alerts.clone()) {
                     error!("Failed to send meter. Error = {:?}", e);
                 }
             }
@@ -1099,7 +1096,7 @@ fn forward_device_data(
             error
         );
 
-        let alert = alert::cursorjump(&request.filter, 0);
+        let alert = alert::cursorjump(&outgoing.client_id, &request.filter, 0);
         alertlog.log(alert);
     }
 
