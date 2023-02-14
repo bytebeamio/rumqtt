@@ -107,8 +107,11 @@ impl<P: Protocol> RemoteLink<P> {
         let client_id = connect.client_id.clone();
         let clean_session = connect.clean_session;
 
-        // Don't allow empty client_id
-        if client_id.is_empty() {
+        if cfg!(feature = "allow-duplicate-clientid") {
+            if !clean_session && client_id.is_empty() {
+                return Err(Error::InvalidClientId);
+            }
+        } else if client_id.is_empty() {
             return Err(Error::InvalidClientId);
         }
 

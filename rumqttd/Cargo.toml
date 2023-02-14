@@ -40,6 +40,7 @@ use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websockets = ["dep:tokio-tungstenite", "dep:websocket-codec", "dep:tokio-util", "dep:futures-util"]
 validate-tenant-prefix = []
+allow-duplicate-clientid = []
 
 [dev-dependencies]
 pretty_env_logger = "0.4.0"
