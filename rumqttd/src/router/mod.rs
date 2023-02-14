@@ -45,7 +45,7 @@ pub enum Event {
         outgoing: iobufs::Outgoing,
     },
     /// New meter link
-    NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
+    NewMeter(flume::Sender<Vec<Meter>>),
     /// New alert link
     NewAlert(flume::Sender<Vec<Alert>>),
     /// Connection ready to receive more data
@@ -344,10 +344,9 @@ pub struct ConnectionEvents {
     events: VecDeque<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub enum Meter {
     Router(usize, RouterMeter),
-    Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
     Subscription(String, SubscriptionMeter),
 }
 

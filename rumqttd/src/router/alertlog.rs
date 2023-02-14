@@ -2,18 +2,20 @@ use crate::RouterConfig;
 use std::collections::VecDeque;
 
 pub mod alert {
-    #[derive(Debug, Clone)]
+    use serde::Serialize;
+
+    #[derive(Serialize, Debug, Clone)]
     pub enum Alert {
         Warn(Warn),
         Error(Error),
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Serialize, Debug, Clone)]
     pub enum Warn {
         CursorJump { filter: String, lost: usize },
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Serialize, Debug, Clone)]
     pub enum Error {
         BadPublish { client_id: String, topic: String },
     }

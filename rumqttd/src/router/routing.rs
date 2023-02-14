@@ -60,7 +60,7 @@ pub struct Router {
     /// Saved state of dead persistent connections
     graveyard: Graveyard,
     /// List of MetersLink's senders
-    meters: Slab<Sender<(ConnectionId, Vec<Meter>)>>,
+    meters: Slab<Sender<Vec<Meter>>>,
     /// List of AlertsLink's senders with their respective subscription Filter
     alerts: Slab<Sender<Vec<Alert>>>,
     /// List of connections
@@ -343,13 +343,8 @@ impl Router {
         self.router_meters.total_connections += 1;
     }
 
-    fn handle_new_meter(&mut self, tx: Sender<(ConnectionId, Vec<Meter>)>) {
-        let meter_id = self.meters.insert(tx);
-        let tx = &self.meters[meter_id];
-        let _ = tx.try_send((
-            meter_id,
-            vec![Meter::Router(self.id, self.router_meters.clone())],
-        ));
+    fn handle_new_meter(&mut self, tx: Sender<Vec<Meter>>) {
+        let _meter_id = self.meters.insert(tx);
     }
 
     fn handle_new_alert(&mut self, tx: Sender<Vec<Alert>>) {
@@ -927,7 +922,7 @@ impl Router {
         }
 
         for link in self.meters.iter() {
-            if let Err(e) = link.1.try_send((0, meters.clone())) {
+            if let Err(e) = link.1.try_send(meters.clone()) {
                 error!("Failed to send meter. Error = {:?}", e);
             }
         }

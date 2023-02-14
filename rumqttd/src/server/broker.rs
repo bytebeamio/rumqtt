@@ -268,7 +268,7 @@ impl Broker {
                 let failed_publishes = register_gauge!("metrics.router.failed_publishes");
                 loop {
                     let metrics = match meter_link.recv() {
-                        Ok((_id, meters)) => meters,
+                        Ok(meters) => meters,
                         Err(e) => {
                             error!(
                                 "Unable to receive meters link data for prometheus listener: {e}"

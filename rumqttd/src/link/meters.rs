@@ -17,43 +17,32 @@ pub enum LinkError {
 }
 
 pub struct MetersLink {
-    pub(crate) _meter_id: ConnectionId,
-    router_rx: Receiver<(ConnectionId, Vec<Meter>)>,
+    router_rx: Receiver<Vec<Meter>>,
 }
 
 impl MetersLink {
     pub fn new(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
         let (tx, rx) = flume::bounded(5);
+
         router_tx.send((0, Event::NewMeter(tx)))?;
-        let (_meter_id, _meter) = rx.recv()?;
-
-        let link = MetersLink {
-            _meter_id,
-            router_rx: rx,
-        };
-
+        let link = MetersLink { router_rx: rx };
         Ok(link)
     }
 
     pub async fn init(router_tx: Sender<(ConnectionId, Event)>) -> Result<MetersLink, LinkError> {
         let (tx, rx) = flume::bounded(5);
-        router_tx.send((0, Event::NewMeter(tx)))?;
-        let (_meter_id, _meter) = rx.recv_async().await?;
 
-        let link = MetersLink {
-            _meter_id,
-            router_rx: rx,
-        };
-
+        router_tx.send_async((0, Event::NewMeter(tx))).await?;
+        let link = MetersLink { router_rx: rx };
         Ok(link)
     }
 
-    pub fn recv(&self) -> Result<(ConnectionId, Vec<Meter>), LinkError> {
+    pub fn recv(&self) -> Result<Vec<Meter>, LinkError> {
         let o = self.router_rx.recv()?;
         Ok(o)
     }
 
-    pub async fn next(&self) -> Result<(ConnectionId, Vec<Meter>), LinkError> {
+    pub async fn next(&self) -> Result<Vec<Meter>, LinkError> {
         let o = self.router_rx.recv_async().await?;
         Ok(o)
     }
