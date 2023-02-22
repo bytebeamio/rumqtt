@@ -295,7 +295,9 @@ impl Broker {
         let console_link = ConsoleLink::new(self.config.console.clone(), self.router_tx.clone());
 
         let console_link = Arc::new(console_link);
-        console::start(console_link);
+        let mut runtime = tokio::runtime::Builder::new_current_thread();
+        let runtime = runtime.enable_all().build().unwrap();
+        runtime.block_on(console::start(console_link));
 
         Ok(())
     }

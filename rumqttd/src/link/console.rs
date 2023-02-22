@@ -1,8 +1,13 @@
 use crate::link::local::{Link, LinkRx};
 use crate::router::{Event, MetricsRequest};
 use crate::{ConnectionId, ConsoleSettings};
+use axum::extract::{Path, State};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::post;
+use axum::Json;
+use axum::{routing::get, Router};
 use flume::Sender;
-use rouille::{router, try_or_400};
+use std::net::TcpListener;
 use std::sync::Arc;
 use tracing::info;
 
@@ -30,85 +35,114 @@ impl ConsoleLink {
 }
 
 #[tracing::instrument]
-pub fn start(console: Arc<ConsoleLink>) {
-    let address = console.config.listen.clone();
+pub async fn start(console: Arc<ConsoleLink>) {
+    let listener = TcpListener::bind(console.config.listen.clone()).unwrap();
 
-    rouille::start_server(address, move |request| {
-        router!(request,
-            (GET) (/) => {
-                rouille::Response::redirect_302("/config")
-            },
-            (GET) (/config) => {
-                rouille::Response::json(&console.config.clone())
-            },
-            (GET) (/router) => {
-                let event = Event::Metrics(MetricsRequest::Router);
-                let message = (console.connection_id, event);
-                if console.router_tx.send(message).is_err() {
-                    return rouille::Response::empty_404()
-                }
+    let app = Router::new()
+        .route("/", get(root))
+        .route("/config", get(config))
+        .route("/router", get(router))
+        .route("/device/:device_id", get(device_with_id))
+        .route("/subscriptions", get(subscriptions))
+        .route("/subscriptions/:filter", get(subscriptions_with_filter))
+        .route("/waiters/:filter", get(waiters_with_filter))
+        .route("/readyqueue", get(readyqueue))
+        .route("/logs", post(logs))
+        .with_state(console);
 
-                rouille::Response::text("OK").with_status_code(200)
-            },
-            (GET) (/device/{id: String}) => {
-                let event = Event::Metrics(MetricsRequest::Connection(id));
-                let message = (console.connection_id, event);
-                if console.router_tx.send(message).is_err() {
-                    return rouille::Response::empty_404()
-                }
+    axum::Server::from_tcp(listener)
+        .unwrap()
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
 
-                rouille::Response::text("OK").with_status_code(200)
-            },
-            (GET) (/subscriptions) => {
-                let event = Event::Metrics(MetricsRequest::Subscriptions);
-                let message = (console.connection_id, event);
-                if console.router_tx.send(message).is_err() {
-                    return rouille::Response::empty_404()
-                }
+async fn root() -> impl IntoResponse {
+    Redirect::to("/config")
+}
 
-                rouille::Response::text("OK").with_status_code(200)
-            },
-            (GET) (/subscription/{filter: String}) => {
-                let filter = filter.replace('.', "/");
-                let event = Event::Metrics(MetricsRequest::Subscription(filter));
-                let message = (console.connection_id, event);
-                if console.router_tx.send(message).is_err() {
-                    return rouille::Response::empty_404()
-                }
+async fn config(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    Json(console.config.clone())
+}
 
-                rouille::Response::text("OK").with_status_code(200)
-            },
-            (GET) (/waiters/{filter: String}) => {
-                let filter = filter.replace('.', "/");
-                let event = Event::Metrics(MetricsRequest::Waiters(filter));
-                let message = (console.connection_id, event);
-                if console.router_tx.send(message).is_err() {
-                    return rouille::Response::empty_404()
-                }
+async fn router(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    let event = Event::Metrics(MetricsRequest::Router);
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
 
-                rouille::Response::text("OK").with_status_code(200)
-            },
-            (GET) (/readyqueue) => {
-                let event = Event::Metrics(MetricsRequest::ReadyQueue);
-                let message = (console.connection_id, event);
-                if console.router_tx.send(message).is_err() {
-                    return rouille::Response::empty_404()
-                }
+    Response::new("OK".to_owned())
+}
 
-                rouille::Response::text("OK").with_status_code(200)
-           },
-           (POST) (/logs) => {
-            info!("Reloading tracing filter");
-            let data = try_or_400!(rouille::input::plain_text_body(request));
-            if let Some(handle) = &console.config.filter_handle {
-                if handle.reload(&data).is_err() {
-                    return rouille::Response::empty_400();
-                }
-                return rouille::Response::text(data);
-            }
-            rouille::Response::empty_404()
-           },
-            _ => rouille::Response::empty_404()
-        )
-    });
+async fn device_with_id(
+    Path(device_id): Path<String>,
+    State(console): State<Arc<ConsoleLink>>,
+) -> impl IntoResponse {
+    let event = Event::Metrics(MetricsRequest::Connection(device_id));
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
+}
+
+async fn subscriptions(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    let event = Event::Metrics(MetricsRequest::Subscriptions);
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
+}
+
+async fn subscriptions_with_filter(
+    Path(filter): Path<String>,
+    State(console): State<Arc<ConsoleLink>>,
+) -> impl IntoResponse {
+    let filter = filter.replace('.', "/");
+    let event = Event::Metrics(MetricsRequest::Subscription(filter));
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
+}
+
+async fn waiters_with_filter(
+    Path(filter): Path<String>,
+    State(console): State<Arc<ConsoleLink>>,
+) -> impl IntoResponse {
+    let filter = filter.replace('.', "/");
+    let event = Event::Metrics(MetricsRequest::Waiters(filter));
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
+}
+
+async fn readyqueue(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    let event = Event::Metrics(MetricsRequest::ReadyQueue);
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
+}
+
+async fn logs(State(console): State<Arc<ConsoleLink>>, data: String) -> impl IntoResponse {
+    info!("Reloading tracing filter");
+    if let Some(handle) = &console.config.filter_handle {
+        if handle.reload(&data).is_err() {
+            return Response::builder().status(404).body("".to_owned()).unwrap();
+        }
+        return Response::new(data);
+    }
+    Response::builder().status(404).body("".to_owned()).unwrap()
 }
