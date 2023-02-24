@@ -587,6 +587,7 @@ impl Router {
 
                         info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
+                        let is_bridge = connection.is_bridge;
 
                         if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
@@ -602,6 +603,18 @@ impl Router {
                         self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
+
+                        if !is_bridge {
+                            let filter = &f.path;
+                            let bridge_filter = format!("$bridge/+/{filter}");
+
+                            let (idx, cursor) = self.datalog.next_native_offset(&bridge_filter);
+                            self.prepare_filter(id, cursor, idx, bridge_filter.clone(), qos as u8);
+
+                            // retained messages in bridgelink needs to be thought about
+                            self.datalog
+                                .handle_retained_messages(&bridge_filter, &mut self.notifications);
+                        }
 
                         let code = match qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
@@ -1089,10 +1102,12 @@ fn append_to_commitlog(
     connections: &mut Slab<Connection>,
 ) -> Result<Offset, RouterError> {
     let topic = std::str::from_utf8(&publish.topic)?;
+    let connection = &connections[id];
+    let is_bridge = connection.is_bridge;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connections[id].tenant_prefix {
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
         if !topic.starts_with(tenant_prefix) {
             return Err(RouterError::BadTenant(
                 tenant_prefix.to_owned(),
@@ -1110,12 +1125,14 @@ fn append_to_commitlog(
     publish.retain = false;
     let pkid = publish.pkid;
 
-    let filter_idxs = datalog.matches(topic);
+    let filter_idxs = datalog.matches(topic, is_bridge);
 
     // Create a dynamic filter if dynamic_filters are enabled for this connection
     let filter_idxs = match filter_idxs {
         Some(v) => v,
-        None if connections[id].dynamic_filters => {
+        // NOTE: DataLog::matches never returns `None` so this branch is never triggered making
+        // `dynamic_filters` usesless
+        None if connection.dynamic_filters => {
             let (idx, _cursor) = datalog.next_native_offset(topic);
             vec![idx]
         }

@@ -58,6 +58,7 @@ pub struct Connect {
     pub client_id: String,
     /// Clean session. Asks the broker to clear previous state
     pub clean_session: bool,
+    pub is_bridge: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -656,14 +657,17 @@ pub fn valid_filter(filter: &str) -> bool {
 ///
 /// **NOTE**: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
-/// during a subscribe
-pub fn matches(topic: &str, filter: &str) -> bool {
-    if !topic.is_empty() && topic[..1].contains('$') {
-        return false;
-    }
-
+/// during a subscribe (should ideally use type system to avoid this assumption)
+/// **NOTE**: # shouldn't match $X $bridge/#
+pub fn matches(topic: &str, filter: &str, is_bridge: bool) -> bool {
     let mut topics = topic.split('/');
     let mut filters = filter.split('/');
+
+    if topic.starts_with('$')
+        && !(is_bridge && filter.starts_with("$bridge") && topic.starts_with("$bridge"))
+    {
+        return false;
+    }
 
     for f in filters.by_ref() {
         // "#" being the last element is validated by the broker with 'valid_filter'

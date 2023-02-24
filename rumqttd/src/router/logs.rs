@@ -30,6 +30,9 @@ pub struct DataLog {
     filter_indexes: HashMap<Filter, FilterIdx>,
     retained_publishes: HashMap<Topic, Publish>,
     /// List of filters associated with a topic
+    /// for e.g.
+    /// there are four subscriptions filters index starting with 0: #, foo/# ,hello/+, +/+
+    /// so topic hello/world will have indexes: {"hello/world": [0, 2, 3]}
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
 }
 
@@ -95,14 +98,16 @@ impl DataLog {
 
     // TODO: Currently returning a Option<Vec> instead of Option<&Vec> due to Rust borrow checker
     // limitation
-    pub fn matches(&mut self, topic: &str) -> Option<Vec<usize>> {
+    //
+    // Returns to which filter_idxs in native to append a message for this topic
+    pub fn matches(&mut self, topic: &str, is_bridge: bool) -> Option<Vec<usize>> {
         match &self.publish_filters.get(topic) {
             Some(v) => Some(v.to_vec()),
             None => {
                 let v: Vec<usize> = self
                     .filter_indexes
                     .iter()
-                    .filter(|(filter, _)| matches(topic, filter))
+                    .filter(|(filter, _)| matches(topic, filter, is_bridge))
                     .map(|(_, filter_idx)| *filter_idx)
                     .collect();
 
@@ -115,6 +120,9 @@ impl DataLog {
         }
     }
 
+    // Returns the offset of the next message for `native` for a particular filter,
+    // if it already doesn't exist add a new `native`, and update `filter_indexes` and
+    // `publish_filters`
     pub fn next_native_offset(&mut self, filter: &str) -> (FilterIdx, Offset) {
         let publish_filters = &mut self.publish_filters;
         let filter_indexes = &mut self.filter_indexes;
@@ -135,7 +143,7 @@ impl DataLog {
 
                 // Match new filter to existing topics and add to publish_filters if it matches
                 for (topic, filters) in publish_filters.iter_mut() {
-                    if matches(topic, filter) {
+                    if matches(topic, filter, false) {
                         filters.push(idx);
                     }
                 }
@@ -217,7 +225,7 @@ impl DataLog {
         let datalog = self.native.get_mut(*idx).unwrap();
 
         for (topic, publish) in self.retained_publishes.iter_mut() {
-            if matches(topic, filter) {
+            if matches(topic, filter, false) {
                 datalog.append(publish.clone(), notifications);
             }
         }
@@ -354,7 +362,7 @@ mod test {
         };
         let mut data = DataLog::new(config).unwrap();
         data.next_native_offset("topic/a");
-        data.matches("topic/a");
+        data.matches("topic/a", false);
 
         data.next_native_offset("topic/+");
 
@@ -374,7 +382,7 @@ mod test {
         let mut data = DataLog::new(config).unwrap();
         data.next_native_offset("+/+");
 
-        data.matches("topic/a");
+        data.matches("topic/a", false);
 
         assert_eq!(data.publish_filters.get("topic/a").unwrap().len(), 1);
     }
