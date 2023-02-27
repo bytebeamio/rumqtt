@@ -46,8 +46,9 @@ fn main() {
     });
 
     let handle = thread::spawn(move || loop {
-        let alert = alerts.recv();
-        println!("Alert: {alert:?}");
+        if let Ok(alert) = alerts.recv() {
+            println!("Alert: {alert:?}");
+        }
         thread::sleep(Duration::from_secs(1));
     });
 

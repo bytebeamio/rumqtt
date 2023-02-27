@@ -5,7 +5,7 @@ use crate::{router::Event, MetricType};
 use crate::{ConnectionId, MetricSettings};
 use flume::{SendError, Sender};
 use tokio::select;
-use tracing::{error, error_span};
+use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -19,7 +19,7 @@ pub async fn start(
     config: HashMap<MetricType, MetricSettings>,
     router_tx: Sender<(ConnectionId, Event)>,
 ) {
-    let span = error_span!("metrics_timer");
+    let span = tracing::info_span!("metrics_timer");
     let _guard = span.enter();
 
     let mut alerts_push_interval = config
