@@ -66,7 +66,7 @@ async fn config(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
 }
 
 async fn router(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
-    let event = Event::Metrics(MetricsRequest::Router);
+    let event = Event::PrintStatus(Print::Router);
     let message = (console.connection_id, event);
     if console.router_tx.send(message).is_err() {
         return Response::builder().status(404).body("".to_owned()).unwrap();
