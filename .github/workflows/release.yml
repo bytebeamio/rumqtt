@@ -2,12 +2,11 @@ name: Releaser
 on:
   push:
     tags:
-      - 'R*'
+      - 'rumqttd-*'
 
 jobs:
   build-release:
     name: Build release for ${{ matrix.target }}
-    needs: ['create-release']
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -16,22 +15,17 @@ jobs:
         include:
           - build: linux-musl
             os: ubuntu-latest
-            rust: stable
             target: x86_64-unknown-linux-musl
           - build: linux-gnu
             os: ubuntu-latest
-            rust: stable
             target: x86_64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.rust }}
-          profile: minimal
-          override: true
+          components: clippy
           target: ${{ matrix.target }}
 
       - name: Use Cross
@@ -49,23 +43,12 @@ jobs:
         if: matrix.build == 'linux-gnu' || matrix.build == 'linux-musl'
         run: strip "${{ env.TARGET_DIR }}/release/rumqttd"
 
-      - name: Upload release archive
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ env.TARGET_DIR }}/release/rumqttd
-          asset_name: rumqttd-${{matrix.target}}
-          asset_content_type: application/octet-stream
+      - name: rename
+        # this assumes git tag is in format rumqttd-x.x.x
+        run: mv ${{ env.TARGET_DIR }}/release/rumqttd ${{ github.ref_name }}-${{ matrix.build }}
 
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: create_release
-        id: create_release
+      - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:
-          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: rumqttd*

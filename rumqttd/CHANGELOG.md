@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Print version number with `--version` cli flag (#578)
 
 ### Changed
 
@@ -22,7 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [rumqttd 0.12.5]
+## [rumqttd 0.12.6] - 14-02-2023
+
+### Added
+- Print version number with `--version` cli flag (#578)
+
+## [rumqttd 0.12.5] - 07-02-2023
 
 ### Changed
 - `structopt` is in maintainance mode, we now use `clap` instead (#571)
