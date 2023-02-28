@@ -1,8 +1,6 @@
-use std::collections::VecDeque;
-
 use crate::router::{Alert, Event};
-use crate::{ConnectionId, Filter};
-use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
+use crate::ConnectionId;
+use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryRecvError, TrySendError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -16,38 +14,29 @@ pub enum LinkError {
     RecvTimeout(#[from] RecvTimeoutError),
     #[error("Timeout = {0}")]
     Elapsed(#[from] tokio::time::error::Elapsed),
+    #[error("Channel try_recv error")]
+    TryRecv(#[from] TryRecvError),
 }
 
 pub struct AlertsLink {
-    _alert_id: ConnectionId,
-    alert_buffer: VecDeque<(ConnectionId, Alert)>,
-    pub router_rx: Receiver<(ConnectionId, Alert)>,
+    pub router_rx: Receiver<Vec<Alert>>,
 }
 
 impl AlertsLink {
-    pub fn new(
-        router_tx: Sender<(ConnectionId, Event)>,
-        filters: Vec<Filter>,
-    ) -> Result<AlertsLink, LinkError> {
+    pub fn new(router_tx: Sender<(ConnectionId, Event)>) -> Result<AlertsLink, LinkError> {
         let (tx, rx) = flume::bounded(100);
-        router_tx.send((0, Event::NewAlert(tx, filters)))?;
-        let (_alert_id, _meter) = rx.recv()?;
-
-        let link = AlertsLink {
-            _alert_id,
-            alert_buffer: VecDeque::new(),
-            router_rx: rx,
-        };
-
+        router_tx.send((0, Event::NewAlert(tx)))?;
+        let link = AlertsLink { router_rx: rx };
         Ok(link)
     }
 
-    pub fn poll(&mut self) -> (ConnectionId, Alert) {
-        self.alert_buffer.extend(self.router_rx.drain());
+    pub fn recv(&self) -> Result<Vec<Alert>, LinkError> {
+        let o = self.router_rx.try_recv()?;
+        Ok(o)
+    }
 
-        match self.alert_buffer.pop_front() {
-            Some(a) => a,
-            None => self.router_rx.recv().unwrap(),
-        }
+    pub async fn next(&self) -> Result<Vec<Alert>, LinkError> {
+        let o = self.router_rx.recv_async().await?;
+        Ok(o)
     }
 }

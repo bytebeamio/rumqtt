@@ -126,7 +126,7 @@ impl Tracker {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn _reset(&mut self) {
         self.data_requests.clear();
         self.status = Status::Paused(PauseReason::Busy);
     }
@@ -177,7 +177,7 @@ impl Tracker {
         self.status = Status::Paused(reason);
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn _is_empty(&self) -> bool {
         self.data_requests.is_empty()
     }
 

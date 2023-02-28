@@ -1,10 +1,10 @@
 use crate::link::alerts::{self};
-use crate::link::bridge;
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, RemoteLink};
 #[cfg(feature = "websockets")]
 use crate::link::shadow::{self, ShadowLink};
+use crate::link::{bridge, timer};
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 #[cfg(feature = "websockets")]
@@ -12,7 +12,7 @@ use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Filter, GetMeter, Meter};
+use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -130,29 +130,9 @@ impl Broker {
         Ok(link)
     }
 
-    /// Alerts of different kind are published on topics mentioned below. MQTT wildcards
-    /// can be used to subscribe to multiple types of alerts at the same time. This are seperated
-    /// from normal topics, so they are only available over AlertsLink
-    ///
-    /// /alerts/<alert_type>/<alert_sub_type>/<connection_id>
-    /// alert_types:
-    ///     - "event"
-    ///         alert_sub_types:
-    ///             - "connect"
-    ///             - "disconnect"
-    ///             - "subscribe"
-    ///             - "unsubscribe"
-    ///     - "error"
-    ///         alert_sub_types: N/A
-    ///
-    /// Examples:
-    ///     - /alerts/event/+/client_id_1           // all alert types for client 'client_id_1'
-    ///     - /alerts/event/connect/client_id_1     // alert type 'connect' for client 'client_id_1'
-    ///     - /alerts/error/#                         // alert type 'error'
-    ///     - /alerts/#                             // all alerts
-    ///     - /alerts/event/#                       // alert type 'event'
-    pub fn alerts(&self, filters: Vec<Filter>) -> Result<alerts::AlertsLink, alerts::LinkError> {
-        let link = alerts::AlertsLink::new(self.router_tx.clone(), filters)?;
+    // Link to get alerts
+    pub fn alerts(&self) -> Result<alerts::AlertsLink, alerts::LinkError> {
+        let link = alerts::AlertsLink::new(self.router_tx.clone())?;
         Ok(link)
     }
 
@@ -166,6 +146,19 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
+        if let Some(metrics_config) = self.config.metrics.clone() {
+            let timer_thread = thread::Builder::new().name("timer".to_owned());
+            let router_tx = self.router_tx.clone();
+            timer_thread.spawn(move || {
+                let mut runtime = tokio::runtime::Builder::new_current_thread();
+                let runtime = runtime.enable_all().build().unwrap();
+
+                runtime.block_on(async move {
+                    timer::start(metrics_config, router_tx).await;
+                });
+            })?;
+        }
+
         // spawn bridge in a separate thread
         if let Some(bridge_config) = self.config.bridge.clone() {
             let bridge_thread = thread::Builder::new().name(bridge_config.name.clone());
@@ -244,6 +237,7 @@ impl Broker {
             let timeout = prometheus_setting.interval;
             let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
             let meter_link = self.meters().unwrap();
+
             metrics_thread.spawn(move || {
                 let builder = PrometheusBuilder::new()
                     .with_http_listener(SocketAddr::new("127.0.0.1".parse().unwrap(), port));
@@ -253,25 +247,19 @@ impl Broker {
                 let total_connections = register_gauge!("metrics.router.total_connections");
                 let failed_publishes = register_gauge!("metrics.router.failed_publishes");
                 loop {
-                    let request = GetMeter::Router;
-                    let metrics = match meter_link.get(request) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!("Data link receive error = {:?}", e);
-                            break;
-                        }
-                    };
-
-                    for m in metrics {
-                        match m {
-                            Meter::Router(_, ref r) => {
-                                total_connections.set(r.total_connections as f64);
-                                total_publishes.set(r.total_publishes as f64);
-                                failed_publishes.set(r.failed_publishes as f64);
+                    if let Ok(metrics) = meter_link.recv() {
+                        for m in metrics {
+                            match m {
+                                Meter::Router(_, ref r) => {
+                                    total_connections.set(r.total_connections as f64);
+                                    total_publishes.set(r.total_publishes as f64);
+                                    failed_publishes.set(r.failed_publishes as f64);
+                                }
+                                _ => continue,
                             }
-                            _ => panic!("We only request for router metrics"),
                         }
                     }
+
                     std::thread::sleep(Duration::from_secs(timeout));
                 }
             })?;

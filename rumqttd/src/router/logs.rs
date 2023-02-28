@@ -60,10 +60,9 @@ impl DataLog {
         })
     }
 
-    pub fn meter(&self, filter: &str) -> Option<SubscriptionMeter> {
-        self.native
-            .get(*self.filter_indexes.get(filter)?)
-            .map(|data| data.meter.clone())
+    pub fn meter(&mut self, filter: &str) -> Option<&mut SubscriptionMeter> {
+        let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
+        Some(&mut data.meter)
     }
 
     pub fn waiters(&self, filter: &Filter) -> Option<&Waiters<DataRequest>> {
@@ -262,9 +261,7 @@ where
         }
 
         self.meter.count += 1;
-        self.meter.append_offset = offset;
         self.meter.total_size += size;
-        self.meter.head_and_tail_id = self.log.head_and_tail();
 
         (offset, &self.filter)
     }

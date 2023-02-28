@@ -105,7 +105,7 @@ where
     }
 
     #[inline]
-    pub fn head_and_tail(&self) -> (u64, u64) {
+    pub fn _head_and_tail(&self) -> (u64, u64) {
         (self.head, self.tail)
     }
 

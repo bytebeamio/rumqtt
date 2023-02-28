@@ -1,4 +1,4 @@
-use rumqttd::{Broker, Config, GetMeter, Notification};
+use rumqttd::{Broker, Config, Notification};
 use std::{thread, time::Duration};
 
 fn main() {
@@ -15,7 +15,7 @@ fn main() {
 
     dbg!(&config);
 
-    let broker = Broker::new(config);
+    let mut broker = Broker::new(config);
     let meters = broker.meters().unwrap();
 
     let (mut link_tx, mut link_rx) = broker.link("consumer").unwrap();
@@ -59,30 +59,18 @@ fn main() {
         });
     }
 
+    thread::spawn(move || {
+        if let Err(e) = broker.start() {
+            println!("Broker stopped: {e}");
+        }
+    });
+    thread::sleep(Duration::from_secs(2));
+
     loop {
         // Router meters
-        let request = GetMeter::Router;
-        let v = meters.get(request).unwrap();
-        println!("{v:#?}");
-
-        // Publisher meters
-        for i in 0..5 {
-            let client_id = format!("client_{i}");
-            let request = GetMeter::Connection(Some(client_id));
-            let v = meters.get(request).unwrap();
+        if let Ok(v) = meters.recv() {
             println!("{v:#?}");
         }
-
-        // Commitlog meters
-        let request = GetMeter::Subscription(Some("hello/+/world".to_owned()));
-        let v = meters.get(request).unwrap();
-        println!("{v:#?}");
-
-        // Consumer meters
-        let request = GetMeter::Connection(Some("consumer".to_owned()));
-        let v = meters.get(request).unwrap();
-        println!("{v:#?}");
-
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(2));
     }
 }

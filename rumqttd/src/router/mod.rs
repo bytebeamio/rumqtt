@@ -12,7 +12,7 @@ use crate::{
         PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
         SubAckProperties, UnsubAck,
     },
-    ConnectionId, Filter, RouterConfig, RouterId, Topic,
+    ConnectionId, Filter, RouterId, Topic,
 };
 
 mod alertlog;
@@ -24,12 +24,11 @@ mod routing;
 mod scheduler;
 mod waiters;
 
-pub use alertlog::{Alert, AlertError, AlertEvent};
+pub use alertlog::Alert;
 pub use connection::Connection;
 pub use routing::Router;
 pub use waiters::Waiters;
 
-use self::scheduler::Tracker;
 pub const MAX_SCHEDULE_ITERATIONS: usize = 100;
 pub const MAX_CHANNEL_CAPACITY: usize = 200;
 
@@ -46,11 +45,9 @@ pub enum Event {
         outgoing: iobufs::Outgoing,
     },
     /// New meter link
-    NewMeter(flume::Sender<(ConnectionId, Vec<Meter>)>),
-    /// Request for meter
-    GetMeter(GetMeter),
-    /// New Alert link
-    NewAlert(flume::Sender<(ConnectionId, Alert)>, Vec<Filter>),
+    NewMeter(flume::Sender<Vec<Meter>>),
+    /// New alert link
+    NewAlert(flume::Sender<Vec<Alert>>),
     /// Connection ready to receive more data
     Ready,
     /// Data for native commitlog
@@ -59,8 +56,12 @@ pub enum Event {
     Disconnect(Disconnection),
     /// Shadow
     Shadow(ShadowRequest),
+    /// Collect and send alerts to all alerts links
+    SendAlerts,
+    /// Collect and send meters to all meters links
+    SendMeters,
     /// Get metrics of a connection or all connections
-    Metrics(MetricsRequest),
+    PrintStatus(Print),
 }
 
 /// Notification from router to connection
@@ -83,8 +84,6 @@ pub enum Notification {
         offset: (u64, u64),
         payload: Bytes,
     },
-    /// All metrics
-    Metrics(MetricsReply),
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
@@ -262,6 +261,8 @@ pub struct ShadowReply {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RouterMeter {
+    pub timestamp: u128,
+    pub sequence: usize,
     pub router_id: RouterId,
     pub total_connections: usize,
     pub total_subscriptions: usize,
@@ -269,13 +270,60 @@ pub struct RouterMeter {
     pub failed_publishes: usize,
 }
 
+impl RouterMeter {
+    pub fn get(&mut self) -> Option<Self> {
+        if self.total_publishes > 0 || self.failed_publishes > 0 {
+            self.timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            self.sequence += 1;
+
+            let meter = self.clone();
+            self.reset();
+
+            Some(meter)
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
+        self.total_publishes = 0;
+        self.failed_publishes = 0;
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SubscriptionMeter {
+    pub timestamp: u128,
+    pub sequence: usize,
     pub count: usize,
     pub total_size: usize,
-    pub head_and_tail_id: (u64, u64),
-    pub append_offset: (u64, u64),
-    pub read_offset: usize,
+}
+
+impl SubscriptionMeter {
+    pub fn get(&mut self) -> Option<Self> {
+        if self.count > 0 {
+            self.timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            self.sequence += 1;
+
+            let meter = self.clone();
+            self.reset();
+
+            Some(meter)
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) {
+        self.count = 0;
+        self.total_size = 0;
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -338,24 +386,14 @@ pub struct ConnectionEvents {
     events: VecDeque<String>,
 }
 
-#[derive(Debug, Clone)]
-pub enum GetMeter {
-    Router,
-    // Associated data of None<String> type
-    // means get all meters
-    Connection(Option<String>),
-    Subscription(Option<String>),
-}
-
-#[derive(Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub enum Meter {
     Router(usize, RouterMeter),
-    Connection(String, Option<IncomingMeter>, Option<OutgoingMeter>),
-    Subscription(String, Option<SubscriptionMeter>),
+    Subscription(String, SubscriptionMeter),
 }
 
 #[derive(Debug, Clone)]
-pub enum MetricsRequest {
+pub enum Print {
     Config,
     Router,
     ReadyQueue,
@@ -363,16 +401,4 @@ pub enum MetricsRequest {
     Subscriptions,
     Subscription(Filter),
     Waiters(Filter),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MetricsReply {
-    Config(RouterConfig),
-    Router(RouterMeter),
-    Connection(Option<(ConnectionEvents, Tracker)>),
-    Subscriptions(HashMap<Filter, Vec<String>>),
-    Subscription(Option<SubscriptionMeter>),
-    Waiters(Option<VecDeque<(String, DataRequest)>>),
-    ReadyQueue(VecDeque<ConnectionId>),
 }

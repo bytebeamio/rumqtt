@@ -16,13 +16,7 @@ fn main() {
     dbg!(&config);
 
     let broker = Broker::new(config);
-    let mut alerts = broker
-        .alerts(vec![
-            "/alerts/error/+".to_string(),
-            "/alerts/event/connect/+".to_string(),
-            "/alerts/event/subscribe/+".to_string(),
-        ])
-        .unwrap();
+    let alerts = broker.alerts().unwrap();
 
     let (mut link_tx, mut link_rx) = broker.link("consumer").unwrap();
     link_tx.subscribe("hello/+/world").unwrap();
@@ -52,8 +46,9 @@ fn main() {
     });
 
     let handle = thread::spawn(move || loop {
-        let alert = alerts.poll();
-        println!("Alert: {alert:?}");
+        if let Ok(alert) = alerts.recv() {
+            println!("Alert: {alert:?}");
+        }
         thread::sleep(Duration::from_secs(1));
     });
 

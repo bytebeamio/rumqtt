@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ---
+## [rumqttd 0.12.7] - 29-02-2023
+
+### Changed
+- Re-design meters and alerts (#579)
 
 ## [rumqttd 0.12.6] - 14-02-2023
 
