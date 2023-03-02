@@ -245,7 +245,11 @@ impl Client {
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
-        let client = Client { client };
+        Self::new_from_async(client, eventloop)
+    }
+
+    pub fn new_from_async(async_client: AsyncClient, eventloop: EventLoop) -> (Client, Connection) {
+        let client = Client { client: async_client };
         let runtime = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
