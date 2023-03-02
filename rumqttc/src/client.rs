@@ -249,7 +249,9 @@ impl Client {
     }
 
     pub fn new_from_async(async_client: AsyncClient, eventloop: EventLoop) -> (Client, Connection) {
-        let client = Client { client: async_client };
+        let client = Client {
+            client: async_client,
+        };
         let runtime = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
