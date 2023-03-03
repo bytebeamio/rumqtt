@@ -104,6 +104,10 @@ impl EventLoop {
         }
     }
 
+    pub fn next_pkid(&mut self) -> u16 {
+        self.state.next_pkid()
+    }
+
     fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;

@@ -63,6 +63,31 @@ impl AsyncClient {
         AsyncClient { request_tx }
     }
 
+    /// Sends a MQTT Publish with a given pkid to the `EventLoop`.
+    pub async fn publish_with_pkid<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+        pkid: u16,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
+    {
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
+        publish.retain = retain;
+        publish.pkid = pkid;
+        let publish = Request::Publish(publish);
+        if !valid_topic(&topic) {
+            return Err(ClientError::Request(publish));
+        }
+        self.request_tx.send_async(publish).await?;
+        Ok(())
+    }
+
     /// Sends a MQTT Publish to the `EventLoop`.
     pub async fn publish<S, V>(
         &self,
@@ -75,14 +100,31 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
+        self.publish_with_pkid(topic, qos, retain, payload, 0).await
+    }
+
+    /// Attempts to send a MQTT Publish with a given pkid to the `EventLoop`.
+    pub fn try_publish_with_pkid<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+        pkid: u16,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
+    {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        publish.pkid = pkid;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::TryRequest(publish));
         }
-        self.request_tx.send_async(publish).await?;
+        self.request_tx.try_send(publish)?;
         Ok(())
     }
 
@@ -98,15 +140,7 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
-        }
-        self.request_tx.try_send(publish)?;
-        Ok(())
+        self.try_publish_with_pkid(topic, qos, retain, payload, 0)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -128,8 +162,28 @@ impl AsyncClient {
         Ok(())
     }
 
+    /// Sends a MQTT Publish to the `EventLoop` width given pkid
+    pub async fn publish_bytes_with_pkid<S>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: Bytes,
+        pkid: u16,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+    {
+        let mut publish = Publish::from_bytes(topic, qos, payload);
+        publish.retain = retain;
+        publish.pkid = pkid;
+        let publish = Request::Publish(publish);
+        self.request_tx.send_async(publish).await?;
+        Ok(())
+    }
+
     /// Sends a MQTT Publish to the `EventLoop`
-    pub async fn publish_bytes<S>(
+    pub async fn publish_bytes<S, V>(
         &self,
         topic: S,
         qos: QoS,
@@ -139,11 +193,8 @@ impl AsyncClient {
     where
         S: Into<String>,
     {
-        let mut publish = Publish::from_bytes(topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        self.request_tx.send_async(publish).await?;
-        Ok(())
+        self.publish_bytes_with_pkid(topic, qos, retain, payload, 0)
+            .await
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -261,6 +312,23 @@ impl Client {
         (client, connection)
     }
 
+    /// Sends a MQTT Publish with a given pkid to the `EventLoop`
+    pub fn publish_with_pkid<S, V>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+        pkid: u16,
+    ) -> Result<(), ClientError>
+        where
+            S: Into<String>,
+            V: Into<Vec<u8>>,
+    {
+        pollster::block_on(self.client.publish_with_pkid(topic, qos, retain, payload, pkid))?;
+        Ok(())
+    }
+
     /// Sends a MQTT Publish to the `EventLoop`
     pub fn publish<S, V>(
         &mut self,
@@ -277,6 +345,24 @@ impl Client {
         Ok(())
     }
 
+    /// Attempts to send a MQTT Publish with a given pkid to the `EventLoop`
+    pub fn try_publish_with_pkid<S, V>(
+        &mut self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+        pkid: u16,
+    ) -> Result<(), ClientError>
+        where
+            S: Into<String>,
+            V: Into<Vec<u8>>,
+    {
+        self.client.try_publish_with_pkid(topic, qos, retain, payload, pkid)?;
+        Ok(())
+    }
+
+    /// Attempts to send a MQTT Publish to the `EventLoop`
     pub fn try_publish<S, V>(
         &mut self,
         topic: S,
@@ -390,6 +476,10 @@ pub struct Connection {
 impl Connection {
     fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
         Connection { eventloop, runtime }
+    }
+
+    pub fn next_pkid(&mut self) -> u16 {
+        self.eventloop.next_pkid()
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's

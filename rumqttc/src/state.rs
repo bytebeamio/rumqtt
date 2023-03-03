@@ -491,7 +491,7 @@ impl MqttState {
     /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
     /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
     ///
-    fn next_pkid(&mut self) -> u16 {
+    pub(crate) fn next_pkid(&mut self) -> u16 {
         let next_pkid = self.last_pkid + 1;
 
         // When next packet id is at the edge of inflight queue,
