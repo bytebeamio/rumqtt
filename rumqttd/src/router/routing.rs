@@ -1,6 +1,7 @@
 use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    PubRec, PubRecReason, PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode,
+    UnsubAck,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -42,8 +43,6 @@ pub enum RouterError {
     BadTenant(String, String),
     #[error("No matching filters to topic {0}")]
     NoMatchingFilters(String),
-    #[error("Unsupported QoS {0:?}")]
-    UnsupportedQoS(QoS),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
@@ -491,18 +490,15 @@ impl Router {
                             force_ack = true;
                         }
                         QoS::ExactlyOnce => {
-                            error!("QoS::ExactlyOnce is not yet supported");
-                            disconnect = true;
-                            break;
-                            // let pubrec = PubRec {
-                            //     pkid,
-                            //     reason: PubRecReason::Success,
-                            // };
-                            //
-                            // let ackslog = self.ackslog.get_mut(id).unwrap();
-                            // ackslog.pubrec(publish, pubrec);
-                            // force_ack = true;
-                            // continue;
+                            let pubrec = PubRec {
+                                pkid,
+                                reason: PubRecReason::Success,
+                            };
+
+                            let ackslog = self.ackslog.get_mut(id).unwrap();
+                            ackslog.pubrec(publish, pubrec);
+                            force_ack = true;
+                            continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing
@@ -1262,10 +1258,6 @@ fn validate_subscription(
         if !filter.path.starts_with(tenant_prefix) {
             return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
         }
-    }
-
-    if filter.qos == QoS::ExactlyOnce {
-        return Err(RouterError::UnsupportedQoS(filter.qos));
     }
 
     if filter.path.starts_with('$') {
