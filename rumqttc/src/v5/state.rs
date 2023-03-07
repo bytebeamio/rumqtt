@@ -175,7 +175,7 @@ impl MqttState {
         };
 
         out?;
-        self.events.push_back(Event::Incoming(Box::new(packet)));
+        self.events.push_back(Event::Incoming(packet));
         self.last_incoming = Instant::now();
         Ok(())
     }
