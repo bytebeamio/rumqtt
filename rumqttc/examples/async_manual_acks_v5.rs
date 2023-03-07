@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{event:?}");
 
         if let Event::Incoming(packet) = event {
-            let publish = match *packet {
+            let publish = match packet {
                 Packet::Publish(publish, _) => publish,
                 _ => continue,
             };
