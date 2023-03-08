@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ---
+
+## [rumqttd 0.13.0] - 08-03-2023
+
+- No change, only version bump
+
 ## [rumqttd 0.12.7] - 04-03-2023
 
 ### Changed
