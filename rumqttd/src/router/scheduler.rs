@@ -160,7 +160,9 @@ impl Tracker {
                 self.status = Status::Ready;
                 Some(previous)
             }
-            ScheduleReason::IncomingAck if previous == PauseReason::InflightFull => {
+            // There might be a case where we got IncomingAck but our inflight wasn't full
+            // So we set status to Ready in case of IncomingAck unless reason in Busy
+            ScheduleReason::IncomingAck if previous != PauseReason::Busy => {
                 self.status = Status::Ready;
                 Some(previous)
             }

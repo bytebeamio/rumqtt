@@ -699,8 +699,13 @@ impl Router {
                             break;
                         }
                     };
+                    self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
-                Packet::PubComp(_pubcomp, _) => {}
+                Packet::PubComp(pubcomp, _) => {
+                    // Should we just log with info! instead of creating a span?
+                    let span = tracing::info_span!("pubcomp", pkid = pubcomp.pkid);
+                    let _guard = span.enter();
+                }
                 Packet::PingReq(_) => {
                     let ackslog = self.ackslog.get_mut(id).unwrap();
                     ackslog.pingresp(PingResp);
@@ -715,7 +720,7 @@ impl Router {
                     break;
                 }
                 incoming => {
-                    warn!(packet=?incoming, "Packet not supported by router yet" );
+                    warn!(packet=?incoming, "Unexpected packet received" );
                 }
             }
         }
