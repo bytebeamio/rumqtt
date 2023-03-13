@@ -145,8 +145,10 @@ impl ConsoleSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Default)]
 pub enum Transport {
     #[serde(rename = "tcp")]
+    #[default]
     Tcp,
     #[serde(rename = "tls")]
     Tls {
@@ -155,11 +157,7 @@ pub enum Transport {
     },
 }
 
-impl Default for Transport {
-    fn default() -> Self {
-        Transport::Tcp
-    }
-}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientAuth {
