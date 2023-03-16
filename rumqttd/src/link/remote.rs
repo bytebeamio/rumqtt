@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
-use tracing::{trace, Span};
+use tracing::{trace, warn, Span};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -74,10 +74,17 @@ impl<P: Protocol> RemoteLink<P> {
         .await??;
 
         let (connect, lastwill, login) = match packet {
-            Packet::Connect(connect, _, lastwill, _, login) => (connect, lastwill, login),
+            Packet::Connect(connect, _, lastwill, _, login) => {
+                Span::current().record("client_id", &connect.client_id);
+
+                // Ignore last will
+                if lastwill.is_some() {
+                    warn!("Un-setting: last will");
+                }
+                (connect, None, login)
+            }
             packet => return Err(Error::NotConnectPacket(packet)),
         };
-        Span::current().record("client_id", &connect.client_id);
 
         // If authentication is configured in config file check for username and password
         if let Some(auths) = &config.auth {
