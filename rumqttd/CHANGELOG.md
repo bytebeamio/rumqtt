@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `PrometheusSetting` now takes `listen` to specify listener address instead of default `127.0.0.1`. Do not use `listen` and `port` together.
 
 ### Changed
 
 ### Deprecated
+- `PrometheusSetting`'s `port` will be removed in favour of `listen`.
 
 ### Removed
 

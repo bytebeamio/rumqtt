@@ -54,7 +54,9 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PrometheusSetting {
-    port: u16,
+    #[deprecated(note = "Use listen instead")]
+    port: Option<u16>,
+    listen: Option<SocketAddr>,
     // How frequently to update metrics
     interval: u64,
 }
@@ -144,8 +146,7 @@ impl ConsoleSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum Transport {
     #[serde(rename = "tcp")]
     #[default]
@@ -156,8 +157,6 @@ pub enum Transport {
         client_auth: Option<ClientAuth>,
     },
 }
-
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientAuth {
