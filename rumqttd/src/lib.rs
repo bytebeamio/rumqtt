@@ -144,8 +144,7 @@ impl ConsoleSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum Transport {
     #[serde(rename = "tcp")]
     #[default]
@@ -156,8 +155,6 @@ pub enum Transport {
         client_auth: Option<ClientAuth>,
     },
 }
-
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientAuth {
