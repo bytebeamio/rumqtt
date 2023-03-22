@@ -232,7 +232,7 @@ where
                         end: (cursor.0, offset),
                     });
                 }
-                // no offset returned -> we reached end / invalid file
+                // no offset returned -> we reached end
                 // if len unfulfilled -> try next segment with remaining length
                 SegmentPosition::Done(next_offset) => {
                     // this condition is needed in case cursor.1 > 0 (when user provies cursor.1
@@ -276,7 +276,7 @@ where
                 // debug!("start: {:?}, end: ({}, {}) done", orig_cursor, cursor.0, absolute_offset);
                 Ok(Position::Done {
                     start,
-                    end: (cursor.0, absolute_offset),
+                    end: (cursor.0 + 1, absolute_offset),
                 })
             }
         }
@@ -687,6 +687,42 @@ mod tests {
             Next {
                 start: (10, 100),
                 end: (10, 105)
+            }
+        );
+    }
+
+    #[test]
+    fn reads_which_end_exactly_at_active_segments_end() {
+        let max_segment_size = 1024;
+        let packet_size: u64 = 1024;
+        let mut log = CommitLog::new(max_segment_size, 1).unwrap();
+
+        log.append(random_payload(0, packet_size));
+        assert_eq!(log.head, 0);
+        assert_eq!(log.tail, 0);
+
+        let mut out = Vec::new();
+        let next = log.readv((0, 0), 1, &mut out).unwrap();
+        assert_eq!(
+            next,
+            Done {
+                start: (0, 0),
+                end: (1, 1)
+            }
+        );
+
+        log.append(random_payload(1, packet_size));
+        assert_eq!(log.head, 1);
+        assert_eq!(log.tail, 1);
+
+        let mut out = Vec::new();
+
+        let next = log.readv((0, 1), 1, &mut out).unwrap();
+        assert_eq!(
+            next,
+            Done {
+                start: (1, 1),
+                end: (2, 2)
             }
         );
     }
