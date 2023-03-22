@@ -78,9 +78,9 @@ where
     /// If disk is opened and the limit on disk size is reached, the head file will be deleted from
     /// filesystem as well.
     pub fn new(max_segment_size: usize, max_mem_segments: usize) -> io::Result<Self> {
-        if max_segment_size < 1024 {
-            panic!("given max_segment_size {max_segment_size} bytes < 1KB");
-        }
+        // if max_segment_size < 1024 {
+        //     panic!("given max_segment_size {max_segment_size} bytes < 1KB");
+        // }
 
         if max_mem_segments < 1 {
             panic!("atleast 1 segment needs to exist in memory else what's the point of log");
@@ -225,10 +225,10 @@ where
             match curr_segment.readv(cursor, len, out)? {
                 // an offset returned -> we didn't read till end -> len fulfilled -> return
                 SegmentPosition::Next(offset) => {
-                    return Ok(Position::Next {
+                    return dbg!(Ok(Position::Next {
                         start,
                         end: (cursor.0, offset),
-                    });
+                    }));
                 }
                 // no offset returned -> we reached end / invalid file
                 // if len unfulfilled -> try next segment with remaining length
@@ -247,7 +247,7 @@ where
 
             if len == 0 {
                 // debug!("start: {:?}, end: ({}, {})", orig_cursor, cursor.0, cursor.1 - 1);
-                return Ok(Position::Next { start, end: cursor });
+                return dbg!(Ok(Position::Next { start, end: cursor }));
             }
 
             idx += 1;
@@ -255,7 +255,7 @@ where
         }
 
         if curr_segment.next_offset() <= cursor.1 {
-            return Ok(Position::Done { start, end: cursor });
+            return dbg!(Ok(Position::Done { start, end: cursor }));
         }
 
         // we need to read seperately from active segment because if `None` returned for active
@@ -265,17 +265,17 @@ where
         match curr_segment.readv(cursor, len, out)? {
             SegmentPosition::Next(v) => {
                 // debug!("start: {:?}, end: ({}, {})", orig_cursor, cursor.0, cursor.1 + v - 1);
-                Ok(Position::Next {
+                dbg!(Ok(Position::Next {
                     start,
                     end: (cursor.0, v),
-                })
+                }))
             }
             SegmentPosition::Done(absolute_offset) => {
                 // debug!("start: {:?}, end: ({}, {}) done", orig_cursor, cursor.0, absolute_offset);
-                Ok(Position::Done {
+                dbg!(Ok(Position::Done {
                     start,
                     end: (cursor.0, absolute_offset),
-                })
+                }))
             }
         }
     }
