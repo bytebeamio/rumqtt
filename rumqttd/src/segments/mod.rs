@@ -389,7 +389,7 @@ mod tests {
                     next,
                     Done {
                         start: (0, 9),
-                        end: (0, 10)
+                        end: (1, 10)
                     }
                 );
                 continue;
@@ -430,7 +430,7 @@ mod tests {
             next,
             Done {
                 start: (0, 0),
-                end: (0, 10)
+                end: (1, 10)
             }
         );
 
@@ -445,7 +445,7 @@ mod tests {
             next,
             Done {
                 start: (0, 0),
-                end: (0, 10)
+                end: (1, 10)
             }
         );
 
@@ -460,13 +460,14 @@ mod tests {
             next,
             Done {
                 start: (0, 5),
-                end: (0, 10)
+                end: (1, 10)
             }
         );
 
         // Read again after after appending again
         let mut out = Vec::new();
         let next = log.readv((0, 10), 20, &mut out).unwrap();
+        // This should have end: (1, 10)
         assert_eq!(
             next,
             Done {
@@ -486,7 +487,7 @@ mod tests {
             next,
             Done {
                 start: (0, 10),
-                end: (0, 20)
+                end: (1, 20)
             }
         );
     }
@@ -551,7 +552,7 @@ mod tests {
             next,
             Done {
                 start: (2, 200),
-                end: (2, 300)
+                end: (3, 300)
             }
         );
     }
@@ -597,6 +598,7 @@ mod tests {
                 end: (3, 35)
             }
         );
+        // This should have end: (4, 40) as well
         let next = log.readv((3, 40), 5, &mut out).unwrap();
         assert_eq!(
             next,
@@ -645,7 +647,7 @@ mod tests {
             next,
             Done {
                 start: (3, 30),
-                end: (3, 40)
+                end: (4, 40)
             }
         );
     }
