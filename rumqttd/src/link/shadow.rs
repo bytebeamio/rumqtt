@@ -2,7 +2,6 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::local::Link;
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings, Filter};
-use bytes::Bytes;
 use flume::{RecvError, SendError, Sender, TrySendError};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -17,7 +16,7 @@ use tokio::{select, time};
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, tungstenite, WebSocketStream};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 use tungstenite::protocol::frame::coding::CloseCode;
 
 use super::network::N;
@@ -44,6 +43,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("Shadow filter not set properly")]
     InvalidFilter,
+    #[error("Authentication error")]
+    InvalidAuth,
 }
 
 pub struct ShadowLink {
@@ -70,6 +71,22 @@ impl ShadowLink {
         let connect = network.read_connect(config.connection_timeout_ms).await?;
         let subscriptions = HashSet::new();
         let client_id = connect.client_id.clone();
+
+        if let Some(auths) = &config.auth {
+            // if authentication is configured and connect packet doesn't have login details return
+            // an error
+            if let Some(login) = connect.login {
+                let is_authenticated = auths
+                    .iter()
+                    .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
+
+                if !is_authenticated {
+                    return Err(Error::InvalidAuth);
+                }
+            } else {
+                return Err(Error::InvalidAuth);
+            }
+        }
 
         let (link_tx, link_rx, _ack) = Link::new(
             None,
@@ -105,7 +122,7 @@ impl ShadowLink {
             select! {
                 o = self.network.read() => {
                     let message = o?;
-                    debug!(size = message.len(), "read"  );
+                    debug!(size = message.len(), "read");
                     match message {
                         Message::Text(m) => {
                             self.extract_message(&m).await?;
@@ -145,8 +162,18 @@ impl ShadowLink {
                         }
                         Notification::Shadow(shadow) => {
                             let topic = std::str::from_utf8(&shadow.topic).unwrap().to_owned();
-                            let publish = Outgoing::Publish { topic, data: shadow.payload };
-                            Message::Text(serde_json::to_string(&publish)?)
+                            // try to convert shadow message
+                            let shadow_json = serde_json::from_slice::<Value>(&shadow.payload[..]);
+                            match shadow_json {
+                                Ok(s) => {
+                                    let publish = Outgoing::Publish { topic, data: serde_json::to_string(&s).unwrap() };
+                                    Message::Text(serde_json::to_string(&publish)?)
+                                },
+                                Err(_) => {
+                                    info!("Non-json message. Unable to parse.");
+                                    continue;
+                                }
+                            }
                         }
                         v => unreachable!("Expecting only data or device acks. Received = {:?}", v)
                     };
@@ -234,6 +261,13 @@ pub struct Connect {
     client_id: String,
     tenant_id: Option<String>,
     body: Option<Jwt>,
+    login: Option<Login>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Login {
+    username: String,
+    password: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -252,7 +286,7 @@ pub enum Outgoing {
     #[serde(alias = "connack")]
     ConnAck { status: bool },
     #[serde(alias = "publish")]
-    Publish { topic: String, data: Bytes },
+    Publish { topic: String, data: String },
     #[serde(alias = "pong")]
     Pong { pong: bool },
 }
