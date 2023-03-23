@@ -267,7 +267,14 @@ impl Client {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        pollster::block_on(self.client.publish(topic, qos, retain, payload))?;
+        let topic = topic.into();
+        let mut publish = Publish::new(&topic, qos, payload);
+        publish.retain = retain;
+        let publish = Request::Publish(publish);
+        if !valid_topic(&topic) {
+            return Err(ClientError::Request(publish));
+        }
+        self.client.request_tx.send(publish)?;
         Ok(())
     }
 
@@ -288,7 +295,11 @@ impl Client {
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        pollster::block_on(self.client.ack(publish))?;
+        let ack = get_ack_req(publish);
+
+        if let Some(ack) = ack {
+            self.client.request_tx.send(ack)?;
+        }
         Ok(())
     }
 
@@ -300,7 +311,9 @@ impl Client {
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        pollster::block_on(self.client.subscribe(topic, qos))?;
+        let subscribe = Subscribe::new(topic.into(), qos);
+        let request = Request::Subscribe(subscribe);
+        self.client.request_tx.send(request)?;
         Ok(())
     }
 
@@ -319,7 +332,10 @@ impl Client {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        pollster::block_on(self.client.subscribe_many(topics))
+        let subscribe = Subscribe::new_many(topics);
+        let request = Request::Subscribe(subscribe);
+        self.client.request_tx.send(request)?;
+        Ok(())
     }
 
     pub fn try_subscribe_many<T>(&mut self, topics: T) -> Result<(), ClientError>
@@ -331,7 +347,9 @@ impl Client {
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
-        pollster::block_on(self.client.unsubscribe(topic))?;
+        let unsubscribe = Unsubscribe::new(topic.into());
+        let request = Request::Unsubscribe(unsubscribe);
+        self.client.request_tx.send(request)?;
         Ok(())
     }
 
@@ -343,7 +361,8 @@ impl Client {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        pollster::block_on(self.client.disconnect())?;
+        let request = Request::Disconnect;
+        self.client.request_tx.send(request)?;
         Ok(())
     }
 
