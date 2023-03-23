@@ -34,6 +34,8 @@ pub type Cursor = (u64, u64);
 pub use link::alerts;
 pub use link::local;
 pub use link::meters;
+#[cfg(feature = "websockets")]
+pub use link::shadow;
 
 pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
 pub use server::Broker;
@@ -144,8 +146,7 @@ impl ConsoleSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum Transport {
     #[serde(rename = "tcp")]
     #[default]
@@ -156,8 +157,6 @@ pub enum Transport {
         client_auth: Option<ClientAuth>,
     },
 }
-
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientAuth {
