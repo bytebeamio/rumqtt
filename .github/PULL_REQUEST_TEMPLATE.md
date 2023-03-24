@@ -1,21 +1,19 @@
-Please read `CONTRIBUTING.md` if you are contributing for the first time.
+<!--
+Thank you for this Pull Request. Please provide a description of your changes above.
 
-# Description
-
-Include a summary of the change and which issue is fixed. Please also include relevant motivation and context. List any dependencies that are required for this change.
-
-Fixes # (issue)
+Read `CONTRIBUTING.md` if you are contributing for the first time.
+-->
 
 ## Type of change
 
-Please delete options that are not relevant.
+<!-- Uncomment the most relevant line that fits your changes. -->
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+<!-- - Bug fix (non-breaking change which fixes an issue) -->
+<!-- - New feature (non-breaking change which adds functionality) -->
+<!-- - Breaking change (fix or feature that would cause existing functionality to not work as expected) -->
+<!-- - Miscellaneous (related to maintanance) -->
 
-
-# Checklist:
+## Checklist:
 
 - [ ] Formatted with `cargo fmt`
-- [ ] Make an entry to `CHANGELOG.md`.
+- [ ] Make an entry to `CHANGELOG.md` if its relevant of user of the library. If its not relevant mention why.
