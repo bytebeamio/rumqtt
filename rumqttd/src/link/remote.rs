@@ -78,9 +78,6 @@ impl<P: Protocol> RemoteLink<P> {
                 Span::current().record("client_id", &connect.client_id);
 
                 // Ignore last will
-                if lastwill.is_some() {
-                    warn!("Un-setting: last will");
-                }
                 (connect, None, login)
             }
             packet => return Err(Error::NotConnectPacket(packet)),

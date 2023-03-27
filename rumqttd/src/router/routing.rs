@@ -510,8 +510,8 @@ impl Router {
 
                     self.router_meters.total_publishes += 1;
 
+                    // Ignore retained messages
                     if publish.retain {
-                        warn!("Un-setting: publish.retain");
                         publish.retain = false;
                     }
 
