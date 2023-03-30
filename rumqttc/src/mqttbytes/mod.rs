@@ -6,6 +6,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core::fmt;
 use std::slice::Iter;
+use serde::{Deserialize, Serialize};
 
 mod topic;
 pub mod v4;
@@ -91,7 +92,7 @@ pub enum Protocol {
 
 /// Quality of service
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
 pub enum QoS {
     AtMostOnce = 0,
     AtLeastOnce = 1,
