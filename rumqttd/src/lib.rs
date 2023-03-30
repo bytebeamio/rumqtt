@@ -54,7 +54,9 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PrometheusSetting {
-    port: u16,
+    #[deprecated(note = "Use listen instead")]
+    port: Option<u16>,
+    listen: Option<SocketAddr>,
     // How frequently to update metrics
     interval: u64,
 }
@@ -144,21 +146,16 @@ impl ConsoleSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub enum Transport {
     #[serde(rename = "tcp")]
+    #[default]
     Tcp,
     #[serde(rename = "tls")]
     Tls {
         ca: PathBuf,
         client_auth: Option<ClientAuth>,
     },
-}
-
-impl Default for Transport {
-    fn default() -> Self {
-        Transport::Tcp
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

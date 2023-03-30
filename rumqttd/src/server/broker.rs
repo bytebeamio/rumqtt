@@ -14,7 +14,7 @@ use crate::protocol::Protocol;
 use crate::server::tls::{self, TLSAcceptor};
 use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument};
 #[cfg(feature = "websockets")]
@@ -233,14 +233,24 @@ impl Broker {
         }
 
         if let Some(prometheus_setting) = &self.config.prometheus {
-            let port = prometheus_setting.port;
             let timeout = prometheus_setting.interval;
+            // If port is specified use it instead of listen.
+            // NOTE: This means listen is ignored when `port` is specified.
+            // `port` will be removed in future release in favour of `listen`
+            let addr = {
+                #[allow(deprecated)]
+                match prometheus_setting.port {
+                    Some(port) => SocketAddr::new("127.0.0.1".parse().unwrap(), port),
+                    None => prometheus_setting.listen.unwrap_or(SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        9042,
+                    )),
+                }
+            };
             let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
             let meter_link = self.meters().unwrap();
-
             metrics_thread.spawn(move || {
-                let builder = PrometheusBuilder::new()
-                    .with_http_listener(SocketAddr::new("127.0.0.1".parse().unwrap(), port));
+                let builder = PrometheusBuilder::new().with_http_listener(addr);
                 builder.install().unwrap();
 
                 let total_publishes = register_gauge!("metrics.router.total_publishes");

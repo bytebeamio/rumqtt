@@ -73,7 +73,7 @@ pub struct EventLoop {
 /// Events which can be yielded by the event loop
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Incoming(Box<Incoming>),
+    Incoming(Incoming),
     Outgoing(Outgoing),
 }
 
@@ -124,7 +124,7 @@ impl EventLoop {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(Box::new(connack)));
+            return Ok(Event::Incoming(connack));
         }
 
         match self.select().await {
