@@ -85,7 +85,7 @@ async fn connection_should_timeout_on_time() {
     let elapsed = start.elapsed();
 
     dbg!(&o);
-    assert_matches!(o, Err(ConnectionError::NetworkTimeout));
+    assert_matches!(o, Err(ConnectionError::ConnectTimeout));
     assert_eq!(elapsed.as_secs(), 5);
 }
 
@@ -550,7 +550,7 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
         let res = run(&mut eventloop, false).await;
         if let Err(e) = res {
             match e {
-                ConnectionError::FlushTimeout => {
+                ConnectionError::Network(NetworkError::FlushTimeout) => {
                     assert!(eventloop.state.write.is_empty());
                     println!("State is being clean properly");
                 }

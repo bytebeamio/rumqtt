@@ -1,10 +1,11 @@
-use crate::{Event, Incoming, Outgoing, Request};
-
-use crate::mqttbytes::v4::*;
-use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
+
 use std::collections::VecDeque;
 use std::{io, time::Instant};
+
+use crate::framed::{Network, NetworkError};
+use crate::mqttbytes::{self, v4::*, *};
+use crate::{Event, Incoming, Outgoing, Request};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +31,8 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
+    #[error("Network: {0}")]
+    Network(#[from] NetworkError),
 }
 
 /// State of the mqtt connection.
@@ -136,6 +139,26 @@ impl MqttState {
 
     pub fn inflight(&self) -> u16 {
         self.inflight
+    }
+
+    /// Read packets in bulk. This allow replies to be in bulk. This method is used
+    /// after the connection is established to read a bunch of incoming packets
+    pub async fn readb(&mut self, network: &mut Network) -> Result<(), StateError> {
+        let mut count = 0;
+        loop {
+            match network.read(count == 0).await {
+                Ok(packet) => {
+                    self.handle_incoming_packet(packet)?;
+
+                    count += 1;
+                    if count >= network.max_readb_count {
+                        return Ok(());
+                    }
+                }
+                Err(NetworkError::Mqtt(mqttbytes::Error::InsufficientBytes(_))) => return Ok(()),
+                Err(e) => return Err(StateError::Network(e)),
+            }
+        }
     }
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
