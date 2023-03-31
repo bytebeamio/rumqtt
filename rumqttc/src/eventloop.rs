@@ -149,8 +149,6 @@ impl EventLoop {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
-        let throttle = self.mqtt_options.pending_throttle;
-        let pending = self.pending.len() > 0;
         let collision = self.state.collision.is_some();
         let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
 
@@ -172,10 +170,14 @@ impl EventLoop {
                 };
                 Ok(self.state.events.pop_front().unwrap())
             },
-            // Pull next request from user requests channel.
-            // If conditions in the below branch are for flow control. We read next user
-            // user request only when inflight messages are < configured inflight and there
-            // are no collisions while handling previous outgoing requests.
+             // Handles pending and new requests.
+            // If available, prioritises pending requests from previous session.
+            // Else, pulls next request from user requests channel.
+            // If conditions in the below branch are for flow control.
+            // The branch is disabled if there's no pending messages and new user requests
+            // cannot be serviced due flow control.
+            // We read next user user request only when inflight messages are < configured inflight
+            // and there are no collisions while handling previous outgoing requests.
             //
             // Flow control is based on ack count. If inflight packet count in the buffer is
             // less than max_inflight setting, next outgoing request will progress. For this
@@ -196,7 +198,11 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
+            o = Self::next_request(
+                &mut self.pending,
+                &self.requests_rx,
+                self.mqtt_options.pending_throttle
+            ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
@@ -206,16 +212,6 @@ impl EventLoop {
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
-            },
-            // Handle the next pending packet from previous session. Disable
-            // this branch when done with all the pending packets
-            Some(request) = next_pending(throttle, &mut self.pending), if pending => {
-                self.state.handle_outgoing_packet(request)?;
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
-                Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
@@ -240,6 +236,24 @@ impl EventLoop {
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
         self
+    }
+
+    async fn next_request(
+        pending: &mut IntoIter<Request>,
+        rx: &Receiver<Request>,
+        pending_throttle: Duration,
+    ) -> Result<Request, ConnectionError> {
+        if pending.len() > 0 {
+            time::sleep(pending_throttle).await;
+            // We must call .next() AFTER sleep() otherwise .next() would
+            // advance the iterator but the future might be canceled before return
+            Ok(pending.next().unwrap())
+        } else {
+            match rx.recv_async().await {
+                Ok(r) => Ok(r),
+                Err(_) => Err(ConnectionError::RequestsDone),
+            }
+        }
     }
 }
 
@@ -388,15 +402,4 @@ async fn mqtt_connect(
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(packet)),
     }
-}
-
-/// Returns the next pending packet asynchronously to be used in select!
-/// This is a synchronous function but made async to make it fit in select!
-pub(crate) async fn next_pending(
-    delay: Duration,
-    pending: &mut IntoIter<Request>,
-) -> Option<Request> {
-    // return next packet with a delay
-    time::sleep(delay).await;
-    pending.next()
 }
