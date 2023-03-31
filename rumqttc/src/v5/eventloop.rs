@@ -1,5 +1,5 @@
 use super::framed::Network;
-use super::mqttbytes::{v5::*, *};
+use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
@@ -17,6 +17,7 @@ use tokio::time::{self, error::Elapsed, Instant, Sleep};
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
+use std::convert::TryInto;
 use std::io;
 #[cfg(unix)]
 use std::path::Path;
@@ -24,7 +25,7 @@ use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
 
-use super::mqttbytes::ConnectReturnCode;
+use super::mqttbytes::v5::ConnectReturnCode;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -86,12 +87,11 @@ impl EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
-        let max_inflight = options.inflight;
         let manual_acks = options.manual_acks;
 
         EventLoop {
             options,
-            state: MqttState::new(max_inflight, manual_acks),
+            state: MqttState::new(manual_acks),
             requests_tx,
             requests_rx,
             pending,
@@ -115,7 +115,7 @@ impl EventLoop {
         if self.network.is_none() {
             let (network, connack) = time::timeout(
                 Duration::from_secs(self.options.connection_timeout()),
-                connect(&self.options),
+                connect(&mut self.options),
             )
             .await??;
             self.network = Some(network);
@@ -124,7 +124,7 @@ impl EventLoop {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(connack));
+            self.state.handle_incoming_packet(connack)?;
         }
 
         match self.select().await {
@@ -140,9 +140,8 @@ impl EventLoop {
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
-        let inflight_full = self.state.inflight >= self.options.inflight;
-        let throttle = self.options.pending_throttle;
-        let pending = self.pending.len() > 0;
+
+        let inflight_full = self.state.inflight >= self.state.max_outgoing_inflight;
         let collision = self.state.collision.is_some();
 
         // Read buffered events from previous polls before calling a new poll
@@ -153,17 +152,14 @@ impl EventLoop {
         // this loop is necessary since self.incoming.pop_front() might return None. In that case,
         // instead of returning a None event, we try again.
         select! {
-            // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state) => {
-                o?;
-                // flush all the acks and return first incoming packet
-                network.flush(&mut self.state.write).await?;
-                Ok(self.state.events.pop_front().unwrap())
-            },
-            // Pull next request from user requests channel.
-            // If conditions in the below branch are for flow control. We read next user
-            // user request only when inflight messages are < configured inflight and there
-            // are no collisions while handling previous outgoing requests.
+            // Handles pending and new requests.
+            // If available, prioritises pending requests from previous session.
+            // Else, pulls next request from user requests channel.
+            // If conditions in the below branch are for flow control.
+            // The branch is disabled if there's no pending messages and new user requests
+            // cannot be serviced due flow control.
+            // We read next user user request only when inflight messages are < configured inflight
+            // and there are no collisions while handling previous outgoing requests.
             //
             // Flow control is based on ack count. If inflight packet count in the buffer is
             // less than max_inflight setting, next outgoing request will progress. For this
@@ -184,7 +180,11 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
+            o = Self::next_request(
+                &mut self.pending,
+                &self.requests_rx,
+                self.options.pending_throttle
+            ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     network.flush(&mut self.state.write).await?;
@@ -192,10 +192,10 @@ impl EventLoop {
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
             },
-            // Handle the next pending packet from previous session. Disable
-            // this branch when done with all the pending packets
-            Some(request) = next_pending(throttle, &mut self.pending), if pending => {
-                self.state.handle_outgoing_packet(request)?;
+            // Pull a bunch of packets from network, reply in bunch and yield the first item
+            o = network.readb(&mut self.state) => {
+                o?;
+                // flush all the acks and return first incoming packet
                 network.flush(&mut self.state.write).await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
@@ -211,6 +211,24 @@ impl EventLoop {
             }
         }
     }
+
+    async fn next_request(
+        pending: &mut IntoIter<Request>,
+        rx: &Receiver<Request>,
+        pending_throttle: Duration,
+    ) -> Result<Request, ConnectionError> {
+        if pending.len() > 0 {
+            time::sleep(pending_throttle).await;
+            // We must call .next() AFTER sleep() otherwise .next() would
+            // advance the iterator but the future might be canceled before return
+            Ok(pending.next().unwrap())
+        } else {
+            match rx.recv_async().await {
+                Ok(r) => Ok(r),
+                Err(_) => Err(ConnectionError::RequestsDone),
+            }
+        }
+    }
 }
 
 /// This stream internally processes requests from the request stream provided to the eventloop
@@ -218,7 +236,7 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(options: &mut MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
@@ -234,11 +252,21 @@ async fn connect(options: &MqttOptions) -> Result<(Network, Incoming), Connectio
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
+    let mut max_incoming_pkt_size = Some(options.default_max_incoming_size);
+
+    // Override default value if max_packet_size is set on `connect_properties`
+    if let Some(connect_props) = &options.connect_properties {
+        if let Some(max_size) = connect_props.max_packet_size {
+            let max_size = max_size.try_into().map_err(StateError::Coversion)?;
+            max_incoming_pkt_size = Some(max_size);
+        }
+    }
+
     let network = match options.transport() {
         Transport::Tcp => {
             let addr = format!("{}:{}", options.broker_addr, options.port);
             let stream = socket_connect(addr, options.network_options()).await?;
-            Network::new(stream, options.max_incoming_packet_size)
+            Network::new(stream, max_incoming_pkt_size)
         }
         #[cfg(any(feature = "use-native-tls", feature = "use-rustls"))]
         Transport::Tls(tls_config) => {
@@ -247,13 +275,13 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
                     .await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            Network::new(socket, max_incoming_pkt_size)
         }
         #[cfg(unix)]
         Transport::Unix => {
             let file = options.broker_addr.as_str();
             let socket = UnixStream::connect(Path::new(file)).await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            Network::new(socket, max_incoming_pkt_size)
         }
         #[cfg(feature = "websocket")]
         Transport::Ws => {
@@ -265,7 +293,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             let (socket, _) = connect_async(request).await?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(WsStream::new(socket), max_incoming_pkt_size)
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
@@ -279,7 +307,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             let (socket, _) = connect_async_with_tls_connector(request, Some(connector)).await?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(WsStream::new(socket), max_incoming_pkt_size)
         }
     };
 
@@ -287,17 +315,19 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 }
 
 async fn mqtt_connect(
-    options: &MqttOptions,
+    options: &mut MqttOptions,
     network: &mut Network,
 ) -> Result<Incoming, ConnectionError> {
     let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_session = options.clean_session();
+    let clean_start = options.clean_start();
     let client_id = options.client_id();
+    let properties = options.connect_properties();
 
     let connect = Connect {
         keep_alive,
         client_id,
-        clean_session,
+        clean_start,
+        properties,
     };
 
     // send mqtt connect packet
@@ -306,20 +336,15 @@ async fn mqtt_connect(
     // validate connack
     match network.read().await? {
         Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+            // Override local keep_alive value if set by server.
+            if let Some(props) = &connack.properties {
+                if let Some(keep_alive) = props.server_keep_alive {
+                    options.keep_alive = Duration::from_secs(keep_alive as u64);
+                }
+            }
             Ok(Packet::ConnAck(connack))
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
     }
-}
-
-/// Returns the next pending packet asynchronously to be used in select!
-/// This is a synchronous function but made async to make it fit in select!
-pub(crate) async fn next_pending(
-    delay: Duration,
-    pending: &mut IntoIter<Request>,
-) -> Option<Request> {
-    // return next packet with a delay
-    time::sleep(delay).await;
-    pending.next()
 }

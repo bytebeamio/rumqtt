@@ -1,8 +1,8 @@
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::mqttbytes::v5::Packet;
-use super::mqttbytes::{self, Connect, Login};
+use super::mqttbytes;
+use super::mqttbytes::v5::{Connect, Login, Packet};
 use super::{Incoming, MqttOptions, MqttState, StateError};
 use std::io;
 
@@ -15,13 +15,13 @@ pub struct Network {
     /// Buffered reads
     read: BytesMut,
     /// Maximum packet size
-    max_incoming_size: usize,
+    max_incoming_size: Option<usize>,
     /// Maximum readv count
     max_readb_count: usize,
 }
 
 impl Network {
-    pub fn new(socket: impl N + 'static, max_incoming_size: usize) -> Network {
+    pub fn new(socket: impl N + 'static, max_incoming_size: Option<usize>) -> Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
@@ -91,6 +91,10 @@ impl Network {
                 Err(mqttbytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
                 }
+                Err(mqttbytes::Error::PayloadSizeLimitExceeded { pkt_size, max }) => {
+                    state.handle_protocol_error()?;
+                    return Err(StateError::IncommingPacketTooLarge { pkt_size, max });
+                }
                 Err(e) => return Err(StateError::Deserialization(e)),
             };
         }
@@ -103,7 +107,8 @@ impl Network {
             username: l.0,
             password: l.1,
         });
-        let len = match Packet::Connect(connect, None, last_will, None, login).write(&mut write) {
+
+        let len = match Packet::Connect(connect, last_will, login).write(&mut write) {
             Ok(size) => size,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };

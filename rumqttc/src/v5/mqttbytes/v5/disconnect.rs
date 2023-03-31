@@ -252,9 +252,9 @@ impl DisconnectProperties {
 }
 
 impl Disconnect {
-    pub fn new() -> Self {
+    pub fn new(reason: DisconnectReasonCode) -> Self {
         Self {
-            reason_code: DisconnectReasonCode::NormalDisconnection,
+            reason_code: reason,
             properties: None,
         }
     }
@@ -281,6 +281,17 @@ impl Disconnect {
         length
     }
 
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        if len == 2 {
+            return len;
+        }
+
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
+
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let packet_type = fixed_header.byte1 >> 4;
         let flags = fixed_header.byte1 & 0b0000_1111;
@@ -296,7 +307,7 @@ impl Disconnect {
         };
 
         if fixed_header.remaining_len == 0 {
-            return Ok(Self::new());
+            return Ok(Self::new(DisconnectReasonCode::NormalDisconnection));
         }
 
         let reason_code = read_u8(&mut bytes)?;
@@ -333,12 +344,6 @@ impl Disconnect {
     }
 }
 
-impl Default for Disconnect {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use bytes::BytesMut;
@@ -354,7 +359,7 @@ mod test {
             0xE0, // Packet type
             0x00, // Remaining length
         ];
-        let expected = Disconnect::new();
+        let expected = Disconnect::new(DisconnectReasonCode::NormalDisconnection);
 
         buffer.extend_from_slice(&packet_bytes[..]);
 
@@ -368,7 +373,7 @@ mod test {
     #[test]
     fn disconnect1_encoding_works() {
         let mut buffer = BytesMut::new();
-        let disconnect = Disconnect::new();
+        let disconnect = Disconnect::new(DisconnectReasonCode::NormalDisconnection);
         let expected = [
             0xE0, // Packet type
             0x00, // Remaining length
@@ -433,5 +438,33 @@ mod test {
         disconnect.write(&mut buffer).unwrap();
 
         assert_eq!(&buffer[..], &expected);
+    }
+
+    // use super::*;
+    use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
+    // use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn length_calculation() {
+        let mut dummy_bytes = BytesMut::new();
+        // Use user_properties to pad the size to exceed ~128 bytes to make the
+        // remaining_length field in the packet be 2 bytes long.
+        let disconn_props = DisconnectProperties {
+            session_expiry_interval: None,
+            reason_string: None,
+            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
+            server_reference: None,
+        };
+
+        let mut disconn_pkt = Disconnect::new(DisconnectReasonCode::NormalDisconnection);
+        disconn_pkt.properties = Some(disconn_props);
+
+        let size_from_size = disconn_pkt.size();
+        let size_from_write = disconn_pkt.write(&mut dummy_bytes).unwrap();
+        let size_from_bytes = dummy_bytes.len();
+
+        assert_eq!(size_from_write, size_from_bytes);
+        assert_eq!(size_from_size, size_from_bytes);
     }
 }
