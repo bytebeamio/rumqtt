@@ -1,103 +1,139 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-fn len(puback: &PubAck, properties: &Option<PubAckProperties>) -> usize {
-    let mut len = 2 + 1; // pkid + reason
-
-    // If there are no properties, sending reason code is optional
-    if puback.reason == PubAckReason::Success && properties.is_none() {
-        return 2;
-    }
-
-    if let Some(p) = properties {
-        let properties_len = properties::len(p);
-        let properties_len_len = len_len(properties_len);
-        len += properties_len_len + properties_len;
-    } else {
-        // just 1 byte representing 0 len properties
-        len += 1;
-    }
-
-    len
+/// Return code in puback
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PubAckReason {
+    Success,
+    NoMatchingSubscribers,
+    UnspecifiedError,
+    ImplementationSpecificError,
+    NotAuthorized,
+    TopicNameInvalid,
+    PacketIdentifierInUse,
+    QuotaExceeded,
+    PayloadFormatInvalid,
 }
 
-pub fn read(
-    fixed_header: FixedHeader,
-    mut bytes: Bytes,
-) -> Result<(PubAck, Option<PubAckProperties>), Error> {
-    let variable_header_index = fixed_header.fixed_header_len;
-    bytes.advance(variable_header_index);
-    let pkid = read_u16(&mut bytes)?;
+/// Acknowledgement to QoS1 publish
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubAck {
+    pub pkid: u16,
+    pub reason: PubAckReason,
+    pub properties: Option<PubAckProperties>,
+}
 
-    // No reason code or properties if remaining length == 2
-    if fixed_header.remaining_len == 2 {
-        return Ok((
-            PubAck {
+impl PubAck {
+    pub fn new(pkid: u16, properties: Option<PubAckProperties>) -> Self {
+        Self {
+            pkid,
+            reason: PubAckReason::Success,
+            properties,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
+            return 4;
+        }
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 2 + 1; // pkid + reason
+
+        // If there are no properties, sending reason code is optional
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
+            return 2;
+        }
+
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len properties
+            len += 1;
+        }
+
+        len
+    }
+
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubAck, Error> {
+        let variable_header_index = fixed_header.fixed_header_len;
+        bytes.advance(variable_header_index);
+        let pkid = read_u16(&mut bytes)?;
+
+        // No reason code or properties if remaining length == 2
+        if fixed_header.remaining_len == 2 {
+            return Ok(PubAck {
                 pkid,
                 reason: PubAckReason::Success,
-            },
-            None,
-        ));
-    }
+                properties: None,
+            });
+        }
 
-    // No properties len or properties if remaining len > 2 but < 4
-    let ack_reason = read_u8(&mut bytes)?;
-    if fixed_header.remaining_len < 4 {
-        return Ok((
-            PubAck {
+        // No properties len or properties if remaining len > 2 but < 4
+        let ack_reason = read_u8(&mut bytes)?;
+        if fixed_header.remaining_len < 4 {
+            return Ok(PubAck {
                 pkid,
                 reason: reason(ack_reason)?,
-            },
-            None,
-        ));
+                properties: None,
+            });
+        }
+
+        let properties = PubAckProperties::read(&mut bytes)?;
+        let puback = PubAck {
+            pkid,
+            reason: reason(ack_reason)?,
+            properties,
+        };
+
+        Ok(puback)
     }
 
-    let puback = PubAck {
-        pkid,
-        reason: reason(ack_reason)?,
-    };
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let len = self.len();
+        buffer.put_u8(0x40);
 
-    let properties = properties::read(&mut bytes)?;
-    Ok((puback, properties))
+        let count = write_remaining_length(buffer, len)?;
+        buffer.put_u16(self.pkid);
+
+        // Reason code is optional with success if there are no properties
+        if self.reason == PubAckReason::Success && self.properties.is_none() {
+            return Ok(4);
+        }
+
+        buffer.put_u8(code(self.reason));
+        if let Some(p) = &self.properties {
+            p.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
+
+        Ok(1 + count + len)
+    }
 }
 
-pub fn write(
-    puback: &PubAck,
-    properties: &Option<PubAckProperties>,
-    buffer: &mut BytesMut,
-) -> Result<usize, Error> {
-    let len = len(puback, properties);
-    buffer.put_u8(0x40);
-
-    let count = write_remaining_length(buffer, len)?;
-    buffer.put_u16(puback.pkid);
-
-    // Reason code is optional with success if there are no properties
-    if puback.reason == PubAckReason::Success && properties.is_none() {
-        return Ok(4);
-    }
-
-    buffer.put_u8(code(puback.reason));
-    if let Some(p) = properties {
-        properties::write(p, buffer)?;
-    } else {
-        write_remaining_length(buffer, 0)?;
-    }
-
-    Ok(1 + count + len)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubAckProperties {
+    pub reason_string: Option<String>,
+    pub user_properties: Vec<(String, String)>,
 }
 
-mod properties {
-    use super::*;
-
-    pub fn len(properties: &PubAckProperties) -> usize {
+impl PubAckProperties {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             len += 1 + 2 + reason.len();
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             len += 1 + 2 + key.len() + 2 + value.len();
         }
 
@@ -142,16 +178,16 @@ mod properties {
         }))
     }
 
-    pub fn write(properties: &PubAckProperties, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = len(properties);
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
         write_remaining_length(buffer, len)?;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             buffer.put_u8(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
@@ -191,5 +227,33 @@ fn code(reason: PubAckReason) -> u8 {
         PubAckReason::PacketIdentifierInUse => 145,
         PubAckReason::QuotaExceeded => 151,
         PubAckReason::PayloadFormatInvalid => 153,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
+    use super::*;
+    use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn length_calculation() {
+        let mut dummy_bytes = BytesMut::new();
+        // Use user_properties to pad the size to exceed ~128 bytes to make the
+        // remaining_length field in the packet be 2 bytes long.
+        let puback_props = PubAckProperties {
+            reason_string: None,
+            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
+        };
+
+        let puback_pkt = PubAck::new(1, Some(puback_props));
+
+        let size_from_size = puback_pkt.size();
+        let size_from_write = puback_pkt.write(&mut dummy_bytes).unwrap();
+        let size_from_bytes = dummy_bytes.len();
+
+        assert_eq!(size_from_write, size_from_bytes);
+        assert_eq!(size_from_size, size_from_bytes);
     }
 }
