@@ -109,7 +109,7 @@ impl<P: Protocol> RemoteLink<P> {
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
-        let clean_session = connect.clean_session;
+        let clean_session = true;
 
         if cfg!(feature = "allow-duplicate-clientid") {
             if !clean_session && client_id.is_empty() {
