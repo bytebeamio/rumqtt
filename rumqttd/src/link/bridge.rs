@@ -166,7 +166,7 @@ async fn network_connect<P: Protocol>(
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
-                100,
+                config.connections.max_inflight_count,
                 protocol,
             ))
         }
@@ -179,7 +179,7 @@ async fn network_connect<P: Protocol>(
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
-                100,
+                config.connections.max_inflight_count,
                 protocol,
             ))
         }
