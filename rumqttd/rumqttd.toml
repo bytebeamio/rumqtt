@@ -9,10 +9,7 @@ max_connections = 10010
 max_outgoing_packet_count = 200
 max_segment_size = 104857600
 max_segment_count = 10
-    [router.custom_segment.'/tenants/electorq/devices/+/actions']
-    max_segment_size = 102400
-    max_segment_count = 2
-    [router.custom_segment.'/tenants/electorq/devices/+/hello']
+    [router.custom_segment.'/tenants/+/+/+/actions']
     max_segment_size = 102400
     max_segment_count = 2
 
