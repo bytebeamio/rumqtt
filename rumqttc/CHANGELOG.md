@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Refactored `MqttOptions` to use `ConnectProperties` for some fields
    - Other minor changes for MQTT5
 
+ - Added support for TLS certificates containing IP addresses
+
 ### Changed
 - Remove `Box` on `Event::Incoming`
 
