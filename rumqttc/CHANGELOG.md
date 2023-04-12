@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Other minor changes for MQTT5
 
  - Added support for TLS certificates containing IP addresses
+ - Added support for RFC8446 C.4 client tracking prevention.
 
 ### Changed
 - Remove `Box` on `Event::Incoming`
