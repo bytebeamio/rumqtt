@@ -21,7 +21,7 @@ use tokio_rustls::{
         client::InvalidDnsNameError, Certificate, ClientConfig, Error as TLSError,
         OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
     },
-    webpki, TlsConnector,
+    TlsConnector,
 };
 use tracing::*;
 
@@ -317,9 +317,6 @@ pub enum BridgeError {
     Io(#[from] io::Error),
     #[error("Network - {0}")]
     Network(#[from] network::Error),
-    #[error("Web Pki - {0}")]
-    #[cfg(feature = "use-rustls")]
-    WebPki(#[from] tokio_rustls::webpki::Error),
     #[error("DNS name - {0}")]
     #[cfg(feature = "use-rustls")]
     DNSName(#[from] InvalidDnsNameError),

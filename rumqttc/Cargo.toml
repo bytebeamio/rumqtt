@@ -15,7 +15,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:rustls-native-certs"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
 use-native-tls = ["dep:tokio-native-tls", "dep:native-tls"]
 websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 
@@ -30,6 +30,7 @@ thiserror = "1"
 # Optional
 # rustls
 tokio-rustls = { version = "0.24", optional = true }
+rustls-webpki = { version = "0.100.1", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 rustls-native-certs = { version = "0.6", optional = true }
 # websockets
