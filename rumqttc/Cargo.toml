@@ -48,7 +48,7 @@ color-backtrace = "0.4"
 matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.4"
-rustls = "0.20"
+rustls = "0.21"
 rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full", "macros"] }

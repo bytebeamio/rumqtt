@@ -1947,7 +1947,7 @@ dependencies = [
  "native-tls",
  "pretty_assertions",
  "pretty_env_logger",
- "rustls 0.20.7",
+ "rustls 0.21.0",
  "rustls-native-certs",
  "rustls-pemfile",
  "rustls-webpki",
