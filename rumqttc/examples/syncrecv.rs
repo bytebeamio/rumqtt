@@ -11,7 +11,8 @@ fn main() {
         .set_keep_alive(Duration::from_secs(5))
         .set_last_will(will);
 
-    let (client, mut connection) = Client::new(mqttoptions, 10);
+    let (client, eventloop) = Client::new(mqttoptions, 10);
+    let mut connection = eventloop.sync();
     thread::spawn(move || publish(client));
 
     if let Ok(notification) = connection.recv() {
@@ -27,14 +28,16 @@ fn main() {
     }
 }
 
-fn publish(mut client: Client) {
-    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
+fn publish(client: Client) {
+    client
+        .subscribe_sync("hello/+/world", QoS::AtMostOnce)
+        .unwrap();
     for i in 0..3 {
         let payload = vec![1; i];
         let topic = format!("hello/{i}/world");
         let qos = QoS::AtLeastOnce;
 
-        client.publish(topic, qos, true, payload).unwrap();
+        client.publish_sync(topic, qos, true, payload).unwrap();
     }
 
     thread::sleep(Duration::from_secs(1));

@@ -17,13 +17,14 @@ pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn 
     mqttoptions.set_keep_alive(Duration::from_secs(20));
     mqttoptions.set_inflight(100);
 
-    let (mut client, mut connection) = Client::new(mqttoptions, 10);
+    let (client, eventloop) = Client::new(mqttoptions, 10);
+    let mut connection = eventloop.sync();
     thread::spawn(move || {
         for _i in 0..count {
             let payload = vec![0; payload_size];
             let qos = QoS::AtLeastOnce;
             let topic = "hello/benchmarks/world";
-            client.publish(topic, qos, false, payload).unwrap();
+            client.publish_sync(topic, qos, false, payload).unwrap();
         }
 
         thread::sleep(Duration::from_secs(1));

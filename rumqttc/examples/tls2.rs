@@ -4,7 +4,7 @@ use std::error::Error;
 #[cfg(feature = "use-rustls")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    use rumqttc::{self, AsyncClient, Key, MqttOptions, TlsConfiguration, Transport};
+    use rumqttc::{self, Client, Key, MqttOptions, TlsConfiguration, Transport};
 
     pretty_env_logger::init();
     color_backtrace::install();
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     mqttoptions.set_transport(transport);
 
-    let (_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (_client, mut eventloop) = Client::new(mqttoptions, 10);
 
     loop {
         match eventloop.poll().await {

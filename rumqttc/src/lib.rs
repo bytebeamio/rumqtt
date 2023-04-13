@@ -112,10 +112,10 @@ mod state;
 mod tls;
 pub mod v5;
 
-pub use client::{
-    AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
+pub use client::{Client, ClientError};
+pub use eventloop::{
+    Connection, ConnectionError, Event, EventLoop, Iter, RecvError, RecvTimeoutError, TryRecvError,
 };
-pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 #[cfg(feature = "use-rustls")]

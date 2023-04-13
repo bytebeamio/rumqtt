@@ -1,17 +1,17 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
+use rumqttc::{self, Client, Event, EventLoop, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
-fn create_conn() -> (AsyncClient, EventLoop) {
+fn create_conn() -> (Client, EventLoop) {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
         .set_clean_session(false);
 
-    AsyncClient::new(mqttoptions, 10)
+    Client::new(mqttoptions, 10)
 }
 
 #[tokio::main(worker_threads = 1)]
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn requests(client: AsyncClient) {
+async fn requests(client: Client) {
     for i in 1..=10 {
         client
             .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
