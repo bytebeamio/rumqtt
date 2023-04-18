@@ -274,10 +274,17 @@ where
             }
             SegmentPosition::Done(absolute_offset) => {
                 // debug!("start: {:?}, end: ({}, {}) done", orig_cursor, cursor.0, absolute_offset);
-                Ok(Position::Done {
-                    start,
-                    end: (cursor.0, absolute_offset),
-                })
+                if self.active_segment().size() < self.max_segment_size as u64 {
+                    Ok(Position::Done {
+                        start,
+                        end: (cursor.0, absolute_offset),
+                    })
+                } else {
+                    Ok(Position::Done {
+                        start,
+                        end: (cursor.0 + 1, absolute_offset),
+                    })
+                }
             }
         }
     }
@@ -603,7 +610,7 @@ mod tests {
             next,
             Done {
                 start: (2, 200),
-                end: (2, 300)
+                end: (3, 300)
             }
         );
     }
