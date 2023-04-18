@@ -363,6 +363,58 @@ mod tests {
     }
 
     #[test]
+    fn should_not_fail() {
+        let max_segment_size = 1024 * 100; // 100K
+        let packet_size: u64 = 1024;
+        // 1 as active only
+        let mut log = CommitLog::new(max_segment_size, 1).unwrap();
+
+        for i in 0..10 {
+            log.append(random_payload(i, packet_size));
+        }
+
+        assert_eq!(log.active_segment().len(), 10);
+        assert_eq!(log.active_segment().size(), packet_size * 10);
+
+        // Read one by one
+        let mut out = Vec::new();
+        let mut last_read_cursor = (0, 0);
+        for i in 0..10 {
+            let offset = i as u64;
+            let next = log.readv((0, offset), 1, &mut out).unwrap();
+            let data = out.pop().unwrap();
+            verify(i, packet_size, data);
+
+            if i == 9 {
+                if let Done { start: _, end } = next {
+                    last_read_cursor = end;
+                };
+                assert_eq!(
+                    next,
+                    Done {
+                        start: (0, 9),
+                        end: (1, 10)
+                    }
+                );
+                continue;
+            }
+
+            assert_eq!(
+                next,
+                Next {
+                    start: (0, i as u64),
+                    end: (0, i as u64 + 1)
+                }
+            );
+        }
+
+        log.append(random_payload(10, packet_size));
+        log.readv(last_read_cursor, 1, &mut out).unwrap();
+        let data = out.pop().unwrap();
+        verify(10, packet_size, data);
+    }
+
+    #[test]
     fn active_segment_appends_and_reads_works() {
         let max_segment_size = 1024 * 100; // 100K
         let packet_size: u64 = 1024;
