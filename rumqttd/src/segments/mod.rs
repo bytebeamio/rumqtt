@@ -276,7 +276,7 @@ where
                 // debug!("start: {:?}, end: ({}, {}) done", orig_cursor, cursor.0, absolute_offset);
                 Ok(Position::Done {
                     start,
-                    end: (cursor.0 + 1, absolute_offset),
+                    end: (cursor.0, absolute_offset),
                 })
             }
         }
@@ -393,7 +393,7 @@ mod tests {
                     next,
                     Done {
                         start: (0, 9),
-                        end: (1, 10)
+                        end: (0, 10)
                     }
                 );
                 continue;
@@ -441,7 +441,7 @@ mod tests {
                     next,
                     Done {
                         start: (0, 9),
-                        end: (1, 10)
+                        end: (0, 10)
                     }
                 );
                 continue;
@@ -482,7 +482,7 @@ mod tests {
             next,
             Done {
                 start: (0, 0),
-                end: (1, 10)
+                end: (0, 10)
             }
         );
 
@@ -497,7 +497,7 @@ mod tests {
             next,
             Done {
                 start: (0, 0),
-                end: (1, 10)
+                end: (0, 10)
             }
         );
 
@@ -512,14 +512,13 @@ mod tests {
             next,
             Done {
                 start: (0, 5),
-                end: (1, 10)
+                end: (0, 10)
             }
         );
 
         // Read again after after appending again
         let mut out = Vec::new();
         let next = log.readv((0, 10), 20, &mut out).unwrap();
-        // This should have end: (1, 10)
         assert_eq!(
             next,
             Done {
@@ -539,7 +538,7 @@ mod tests {
             next,
             Done {
                 start: (0, 10),
-                end: (1, 20)
+                end: (0, 20)
             }
         );
     }
@@ -604,7 +603,7 @@ mod tests {
             next,
             Done {
                 start: (2, 200),
-                end: (3, 300)
+                end: (2, 300)
             }
         );
     }
@@ -749,7 +748,7 @@ mod tests {
     fn reads_which_end_exactly_at_active_segments_end() {
         let max_segment_size = 1024;
         let packet_size: u64 = 1024;
-        let mut log = CommitLog::new(max_segment_size, 1).unwrap();
+        let mut log = CommitLog::new(max_segment_size, 2).unwrap();
 
         log.append(random_payload(0, packet_size));
         assert_eq!(log.head, 0);
@@ -766,12 +765,12 @@ mod tests {
         );
 
         log.append(random_payload(1, packet_size));
-        assert_eq!(log.head, 1);
+        assert_eq!(log.head, 0);
         assert_eq!(log.tail, 1);
 
         let mut out = Vec::new();
 
-        let next = log.readv((0, 1), 1, &mut out).unwrap();
+        let next = log.readv((1, 1), 1, &mut out).unwrap();
         assert_eq!(
             next,
             Done {
