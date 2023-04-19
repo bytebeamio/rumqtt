@@ -78,10 +78,43 @@ fn main() {
     let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
     configs.console.set_filter_reload_handle(reload_handle);
 
+    validate_config(&configs);
+
     // println!("{:#?}", configs);
 
     let mut broker = Broker::new(configs);
     broker.start().unwrap();
+}
+
+// Do any extra validation that needs to be done before starting the broker here.
+fn validate_config(configs: &rumqttd::Config) {
+    for server_setting in configs.v4.values() {
+        if let Some(tls_config) = &server_setting.tls {
+            if !tls_config.validate_paths() {
+                panic!("Certificate path not valid.")
+            }
+        }
+    }
+
+    if let Some(v5) = &configs.v5 {
+        for server_setting in v5.values() {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid.")
+                }
+            }
+        }
+    }
+
+    if let Some(ws) = &configs.ws {
+        for server_setting in ws.values() {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid.")
+                }
+            }
+        }
+    }
 }
 
 fn banner() {
