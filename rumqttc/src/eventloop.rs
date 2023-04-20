@@ -1,30 +1,34 @@
-#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-use crate::tls;
 use crate::{framed::Network, Transport};
 use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
+use crate::framed::N;
 use crate::mqttbytes::v4::*;
-#[cfg(feature = "websocket")]
-use async_tungstenite::tokio::connect_async;
-#[cfg(all(feature = "use-rustls", feature = "websocket"))]
-use async_tungstenite::tokio::connect_async_with_tls_connector;
 use flume::{bounded, Receiver, Sender};
-#[cfg(unix)]
-use tokio::net::UnixStream;
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
 use tokio::time::{self, Instant, Sleep};
-#[cfg(feature = "websocket")]
-use ws_stream_tungstenite::WsStream;
 
 use std::io;
 use std::net::SocketAddr;
-#[cfg(unix)]
-use std::path::Path;
 use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
+
+#[cfg(unix)]
+use {std::path::Path, tokio::net::UnixStream};
+
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+use crate::tls;
+
+#[cfg(feature = "websocket")]
+use {
+    crate::websockets::{split_url, UrlError},
+    ws_stream_tungstenite::WsStream,
+};
+
+#[cfg(feature = "proxy")]
+use crate::proxy::ProxyError;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +56,12 @@ pub enum ConnectionError {
     NotConnAck(Packet),
     #[error("Requests done")]
     RequestsDone,
+    #[cfg(feature = "websocket")]
+    #[error("Invalid Url: {0}")]
+    InvalidUrl(#[from] UrlError),
+    #[cfg(feature = "proxy")]
+    #[error("Proxy Connect: {0}")]
+    Proxy(#[from] ProxyError),
 }
 
 /// Eventloop with all the state of a connection
@@ -320,28 +330,53 @@ async fn network_connect(
     options: &MqttOptions,
     network_options: NetworkOptions,
 ) -> Result<Network, ConnectionError> {
-    let network = match options.transport() {
-        Transport::Tcp => {
-            let addr = format!("{}:{}", options.broker_addr, options.port);
-            let tcp_stream = socket_connect(addr, network_options).await?;
-            Network::new(tcp_stream, options.max_incoming_packet_size)
+    // Process Unix files early, as proxy is not supported for them.
+    #[cfg(unix)]
+    if matches!(options.transport(), Transport::Unix) {
+        let file = options.broker_addr.as_str();
+        let socket = UnixStream::connect(Path::new(file)).await?;
+        let network = Network::new(socket, options.max_incoming_packet_size);
+        return Ok(network);
+    }
+
+    // For websockets domain and port are taken directly from `broker_addr` (which is a url).
+    let (domain, port) = match options.transport() {
+        #[cfg(feature = "websocket")]
+        Transport::Ws => split_url(&options.broker_addr)?,
+        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+        Transport::Wss(_) => split_url(&options.broker_addr)?,
+        _ => options.broker_address(),
+    };
+
+    let tcp_stream: Box<dyn N> = {
+        #[cfg(feature = "proxy")]
+        match options.proxy() {
+            Some(proxy) => proxy.connect(&domain, port, network_options).await?,
+            None => {
+                let addr = format!("{domain}:{port}");
+                let tcp = socket_connect(addr, network_options).await?;
+                Box::new(tcp)
+            }
         }
+        #[cfg(not(feature = "proxy"))]
+        {
+            let addr = format!("{domain}:{port}");
+            let tcp = socket_connect(addr, network_options).await?;
+            Box::new(tcp)
+        }
+    };
+
+    let network = match options.transport() {
+        Transport::Tcp => Network::new(tcp_stream, options.max_incoming_packet_size),
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
-            let addr = format!("{}:{}", options.broker_addr, options.port);
-            let tcp_stream = socket_connect(addr, network_options).await?;
-
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
                     .await?;
             Network::new(socket, options.max_incoming_packet_size)
         }
         #[cfg(unix)]
-        Transport::Unix => {
-            let file = options.broker_addr.as_str();
-            let socket = UnixStream::connect(Path::new(file)).await?;
-            Network::new(socket, options.max_incoming_packet_size)
-        }
+        Transport::Unix => unreachable!(),
         #[cfg(feature = "websocket")]
         Transport::Ws => {
             let request = http::Request::builder()
@@ -350,7 +385,7 @@ async fn network_connect(
                 .header("Sec-WebSocket-Protocol", "mqttv3.1")
                 .body(())?;
 
-            let (socket, _) = connect_async(request).await?;
+            let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -364,7 +399,12 @@ async fn network_connect(
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
-            let (socket, _) = connect_async_with_tls_connector(request, Some(connector)).await?;
+            let (socket, _) = async_tungstenite::tokio::client_async_tls_with_connector(
+                request,
+                tcp_stream,
+                Some(connector),
+            )
+            .await?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }

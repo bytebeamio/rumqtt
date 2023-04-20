@@ -8,18 +8,22 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
-#[cfg(feature = "use-rustls")]
-pub use crate::tls::Error as TlsError;
+use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
+
+use mqttbytes::v5::*;
+
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
-use mqttbytes::v5::*;
+#[cfg(feature = "use-rustls")]
+pub use crate::tls::Error as TlsError;
+
+#[cfg(feature = "proxy")]
+pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
-
-use crate::Outgoing;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
@@ -79,6 +83,9 @@ pub struct MqttOptions {
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
     network_options: NetworkOptions,
+    #[cfg(feature = "proxy")]
+    /// Proxy configuration.
+    proxy: Option<Proxy>,
 }
 
 impl MqttOptions {
@@ -120,6 +127,8 @@ impl MqttOptions {
             connect_properties: None,
             manual_acks: false,
             network_options: NetworkOptions::new(),
+            #[cfg(feature = "proxy")]
+            proxy: None,
         }
     }
 
@@ -465,6 +474,17 @@ impl MqttOptions {
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
         self
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn set_proxy(&mut self, proxy: Proxy) -> &mut Self {
+        self.proxy = Some(proxy);
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn proxy(&self) -> Option<Proxy> {
+        self.proxy.clone()
     }
 }
 

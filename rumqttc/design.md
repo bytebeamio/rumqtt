@@ -190,7 +190,7 @@ eventloop.run() //return -> Result<MqttSt>
 ```
 
 
-Keep additional functionality like gcloud jwt auth and http connect proxy out of rumqtt
+Keep additional functionality like gcloud jwt auth out of rumqtt
 -------
 
 Prevents (some) conflicts w.r.t different versions of ring. conflicts because of rustls are still possible but atleast
