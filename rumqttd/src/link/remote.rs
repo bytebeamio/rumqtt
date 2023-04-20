@@ -74,10 +74,14 @@ impl<P: Protocol> RemoteLink<P> {
         .await??;
 
         let (connect, lastwill, login) = match packet {
-            Packet::Connect(connect, _, lastwill, _, login) => (connect, lastwill, login),
+            Packet::Connect(connect, _, _lastwill, _, login) => {
+                Span::current().record("client_id", &connect.client_id);
+
+                // Ignore last will
+                (connect, None, login)
+            }
             packet => return Err(Error::NotConnectPacket(packet)),
         };
-        Span::current().record("client_id", &connect.client_id);
 
         // If authentication is configured in config file check for username and password
         if let Some(auths) = &config.auth {

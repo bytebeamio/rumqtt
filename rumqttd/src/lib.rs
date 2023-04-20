@@ -56,7 +56,9 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PrometheusSetting {
-    port: u16,
+    #[deprecated(note = "Use listen instead")]
+    port: Option<u16>,
+    listen: Option<SocketAddr>,
     // How frequently to update metrics
     interval: u64,
 }

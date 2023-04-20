@@ -126,10 +126,10 @@ for more information look at rumqttc's [README](https://github.com/bytebeamio/ru
 
 - [x] MQTT 3.1.1
 - [x] QoS 0 and 1
-- [x] Retained messages
 - [x] Connection via TLS
-- [x] Last will
 - [x] Retransmission after reconnect
+- [ ] Last will
+- [ ] Retained messages
 - [ ] QoS 2
 - [ ] MQTT 5
 

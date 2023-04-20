@@ -221,7 +221,7 @@ impl Router {
     }
 
     fn events(&mut self, id: ConnectionId, data: Event) {
-        let span = tracing::info_span!("[>] incoming", connection_id = id);
+        let span = tracing::error_span!("[>] incoming", connection_id = id);
         let _guard = span.enter();
 
         match data {
@@ -442,7 +442,7 @@ impl Router {
         };
 
         let client_id = incoming.client_id.clone();
-        let span = tracing::info_span!("incoming_payload", client_id);
+        let span = tracing::error_span!("incoming_payload", client_id);
         let _guard = span.enter();
 
         // Instead of exchanging, we should just append new incoming packets inside cache
@@ -457,9 +457,8 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(publish, _) => {
-                    let span =
-                        tracing::info_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
+                Packet::Publish(mut publish, _) => {
+                    let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
@@ -510,6 +509,11 @@ impl Router {
                     };
 
                     self.router_meters.total_publishes += 1;
+
+                    // Ignore retained messages
+                    if publish.retain {
+                        publish.retain = false;
+                    }
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -875,6 +879,7 @@ impl Router {
             None => return,
         };
 
+        error!("Unexpected: last will not unset");
         let publish = Publish {
             dup: false,
             qos: will.qos,
@@ -966,6 +971,7 @@ fn append_to_commitlog(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
+        error!("Unexpected: retain field was not unset");
         datalog.insert_to_retained_publishes(publish.clone(), topic.to_owned());
     }
 
