@@ -160,6 +160,9 @@ where
 
     fn apply_retention(&mut self) {
         if self.active_segment().size() >= self.max_segment_size as u64 {
+            // Read absolute_offset before applying memory retention, incase there is only 1
+            // segment allowed
+            let absolute_offset = self.active_segment().next_offset();
             // If active segment is full and segments are full, apply retention policy
             if self.memory_segments_count() >= self.max_mem_segments {
                 self.segments.pop_front();
@@ -168,7 +171,6 @@ where
 
             // Pushing a new segment into segments and updating tail automatically changes active
             // segment to new empty one.
-            let absolute_offset = self.active_segment().next_offset();
             self.segments
                 .push_back(Segment::with_offset(absolute_offset));
             self.tail += 1;
@@ -230,7 +232,7 @@ where
                         end: (cursor.0, offset),
                     });
                 }
-                // no offset returned -> we reached end / invalid file
+                // no offset returned -> we reached end
                 // if len unfulfilled -> try next segment with remaining length
                 SegmentPosition::Done(next_offset) => {
                     // this condition is needed in case cursor.1 > 0 (when user provies cursor.1
