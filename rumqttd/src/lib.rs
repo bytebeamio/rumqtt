@@ -86,13 +86,9 @@ impl TlsConfig {
                 capath,
                 certpath,
                 keypath,
-            } => [
-                Path::new(capath).exists(),
-                Path::new(certpath).exists(),
-                Path::new(keypath).exists(),
-            ]
-            .iter()
-            .all(|v| *v),
+            } => [capath, certpath, keypath]
+                .iter()
+                .all(|v| Path::new(v).exists()),
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
         }
     }
