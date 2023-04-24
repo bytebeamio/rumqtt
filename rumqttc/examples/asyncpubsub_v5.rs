@@ -35,13 +35,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn requests(client: AsyncClient) {
     client
-        .subscribe_with_properties("hello/world", QoS::AtMostOnce, None)
+        .subscribe("hello/world", QoS::AtMostOnce)
         .await
         .unwrap();
 
     for i in 1..=10 {
         client
-            .publish_with_properties("hello/world", QoS::ExactlyOnce, false, vec![1; i], None)
+            .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
             .await
             .unwrap();
 

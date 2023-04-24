@@ -28,12 +28,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn requests(client: AsyncClient) {
     client
-        .subscribe_with_properties("hello/world", QoS::AtMostOnce, None)
+        .subscribe("hello/world", QoS::AtMostOnce)
         .await
         .unwrap();
 
     client
-        .subscribe_with_properties("bye/world", QoS::AtMostOnce, None)
+        .subscribe("bye/world", QoS::AtMostOnce)
         .await
         .unwrap();
 
@@ -46,7 +46,7 @@ async fn requests(client: AsyncClient) {
             QoS::ExactlyOnce,
             false,
             vec![3; 3],
-            Some(props.clone()),
+            props.clone(),
         )
         .await
         .unwrap();
@@ -60,7 +60,7 @@ async fn requests(client: AsyncClient) {
             QoS::ExactlyOnce,
             false,
             vec![3; 3],
-            Some(other.clone()),
+            other.clone(),
         )
         .await
         .unwrap();
@@ -72,7 +72,7 @@ async fn requests(client: AsyncClient) {
             props.clone()
         };
         client
-            .publish_with_properties("", QoS::ExactlyOnce, false, vec![1; i], Some(properties))
+            .publish_with_properties("", QoS::ExactlyOnce, false, vec![1; i], properties)
             .await
             .unwrap();
 

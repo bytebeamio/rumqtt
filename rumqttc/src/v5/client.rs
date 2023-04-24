@@ -69,7 +69,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
-    pub async fn publish_with_properties<S, P>(
+    async fn handle_publish<S, P>(
         &self,
         topic: S,
         qos: QoS,
@@ -92,6 +92,22 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub async fn publish_with_properties<S, P>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: P,
+        properties: PublishProperties,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        P: Into<Bytes>,
+    {
+        self.handle_publish(topic, qos, retain, payload, Some(properties))
+            .await
+    }
+
     pub async fn publish<S, P>(
         &self,
         topic: S,
@@ -103,12 +119,11 @@ impl AsyncClient {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        self.publish_with_properties(topic, qos, retain, payload, None)
-            .await
+        self.handle_publish(topic, qos, retain, payload, None).await
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
-    pub fn try_publish_with_properties<S, P>(
+    fn handle_try_publish<S, P>(
         &self,
         topic: S,
         qos: QoS,
@@ -131,6 +146,21 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub fn try_publish_with_properties<S, P>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: P,
+        properties: PublishProperties,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        P: Into<Bytes>,
+    {
+        self.handle_try_publish(topic, qos, retain, payload, Some(properties))
+    }
+
     pub fn try_publish<S, P>(
         &self,
         topic: S,
@@ -142,7 +172,7 @@ impl AsyncClient {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        self.try_publish_with_properties(topic, qos, retain, payload, None)
+        self.handle_try_publish(topic, qos, retain, payload, None)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -165,7 +195,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
-    pub async fn publish_bytes_with_properties<S>(
+    async fn handle_publish_bytes<S>(
         &self,
         topic: S,
         qos: QoS,
@@ -187,6 +217,21 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub async fn publish_bytes_with_properties<S>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: Bytes,
+        properties: PublishProperties,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+    {
+        self.handle_publish_bytes(topic, qos, retain, payload, Some(properties))
+            .await
+    }
+
     pub async fn publish_bytes<S>(
         &self,
         topic: S,
@@ -197,12 +242,12 @@ impl AsyncClient {
     where
         S: Into<String>,
     {
-        self.publish_bytes_with_properties(topic, qos, retain, payload, None)
+        self.handle_publish_bytes(topic, qos, retain, payload, None)
             .await
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub async fn subscribe_with_properties<S: Into<String>>(
+    async fn handle_subscribe<S: Into<String>>(
         &self,
         topic: S,
         qos: QoS,
@@ -210,17 +255,26 @@ impl AsyncClient {
     ) -> Result<(), ClientError> {
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
-        let request = Request::Subscribe(subscribe);
+        let request: Request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
     }
 
+    pub async fn subscribe_with_properties<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+        properties: SubscribeProperties,
+    ) -> Result<(), ClientError> {
+        self.handle_subscribe(topic, qos, Some(properties)).await
+    }
+
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.subscribe_with_properties(topic, qos, None).await
+        self.handle_subscribe(topic, qos, None).await
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
-    pub fn try_subscribe_with_properties<S: Into<String>>(
+    fn handle_try_subscribe<S: Into<String>>(
         &self,
         topic: S,
         qos: QoS,
@@ -233,12 +287,21 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub fn try_subscribe_with_properties<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+        properties: SubscribeProperties,
+    ) -> Result<(), ClientError> {
+        self.handle_try_subscribe(topic, qos, Some(properties))
+    }
+
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.try_subscribe_with_properties(topic, qos, None)
+        self.handle_try_subscribe(topic, qos, None)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub async fn subscribe_many_with_properties<T>(
+    async fn handle_subscribe_many<T>(
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
@@ -250,17 +313,28 @@ impl AsyncClient {
         let request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
+    }
+
+    pub async fn subscribe_many_with_properties<T>(
+        &self,
+        topics: T,
+        properties: SubscribeProperties,
+    ) -> Result<(), ClientError>
+    where
+        T: IntoIterator<Item = Filter>,
+    {
+        self.handle_subscribe_many(topics, Some(properties)).await
     }
 
     pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
-        self.subscribe_many_with_properties(topics, None).await
+        self.handle_subscribe_many(topics, None).await
     }
 
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn try_subscribe_many_with_properties<T>(
+    fn handle_try_subscribe_many<T>(
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
@@ -274,15 +348,26 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub fn try_subscribe_many_with_properties<T>(
+        &self,
+        topics: T,
+        properties: SubscribeProperties,
+    ) -> Result<(), ClientError>
+    where
+        T: IntoIterator<Item = Filter>,
+    {
+        self.handle_try_subscribe_many(topics, Some(properties))
+    }
+
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
-        self.try_subscribe_many_with_properties(topics, None)
+        self.handle_try_subscribe_many(topics, None)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub async fn unsubscribe_with_properties<S: Into<String>>(
+    async fn handle_unsubscribe<S: Into<String>>(
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
@@ -293,12 +378,20 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub async fn unsubscribe_with_properties<S: Into<String>>(
+        &self,
+        topic: S,
+        properties: UnsubscribeProperties,
+    ) -> Result<(), ClientError> {
+        self.handle_unsubscribe(topic, Some(properties)).await
+    }
+
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        self.unsubscribe_with_properties(topic, None).await
+        self.handle_unsubscribe(topic, None).await
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe_with_properties<S: Into<String>>(
+    fn handle_try_unsubscribe<S: Into<String>>(
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
@@ -309,8 +402,16 @@ impl AsyncClient {
         Ok(())
     }
 
+    pub fn try_unsubscribe_with_properties<S: Into<String>>(
+        &self,
+        topic: S,
+        properties: UnsubscribeProperties,
+    ) -> Result<(), ClientError> {
+        self.handle_try_unsubscribe(topic, Some(properties))
+    }
+
     pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        self.try_unsubscribe_with_properties(topic, None)
+        self.handle_try_unsubscribe(topic, None)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
@@ -370,7 +471,7 @@ impl Client {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
-    pub fn publish_with_properties<S, P>(
+    fn handle_publish<S, P>(
         &self,
         topic: S,
         qos: QoS,
@@ -393,6 +494,21 @@ impl Client {
         Ok(())
     }
 
+    pub fn publish_with_properties<S, P>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: P,
+        properties: PublishProperties,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String>,
+        P: Into<Bytes>,
+    {
+        self.handle_publish(topic, qos, retain, payload, Some(properties))
+    }
+
     pub fn publish<S, P>(
         &self,
         topic: S,
@@ -404,7 +520,7 @@ impl Client {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        self.publish_with_properties(topic, qos, retain, payload, None)
+        self.handle_publish(topic, qos, retain, payload, None)
     }
 
     pub fn try_publish_with_properties<S, P>(
@@ -413,15 +529,14 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: P,
-        properties: Option<PublishProperties>,
+        properties: PublishProperties,
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
     {
         self.client
-            .try_publish_with_properties(topic, qos, retain, payload, properties)?;
-        Ok(())
+            .try_publish_with_properties(topic, qos, retain, payload, properties)
     }
 
     pub fn try_publish<S, P>(
@@ -435,7 +550,7 @@ impl Client {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        self.try_publish_with_properties(topic, qos, retain, payload, None)
+        self.client.try_publish(topic, qos, retain, payload)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -455,7 +570,7 @@ impl Client {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub fn subscribe_with_properties<S: Into<String>>(
+    fn handle_subscribe<S: Into<String>>(
         &self,
         topic: S,
         qos: QoS,
@@ -468,8 +583,17 @@ impl Client {
         Ok(())
     }
 
+    pub fn subscribe_with_properties<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+        properties: SubscribeProperties,
+    ) -> Result<(), ClientError> {
+        self.handle_subscribe(topic, qos, Some(properties))
+    }
+
     pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.subscribe_with_properties(topic, qos, None)
+        self.handle_subscribe(topic, qos, None)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -477,19 +601,18 @@ impl Client {
         &self,
         topic: S,
         qos: QoS,
-        properties: Option<SubscribeProperties>,
+        properties: SubscribeProperties,
     ) -> Result<(), ClientError> {
         self.client
-            .try_subscribe_with_properties(topic, qos, properties)?;
-        Ok(())
+            .try_subscribe_with_properties(topic, qos, properties)
     }
 
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.try_subscribe_with_properties(topic, qos, None)
+        self.client.try_subscribe(topic, qos)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn subscribe_many_with_properties<T>(
+    fn handle_subscribe_many<T>(
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
@@ -503,17 +626,28 @@ impl Client {
         Ok(())
     }
 
+    pub fn subscribe_many_with_properties<T>(
+        &self,
+        topics: T,
+        properties: SubscribeProperties,
+    ) -> Result<(), ClientError>
+    where
+        T: IntoIterator<Item = Filter>,
+    {
+        self.handle_subscribe_many(topics, Some(properties))
+    }
+
     pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
-        self.subscribe_many_with_properties(topics, None)
+        self.handle_subscribe_many(topics, None)
     }
 
     pub fn try_subscribe_many_with_properties<T>(
         &self,
         topics: T,
-        properties: Option<SubscribeProperties>,
+        properties: SubscribeProperties,
     ) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
@@ -526,11 +660,11 @@ impl Client {
     where
         T: IntoIterator<Item = Filter>,
     {
-        self.try_subscribe_many_with_properties(topics, None)
+        self.client.try_subscribe_many(topics)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn unsubscribe_with_properties<S: Into<String>>(
+    fn handle_unsubscribe<S: Into<String>>(
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
@@ -541,23 +675,30 @@ impl Client {
         Ok(())
     }
 
+    pub fn unsubscribe_with_properties<S: Into<String>>(
+        &self,
+        topic: S,
+        properties: UnsubscribeProperties,
+    ) -> Result<(), ClientError> {
+        self.handle_unsubscribe(topic, Some(properties))
+    }
+
     pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        self.unsubscribe_with_properties(topic, None)
+        self.handle_unsubscribe(topic, None)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
-        properties: Option<UnsubscribeProperties>,
+        properties: UnsubscribeProperties,
     ) -> Result<(), ClientError> {
         self.client
-            .try_unsubscribe_with_properties(topic, properties)?;
-        Ok(())
+            .try_unsubscribe_with_properties(topic, properties)
     }
 
     pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        self.try_unsubscribe_with_properties(topic, None)
+        self.client.try_unsubscribe(topic)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
