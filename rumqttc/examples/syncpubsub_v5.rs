@@ -32,15 +32,13 @@ fn main() {
 }
 
 fn publish(client: Client) {
-    client
-        .subscribe_with_properties("hello/+/world", QoS::AtMostOnce, None)
-        .unwrap();
+    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..10_usize {
         let payload = vec![1; i];
         let topic = format!("hello/{i}/world");
         let qos = QoS::AtLeastOnce;
 
-        let _ = client.publish_with_properties(topic, qos, true, payload, None);
+        let _ = client.publish(topic, qos, true, payload);
     }
 
     thread::sleep(Duration::from_secs(1));

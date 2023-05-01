@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // subscribe example topic
     client
-        .subscribe_with_properties("hello/world", QoS::AtLeastOnce, None)
+        .subscribe("hello/world", QoS::AtLeastOnce)
         .await
         .unwrap();
 
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn requests(client: &AsyncClient) {
     for i in 1..=10 {
         client
-            .publish_with_properties("hello/world", QoS::AtLeastOnce, false, vec![1; i], None)
+            .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
             .await
             .unwrap();
 
