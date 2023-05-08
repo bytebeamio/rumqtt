@@ -3,7 +3,8 @@ use slab::Slab;
 use tracing::trace;
 
 use crate::protocol::{
-    matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, SubAck, UnsubAck,
+    matches, ConnAck, PingResp, PubAck, PubComp, PubRec, PubRel, Publish, PublishProperties,
+    SubAck, UnsubAck,
 };
 use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
 use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
@@ -12,6 +13,39 @@ use crate::segments::{CommitLog, Position};
 use crate::Storage;
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::time::{Duration, Instant};
+
+type PubWithProp = (Publish, Option<PublishProperties>);
+
+#[derive(Clone)]
+pub struct PublishData {
+    // coupled so it is easier while returning
+    pub publish: PubWithProp,
+    pub expiry: Option<Instant>,
+}
+
+impl From<PubWithProp> for PublishData {
+    fn from(value: PubWithProp) -> Self {
+        let mut expiry = None;
+        if let Some(ref props) = value.1 {
+            expiry = props
+                .message_expiry_interval
+                .map(|t| Instant::now() + Duration::from_secs(t as u64));
+        }
+        PublishData {
+            publish: value,
+            expiry,
+        }
+    }
+}
+
+// TODO: remove this from here
+impl Storage for PublishData {
+    fn size(&self) -> usize {
+        let (publish, _) = &self.publish;
+        4 + publish.topic.len() + publish.payload.len()
+    }
+}
 
 /// Stores 'device' data and 'actions' data in native commitlog
 /// organized by subscription filter. Device data is replicated
@@ -25,10 +59,10 @@ pub struct DataLog {
     /// Also has waiters used to wake connections/replicator tracker
     /// which are caught up with all the data on 'Filter' and waiting
     /// for new data
-    pub native: Slab<Data<Publish>>,
+    pub native: Slab<Data<PublishData>>,
     /// Map of subscription filter name to filter index
     filter_indexes: HashMap<Filter, FilterIdx>,
-    retained_publishes: HashMap<Topic, Publish>,
+    retained_publishes: HashMap<Topic, PublishData>,
     /// List of filters associated with a topic
     publish_filters: HashMap<Topic, Vec<FilterIdx>>,
 }
@@ -151,7 +185,7 @@ impl DataLog {
         filter_idx: FilterIdx,
         offset: Offset,
         len: u64,
-    ) -> io::Result<(Position, Vec<(Publish, Offset)>)> {
+    ) -> io::Result<(Position, Vec<(PubWithProp, Offset)>)> {
         // unwrap to get index of `self.native` is fine here, because when a new subscribe packet
         // arrives in `Router::handle_device_payload`, it first calls the function
         // `next_native_offset` which creates a new commitlog if one doesn't exist. So any new
@@ -163,12 +197,13 @@ impl DataLog {
         // Encoding this information is important so that calling function
         // has more information on how this method behaves.
         let next = data.log.readv(offset, len, &mut o)?;
+        let o = o.into_iter().map(|x| (x.0.publish, x.1)).collect();
         Ok((next, o))
     }
 
-    pub fn shadow(&mut self, filter: &str) -> Option<Publish> {
+    pub fn shadow(&mut self, filter: &str) -> Option<PubWithProp> {
         let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
-        data.log.last()
+        data.log.last().map(|p| p.publish)
     }
 
     /// This method is called when the subscriber has caught up with the commit log. In which case,
@@ -196,8 +231,14 @@ impl DataLog {
         inflight
     }
 
-    pub fn insert_to_retained_publishes(&mut self, publish: Publish, topic: Topic) {
-        self.retained_publishes.insert(topic, publish);
+    pub fn insert_to_retained_publishes(
+        &mut self,
+        publish: Publish,
+        publish_properties: Option<PublishProperties>,
+        topic: Topic,
+    ) {
+        let pub_with_props = (publish, publish_properties);
+        self.retained_publishes.insert(topic, pub_with_props.into());
     }
 
     pub fn remove_from_retained_publishes(&mut self, topic: Topic) {

@@ -1,6 +1,6 @@
 use crate::protocol::{
     ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    PubRel, PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -457,7 +457,7 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(mut publish, _) => {
+                Packet::Publish(mut publish, properties) => {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
@@ -519,6 +519,7 @@ impl Router {
                     match append_to_commitlog(
                         id,
                         publish.clone(),
+                        properties,
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
@@ -687,6 +688,7 @@ impl Router {
                     match append_to_commitlog(
                         id,
                         publish,
+                        None,
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
@@ -888,9 +890,12 @@ impl Router {
             pkid: 0,
             payload: will.message,
         };
+
+        let properties = None;
         match append_to_commitlog(
             id,
             publish,
+            properties,
             &mut self.datalog,
             &mut self.notifications,
             &mut self.connections,
@@ -951,6 +956,7 @@ impl Router {
 fn append_to_commitlog(
     id: ConnectionId,
     mut publish: Publish,
+    properties: Option<PublishProperties>,
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
@@ -972,7 +978,7 @@ fn append_to_commitlog(
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
         error!("Unexpected: retain field was not unset");
-        datalog.insert_to_retained_publishes(publish.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
     }
 
     publish.retain = false;
@@ -993,7 +999,8 @@ fn append_to_commitlog(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let (offset, filter) = datalog.append(publish.clone(), notifications);
+        let publish_data = (publish.clone(), properties.clone());
+        let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
             "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
@@ -1130,7 +1137,8 @@ fn forward_device_data(
     }
 
     // Fill and notify device data
-    let forwards = publishes.into_iter().map(|(mut publish, offset)| {
+    let forwards = publishes.into_iter().map(|(publish, offset)| {
+        let mut publish = publish.0;
         publish.qos = protocol::qos(qos).unwrap();
         Forward {
             cursor: offset,
@@ -1168,7 +1176,7 @@ fn forward_device_data(
 
 fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: ShadowRequest) {
     if let Some(reply) = datalog.shadow(&shadow.filter) {
-        let publish = reply;
+        let publish = reply.0;
         let shadow_reply = router::ShadowReply {
             topic: publish.topic,
             payload: publish.payload,
