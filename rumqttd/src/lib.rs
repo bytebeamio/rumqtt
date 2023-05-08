@@ -18,9 +18,9 @@ use std::net::SocketAddr;
 
 mod link;
 pub mod protocol;
-mod router;
+pub mod router;
 mod segments;
-mod server;
+pub mod server;
 
 pub type ConnectionId = usize;
 pub type RouterId = usize;
