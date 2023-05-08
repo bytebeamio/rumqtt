@@ -197,6 +197,12 @@ impl DataLog {
         // Encoding this information is important so that calling function
         // has more information on how this method behaves.
         let next = data.log.readv(offset, len, &mut o)?;
+
+        // ignore expired messages
+        let now = Instant::now();
+        o.retain(|x| x.0.expiry > Some(now));
+
+        // no need to include expiry when returning
         let o = o.into_iter().map(|x| (x.0.publish, x.1)).collect();
         Ok((next, o))
     }
