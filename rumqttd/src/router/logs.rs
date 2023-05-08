@@ -200,7 +200,7 @@ impl DataLog {
 
         // ignore expired messages
         let now = Instant::now();
-        o.retain(|x| x.0.expiry > Some(now));
+        o.retain(|x| x.0.expiry.map_or(true, |exp| exp > now));
 
         // no need to include expiry when returning
         let o = o.into_iter().map(|x| (x.0.publish, x.1)).collect();
