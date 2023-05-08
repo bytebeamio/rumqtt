@@ -108,9 +108,16 @@ mod eventloop;
 mod framed;
 pub mod mqttbytes;
 mod state;
+pub mod v5;
+
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 mod tls;
-pub mod v5;
+
+#[cfg(feature = "websocket")]
+mod websockets;
+
+#[cfg(feature = "proxy")]
+mod proxy;
 
 pub use client::{
     AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
@@ -127,6 +134,9 @@ pub use tls::Error as TlsError;
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{Certificate, ClientConfig, RootCertStore};
+
+#[cfg(feature = "proxy")]
+pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
@@ -297,7 +307,7 @@ impl Transport {
 }
 
 /// TLS configuration method
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub enum TlsConfiguration {
     #[cfg(feature = "use-rustls")]
@@ -426,6 +436,9 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    #[cfg(feature = "proxy")]
+    /// Proxy configuration.
+    proxy: Option<Proxy>,
 }
 
 impl MqttOptions {
@@ -466,6 +479,8 @@ impl MqttOptions {
             inflight: 100,
             last_will: None,
             manual_acks: false,
+            #[cfg(feature = "proxy")]
+            proxy: None,
         }
     }
 
@@ -634,6 +649,17 @@ impl MqttOptions {
     /// get manual acknowledgements
     pub fn manual_acks(&self) -> bool {
         self.manual_acks
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn set_proxy(&mut self, proxy: Proxy) -> &mut Self {
+        self.proxy = Some(proxy);
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn proxy(&self) -> Option<Proxy> {
+        self.proxy.clone()
     }
 }
 

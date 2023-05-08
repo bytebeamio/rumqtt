@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    - Added new API's on v5 client for properties, eg `publish_with_props` etc
    - Refactored `MqttOptions` to use `ConnectProperties` for some fields
    - Other minor changes for MQTT5
+  - Added support for HTTP(s) proxy (#608)
+    - Added `proxy` feature gate
+    - Refactored `eventloop::network_connect` to allow setting proxy
+    - Added proxy options to `MqttOptions`
 
 ### Changed
 - Remove `Box` on `Event::Incoming`
