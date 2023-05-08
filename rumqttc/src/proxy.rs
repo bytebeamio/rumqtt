@@ -1,11 +1,11 @@
 use crate::eventloop::socket_connect;
 use crate::framed::N;
-use crate::{NetworkOptions, TlsConfiguration};
+use crate::{NetworkOptions};
 
 use std::io;
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-use crate::tls;
+use crate::{tls, TlsConfiguration};
 
 #[derive(Clone, Debug)]
 pub struct Proxy {
