@@ -219,7 +219,7 @@ impl TLSAcceptor {
 
             ServerConfig::builder()
                 .with_safe_defaults()
-                .with_client_cert_verifier(AllowAnyAuthenticatedClient::new(store))
+                .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
                 .with_single_cert(certs, key)?
         };
 

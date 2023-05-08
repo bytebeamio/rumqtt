@@ -7,8 +7,6 @@ use tokio_rustls::rustls::{
     Certificate, ClientConfig, OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
 };
 #[cfg(feature = "use-rustls")]
-use tokio_rustls::webpki;
-#[cfg(feature = "use-rustls")]
 use tokio_rustls::TlsConnector as RustlsConnector;
 
 #[cfg(feature = "use-rustls")]
@@ -44,8 +42,8 @@ pub enum Error {
     /// Certificate/Name validation error
     #[error("Web Pki: {0}")]
     WebPki(#[from] webpki::Error),
-    #[cfg(feature = "use-rustls")]
     /// Invalid DNS name
+    #[cfg(feature = "use-rustls")]
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
     #[cfg(feature = "use-rustls")]

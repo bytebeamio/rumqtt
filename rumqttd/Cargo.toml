@@ -18,7 +18,8 @@ flume = "0.10.9"
 slab = "0.4.3"
 thiserror = "1.0.24"
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
-tokio-rustls =  { version = "0.23.0", optional = true }
+tokio-rustls = { version = "0.24", optional = true }
+rustls-webpki = { version = "0.100.1", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 tokio-tungstenite = { version = "0.15.0", optional = true }
@@ -36,7 +37,7 @@ axum = "0.6.4"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:x509-parser"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websockets = ["dep:tokio-tungstenite", "dep:websocket-codec", "dep:tokio-util", "dep:futures-util"]
 validate-tenant-prefix = []

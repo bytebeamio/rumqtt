@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Refactored `eventloop::network_connect` to allow setting proxy
     - Added proxy options to `MqttOptions`
 
+ - Added support for TLS certificates containing IP addresses
+ - Added support for RFC8446 C.4 client tracking prevention.
+
 ### Changed
 - Remove `Box` on `Event::Incoming`
 
