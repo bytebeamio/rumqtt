@@ -317,6 +317,9 @@ pub enum BridgeError {
     Io(#[from] io::Error),
     #[error("Network - {0}")]
     Network(#[from] network::Error),
+    #[error("Web Pki - {0}")]
+    #[cfg(feature = "use-rustls")]
+    WebPki(#[from] webpki::Error),
     #[error("DNS name - {0}")]
     #[cfg(feature = "use-rustls")]
     DNSName(#[from] InvalidDnsNameError),

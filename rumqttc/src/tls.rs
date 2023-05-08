@@ -40,7 +40,11 @@ pub enum Error {
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[cfg(feature = "use-rustls")]
+    /// Certificate/Name validation error
+    #[error("Web Pki: {0}")]
+    WebPki(#[from] webpki::Error),
     /// Invalid DNS name
+    #[cfg(feature = "use-rustls")]
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
     #[cfg(feature = "use-rustls")]
