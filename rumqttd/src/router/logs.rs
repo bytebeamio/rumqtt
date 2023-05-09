@@ -13,28 +13,23 @@ use crate::segments::{CommitLog, Position};
 use crate::Storage;
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 type PubWithProp = (Publish, Option<PublishProperties>);
 
 #[derive(Clone)]
 pub struct PublishData {
-    // coupled so it is easier while returning
-    pub publish: PubWithProp,
-    pub expiry: Option<Instant>,
+    pub publish: Publish,
+    pub properties: Option<PublishProperties>,
+    pub timestamp: Instant,
 }
 
 impl From<PubWithProp> for PublishData {
-    fn from(value: PubWithProp) -> Self {
-        let mut expiry = None;
-        if let Some(ref props) = value.1 {
-            expiry = props
-                .message_expiry_interval
-                .map(|t| Instant::now() + Duration::from_secs(t as u64));
-        }
+    fn from((publish, properties): PubWithProp) -> Self {
         PublishData {
-            publish: value,
-            expiry,
+            publish,
+            properties,
+            timestamp: Instant::now(),
         }
     }
 }
@@ -42,7 +37,7 @@ impl From<PubWithProp> for PublishData {
 // TODO: remove this from here
 impl Storage for PublishData {
     fn size(&self) -> usize {
-        let (publish, _) = &self.publish;
+        let publish = &self.publish;
         4 + publish.topic.len() + publish.payload.len()
     }
 }
@@ -198,18 +193,38 @@ impl DataLog {
         // has more information on how this method behaves.
         let next = data.log.readv(offset, len, &mut o)?;
 
-        // ignore expired messages
         let now = Instant::now();
-        o.retain(|x| x.0.expiry.map_or(true, |exp| exp > now));
+        o.retain_mut(|(pubdata, _)| {
+            if let Some(PublishProperties {
+                message_expiry_interval: Some(t),
+                ..
+            }) = pubdata.properties.as_mut()
+            {
+                let time_spent = (now - pubdata.timestamp).as_secs() as u32;
 
-        // no need to include expiry when returning
-        let o = o.into_iter().map(|x| (x.0.publish, x.1)).collect();
+                // ignore expired messages
+                if time_spent > *t {
+                    return false;
+                }
+
+                // set message_expiry_interval to (original value - time spent waiting in server)
+                *t -= time_spent;
+            }
+            true
+        });
+
+        // no need to include timestamp when returning
+        let o = o
+            .into_iter()
+            .map(|(pubdata, offset)| ((pubdata.publish, pubdata.properties), offset))
+            .collect();
+
         Ok((next, o))
     }
 
     pub fn shadow(&mut self, filter: &str) -> Option<PubWithProp> {
         let data = self.native.get_mut(*self.filter_indexes.get(filter)?)?;
-        data.log.last().map(|p| p.publish)
+        data.log.last().map(|p| (p.publish, p.properties))
     }
 
     /// This method is called when the subscriber has caught up with the commit log. In which case,
