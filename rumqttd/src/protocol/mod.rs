@@ -146,7 +146,7 @@ pub struct ConnAck {
     pub code: ConnectReturnCode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConnAckProperties {
     pub session_expiry_interval: Option<u32>,
     pub receive_max: Option<u16>,

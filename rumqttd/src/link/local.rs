@@ -123,7 +123,7 @@ impl Link {
         // Right now link identifies failure with dropped rx in router,
         // which is probably ok. We need this here to get id assigned by router
         let (id, ack) = match notification {
-            Notification::DeviceAck(Ack::ConnAck(id, ack)) => (id, ack),
+            Notification::DeviceAck(Ack::ConnAck(id, ack, _)) => (id, ack),
             _message => return Err(LinkError::NotConnectionAck),
         };
 

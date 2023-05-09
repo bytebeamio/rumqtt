@@ -1,6 +1,7 @@
 use crate::protocol::{
-    ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRel, PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    ConnAck, ConnAckProperties, ConnectReturnCode, DisconnectReasonCode, Packet, PingResp, PubAck,
+    PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish, PublishProperties, QoS,
+    SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -48,7 +49,11 @@ pub enum RouterError {
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
     InvalidClientId(String),
+    #[error("Disconnection")]
+    Disconnect(DisconnectReasonCode),
 }
+
+const TOPIC_ALIAS_MAX: u16 = 4096;
 
 pub struct Router {
     id: RouterId,
@@ -334,8 +339,14 @@ impl Router {
             code: ConnectReturnCode::Success,
         };
 
+        let properties = ConnAckProperties {
+            // TODO: set this to some appropriate value
+            topic_alias_max: Some(TOPIC_ALIAS_MAX),
+            ..Default::default()
+        };
+
         let ackslog = self.ackslog.get_mut(connection_id).unwrap();
-        ackslog.connack(connection_id, ack);
+        ackslog.connack(connection_id, ack, Some(properties));
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
@@ -961,8 +972,6 @@ fn append_to_commitlog(
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
 ) -> Result<Offset, RouterError> {
-    let topic = std::str::from_utf8(&publish.topic)?;
-
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
     if let Some(tenant_prefix) = &connections[id].tenant_prefix {
@@ -973,6 +982,37 @@ fn append_to_commitlog(
             ));
         }
     }
+
+    let connection = connections.get_mut(id).unwrap();
+
+    if let Some(PublishProperties {
+        topic_alias: Some(alias),
+        ..
+    }) = properties
+    {
+        if alias == 0 || alias > TOPIC_ALIAS_MAX {
+            error!("Alias must be greater than 0 and <={TOPIC_ALIAS_MAX}");
+            return Err(RouterError::Disconnect(
+                DisconnectReasonCode::TopicAliasInvalid,
+            ));
+        }
+
+        if publish.topic.is_empty() {
+            let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
+                error!("Empty topic name with invalid alias");
+                return Err(RouterError::Disconnect(
+                    DisconnectReasonCode::ProtocolError,
+                ));
+            };
+            publish.topic = alias_topic.to_owned().into();
+        } else {
+            let topic = std::str::from_utf8(&publish.topic)?;
+            connection.topic_aliases.insert(alias, topic.to_owned());
+            trace!("set alias {alias} for topic {topic}");
+        }
+    };
+
+    let topic = std::str::from_utf8(&publish.topic)?;
 
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
@@ -989,7 +1029,7 @@ fn append_to_commitlog(
     // Create a dynamic filter if dynamic_filters are enabled for this connection
     let filter_idxs = match filter_idxs {
         Some(v) => v,
-        None if connections[id].dynamic_filters => {
+        None if connection.dynamic_filters => {
             let (idx, _cursor) = datalog.next_native_offset(topic);
             vec![idx]
         }
@@ -1137,15 +1177,21 @@ fn forward_device_data(
     }
 
     // Fill and notify device data
-    let forwards = publishes.into_iter().map(|(publish, offset)| {
-        let mut publish = publish.0;
-        publish.qos = protocol::qos(qos).unwrap();
-        Forward {
-            cursor: offset,
-            size: 0,
-            publish,
-        }
-    });
+    let forwards = publishes
+        .into_iter()
+        .map(|((mut publish, mut properties), offset)| {
+            publish.qos = protocol::qos(qos).unwrap();
+            // TODO: server decides to set topic alias
+            if let Some(p) = properties.as_mut() {
+                p.topic_alias = None
+            };
+            Forward {
+                cursor: offset,
+                size: 0,
+                publish,
+                properties,
+            }
+        });
 
     let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
 

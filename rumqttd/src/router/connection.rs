@@ -1,6 +1,6 @@
 use crate::protocol::LastWill;
 use crate::Filter;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::ConnectionEvents;
 
@@ -22,6 +22,8 @@ pub struct Connection {
     pub last_will: Option<LastWill>,
     /// Connection events
     pub events: ConnectionEvents,
+    /// Topic aliases set by clients
+    pub(crate) topic_aliases: HashMap<u16, Filter>,
 }
 
 impl Connection {
@@ -52,6 +54,7 @@ impl Connection {
             subscriptions: HashSet::default(),
             last_will,
             events: ConnectionEvents::default(),
+            topic_aliases: HashMap::new(),
         }
     }
 }
