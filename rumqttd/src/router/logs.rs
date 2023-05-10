@@ -203,7 +203,7 @@ impl DataLog {
                 let time_spent = (now - pubdata.timestamp).as_secs() as u32;
 
                 // ignore expired messages
-                if time_spent > *t {
+                if time_spent >= *t {
                     return false;
                 }
 
