@@ -1,7 +1,7 @@
 use crate::protocol::{
-    ConnAck, ConnAckProperties, ConnectReturnCode, DisconnectReasonCode, Packet, PingResp, PubAck,
-    PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish, PublishProperties, QoS,
-    SubAck, SubscribeReasonCode, UnsubAck,
+    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
+    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
+    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -238,7 +238,9 @@ impl Router {
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::NewAlert(tx) => self.handle_new_alert(tx),
             Event::DeviceData => self.handle_device_payload(id),
-            Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
+            Event::Disconnect(disconnect) => {
+                self.handle_disconnection(id, disconnect.execute_will, None)
+            }
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
@@ -278,7 +280,7 @@ impl Router {
                     "Duplicate client_id, dropping previous connection with connection_id: {}",
                     connection_id
                 );
-                self.handle_disconnection(*connection_id, true);
+                self.handle_disconnection(*connection_id, true, None);
             }
         }
 
@@ -362,7 +364,12 @@ impl Router {
         let _alert_id = self.alerts.insert(tx);
     }
 
-    fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
+    fn handle_disconnection(
+        &mut self,
+        id: ConnectionId,
+        execute_last_will: bool,
+        reason: Option<DisconnectReasonCode>,
+    ) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
         let client_id = match &self.obufs.get(id) {
@@ -382,6 +389,27 @@ impl Router {
 
         info!("Disconnecting connection");
 
+        if let Some(reason_code) = reason {
+            let outgoing = match self.obufs.get_mut(id) {
+                Some(v) => v,
+                None => {
+                    error!("no-connection id {} is already gone", id);
+                    return;
+                }
+            };
+
+            let disconnect = Disconnect { reason_code };
+
+            let disconnect_notification = Notification::Disconnect(disconnect, None);
+
+            outgoing
+                .data_buffer
+                .lock()
+                .push_back(disconnect_notification);
+
+            outgoing.handle.try_send(()).ok();
+        }
+
         // Remove connection from router
         let mut connection = self.connections.remove(id);
         let _incoming = self.ibufs.remove(id);
@@ -391,7 +419,7 @@ impl Router {
         self.ackslog.remove(id);
 
         // Don't remove connection id from readyqueue with index. This will
-        // remove wrong connection from readyqueue. Instead just leave diconnected
+        // remove wrong connection from readyqueue. Instead just leave disconnected
         // connection in readyqueue and allow 'consume()' method to deal with this
         // self.readyqueue.remove(id);
 
@@ -462,6 +490,7 @@ impl Router {
         let mut force_ack = false;
         let mut new_data = false;
         let mut disconnect = false;
+        let mut disconnect_reason: Option<DisconnectReasonCode> = None;
         let mut execute_will = true;
 
         // info!("{:15.15}[I] {:20} count = {}", client_id, "packets", packets.len());
@@ -548,6 +577,11 @@ impl Router {
                             );
                             self.router_meters.failed_publishes += 1;
                             disconnect = true;
+
+                            if let RouterError::Disconnect(code) = e {
+                                disconnect_reason = Some(code)
+                            }
+
                             break;
                         }
                     };
@@ -768,7 +802,7 @@ impl Router {
         // on say 5th packet should not block new data notifications for packets
         // 1 - 4. Hence we use a flag instead of diconnecting immediately
         if disconnect {
-            self.handle_disconnection(id, execute_will);
+            self.handle_disconnection(id, execute_will, disconnect_reason);
         }
     }
 

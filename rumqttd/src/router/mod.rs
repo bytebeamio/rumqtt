@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     protocol::{
-        ConnAck, ConnAckProperties, Packet, PingResp, PubAck, PubAckProperties, PubComp,
-        PubCompProperties, PubRec, PubRecProperties, PubRel, PubRelProperties, Publish,
-        PublishProperties, SubAck, SubAckProperties, UnsubAck,
+        ConnAck, ConnAckProperties, Disconnect, DisconnectProperties, Packet, PingResp, PubAck,
+        PubAckProperties, PubComp, PubCompProperties, PubRec, PubRecProperties, PubRel,
+        PubRelProperties, Publish, PublishProperties, SubAck, SubAckProperties, UnsubAck,
     },
     ConnectionId, Filter, RouterId, Topic,
 };
@@ -85,6 +85,7 @@ pub enum Notification {
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
+    Disconnect(Disconnect, Option<DisconnectProperties>),
 }
 
 type MaybePacket = Option<Packet>;
@@ -96,6 +97,7 @@ impl From<Notification> for MaybePacket {
             Notification::Forward(forward) => Packet::Publish(forward.publish, forward.properties),
             Notification::DeviceAck(ack) => ack.into(),
             Notification::Unschedule => return None,
+            Notification::Disconnect(disconnct, props) => Packet::Disconnect(disconnct, props),
             v => {
                 tracing::error!("Unexpected notification here, it cannot be converted into Packet, Notification: {:?}", v);
                 return None;
