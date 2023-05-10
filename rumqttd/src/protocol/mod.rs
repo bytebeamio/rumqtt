@@ -246,7 +246,7 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PublishProperties {
     pub payload_format_indicator: Option<u8>,
     pub message_expiry_interval: Option<u32>,

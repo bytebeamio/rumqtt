@@ -1,3 +1,5 @@
+use slab::Slab;
+
 use crate::protocol::LastWill;
 use crate::Filter;
 use std::collections::{HashMap, HashSet};
@@ -24,6 +26,10 @@ pub struct Connection {
     pub events: ConnectionEvents,
     /// Topic aliases set by clients
     pub(crate) topic_aliases: HashMap<u16, Filter>,
+    /// Topic aliases used by broker
+    pub(crate) broker_topic_aliases: HashMap<Filter, u16>,
+    pub topic_alias_max: u16,
+    pub(crate) used_aliases: Slab<()>,
 }
 
 impl Connection {
@@ -34,6 +40,7 @@ impl Connection {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        topic_alias_max: u16,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
@@ -46,6 +53,10 @@ impl Connection {
             None => (client_id, None),
         };
 
+        let mut used_aliases = Slab::new();
+        // occupy 0th index as 0 is invalid topic alias
+        assert_eq!(0, used_aliases.insert(()));
+
         Connection {
             client_id,
             tenant_prefix,
@@ -55,6 +66,9 @@ impl Connection {
             last_will,
             events: ConnectionEvents::default(),
             topic_aliases: HashMap::new(),
+            broker_topic_aliases: HashMap::new(),
+            topic_alias_max,
+            used_aliases,
         }
     }
 }

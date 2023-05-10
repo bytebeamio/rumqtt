@@ -629,6 +629,10 @@ impl Router {
                                 continue;
                             }
 
+                            if let Some(alias) = connection.broker_topic_aliases.remove(filter) {
+                                connection.used_aliases.remove(alias as usize)
+                            };
+
                             let unsuback = UnsubAck {
                                 pkid,
                                 // reasons are used in MQTTv5
@@ -838,6 +842,11 @@ impl Router {
         // We always try to ack when ever a connection is scheduled
         ack_device_data(ackslog, outgoing);
 
+        let connection = &mut self.connections[id];
+        let max_alias = connection.topic_alias_max;
+        let broker_topic_aliases = &mut connection.broker_topic_aliases;
+        let used_aliases = &mut connection.used_aliases;
+
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
         // So a new connection is always scheduled with at least one request
@@ -854,7 +863,15 @@ impl Router {
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing, alertlog) {
+            match forward_device_data(
+                &mut request,
+                datalog,
+                outgoing,
+                alertlog,
+                broker_topic_aliases,
+                used_aliases,
+                max_alias,
+            ) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -967,7 +984,7 @@ impl Router {
 fn append_to_commitlog(
     id: ConnectionId,
     mut publish: Publish,
-    properties: Option<PublishProperties>,
+    mut properties: Option<PublishProperties>,
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
@@ -985,11 +1002,12 @@ fn append_to_commitlog(
 
     let connection = connections.get_mut(id).unwrap();
 
-    if let Some(PublishProperties {
-        topic_alias: Some(alias),
-        ..
-    }) = properties
-    {
+    let topic_alias = properties.as_mut().and_then(|p| {
+        // clear the received value as it is irrelevant while forwarding publishes
+        p.topic_alias.take()
+    });
+
+    if let Some(alias) = topic_alias {
         if alias == 0 || alias > TOPIC_ALIAS_MAX {
             error!("Alias must be greater than 0 and <={TOPIC_ALIAS_MAX}");
             return Err(RouterError::Disconnect(
@@ -1106,6 +1124,9 @@ fn forward_device_data(
     datalog: &DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
+    broker_topic_aliases: &mut HashMap<Filter, u16>,
+    used_aliases: &mut Slab<()>,
+    max_alias: u16,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
@@ -1176,15 +1197,45 @@ fn forward_device_data(
         return ConsumeStatus::FilterCaughtup;
     }
 
+    // there are three cases
+    // 1. we are using an alias for filter already
+    // 2. we can't use alias as none is avaliable to use
+    // 3. we need to set the alias as this is first time
+    let mut clear_topic = true;
+    let topic_alias = broker_topic_aliases
+        .get(&request.filter)
+        .copied()
+        .or_else(|| {
+            clear_topic = false;
+            let alias_to_use = used_aliases.insert(());
+            // this also handles the case when client set max_alias to 0
+            // i.e. client do not support topic aliases
+            if alias_to_use > max_alias as usize {
+                used_aliases.remove(alias_to_use);
+                return None;
+            }
+
+            let alias_to_use = alias_to_use as u16;
+            broker_topic_aliases.insert(request.filter.clone(), alias_to_use);
+            Some(alias_to_use)
+        });
+
     // Fill and notify device data
     let forwards = publishes
         .into_iter()
         .map(|((mut publish, mut properties), offset)| {
             publish.qos = protocol::qos(qos).unwrap();
-            // TODO: server decides to set topic alias
-            if let Some(p) = properties.as_mut() {
-                p.topic_alias = None
-            };
+
+            if topic_alias.is_some() {
+                let mut props = properties.unwrap_or_default();
+                props.topic_alias = topic_alias;
+                properties = Some(props);
+            }
+
+            if clear_topic {
+                publish.topic.clear()
+            }
+
             Forward {
                 cursor: offset,
                 size: 0,
