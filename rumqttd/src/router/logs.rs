@@ -195,22 +195,24 @@ impl DataLog {
 
         let now = Instant::now();
         o.retain_mut(|(pubdata, _)| {
-            if let Some(PublishProperties {
+            let Some(PublishProperties {
                 message_expiry_interval: Some(t),
                 ..
-            }) = pubdata.properties.as_mut()
-            {
-                let time_spent = (now - pubdata.timestamp).as_secs() as u32;
+            }) = pubdata.properties.as_mut() else {
+                return true;
+            };
 
-                // ignore expired messages
-                if time_spent >= *t {
-                    return false;
-                }
+            let time_spent = (now - pubdata.timestamp).as_secs() as u32;
 
+            let is_valid = time_spent < *t;
+
+            // ignore expired messages
+            if is_valid {
                 // set message_expiry_interval to (original value - time spent waiting in server)
                 *t -= time_spent;
             }
-            true
+
+            is_valid
         });
 
         // no need to include timestamp when returning
