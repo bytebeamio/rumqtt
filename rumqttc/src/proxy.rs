@@ -1,6 +1,6 @@
 use crate::eventloop::socket_connect;
 use crate::framed::N;
-use crate::{NetworkOptions};
+use crate::NetworkOptions;
 
 use std::io;
 

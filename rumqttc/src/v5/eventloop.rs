@@ -97,11 +97,12 @@ impl EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
+        let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;
 
         EventLoop {
             options,
-            state: MqttState::new(manual_acks),
+            state: MqttState::new(inflight_limit, manual_acks),
             requests_tx,
             requests_rx,
             pending,

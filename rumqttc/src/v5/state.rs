@@ -111,13 +111,15 @@ pub struct MqttState {
     pub max_outgoing_packet_size: Option<u32>,
     /// Maximum number of allowed inflight QoS1 & QoS2 requests
     pub(crate) max_outgoing_inflight: u16,
+    /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
+    max_outgoing_inflight_upper_limit: u16,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(manual_acks: bool) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -126,8 +128,8 @@ impl MqttState {
             last_pkid: 0,
             inflight: 0,
             // index 0 is wasted as 0 is not a valid packet id
-            outgoing_pub: vec![None; std::u16::MAX as usize + 1],
-            outgoing_rel: vec![None; std::u16::MAX as usize + 1],
+            outgoing_pub: vec![None; max_inflight as usize + 1],
+            outgoing_rel: vec![None; max_inflight as usize + 1],
             incoming_pub: vec![None; std::u16::MAX as usize + 1],
             collision: None,
             // TODO: Optimize these sizes later
@@ -138,7 +140,8 @@ impl MqttState {
             // Set via CONNACK
             broker_topic_alias_max: 0,
             max_outgoing_packet_size: None,
-            max_outgoing_inflight: std::u16::MAX,
+            max_outgoing_inflight: max_inflight,
+            max_outgoing_inflight_upper_limit: max_inflight,
         }
     }
 
@@ -282,7 +285,8 @@ impl MqttState {
             }
 
             if let Some(max_inflight) = props.receive_max {
-                self.max_outgoing_inflight = max_inflight;
+                self.max_outgoing_inflight =
+                    max_inflight.min(self.max_outgoing_inflight_upper_limit);
                 // FIXME: Maybe resize the pubrec and pubrel queues here
                 // to save some space.
             }
@@ -725,7 +729,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(false)
+        MqttState::new(u16::MAX, false)
     }
 
     #[test]
@@ -782,6 +786,38 @@ mod test {
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 4);
         assert_eq!(mqtt.inflight, 4);
+    }
+
+    #[test]
+    fn outgoing_publish_with_max_inflight_is_ok() {
+        let mut mqtt = MqttState::new(2, false);
+
+        // QoS2 publish
+        let publish = build_outgoing_publish(QoS::ExactlyOnce);
+
+        mqtt.outgoing_publish(publish.clone()).unwrap();
+        assert_eq!(mqtt.last_pkid, 1);
+        assert_eq!(mqtt.inflight, 1);
+
+        // Packet id should be set back down to 0, since we hit the limit
+        mqtt.outgoing_publish(publish.clone()).unwrap();
+        assert_eq!(mqtt.last_pkid, 0);
+        assert_eq!(mqtt.inflight, 2);
+
+        // This should cause a collition
+        mqtt.outgoing_publish(publish.clone()).unwrap();
+        assert_eq!(mqtt.last_pkid, 1);
+        assert_eq!(mqtt.inflight, 2);
+        assert!(mqtt.collision.is_some());
+
+        mqtt.handle_incoming_puback(&PubAck::new(1, None)).unwrap();
+        mqtt.handle_incoming_puback(&PubAck::new(2, None)).unwrap();
+        assert_eq!(mqtt.inflight, 1);
+
+        // Now there should be space in the outgoing queue
+        mqtt.outgoing_publish(publish.clone()).unwrap();
+        assert_eq!(mqtt.last_pkid, 0);
+        assert_eq!(mqtt.inflight, 2);
     }
 
     #[test]

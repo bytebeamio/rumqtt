@@ -86,6 +86,9 @@ pub struct MqttOptions {
     #[cfg(feature = "proxy")]
     /// Proxy configuration.
     proxy: Option<Proxy>,
+    /// Upper limit on maximum number of inflight requests.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    outgoing_inflight_upper_limit: Option<u16>,
 }
 
 impl MqttOptions {
@@ -129,6 +132,7 @@ impl MqttOptions {
             network_options: NetworkOptions::new(),
             #[cfg(feature = "proxy")]
             proxy: None,
+            outgoing_inflight_upper_limit: None,
         }
     }
 
@@ -485,6 +489,19 @@ impl MqttOptions {
     #[cfg(feature = "proxy")]
     pub fn proxy(&self) -> Option<Proxy> {
         self.proxy.clone()
+    }
+
+    /// Get the upper limit on maximum number of inflight outgoing publishes.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    pub fn set_outgoing_inflight_upper_limit(&mut self, limit: u16) -> &mut Self {
+        self.outgoing_inflight_upper_limit = Some(limit);
+        self
+    }
+
+    /// Set the upper limit on maximum number of inflight outgoing publishes.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    pub fn get_outgoing_inflight_upper_limit(&self) -> Option<u16> {
+        self.outgoing_inflight_upper_limit
     }
 }
 
