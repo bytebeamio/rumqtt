@@ -1023,6 +1023,8 @@ fn append_to_commitlog(
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
 ) -> Result<Offset, RouterError> {
+    let topic = std::str::from_utf8(&publish.topic)?;
+
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
     if let Some(tenant_prefix) = &connections[id].tenant_prefix {
@@ -1058,7 +1060,6 @@ fn append_to_commitlog(
             };
             publish.topic = alias_topic.to_owned().into();
         } else {
-            let topic = std::str::from_utf8(&publish.topic)?;
             connection.topic_aliases.insert(alias, topic.to_owned());
             trace!("set alias {alias} for topic {topic}");
         }
