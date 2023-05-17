@@ -1,6 +1,7 @@
 use crate::{framed::Network, Transport};
 use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
+use crate::state::ThreadSafeMqttPkidManager;
 
 use crate::framed::N;
 use crate::mqttbytes::v4::*;
@@ -114,8 +115,8 @@ impl EventLoop {
         }
     }
 
-    pub fn next_pkid(&mut self) -> u16 {
-        self.state.next_pkid()
+    pub fn pkid_manager(&self) -> &ThreadSafeMqttPkidManager {
+        &self.state.pkid_manager
     }
 
     fn clean(&mut self) {

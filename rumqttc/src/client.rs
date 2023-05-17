@@ -10,6 +10,7 @@ use flume::{SendError, Sender, TrySendError};
 use futures::FutureExt;
 use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
+use crate::state::ThreadSafeMqttPkidManager;
 
 /// Client Error
 #[derive(Debug, thiserror::Error)]
@@ -18,6 +19,8 @@ pub enum ClientError {
     Request(Request),
     #[error("Failed to send mqtt requests to eventloop")]
     TryRequest(Request),
+    #[error("A StateError occured while sending a request")]
+    StateError(#[from] crate::state::StateError),
 }
 
 impl From<SendError<Request>> for ClientError {
@@ -42,6 +45,7 @@ impl From<TrySendError<Request>> for ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
+    pkid_manager: Option<ThreadSafeMqttPkidManager>
 }
 
 impl AsyncClient {
@@ -52,7 +56,7 @@ impl AsyncClient {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
 
-        let client = AsyncClient { request_tx };
+        let client = AsyncClient { request_tx, pkid_manager: Some(eventloop.pkid_manager().clone()) };
 
         (client, eventloop)
     }
@@ -60,25 +64,7 @@ impl AsyncClient {
     /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
     /// creating a test instance.
     pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
-        AsyncClient { request_tx }
-    }
-
-    /// Sends a MQTT Publish with a given pkid to the `EventLoop`.
-    pub async fn publish_with_pkid<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-        pkid: u16,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        V: Into<Vec<u8>>,
-    {
-        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
-        self.request_tx.send_async(publish).await?;
-        Ok(())
+        AsyncClient { request_tx, pkid_manager: None }
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
@@ -88,30 +74,18 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.publish_with_pkid(topic, qos, retain, payload, 0).await
-    }
-
-    /// Attempts to send a MQTT Publish with a given pkid to the `EventLoop`.
-    pub fn try_publish_with_pkid<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-        pkid: u16,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        V: Into<Vec<u8>>,
-    {
+        let mut pkid = 0;
+        if let Some(pm) = &self.pkid_manager {
+            pkid = pm.next_pkid()?;
+        }
         let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
-        self.request_tx.try_send(publish)?;
-        Ok(())
+        self.request_tx.send_async(publish).await?;
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
@@ -121,12 +95,18 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.try_publish_with_pkid(topic, qos, retain, payload, 0)
+        let mut pkid = 0;
+        if let Some(pm) = &self.pkid_manager {
+            pkid = pm.next_pkid()?;
+        }
+        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
+        self.request_tx.try_send(publish)?;
+        Ok(pkid)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -310,24 +290,6 @@ impl Client {
         (client, connection)
     }
 
-    /// Sends a MQTT Publish with a given pkid to the `EventLoop`
-    pub fn publish_with_pkid<S, V>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-        pkid: u16,
-    ) -> Result<(), ClientError>
-        where
-            S: Into<String>,
-            V: Into<Vec<u8>>,
-    {
-        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
-        self.client.request_tx.send(publish)?;
-        Ok(())
-    }
-
     /// Sends a MQTT Publish to the `EventLoop`
     pub fn publish<S, V>(
         &mut self,
@@ -335,29 +297,18 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.publish_with_pkid(topic, qos, retain, payload, 0)
-    }
-
-    /// Attempts to send a MQTT Publish with a given pkid to the `EventLoop`
-    pub fn try_publish_with_pkid<S, V>(
-        &mut self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-        pkid: u16,
-    ) -> Result<(), ClientError>
-        where
-            S: Into<String>,
-            V: Into<Vec<u8>>,
-    {
-        self.client.try_publish_with_pkid(topic, qos, retain, payload, pkid)?;
-        Ok(())
+        let mut pkid = 0;
+        if let Some(pm) = &self.client.pkid_manager {
+            pkid = pm.next_pkid()?;
+        }
+        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
+        self.client.request_tx.send(publish)?;
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`
@@ -367,13 +318,12 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.client.try_publish(topic, qos, retain, payload)?;
-        Ok(())
+        self.client.try_publish(topic, qos, retain, payload)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -486,10 +436,6 @@ pub struct Connection {
 impl Connection {
     fn new(eventloop: EventLoop, runtime: Runtime) -> Connection {
         Connection { eventloop, runtime }
-    }
-
-    pub fn next_pkid(&mut self) -> u16 {
-        self.eventloop.next_pkid()
     }
 
     /// Returns an iterator over this connection. Iterating over this is all that's
