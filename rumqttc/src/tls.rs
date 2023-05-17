@@ -1,4 +1,3 @@
-use tokio::net::TcpStream;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
 #[cfg(feature = "use-rustls")]
@@ -7,8 +6,6 @@ use tokio_rustls::rustls::client::InvalidDnsNameError;
 use tokio_rustls::rustls::{
     Certificate, ClientConfig, OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
 };
-#[cfg(feature = "use-rustls")]
-use tokio_rustls::webpki;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::TlsConnector as RustlsConnector;
 
@@ -45,8 +42,8 @@ pub enum Error {
     /// Certificate/Name validation error
     #[error("Web Pki: {0}")]
     WebPki(#[from] webpki::Error),
-    #[cfg(feature = "use-rustls")]
     /// Invalid DNS name
+    #[cfg(feature = "use-rustls")]
     #[error("DNS name")]
     DNSName(#[from] InvalidDnsNameError),
     #[cfg(feature = "use-rustls")]
@@ -175,7 +172,7 @@ pub async fn tls_connect(
     addr: &str,
     _port: u16,
     tls_config: &TlsConfiguration,
-    tcp: TcpStream,
+    tcp: Box<dyn N>,
 ) -> Result<Box<dyn N>, Error> {
     let tls: Box<dyn N> = match tls_config {
         #[cfg(feature = "use-rustls")]
