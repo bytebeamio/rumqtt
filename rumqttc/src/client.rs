@@ -76,14 +76,7 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        publish.pkid = pkid;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
-        }
+        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
         self.request_tx.send_async(publish).await?;
         Ok(())
     }
@@ -116,14 +109,7 @@ impl AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        publish.pkid = pkid;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
-        }
+        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
         self.request_tx.try_send(publish)?;
         Ok(())
     }
@@ -275,6 +261,18 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
     Some(ack)
 }
 
+fn create_request_publish<S, V>(topic: S, qos: QoS, retain: bool, payload: V, pkid: u16) -> Result<Request, ClientError> where S: Into<String>, V: Into<Vec<u8>> {
+    let topic = topic.into();
+    let mut publish = Publish::new(&topic, qos, payload);
+    publish.retain = retain;
+    publish.pkid = pkid;
+    let publish = Request::Publish(publish);
+    if !valid_topic(&topic) {
+        return Err(ClientError::Request(publish));
+    }
+    Ok(publish)
+}
+
 /// A synchronous client, communicates with MQTT `EventLoop`.
 ///
 /// This is cloneable and can be used to synchronously [`publish`](`AsyncClient::publish`),
@@ -325,7 +323,8 @@ impl Client {
             S: Into<String>,
             V: Into<Vec<u8>>,
     {
-        pollster::block_on(self.client.publish_with_pkid(topic, qos, retain, payload, pkid))?;
+        let publish = create_request_publish(topic, qos, retain, payload, pkid)?;
+        self.client.request_tx.send(publish)?;
         Ok(())
     }
 
@@ -341,15 +340,7 @@ impl Client {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
-        }
-        self.client.request_tx.send(publish)?;
-        Ok(())
+        self.publish_with_pkid(topic, qos, retain, payload, 0)
     }
 
     /// Attempts to send a MQTT Publish with a given pkid to the `EventLoop`
