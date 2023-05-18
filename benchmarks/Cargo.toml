@@ -9,7 +9,7 @@ edition = "2018"
 bytes = "1"
 futures = { version = "0.3", features = ["compat"] }
 itoa = "0.4"
-pprof = { version = "0.10", features = ["flamegraph", "prost-codec"] }
+pprof = { version = "0.11", features = ["flamegraph", "prost-codec"] }
 pretty_env_logger = "0.4"
 rumqttc = { path = "../rumqttc" }
 rumqttd = { path = "../rumqttd" }

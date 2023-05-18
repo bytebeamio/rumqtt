@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - QoS2 support
 
 ### Changed
+- Certificate paths configured in config file are checked during startup and throws a panic if it is not valid.
 
 ### Deprecated
 
@@ -21,7 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ---
-## [rumqttd 0.12.7] - 29-02-2023
+
+## [rumqttd 0.14.0] - 31-03-2023
+
+### Added
+- `PrometheusSetting` now takes `listen` to specify listener address instead of default `127.0.0.1`. Do not use `listen` and `port` together.
+
+### Deprecated
+- `PrometheusSetting`'s `port` will be removed in favour of `listen`.
+
+### Removed
+- **Breaking:** Remove retained messages and lastwill features
+
+
+## [rumqttd 0.13.0] - 08-03-2023
+
+- No change, only version bump
+
+## [rumqttd 0.12.7] - 04-03-2023
 
 ### Changed
 - Re-design meters and alerts (#579)

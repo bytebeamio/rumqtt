@@ -1,101 +1,133 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-fn len(pubrel: &PubRel, properties: &Option<PubRelProperties>) -> usize {
-    let mut len = 2 + 1; // pkid + reason
-
-    // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
-    // and there are no Properties. In this case the PUBREL has a Remaining Length of 2.
-    // <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901144>
-    if pubrel.reason == PubRelReason::Success && properties.is_none() {
-        return 2;
-    }
-
-    if let Some(p) = properties {
-        let properties_len = properties::len(p);
-        let properties_len_len = len_len(properties_len);
-        len += properties_len_len + properties_len;
-    } else {
-        len += 1;
-    }
-
-    len
+/// Return code in PubRel
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PubRelReason {
+    Success,
+    PacketIdentifierNotFound,
 }
 
-pub fn read(
-    fixed_header: FixedHeader,
-    mut bytes: Bytes,
-) -> Result<(PubRel, Option<PubRelProperties>), Error> {
-    let variable_header_index = fixed_header.fixed_header_len;
-    bytes.advance(variable_header_index);
-    let pkid = read_u16(&mut bytes)?;
-    if fixed_header.remaining_len == 2 {
-        return Ok((
-            PubRel {
+/// QoS2 Publish release, in response to PUBREC packet
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubRel {
+    pub pkid: u16,
+    pub reason: PubRelReason,
+    pub properties: Option<PubRelProperties>,
+}
+
+impl PubRel {
+    pub fn new(pkid: u16, properties: Option<PubRelProperties>) -> Self {
+        Self {
+            pkid,
+            reason: PubRelReason::Success,
+            properties,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubRelReason::Success && self.properties.is_none() {
+            return 4;
+        }
+
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 2 + 1; // pkid + reason
+
+        // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
+        // and there are no Properties. In this case the PUBREL has a Remaining Length of 2.
+        // <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901144>
+        if self.reason == PubRelReason::Success && self.properties.is_none() {
+            return 2;
+        }
+
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            len += 1;
+        }
+
+        len
+    }
+
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubRel, Error> {
+        let variable_header_index = fixed_header.fixed_header_len;
+        bytes.advance(variable_header_index);
+        let pkid = read_u16(&mut bytes)?;
+        if fixed_header.remaining_len == 2 {
+            return Ok(PubRel {
                 pkid,
                 reason: PubRelReason::Success,
-            },
-            None,
-        ));
-    }
+                properties: None,
+            });
+        }
 
-    let ack_reason = read_u8(&mut bytes)?;
-    if fixed_header.remaining_len < 4 {
-        return Ok((
-            PubRel {
+        let ack_reason = read_u8(&mut bytes)?;
+        if fixed_header.remaining_len < 4 {
+            return Ok(PubRel {
                 pkid,
                 reason: reason(ack_reason)?,
-            },
-            None,
-        ));
+                properties: None,
+            });
+        }
+
+        let properties = PubRelProperties::read(&mut bytes)?;
+        let puback = PubRel {
+            pkid,
+            reason: reason(ack_reason)?,
+            properties,
+        };
+
+        Ok(puback)
     }
 
-    let puback = PubRel {
-        pkid,
-        reason: reason(ack_reason)?,
-    };
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        let len = self.len();
+        buffer.put_u8(0x62);
+        let count = write_remaining_length(buffer, len)?;
+        buffer.put_u16(self.pkid);
 
-    let properties = properties::read(&mut bytes)?;
-    Ok((puback, properties))
+        // If there are no properties during success, sending reason code is optional
+        if self.reason == PubRelReason::Success && self.properties.is_none() {
+            return Ok(4);
+        }
+
+        buffer.put_u8(code(self.reason));
+
+        if let Some(p) = &self.properties {
+            p.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
+
+        Ok(1 + count + len)
+    }
 }
 
-pub fn write(
-    pubrel: &PubRel,
-    properties: &Option<PubRelProperties>,
-    buffer: &mut BytesMut,
-) -> Result<usize, Error> {
-    let len = len(pubrel, properties);
-    buffer.put_u8(0x62);
-    let count = write_remaining_length(buffer, len)?;
-    buffer.put_u16(pubrel.pkid);
-
-    // If there are no properties during success, sending reason code is optional
-    if pubrel.reason == PubRelReason::Success && properties.is_none() {
-        return Ok(4);
-    }
-
-    buffer.put_u8(code(pubrel.reason));
-
-    if let Some(p) = properties {
-        properties::write(p, buffer)?;
-    } else {
-        write_remaining_length(buffer, 0)?;
-    }
-
-    Ok(1 + count + len)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubRelProperties {
+    pub reason_string: Option<String>,
+    pub user_properties: Vec<(String, String)>,
 }
 
-mod properties {
-    use super::*;
-
-    pub fn len(properties: &PubRelProperties) -> usize {
+impl PubRelProperties {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             len += 1 + 2 + reason.len();
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             len += 1 + 2 + key.len() + 2 + value.len();
         }
 
@@ -140,16 +172,16 @@ mod properties {
         }))
     }
 
-    pub fn write(properties: &PubRelProperties, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = len(properties);
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
         write_remaining_length(buffer, len)?;
 
-        if let Some(reason) = &properties.reason_string {
+        if let Some(reason) = &self.reason_string {
             buffer.put_u8(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
@@ -158,6 +190,7 @@ mod properties {
         Ok(())
     }
 }
+
 /// Connection return code type
 fn reason(num: u8) -> Result<PubRelReason, Error> {
     let code = match num {
@@ -173,5 +206,33 @@ fn code(reason: PubRelReason) -> u8 {
     match reason {
         PubRelReason::Success => 0,
         PubRelReason::PacketIdentifierNotFound => 146,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
+    use super::*;
+    use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn length_calculation() {
+        let mut dummy_bytes = BytesMut::new();
+        // Use user_properties to pad the size to exceed ~128 bytes to make the
+        // remaining_length field in the packet be 2 bytes long.
+        let pubrel_props = PubRelProperties {
+            reason_string: None,
+            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
+        };
+
+        let pubrel_pkt = PubRel::new(1, Some(pubrel_props));
+
+        let size_from_size = pubrel_pkt.size();
+        let size_from_write = pubrel_pkt.write(&mut dummy_bytes).unwrap();
+        let size_from_bytes = dummy_bytes.len();
+
+        assert_eq!(size_from_write, size_from_bytes);
+        assert_eq!(size_from_size, size_from_bytes);
     }
 }

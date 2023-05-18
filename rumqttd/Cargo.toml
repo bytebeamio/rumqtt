@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.12.6"
+version = "0.14.0"
 license = "Apache-2.0"
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 authors = ["tekjar <raviteja@bytebeam.io>"]
@@ -18,7 +18,8 @@ flume = "0.10.9"
 slab = "0.4.3"
 thiserror = "1.0.24"
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
-tokio-rustls =  { version = "0.23.0", optional = true }
+tokio-rustls = { version = "0.24", optional = true }
+rustls-webpki = { version = "0.100.1", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 tokio-tungstenite = { version = "0.15.0", optional = true }
@@ -31,12 +32,12 @@ tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="0.3.16", features=["env-filter"] }
 metrics = "0.20.1"
 metrics-exporter-prometheus = "0.11.0"
-clap = { version = "4.1.4", features = ["derive"] }
+clap = { version = "4.2", features = ["derive"] }
 axum = "0.6.4"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-pemfile", "dep:x509-parser"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websockets = ["dep:tokio-tungstenite", "dep:websocket-codec", "dep:tokio-util", "dep:futures-util"]
 validate-tenant-prefix = []

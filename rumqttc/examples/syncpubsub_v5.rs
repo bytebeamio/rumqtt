@@ -1,6 +1,5 @@
-use rumqttc::v5::mqttbytes::{LastWill, QoS};
-use rumqttc::v5::ConnectionError;
-use rumqttc::v5::{Client, MqttOptions};
+use rumqttc::v5::mqttbytes::{v5::LastWill, QoS};
+use rumqttc::v5::{Client, ConnectionError, MqttOptions};
 use std::thread;
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ fn main() {
     pretty_env_logger::init();
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
-    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false, None);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_last_will(will);

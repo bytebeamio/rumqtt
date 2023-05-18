@@ -12,7 +12,7 @@ fn create_conn() -> (AsyncClient, EventLoop) {
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
-        .set_clean_session(false);
+        .set_clean_start(false);
 
     AsyncClient::new(mqttoptions, 10)
 }
@@ -58,8 +58,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{event:?}");
 
         if let Event::Incoming(packet) = event {
-            let publish = match *packet {
-                Packet::Publish(publish, _) => publish,
+            let publish = match packet {
+                Packet::Publish(publish) => publish,
                 _ => continue,
             };
             // this time we will ack incoming publishes.

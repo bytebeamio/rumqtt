@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 
@@ -7,18 +8,22 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
-#[cfg(feature = "use-rustls")]
-pub use crate::tls::Error as TlsError;
+use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
+
+use mqttbytes::v5::*;
+
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
-use mqttbytes::{v5::*, *};
+#[cfg(feature = "use-rustls")]
+pub use crate::tls::Error as TlsError;
+
+#[cfg(feature = "proxy")]
+pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
-
-use crate::Outgoing;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
@@ -53,18 +58,11 @@ pub struct MqttOptions {
     /// keep alive time to send pingreq to broker when the connection is idle
     keep_alive: Duration,
     /// clean (or) persistent session
-    clean_session: bool,
+    clean_start: bool,
     /// client identifier
     client_id: String,
     /// username and password
     credentials: Option<(String, String)>,
-    /// maximum incoming packet size (verifies remaining length of the packet)
-    max_incoming_packet_size: usize,
-    /// Maximum outgoing packet size (only verifies publish payload size)
-    // TODO Verify this with all packets. This can be packet.write but message left in
-    // the state might be a footgun as user has to explicitly clean it. Probably state
-    // has to be moved to network
-    max_outgoing_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// Max internal request batching
@@ -72,16 +70,25 @@ pub struct MqttOptions {
     /// Minimum delay time between consecutive outgoing packets
     /// while retransmitting pending packets
     pending_throttle: Duration,
-    /// maximum number of outgoing inflight messages
-    inflight: u16,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
     /// Connection timeout
     conn_timeout: u64,
+    /// Default value of for maximum incoming packet size.
+    /// Used when `max_incomming_size` in `connect_properties` is NOT available.
+    default_max_incoming_size: usize,
+    /// Connect Properties
+    connect_properties: Option<ConnectProperties>,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
     network_options: NetworkOptions,
+    #[cfg(feature = "proxy")]
+    /// Proxy configuration.
+    proxy: Option<Proxy>,
+    /// Upper limit on maximum number of inflight requests.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    outgoing_inflight_upper_limit: Option<u16>,
 }
 
 impl MqttOptions {
@@ -111,19 +118,21 @@ impl MqttOptions {
             port,
             transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
-            clean_session: true,
+            clean_start: true,
             client_id: id,
             credentials: None,
-            max_incoming_packet_size: 10 * 1024,
-            max_outgoing_packet_size: 10 * 1024,
             request_channel_capacity: 10,
             max_request_batch: 0,
             pending_throttle: Duration::from_micros(0),
-            inflight: 100,
             last_will: None,
             conn_timeout: 5,
+            default_max_incoming_size: 10 * 1024,
+            connect_properties: None,
             manual_acks: false,
             network_options: NetworkOptions::new(),
+            #[cfg(feature = "proxy")]
+            proxy: None,
+            outgoing_inflight_upper_limit: None,
         }
     }
 
@@ -205,32 +214,20 @@ impl MqttOptions {
         self.client_id.clone()
     }
 
-    /// Set packet size limit for outgoing an incoming packets
-    pub fn set_max_packet_size(&mut self, incoming: usize, outgoing: usize) -> &mut Self {
-        self.max_incoming_packet_size = incoming;
-        self.max_outgoing_packet_size = outgoing;
-        self
-    }
-
-    /// Maximum packet size
-    pub fn max_packet_size(&self) -> usize {
-        self.max_incoming_packet_size
-    }
-
-    /// `clean_session = true` removes all the state from queues & instructs the broker
+    /// `clean_start = true` removes all the state from queues & instructs the broker
     /// to clean all the client state when client disconnects.
     ///
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
-    pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
-        self.clean_session = clean_session;
+    pub fn set_clean_start(&mut self, clean_start: bool) -> &mut Self {
+        self.clean_start = clean_start;
         self
     }
 
     /// Clean session
-    pub fn clean_session(&self) -> bool {
-        self.clean_session
+    pub fn clean_start(&self) -> bool {
+        self.clean_start
     }
 
     /// Username and password
@@ -270,19 +267,6 @@ impl MqttOptions {
         self.pending_throttle
     }
 
-    /// Set number of concurrent in flight messages
-    pub fn set_inflight(&mut self, inflight: u16) -> &mut Self {
-        assert!(inflight != 0, "zero in flight is not allowed");
-
-        self.inflight = inflight;
-        self
-    }
-
-    /// Number of concurrent in flight messages
-    pub fn inflight(&self) -> u16 {
-        self.inflight
-    }
-
     /// set connection timeout in secs
     pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
         self.conn_timeout = timeout;
@@ -292,6 +276,188 @@ impl MqttOptions {
     /// get timeout in secs
     pub fn connection_timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// set connection properties
+    pub fn set_connect_properties(&mut self, properties: ConnectProperties) -> &mut Self {
+        self.connect_properties = Some(properties);
+        self
+    }
+
+    /// get connection properties
+    pub fn connect_properties(&self) -> Option<ConnectProperties> {
+        self.connect_properties.clone()
+    }
+
+    /// set receive maximum on connection properties
+    pub fn set_receive_maximum(&mut self, recv_max: Option<u16>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.receive_maximum = recv_max;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.receive_maximum = recv_max;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get receive maximum from connection properties
+    pub fn receive_maximum(&self) -> Option<u16> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.receive_maximum
+        } else {
+            None
+        }
+    }
+
+    /// set max packet size on connection properties
+    pub fn set_max_packet_size(&mut self, max_size: Option<u32>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.max_packet_size = max_size;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.max_packet_size = max_size;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get max packet size from connection properties
+    pub fn max_packet_size(&self) -> Option<u32> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.max_packet_size
+        } else {
+            None
+        }
+    }
+
+    /// set max topic alias on connection properties
+    pub fn set_topic_alias_max(&mut self, topic_alias_max: Option<u16>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.topic_alias_max = topic_alias_max;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.topic_alias_max = topic_alias_max;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get max topic alias from connection properties
+    pub fn topic_alias_max(&self) -> Option<u16> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.topic_alias_max
+        } else {
+            None
+        }
+    }
+
+    /// set request response info on connection properties
+    pub fn set_request_response_info(&mut self, request_response_info: Option<u8>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.request_response_info = request_response_info;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.request_response_info = request_response_info;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get request response info from connection properties
+    pub fn request_response_info(&self) -> Option<u8> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.request_response_info
+        } else {
+            None
+        }
+    }
+
+    /// set request problem info on connection properties
+    pub fn set_request_problem_info(&mut self, request_problem_info: Option<u8>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.request_problem_info = request_problem_info;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.request_problem_info = request_problem_info;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get request problem info from connection properties
+    pub fn request_problem_info(&self) -> Option<u8> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.request_problem_info
+        } else {
+            None
+        }
+    }
+
+    /// set user properties on connection properties
+    pub fn set_user_properties(&mut self, user_properties: Vec<(String, String)>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.user_properties = user_properties;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.user_properties = user_properties;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get user properties from connection properties
+    pub fn user_properties(&self) -> Vec<(String, String)> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.user_properties.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// set authentication method on connection properties
+    pub fn set_authentication_method(
+        &mut self,
+        authentication_method: Option<String>,
+    ) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.authentication_method = authentication_method;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.authentication_method = authentication_method;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get authentication method from connection properties
+    pub fn authentication_method(&self) -> Option<String> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.authentication_method.clone()
+        } else {
+            None
+        }
+    }
+
+    /// set authentication data on connection properties
+    pub fn set_authentication_data(&mut self, authentication_data: Option<Bytes>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.authentication_data = authentication_data;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.authentication_data = authentication_data;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get authentication data from connection properties
+    pub fn authentication_data(&self) -> Option<Bytes> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.authentication_data.clone()
+        } else {
+            None
+        }
     }
 
     /// set manual acknowledgements
@@ -313,6 +479,30 @@ impl MqttOptions {
         self.network_options = network_options;
         self
     }
+
+    #[cfg(feature = "proxy")]
+    pub fn set_proxy(&mut self, proxy: Proxy) -> &mut Self {
+        self.proxy = Some(proxy);
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn proxy(&self) -> Option<Proxy> {
+        self.proxy.clone()
+    }
+
+    /// Get the upper limit on maximum number of inflight outgoing publishes.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    pub fn set_outgoing_inflight_upper_limit(&mut self, limit: u16) -> &mut Self {
+        self.outgoing_inflight_upper_limit = Some(limit);
+        self
+    }
+
+    /// Set the upper limit on maximum number of inflight outgoing publishes.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    pub fn get_outgoing_inflight_upper_limit(&self) -> Option<u16> {
+        self.outgoing_inflight_upper_limit
+    }
 }
 
 #[cfg(feature = "url")]
@@ -327,8 +517,8 @@ pub enum OptionError {
     #[error("Invalid keep-alive value.")]
     KeepAlive,
 
-    #[error("Invalid clean-session value.")]
-    CleanSession,
+    #[error("Invalid clean-start value.")]
+    CleanStart,
 
     #[error("Invalid max-incoming-packet-size value.")]
     MaxIncomingPacketSize,
@@ -391,6 +581,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             .into_owned();
 
         let mut options = MqttOptions::new(id, host, port);
+        let mut connect_props = ConnectProperties::new();
         options.set_transport(transport);
 
         if let Some(keep_alive) = queries
@@ -401,12 +592,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.set_keep_alive(Duration::from_secs(keep_alive));
         }
 
-        if let Some(clean_session) = queries
-            .remove("clean_session")
-            .map(|v| v.parse::<bool>().map_err(|_| OptionError::CleanSession))
+        if let Some(clean_start) = queries
+            .remove("clean_start")
+            .map(|v| v.parse::<bool>().map_err(|_| OptionError::CleanStart))
             .transpose()?
         {
-            options.set_clean_session(clean_session);
+            options.set_clean_start(clean_start);
         }
 
         if let Some((username, password)) = {
@@ -421,24 +612,13 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.set_credentials(username, password);
         }
 
-        if let (Some(incoming), Some(outgoing)) = (
-            queries
-                .remove("max_incoming_packet_size_bytes")
-                .map(|v| {
-                    v.parse::<usize>()
-                        .map_err(|_| OptionError::MaxIncomingPacketSize)
-                })
-                .transpose()?,
-            queries
-                .remove("max_outgoing_packet_size_bytes")
-                .map(|v| {
-                    v.parse::<usize>()
-                        .map_err(|_| OptionError::MaxOutgoingPacketSize)
-                })
-                .transpose()?,
-        ) {
-            options.set_max_packet_size(incoming, outgoing);
-        }
+        connect_props.max_packet_size = queries
+            .remove("max_incoming_packet_size_bytes")
+            .map(|v| {
+                v.parse::<u32>()
+                    .map_err(|_| OptionError::MaxIncomingPacketSize)
+            })
+            .transpose()?;
 
         if let Some(request_channel_capacity) = queries
             .remove("request_channel_capacity_num")
@@ -467,13 +647,10 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.set_pending_throttle(Duration::from_micros(pending_throttle));
         }
 
-        if let Some(inflight) = queries
+        connect_props.receive_maximum = queries
             .remove("inflight_num")
             .map(|v| v.parse::<u16>().map_err(|_| OptionError::Inflight))
-            .transpose()?
-        {
-            options.set_inflight(inflight);
-        }
+            .transpose()?;
 
         if let Some(conn_timeout) = queries
             .remove("conn_timeout_secs")
@@ -487,6 +664,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             return Err(OptionError::Unknown(opt.into_owned()));
         }
 
+        options.connect_properties = Some(connect_props);
         Ok(options)
     }
 }
@@ -499,17 +677,16 @@ impl Debug for MqttOptions {
             .field("broker_addr", &self.broker_addr)
             .field("port", &self.port)
             .field("keep_alive", &self.keep_alive)
-            .field("clean_session", &self.clean_session)
+            .field("clean_start", &self.clean_start)
             .field("client_id", &self.client_id)
             .field("credentials", &self.credentials)
-            .field("max_packet_size", &self.max_incoming_packet_size)
             .field("request_channel_capacity", &self.request_channel_capacity)
             .field("max_request_batch", &self.max_request_batch)
             .field("pending_throttle", &self.pending_throttle)
-            .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
             .field("conn_timeout", &self.conn_timeout)
             .field("manual_acks", &self.manual_acks)
+            .field("connect properties", &self.connect_properties)
             .finish()
     }
 }
@@ -521,7 +698,7 @@ mod test {
     #[test]
     #[should_panic]
     fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_start(true);
     }
 
     #[test]
@@ -579,16 +756,12 @@ mod test {
             OptionError::KeepAlive
         );
         assert_eq!(
-            err("mqtt://host:42?client_id=foo&clean_session=foo"),
-            OptionError::CleanSession
+            err("mqtt://host:42?client_id=foo&clean_start=foo"),
+            OptionError::CleanStart
         );
         assert_eq!(
             err("mqtt://host:42?client_id=foo&max_incoming_packet_size_bytes=foo"),
             OptionError::MaxIncomingPacketSize
-        );
-        assert_eq!(
-            err("mqtt://host:42?client_id=foo&max_outgoing_packet_size_bytes=foo"),
-            OptionError::MaxOutgoingPacketSize
         );
         assert_eq!(
             err("mqtt://host:42?client_id=foo&request_channel_capacity_num=foo"),
@@ -615,6 +788,6 @@ mod test {
     #[test]
     #[should_panic]
     fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
     }
 }

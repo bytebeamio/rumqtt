@@ -1,6 +1,20 @@
 use std::slice::Iter;
 
-use self::{disconnect::Disconnect, ping::pingreq};
+pub use self::{
+    connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
+    connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
+    disconnect::{Disconnect, DisconnectReasonCode},
+    ping::{PingReq, PingResp},
+    puback::{PubAck, PubAckProperties, PubAckReason},
+    pubcomp::{PubComp, PubCompProperties, PubCompReason},
+    publish::{Publish, PublishProperties},
+    pubrec::{PubRec, PubRecProperties, PubRecReason},
+    pubrel::{PubRel, PubRelProperties, PubRelReason},
+    suback::{SubAck, SubAckProperties, SubscribeReasonCode},
+    subscribe::{Filter, Subscribe, SubscribeProperties},
+    unsuback::{UnsubAck, UnsubAckProperties, UnsubAckReason},
+    unsubscribe::{Unsubscribe, UnsubscribeProperties},
+};
 
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -21,23 +35,17 @@ mod unsubscribe;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
-    Connect(
-        Connect,
-        Option<ConnectProperties>,
-        Option<LastWill>,
-        Option<LastWillProperties>,
-        Option<Login>,
-    ),
+    Connect(Connect, Option<LastWill>, Option<Login>),
     ConnAck(ConnAck),
-    Publish(Publish, Option<PublishProperties>),
-    PubAck(PubAck, Option<PubAckProperties>),
+    Publish(Publish),
+    PubAck(PubAck),
     PingReq(PingReq),
     PingResp(PingResp),
-    Subscribe(Subscribe, Option<SubscribeProperties>),
-    SubAck(SubAck, Option<SubAckProperties>),
-    PubRec(PubRec, Option<PubRecProperties>),
-    PubRel(PubRel, Option<PubRelProperties>),
-    PubComp(PubComp, Option<PubCompProperties>),
+    Subscribe(Subscribe),
+    SubAck(SubAck),
+    PubRec(PubRec),
+    PubRel(PubRel),
+    PubComp(PubComp),
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
@@ -45,7 +53,7 @@ pub enum Packet {
 
 impl Packet {
     /// Reads a stream of bytes and extracts next MQTT packet out of it
-    pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
+    pub fn read(stream: &mut BytesMut, max_size: Option<usize>) -> Result<Packet, Error> {
         let fixed_header = check(stream.iter(), max_size)?;
 
         // Test with a stream with exactly the size to check border panics
@@ -64,48 +72,47 @@ impl Packet {
         let packet = packet.freeze();
         let packet = match packet_type {
             PacketType::Connect => {
-                let (connect, properties, will, willproperties, login) =
-                    connect::read(fixed_header, packet)?;
-                Packet::Connect(connect, properties, will, willproperties, login)
+                let (connect, will, login) = Connect::read(fixed_header, packet)?;
+                Packet::Connect(connect, will, login)
             }
             PacketType::Publish => {
-                let (publish, properties) = publish::read(fixed_header, packet)?;
-                Packet::Publish(publish, properties)
+                let publish = Publish::read(fixed_header, packet)?;
+                Packet::Publish(publish)
             }
             PacketType::Subscribe => {
-                let (subscribe, properties) = subscribe::read(fixed_header, packet)?;
-                Packet::Subscribe(subscribe, properties)
+                let subscribe = Subscribe::read(fixed_header, packet)?;
+                Packet::Subscribe(subscribe)
             }
             PacketType::Unsubscribe => {
-                let (unsubscribe, _) = unsubscribe::read(fixed_header, packet)?;
+                let unsubscribe = Unsubscribe::read(fixed_header, packet)?;
                 Packet::Unsubscribe(unsubscribe)
             }
             PacketType::ConnAck => {
-                let (connack, _) = connack::read(fixed_header, packet)?;
+                let connack = ConnAck::read(fixed_header, packet)?;
                 Packet::ConnAck(connack)
             }
             PacketType::PubAck => {
-                let (puback, properties) = puback::read(fixed_header, packet)?;
-                Packet::PubAck(puback, properties)
+                let puback = PubAck::read(fixed_header, packet)?;
+                Packet::PubAck(puback)
             }
             PacketType::PubRec => {
-                let (pubrec, properties) = pubrec::read(fixed_header, packet)?;
-                Packet::PubRec(pubrec, properties)
+                let pubrec = PubRec::read(fixed_header, packet)?;
+                Packet::PubRec(pubrec)
             }
             PacketType::PubRel => {
-                let (pubrel, properties) = pubrel::read(fixed_header, packet)?;
-                Packet::PubRel(pubrel, properties)
+                let pubrel = PubRel::read(fixed_header, packet)?;
+                Packet::PubRel(pubrel)
             }
             PacketType::PubComp => {
-                let (pubcomp, properties) = pubcomp::read(fixed_header, packet)?;
-                Packet::PubComp(pubcomp, properties)
+                let pubcomp = PubComp::read(fixed_header, packet)?;
+                Packet::PubComp(pubcomp)
             }
             PacketType::SubAck => {
-                let (suback, properties) = suback::read(fixed_header, packet)?;
-                Packet::SubAck(suback, properties)
+                let suback = SubAck::read(fixed_header, packet)?;
+                Packet::SubAck(suback)
             }
             PacketType::UnsubAck => {
-                let (unsuback, _) = unsuback::read(fixed_header, packet)?;
+                let unsuback = UnsubAck::read(fixed_header, packet)?;
                 Packet::UnsubAck(unsuback)
             }
             PacketType::PingReq => Packet::PingReq(PingReq),
@@ -121,23 +128,19 @@ impl Packet {
 
     pub fn write(&self, write: &mut BytesMut) -> Result<usize, Error> {
         match self {
-            Self::Publish(publish, properties) => publish::write(publish, properties, write),
-            Self::Subscribe(subscription, properties) => {
-                subscribe::write(subscription, properties, write)
-            }
-            Self::Unsubscribe(unsubscribe) => unsubscribe::write(unsubscribe, &None, write),
-            Self::ConnAck(ack) => connack::write(ack, &None, write),
-            Self::PubAck(ack, properties) => puback::write(ack, properties, write),
-            Self::SubAck(ack, properties) => suback::write(ack, properties, write),
-            Self::UnsubAck(unsuback) => unsuback::write(unsuback, &None, write),
-            Self::PubRec(pubrec, properties) => pubrec::write(pubrec, properties, write),
-            Self::PubRel(pubrel, properties) => pubrel::write(pubrel, properties, write),
-            Self::PubComp(pubcomp, properties) => pubcomp::write(pubcomp, properties, write),
-            Self::Connect(connect, properties, will, will_properties, login) => {
-                connect::write(connect, will, will_properties, login, properties, write)
-            }
-            Self::PingReq(_) => pingreq::write(write),
-            Self::PingResp(_) => ping::pingresp::write(write),
+            Self::Publish(publish) => publish.write(write),
+            Self::Subscribe(subscription) => subscription.write(write),
+            Self::Unsubscribe(unsubscribe) => unsubscribe.write(write),
+            Self::ConnAck(ack) => ack.write(write),
+            Self::PubAck(ack) => ack.write(write),
+            Self::SubAck(ack) => ack.write(write),
+            Self::UnsubAck(unsuback) => unsuback.write(write),
+            Self::PubRec(pubrec) => pubrec.write(write),
+            Self::PubRel(pubrel) => pubrel.write(write),
+            Self::PubComp(pubcomp) => pubcomp.write(write),
+            Self::Connect(connect, will, login) => connect.write(will, login, write),
+            Self::PingReq(_) => PingReq::write(write),
+            Self::PingResp(_) => PingResp::write(write),
             Self::Disconnect(disconnect) => disconnect.write(write),
         }
     }
@@ -298,7 +301,7 @@ fn property(num: u8) -> Result<PropertyType, Error> {
 /// The passed stream doesn't modify parent stream's cursor. If this function
 /// returned an error, next `check` on the same parent stream is forced start
 /// with cursor at 0 again (Iter is owned. Only Iter's cursor is changed internally)
-pub fn check(stream: Iter<u8>, max_packet_size: usize) -> Result<FixedHeader, Error> {
+pub fn check(stream: Iter<u8>, max_packet_size: Option<usize>) -> Result<FixedHeader, Error> {
     // Create fixed header if there are enough bytes in the stream
     // to frame full packet
     let stream_len = stream.len();
@@ -306,8 +309,13 @@ pub fn check(stream: Iter<u8>, max_packet_size: usize) -> Result<FixedHeader, Er
 
     // Don't let rogue connections attack with huge payloads.
     // Disconnect them before reading all that data
-    if fixed_header.remaining_len > max_packet_size {
-        return Err(Error::PayloadSizeLimitExceeded(fixed_header.remaining_len));
+    if let Some(max_size) = max_packet_size {
+        if fixed_header.remaining_len > max_size {
+            return Err(Error::PayloadSizeLimitExceeded {
+                pkt_size: fixed_header.remaining_len,
+                max: max_size,
+            });
+        }
     }
 
     // If the current call fails due to insufficient bytes in the stream,
@@ -476,4 +484,12 @@ fn read_u32(stream: &mut Bytes) -> Result<u32, Error> {
     }
 
     Ok(stream.get_u32())
+}
+
+mod test {
+    // These are used in tests by packets
+    #[allow(dead_code)]
+    pub const USER_PROP_KEY: &str = "property";
+    #[allow(dead_code)]
+    pub const USER_PROP_VAL: &str = "a value thats really long............................................................................................................";
 }

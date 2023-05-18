@@ -13,3 +13,4 @@ perf.data*
 node_modules
 cachegrind.out
 plot
+.uuid

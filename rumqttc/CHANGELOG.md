@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+ - Added `outgoing_inflight_upper_limit` to MQTT5 `MqttOptions`. This sets the upper bound for the number of outgoing publish messages.
 
 ### Changed
 
@@ -20,6 +21,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 ---
+
+## [rumqttc 0.21.0] - 01-05-2023
+
+### Added
+ - Added support for MQTT5 features to v5 client
+   - Refactored v5::mqttbytes to use associated functions & include properties
+   - Added new API's on v5 client for properties, eg `publish_with_props` etc
+   - Refactored `MqttOptions` to use `ConnectProperties` for some fields
+   - Other minor changes for MQTT5
+  - Added support for HTTP(s) proxy (#608)
+    - Added `proxy` feature gate
+    - Refactored `eventloop::network_connect` to allow setting proxy
+    - Added proxy options to `MqttOptions`
+
+ - Added support for TLS certificates containing IP addresses
+ - Added support for RFC8446 C.4 client tracking prevention.
+
+### Changed
+- Remove `Box` on `Event::Incoming`
+
+### Deprecated
+
+### Removed
+ - Removed dependency on pollster
+
+### Fixed
+ - Fixed v5::mqttbytes `Connect` packet returning wrong size on `write()`
+   - Added tests for packet length for all v5 packets
+
+### Security
+
 
 ## [rumqttc 0.20.0] - 17-01-2023
 
