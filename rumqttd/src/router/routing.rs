@@ -1023,19 +1023,6 @@ fn append_to_commitlog(
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
 ) -> Result<Offset, RouterError> {
-    let topic = std::str::from_utf8(&publish.topic)?;
-
-    // Ensure that only clients associated with a tenant can publish to tenant's topic
-    #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connections[id].tenant_prefix {
-        if !topic.starts_with(tenant_prefix) {
-            return Err(RouterError::BadTenant(
-                tenant_prefix.to_owned(),
-                topic.to_owned(),
-            ));
-        }
-    }
-
     let connection = connections.get_mut(id).unwrap();
 
     let topic_alias = properties.as_mut().and_then(|p| {
@@ -1060,12 +1047,24 @@ fn append_to_commitlog(
             };
             publish.topic = alias_topic.to_owned().into();
         } else {
+            let topic = std::str::from_utf8(&publish.topic)?;
             connection.topic_aliases.insert(alias, topic.to_owned());
             trace!("set alias {alias} for topic {topic}");
         }
     };
 
     let topic = std::str::from_utf8(&publish.topic)?;
+
+    // Ensure that only clients associated with a tenant can publish to tenant's topic
+    #[cfg(feature = "validate-tenant-prefix")]
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
+        if !topic.starts_with(tenant_prefix) {
+            return Err(RouterError::BadTenant(
+                tenant_prefix.to_owned(),
+                topic.to_owned(),
+            ));
+        }
+    }
 
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
@@ -1242,9 +1241,13 @@ fn forward_device_data(
         .copied()
         .or_else(|| {
             clear_topic = false;
+
+            // max_alias to 0 means client do not support topic aliases
+            if max_alias == 0 {
+                return None;
+            }
+
             let alias_to_use = used_aliases.insert(());
-            // this also handles the case when client set max_alias to 0
-            // i.e. client do not support topic aliases
             if alias_to_use > max_alias as usize {
                 used_aliases.remove(alias_to_use);
                 return None;
