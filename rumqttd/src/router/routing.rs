@@ -49,7 +49,7 @@ pub enum RouterError {
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
     InvalidClientId(String),
-    #[error("Disconnection")]
+    #[error("Disconnection (Reason: {0:?})")]
     Disconnect(DisconnectReasonCode),
 }
 
