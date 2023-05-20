@@ -27,7 +27,7 @@ pub struct Connection {
     /// Topic aliases set by clients
     pub(crate) topic_aliases: HashMap<u16, Filter>,
     /// Topic aliases used by broker
-    pub(crate) broker_topic_aliases: HashMap<Filter, u16>,
+    pub(crate) broker_topic_aliases: Option<HashMap<Filter, u16>>,
     pub topic_alias_max: u16,
     pub(crate) used_aliases: Slab<()>,
 }
@@ -57,6 +57,13 @@ impl Connection {
         // occupy 0th index as 0 is invalid topic alias
         assert_eq!(0, used_aliases.insert(()));
 
+        // topic_alias_max is 0, that means client doesn't want to use / support topic alias
+        let broker_topic_aliases = if topic_alias_max == 0 {
+            None
+        } else {
+            Some(HashMap::new())
+        };
+
         Connection {
             client_id,
             tenant_prefix,
@@ -66,7 +73,7 @@ impl Connection {
             last_will,
             events: ConnectionEvents::default(),
             topic_aliases: HashMap::new(),
-            broker_topic_aliases: HashMap::new(),
+            broker_topic_aliases,
             topic_alias_max,
             used_aliases,
         }

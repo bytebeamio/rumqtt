@@ -663,7 +663,11 @@ impl Router {
                                 continue;
                             }
 
-                            if let Some(alias) = connection.broker_topic_aliases.remove(filter) {
+                            if let Some(alias) = connection
+                                .broker_topic_aliases
+                                .as_mut()
+                                .and_then(|aliases| aliases.remove(filter))
+                            {
                                 connection.used_aliases.remove(alias as usize)
                             };
 
@@ -1039,14 +1043,18 @@ fn append_to_commitlog(
         }
 
         if publish.topic.is_empty() {
+            // if publish topic is empty, publisher must have set a valid alias
             let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
                 error!("Empty topic name with invalid alias");
                 return Err(RouterError::Disconnect(
                     DisconnectReasonCode::ProtocolError,
                 ));
             };
+            // set the publish topic before further processing
             publish.topic = alias_topic.to_owned().into();
         } else {
+            // if publish topic isn't empty, that means
+            // publisher wants to establish new mapping for topic & alias
             let topic = std::str::from_utf8(&publish.topic)?;
             connection.topic_aliases.insert(alias, topic.to_owned());
             trace!("set alias {alias} for topic {topic}");
@@ -1158,7 +1166,7 @@ fn forward_device_data(
     datalog: &DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
-    broker_topic_aliases: &mut HashMap<Filter, u16>,
+    broker_topic_aliases: &mut Option<HashMap<Filter, u16>>,
     used_aliases: &mut Slab<()>,
     max_alias: u16,
 ) -> ConsumeStatus {
@@ -1235,28 +1243,27 @@ fn forward_device_data(
     // 1. we are using an alias for filter already
     // 2. we can't use alias as none is avaliable to use
     // 3. we need to set the alias as this is first time
+    // We want to clear topic in only in case 1!
     let mut clear_topic = true;
-    let topic_alias = broker_topic_aliases
-        .get(&request.filter)
-        .copied()
-        .or_else(|| {
+    let topic_alias = broker_topic_aliases.as_mut().and_then(|aliases| {
+        aliases.get(&request.filter).copied().or_else(|| {
+            // don't clear topic for case 2 | 3
             clear_topic = false;
 
-            // max_alias to 0 means client do not support topic aliases
-            if max_alias == 0 {
-                return None;
-            }
-
             let alias_to_use = used_aliases.insert(());
+
+            // case 2
             if alias_to_use > max_alias as usize {
                 used_aliases.remove(alias_to_use);
                 return None;
             }
 
+            // case 3
             let alias_to_use = alias_to_use as u16;
-            broker_topic_aliases.insert(request.filter.clone(), alias_to_use);
+            aliases.insert(request.filter.clone(), alias_to_use);
             Some(alias_to_use)
-        });
+        })
+    });
 
     // Fill and notify device data
     let forwards = publishes
@@ -1264,6 +1271,7 @@ fn forward_device_data(
         .map(|((mut publish, mut properties), offset)| {
             publish.qos = protocol::qos(qos).unwrap();
 
+            // if there is some topic alias to use, set it in publish properties
             if topic_alias.is_some() {
                 let mut props = properties.unwrap_or_default();
                 props.topic_alias = topic_alias;
