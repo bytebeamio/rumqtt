@@ -24,6 +24,7 @@ use crate::tls;
 #[cfg(feature = "websocket")]
 use {
     crate::websockets::{split_url, UrlError},
+    async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
 
@@ -379,11 +380,10 @@ async fn network_connect(
         Transport::Unix => unreachable!(),
         #[cfg(feature = "websocket")]
         Transport::Ws => {
-            let request = http::Request::builder()
-                .method(http::Method::GET)
-                .uri(options.broker_addr.as_str())
-                .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())?;
+            let mut request = options.broker_addr.as_str().into_client_request()?;
+            request
+                .headers_mut()
+                .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
             let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
 
@@ -391,11 +391,10 @@ async fn network_connect(
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
-            let request = http::Request::builder()
-                .method(http::Method::GET)
-                .uri(options.broker_addr.as_str())
-                .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())?;
+            let mut request = options.broker_addr.as_str().into_client_request()?;
+            request
+                .headers_mut()
+                .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
