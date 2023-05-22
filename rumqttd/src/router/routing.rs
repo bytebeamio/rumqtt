@@ -1035,30 +1035,7 @@ fn append_to_commitlog(
     });
 
     if let Some(alias) = topic_alias {
-        if alias == 0 || alias > TOPIC_ALIAS_MAX {
-            error!("Alias must be greater than 0 and <={TOPIC_ALIAS_MAX}");
-            return Err(RouterError::Disconnect(
-                DisconnectReasonCode::TopicAliasInvalid,
-            ));
-        }
-
-        if publish.topic.is_empty() {
-            // if publish topic is empty, publisher must have set a valid alias
-            let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
-                error!("Empty topic name with invalid alias");
-                return Err(RouterError::Disconnect(
-                    DisconnectReasonCode::ProtocolError,
-                ));
-            };
-            // set the publish topic before further processing
-            publish.topic = alias_topic.to_owned().into();
-        } else {
-            // if publish topic isn't empty, that means
-            // publisher wants to establish new mapping for topic & alias
-            let topic = std::str::from_utf8(&publish.topic)?;
-            connection.topic_aliases.insert(alias, topic.to_owned());
-            trace!("set alias {alias} for topic {topic}");
-        }
+        validate_and_set_topic_alias(&mut publish, connection, alias)?;
     };
 
     let topic = std::str::from_utf8(&publish.topic)?;
@@ -1111,6 +1088,39 @@ fn append_to_commitlog(
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
     Ok(o)
+}
+
+fn validate_and_set_topic_alias(
+    publish: &mut Publish,
+    connection: &mut Connection,
+    alias: u16,
+) -> Result<(), RouterError> {
+    if alias == 0 || alias > TOPIC_ALIAS_MAX {
+        error!("Alias must be greater than 0 and <={TOPIC_ALIAS_MAX}");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::TopicAliasInvalid,
+        ));
+    }
+
+    if publish.topic.is_empty() {
+        // if publish topic is empty, publisher must have set a valid alias
+        let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
+                error!("Empty topic name with invalid alias");
+                return Err(RouterError::Disconnect(
+                    DisconnectReasonCode::ProtocolError,
+                ));
+            };
+        // set the publish topic before further processing
+        publish.topic = alias_topic.to_owned().into();
+    } else {
+        // if publish topic isn't empty, that means
+        // publisher wants to establish new mapping for topic & alias
+        let topic = std::str::from_utf8(&publish.topic)?;
+        connection.topic_aliases.insert(alias, topic.to_owned());
+        trace!("set alias {alias} for topic {topic}");
+    };
+
+    Ok(())
 }
 
 /// Sweep ackslog for all the pending acks.
