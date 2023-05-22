@@ -19,6 +19,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 use super::alertlog::{Alert, AlertLog};
+use super::connection::BrokerAliases;
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
@@ -665,13 +666,9 @@ impl Router {
                                 continue;
                             }
 
-                            if let Some(alias) = connection
-                                .broker_topic_aliases
-                                .as_mut()
-                                .and_then(|aliases| aliases.remove(filter))
-                            {
-                                connection.used_aliases.remove(alias as usize)
-                            };
+                            if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
+                                broker_aliases.remove_alias(filter);
+                            }
 
                             let unsuback = UnsubAck {
                                 pkid,
@@ -883,9 +880,7 @@ impl Router {
         ack_device_data(ackslog, outgoing);
 
         let connection = &mut self.connections[id];
-        let max_alias = connection.topic_alias_max;
         let broker_topic_aliases = &mut connection.broker_topic_aliases;
-        let used_aliases = &mut connection.used_aliases;
 
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
@@ -909,8 +904,6 @@ impl Router {
                 outgoing,
                 alertlog,
                 broker_topic_aliases,
-                used_aliases,
-                max_alias,
             ) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
@@ -1178,9 +1171,7 @@ fn forward_device_data(
     datalog: &DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
-    broker_topic_aliases: &mut Option<HashMap<Filter, u16>>,
-    used_aliases: &mut Slab<()>,
-    max_alias: u16,
+    broker_topic_aliases: &mut Option<BrokerAliases>,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
@@ -1251,31 +1242,18 @@ fn forward_device_data(
         return ConsumeStatus::FilterCaughtup;
     }
 
-    // there are three cases
-    // 1. we are using an alias for filter already
-    // 2. we can't use alias as none is avaliable to use
-    // 3. we need to set the alias as this is first time
-    // We want to clear topic in only in case 1!
-    let mut clear_topic = true;
-    let topic_alias = broker_topic_aliases.as_mut().and_then(|aliases| {
-        aliases.get(&request.filter).copied().or_else(|| {
-            // don't clear topic for case 2 | 3
-            clear_topic = false;
+    let mut topic_alias = broker_topic_aliases
+        .as_ref()
+        .and_then(|aliases| aliases.get_alias(&request.filter));
 
-            let alias_to_use = used_aliases.insert(());
+    let topic_alias_exists = topic_alias.is_some();
 
-            // case 2
-            if alias_to_use > max_alias as usize {
-                used_aliases.remove(alias_to_use);
-                return None;
-            }
-
-            // case 3
-            let alias_to_use = alias_to_use as u16;
-            aliases.insert(request.filter.clone(), alias_to_use);
-            Some(alias_to_use)
-        })
-    });
+    // if topic alias doesn't exists, try creating new one!
+    if !topic_alias_exists {
+        topic_alias = broker_topic_aliases
+            .as_mut()
+            .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
+    }
 
     // Fill and notify device data
     let forwards = publishes
@@ -1290,7 +1268,8 @@ fn forward_device_data(
                 properties = Some(props);
             }
 
-            if clear_topic {
+            // We want to clear topic if we are using an existing alias
+            if topic_alias_exists {
                 publish.topic.clear()
             }
 
