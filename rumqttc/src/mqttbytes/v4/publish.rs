@@ -44,6 +44,13 @@ impl Publish {
         }
     }
 
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
+
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let qos = qos((fixed_header.byte1 & 0b0110) >> 1)?;
         let dup = (fixed_header.byte1 & 0b1000) != 0;

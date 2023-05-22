@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+ - Enforce `max_outgoing_packet_size` on v3 client
+
 ### Security
 
 ---
