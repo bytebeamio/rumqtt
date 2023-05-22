@@ -383,6 +383,8 @@ impl Router {
         let span = tracing::info_span!("incoming_disconnect", client_id);
         let _guard = span.enter();
 
+        // must handle last will before sending disconnect packet
+        // as the disconnecting client might have subscribed to will topic.
         if execute_last_will {
             self.handle_last_will(id);
         }

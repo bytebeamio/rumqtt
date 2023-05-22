@@ -36,6 +36,7 @@ impl From<PubWithProp> for PublishData {
 
 // TODO: remove this from here
 impl Storage for PublishData {
+    // TODO: calculate size of publish properties as well!
     fn size(&self) -> usize {
         let publish = &self.publish;
         4 + publish.topic.len() + publish.payload.len()
@@ -209,6 +210,7 @@ impl DataLog {
             // ignore expired messages
             if is_valid {
                 // set message_expiry_interval to (original value - time spent waiting in server)
+                // ref: https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901112
                 *t -= time_spent;
             }
 
