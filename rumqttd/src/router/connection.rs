@@ -51,7 +51,7 @@ impl Connection {
             None => (client_id, None),
         };
 
-        // topic_alias_max is 0, that means client doesn't want to use / support topic alias
+        // if topic_alias_max is 0, that means client doesn't want to use / support topic alias
         let broker_topic_aliases = if topic_alias_max == 0 {
             None
         } else {
@@ -106,7 +106,7 @@ impl BrokerAliases {
         self.broker_topic_aliases.get(topic).copied()
     }
 
-    // Set new alias for a topic and reutrn the alias
+    // Set new alias for a topic and return the alias
     // returns None if can't set new alias
     pub fn set_new_alias(&mut self, topic: &str) -> Option<u16> {
         let alias_to_use = self.used_aliases.insert(());

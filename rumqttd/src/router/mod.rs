@@ -121,6 +121,7 @@ pub enum Ack {
     ConnAck(ConnectionId, ConnAck, Option<ConnAckProperties>),
     // NOTE: using Option may be a better choice than new variant
     // ConnAckWithProperties(ConnectionId, ConnAck, ConnAckProperties),
+    // TODO: merge the other variants as well using the same pattern
     PubAck(PubAck),
     PubAckWithProperties(PubAck, PubAckProperties),
     SubAck(SubAck),
