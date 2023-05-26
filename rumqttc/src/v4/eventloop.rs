@@ -1,8 +1,8 @@
-use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
-use crate::{MqttOptions, Outgoing};
+use crate::v4::{framed::Network, Transport};
+use crate::v4::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
+use crate::v4::{MqttOptions, Outgoing};
 
-use crate::framed::N;
+use crate::v4::framed::N;
 use crate::mqttbytes::v4::*;
 use flume::{bounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
@@ -19,17 +19,17 @@ use std::vec::IntoIter;
 use {std::path::Path, tokio::net::UnixStream};
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-use crate::tls;
+use crate::v4::tls;
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, UrlError},
+    crate::v4::websockets::{split_url, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
 
 #[cfg(feature = "proxy")]
-use crate::proxy::ProxyError;
+use crate::v4::proxy::ProxyError;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]

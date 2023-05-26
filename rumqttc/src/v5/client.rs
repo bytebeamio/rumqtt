@@ -8,7 +8,7 @@ use super::mqttbytes::v5::{
 };
 use super::mqttbytes::QoS;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::valid_topic;
+use crate::v4::valid_topic;
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};

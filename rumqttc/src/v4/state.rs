@@ -1,4 +1,4 @@
-use crate::{Event, Incoming, Outgoing, Request};
+use crate::v4::{Event, Incoming, Outgoing, Request};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
@@ -531,7 +531,7 @@ mod test {
     use super::{MqttState, StateError};
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
-    use crate::{Event, Incoming, Outgoing, Request};
+    use crate::v4::{Event, Incoming, Outgoing, Request};
     use bytes::BufMut;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {

@@ -1,5 +1,5 @@
 #[cfg(feature = "websocket")]
-use rumqttc::{self, AsyncClient, MqttOptions, QoS, Transport};
+use rumqttc::{AsyncClient, MqttOptions, QoS, Transport};
 #[cfg(feature = "websocket")]
 use std::{error::Error, time::Duration};
 #[cfg(feature = "websocket")]

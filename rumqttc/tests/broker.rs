@@ -9,7 +9,7 @@ use tokio::{task, time};
 
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender};
-use rumqttc::{Event, Incoming, Outgoing, Packet};
+use rumqttc::v4::{Event, Incoming, Outgoing, Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub struct Broker {

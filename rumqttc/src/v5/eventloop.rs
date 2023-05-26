@@ -1,8 +1,8 @@
 use super::framed::Network;
 use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
-use crate::eventloop::socket_connect;
-use crate::framed::N;
+use crate::v4::eventloop::socket_connect;
+use crate::v4::framed::N;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -17,20 +17,20 @@ use std::vec::IntoIter;
 use super::mqttbytes::v5::ConnectReturnCode;
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-use crate::tls;
+use crate::v4::tls;
 
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, UrlError},
+    crate::v4::websockets::{split_url, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
 
 #[cfg(feature = "proxy")]
-use crate::proxy::ProxyError;
+use crate::v4::proxy::ProxyError;
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]

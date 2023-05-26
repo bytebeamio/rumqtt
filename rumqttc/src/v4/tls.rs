@@ -10,7 +10,7 @@ use tokio_rustls::rustls::{
 use tokio_rustls::TlsConnector as RustlsConnector;
 
 #[cfg(feature = "use-rustls")]
-use crate::Key;
+use crate::v4::Key;
 #[cfg(feature = "use-rustls")]
 use std::convert::TryFrom;
 #[cfg(feature = "use-rustls")]
@@ -18,8 +18,8 @@ use std::io::{BufReader, Cursor};
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 
-use crate::framed::N;
-use crate::TlsConfiguration;
+use crate::v4::framed::N;
+use crate::v4::TlsConfiguration;
 
 #[cfg(feature = "use-native-tls")]
 use tokio_native_tls::TlsConnector as NativeTlsConnector;
