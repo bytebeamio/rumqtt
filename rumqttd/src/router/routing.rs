@@ -1246,10 +1246,10 @@ fn forward_device_data(
         .as_ref()
         .and_then(|aliases| aliases.get_alias(&request.filter));
 
-    let topic_alias_exists = topic_alias.is_some();
+    let topic_alias_already_exists = topic_alias.is_some();
 
     // if topic alias doesn't exists, try creating new one!
-    if !topic_alias_exists {
+    if !topic_alias_already_exists {
         topic_alias = broker_topic_aliases
             .as_mut()
             .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
@@ -1269,7 +1269,7 @@ fn forward_device_data(
             }
 
             // We want to clear topic if we are using an existing alias
-            if topic_alias_exists {
+            if topic_alias_already_exists {
                 publish.topic.clear()
             }
 
