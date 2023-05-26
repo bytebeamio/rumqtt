@@ -98,7 +98,7 @@ impl Subscribe {
 }
 
 ///  Subscription filter
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Filter {
     pub path: String,
     pub qos: QoS,
@@ -112,7 +112,9 @@ impl Filter {
         Self {
             path: topic.into(),
             qos,
-            ..Default::default()
+            nolocal: Default::default(),
+            preserve_retain: Default::default(),
+            retain_forward_rule: Default::default(),
         }
     }
 
@@ -141,12 +143,12 @@ impl Filter {
                 0 => RetainForwardRule::OnEverySubscribe,
                 1 => RetainForwardRule::OnNewSubscribe,
                 2 => RetainForwardRule::Never,
-                r => return Err(Error::InvalidRetainForwardRule(r)),
+                r => return Err(ErrorV5::InvalidRetainForwardRule(r).into()),
             };
 
             filters.push(Filter {
                 path,
-                qos: qos(requested_qos).ok_or(Error::InvalidQoS(requested_qos))?,
+                qos: qos(requested_qos)?,
                 nolocal,
                 preserve_retain,
                 retain_forward_rule,

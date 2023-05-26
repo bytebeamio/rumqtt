@@ -5,13 +5,11 @@ use std::time::Duration;
 mod client;
 mod eventloop;
 mod framed;
-pub mod mqttbytes;
 mod state;
 
+use crate::mqttbytes::v5::*;
 use crate::v4::Outgoing;
 use crate::v4::{NetworkOptions, Transport};
-
-use mqttbytes::v5::*;
 
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
@@ -23,7 +21,7 @@ pub use crate::v4::tls::Error as TlsError;
 #[cfg(feature = "proxy")]
 pub use crate::v4::proxy::{Proxy, ProxyAuth, ProxyType};
 
-pub type Incoming = Packet;
+pub type Incoming = crate::mqttbytes::v5::Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.

@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Publish packet
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
@@ -24,9 +24,11 @@ impl Publish {
         Self {
             qos,
             topic,
-            payload: payload.into(),
             properties,
-            ..Default::default()
+            payload: payload.into(),
+            dup: Default::default(),
+            retain: Default::default(),
+            pkid: Default::default(),
         }
     }
 
@@ -58,7 +60,7 @@ impl Publish {
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Error> {
         let qos_num = (fixed_header.byte1 & 0b0110) >> 1;
-        let qos = qos(qos_num).ok_or(Error::InvalidQoS(qos_num))?;
+        let qos = qos(qos_num)?;
         let dup = (fixed_header.byte1 & 0b1000) != 0;
         let retain = (fixed_header.byte1 & 0b0001) != 0;
 

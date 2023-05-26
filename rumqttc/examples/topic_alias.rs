@@ -1,4 +1,4 @@
-use rumqttc::v5::mqttbytes::{v5::PublishProperties, QoS};
+use rumqttc::mqttbytes::{v5::PublishProperties, QoS};
 use tokio::{task, time};
 
 use rumqttc::v5::{AsyncClient, MqttOptions};

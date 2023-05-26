@@ -1,6 +1,6 @@
 use super::framed::Network;
-use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
+use crate::mqttbytes::v5::*;
 use crate::v4::eventloop::socket_connect;
 use crate::v4::framed::N;
 
@@ -14,7 +14,7 @@ use std::pin::Pin;
 use std::time::Duration;
 use std::vec::IntoIter;
 
-use super::mqttbytes::v5::ConnectReturnCode;
+use crate::mqttbytes::v5::ConnectReturnCode;
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::v4::tls;

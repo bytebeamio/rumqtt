@@ -1,3 +1,4 @@
+use super::super::Error;
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 

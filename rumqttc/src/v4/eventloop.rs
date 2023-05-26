@@ -2,8 +2,8 @@ use crate::v4::{framed::Network, Transport};
 use crate::v4::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::v4::{MqttOptions, Outgoing};
 
-use crate::v4::framed::N;
 use crate::mqttbytes::v4::*;
+use crate::v4::framed::N;
 use flume::{bounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
