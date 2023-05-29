@@ -400,6 +400,10 @@ impl Protocol for V5 {
                 let (subscribe, properties) = subscribe::read(fixed_header, packet)?;
                 Packet::Subscribe(subscribe, properties)
             }
+            Packet::Unsubscribe => {
+                let (unsubscribe, properties) = unsubscribe::read(fixed_header, packet)?;
+                Packet::Unsubscribe(unsubscribe, properties)
+            }
             PacketType::SubAck => {
                 let (suback, properties) = suback::read(fixed_header, packet)?;
                 Packet::SubAck(suback, properties)
