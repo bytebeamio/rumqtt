@@ -59,7 +59,7 @@ where
         "Starting bridge with subscription on filter \"{}\"",
         &config.sub_path,
     );
-    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
+    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true, None)?;
 
     'outer: loop {
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {

@@ -1,6 +1,7 @@
 use crate::protocol::{
-    ConnAck, ConnectReturnCode, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason,
-    PubRel, PubRelReason, Publish, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
+    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
+    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -18,6 +19,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 use super::alertlog::{Alert, AlertLog};
+use super::connection::BrokerAliases;
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
@@ -48,7 +50,11 @@ pub enum RouterError {
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
     InvalidClientId(String),
+    #[error("Disconnection (Reason: {0:?})")]
+    Disconnect(DisconnectReasonCode),
 }
+
+const TOPIC_ALIAS_MAX: u16 = 4096;
 
 pub struct Router {
     id: RouterId,
@@ -233,7 +239,9 @@ impl Router {
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::NewAlert(tx) => self.handle_new_alert(tx),
             Event::DeviceData => self.handle_device_payload(id),
-            Event::Disconnect(disconnect) => self.handle_disconnection(id, disconnect.execute_will),
+            Event::Disconnect(disconnect) => {
+                self.handle_disconnection(id, disconnect.execute_will, None)
+            }
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
@@ -273,7 +281,7 @@ impl Router {
                     "Duplicate client_id, dropping previous connection with connection_id: {}",
                     connection_id
                 );
-                self.handle_disconnection(*connection_id, true);
+                self.handle_disconnection(*connection_id, true, None);
             }
         }
 
@@ -334,8 +342,14 @@ impl Router {
             code: ConnectReturnCode::Success,
         };
 
+        let properties = ConnAckProperties {
+            // TODO: set this to some appropriate value
+            topic_alias_max: Some(TOPIC_ALIAS_MAX),
+            ..Default::default()
+        };
+
         let ackslog = self.ackslog.get_mut(connection_id).unwrap();
-        ackslog.connack(connection_id, ack);
+        ackslog.connack(connection_id, ack, Some(properties));
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
@@ -351,7 +365,12 @@ impl Router {
         let _alert_id = self.alerts.insert(tx);
     }
 
-    fn handle_disconnection(&mut self, id: ConnectionId, execute_last_will: bool) {
+    fn handle_disconnection(
+        &mut self,
+        id: ConnectionId,
+        execute_last_will: bool,
+        reason: Option<DisconnectReasonCode>,
+    ) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
         let client_id = match &self.obufs.get(id) {
@@ -365,11 +384,34 @@ impl Router {
         let span = tracing::info_span!("incoming_disconnect", client_id);
         let _guard = span.enter();
 
+        // must handle last will before sending disconnect packet
+        // as the disconnecting client might have subscribed to will topic.
         if execute_last_will {
             self.handle_last_will(id);
         }
 
         info!("Disconnecting connection");
+
+        if let Some(reason_code) = reason {
+            let outgoing = match self.obufs.get_mut(id) {
+                Some(v) => v,
+                None => {
+                    error!("no-connection id {} is already gone", id);
+                    return;
+                }
+            };
+
+            let disconnect = Disconnect { reason_code };
+
+            let disconnect_notification = Notification::Disconnect(disconnect, None);
+
+            outgoing
+                .data_buffer
+                .lock()
+                .push_back(disconnect_notification);
+
+            outgoing.handle.try_send(()).ok();
+        }
 
         // Remove connection from router
         let mut connection = self.connections.remove(id);
@@ -380,7 +422,7 @@ impl Router {
         self.ackslog.remove(id);
 
         // Don't remove connection id from readyqueue with index. This will
-        // remove wrong connection from readyqueue. Instead just leave diconnected
+        // remove wrong connection from readyqueue. Instead just leave disconnected
         // connection in readyqueue and allow 'consume()' method to deal with this
         // self.readyqueue.remove(id);
 
@@ -451,13 +493,14 @@ impl Router {
         let mut force_ack = false;
         let mut new_data = false;
         let mut disconnect = false;
+        let mut disconnect_reason: Option<DisconnectReasonCode> = None;
         let mut execute_will = true;
 
         // info!("{:15.15}[I] {:20} count = {}", client_id, "packets", packets.len());
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(mut publish, _) => {
+                Packet::Publish(mut publish, properties) => {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
@@ -519,6 +562,7 @@ impl Router {
                     match append_to_commitlog(
                         id,
                         publish.clone(),
+                        properties,
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
@@ -536,6 +580,11 @@ impl Router {
                             );
                             self.router_meters.failed_publishes += 1;
                             disconnect = true;
+
+                            if let RouterError::Disconnect(code) = e {
+                                disconnect_reason = Some(code)
+                            }
+
                             break;
                         }
                     };
@@ -617,6 +666,10 @@ impl Router {
                                 continue;
                             }
 
+                            if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
+                                broker_aliases.remove_alias(filter);
+                            }
+
                             let unsuback = UnsubAck {
                                 pkid,
                                 // reasons are used in MQTTv5
@@ -687,6 +740,7 @@ impl Router {
                     match append_to_commitlog(
                         id,
                         publish,
+                        None,
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
@@ -751,7 +805,7 @@ impl Router {
         // on say 5th packet should not block new data notifications for packets
         // 1 - 4. Hence we use a flag instead of diconnecting immediately
         if disconnect {
-            self.handle_disconnection(id, execute_will);
+            self.handle_disconnection(id, execute_will, disconnect_reason);
         }
     }
 
@@ -825,6 +879,9 @@ impl Router {
         // We always try to ack when ever a connection is scheduled
         ack_device_data(ackslog, outgoing);
 
+        let connection = &mut self.connections[id];
+        let broker_topic_aliases = &mut connection.broker_topic_aliases;
+
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
         // So a new connection is always scheduled with at least one request
@@ -841,7 +898,13 @@ impl Router {
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing, alertlog) {
+            match forward_device_data(
+                &mut request,
+                datalog,
+                outgoing,
+                alertlog,
+                broker_topic_aliases,
+            ) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -888,9 +951,12 @@ impl Router {
             pkid: 0,
             payload: will.message,
         };
+
+        let properties = None;
         match append_to_commitlog(
             id,
             publish,
+            properties,
             &mut self.datalog,
             &mut self.notifications,
             &mut self.connections,
@@ -951,15 +1017,27 @@ impl Router {
 fn append_to_commitlog(
     id: ConnectionId,
     mut publish: Publish,
+    mut properties: Option<PublishProperties>,
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
 ) -> Result<Offset, RouterError> {
+    let connection = connections.get_mut(id).unwrap();
+
+    let topic_alias = properties.as_mut().and_then(|p| {
+        // clear the received value as it is irrelevant while forwarding publishes
+        p.topic_alias.take()
+    });
+
+    if let Some(alias) = topic_alias {
+        validate_and_set_topic_alias(&mut publish, connection, alias)?;
+    };
+
     let topic = std::str::from_utf8(&publish.topic)?;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connections[id].tenant_prefix {
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
         if !topic.starts_with(tenant_prefix) {
             return Err(RouterError::BadTenant(
                 tenant_prefix.to_owned(),
@@ -972,7 +1050,7 @@ fn append_to_commitlog(
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
         error!("Unexpected: retain field was not unset");
-        datalog.insert_to_retained_publishes(publish.clone(), topic.to_owned());
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
     }
 
     publish.retain = false;
@@ -983,7 +1061,7 @@ fn append_to_commitlog(
     // Create a dynamic filter if dynamic_filters are enabled for this connection
     let filter_idxs = match filter_idxs {
         Some(v) => v,
-        None if connections[id].dynamic_filters => {
+        None if connection.dynamic_filters => {
             let (idx, _cursor) = datalog.next_native_offset(topic);
             vec![idx]
         }
@@ -993,7 +1071,8 @@ fn append_to_commitlog(
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
         let datalog = datalog.native.get_mut(filter_idx).unwrap();
-        let (offset, filter) = datalog.append(publish.clone(), notifications);
+        let publish_data = (publish.clone(), properties.clone());
+        let (offset, filter) = datalog.append(publish_data.into(), notifications);
         debug!(
             pkid,
             "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
@@ -1004,6 +1083,39 @@ fn append_to_commitlog(
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
     Ok(o)
+}
+
+fn validate_and_set_topic_alias(
+    publish: &mut Publish,
+    connection: &mut Connection,
+    alias: u16,
+) -> Result<(), RouterError> {
+    if alias == 0 || alias > TOPIC_ALIAS_MAX {
+        error!("Alias must be greater than 0 and <={TOPIC_ALIAS_MAX}");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::TopicAliasInvalid,
+        ));
+    }
+
+    if publish.topic.is_empty() {
+        // if publish topic is empty, publisher must have set a valid alias
+        let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
+                error!("Empty topic name with invalid alias");
+                return Err(RouterError::Disconnect(
+                    DisconnectReasonCode::ProtocolError,
+                ));
+            };
+        // set the publish topic before further processing
+        publish.topic = alias_topic.to_owned().into();
+    } else {
+        // if publish topic isn't empty, that means
+        // publisher wants to establish new mapping for topic & alias
+        let topic = std::str::from_utf8(&publish.topic)?;
+        connection.topic_aliases.insert(alias, topic.to_owned());
+        trace!("set alias {alias} for topic {topic}");
+    };
+
+    Ok(())
 }
 
 /// Sweep ackslog for all the pending acks.
@@ -1059,6 +1171,7 @@ fn forward_device_data(
     datalog: &DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
+    broker_topic_aliases: &mut Option<BrokerAliases>,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
@@ -1129,15 +1242,44 @@ fn forward_device_data(
         return ConsumeStatus::FilterCaughtup;
     }
 
+    let mut topic_alias = broker_topic_aliases
+        .as_ref()
+        .and_then(|aliases| aliases.get_alias(&request.filter));
+
+    let topic_alias_already_exists = topic_alias.is_some();
+
+    // if topic alias doesn't exists, try creating new one!
+    if !topic_alias_already_exists {
+        topic_alias = broker_topic_aliases
+            .as_mut()
+            .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
+    }
+
     // Fill and notify device data
-    let forwards = publishes.into_iter().map(|(mut publish, offset)| {
-        publish.qos = protocol::qos(qos).unwrap();
-        Forward {
-            cursor: offset,
-            size: 0,
-            publish,
-        }
-    });
+    let forwards = publishes
+        .into_iter()
+        .map(|((mut publish, mut properties), offset)| {
+            publish.qos = protocol::qos(qos).unwrap();
+
+            // if there is some topic alias to use, set it in publish properties
+            if topic_alias.is_some() {
+                let mut props = properties.unwrap_or_default();
+                props.topic_alias = topic_alias;
+                properties = Some(props);
+            }
+
+            // We want to clear topic if we are using an existing alias
+            if topic_alias_already_exists {
+                publish.topic.clear()
+            }
+
+            Forward {
+                cursor: offset,
+                size: 0,
+                publish,
+                properties,
+            }
+        });
 
     let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
 
@@ -1168,7 +1310,7 @@ fn forward_device_data(
 
 fn retrieve_shadow(datalog: &mut DataLog, outgoing: &mut Outgoing, shadow: ShadowRequest) {
     if let Some(reply) = datalog.shadow(&shadow.filter) {
-        let publish = reply;
+        let publish = reply.0;
         let shadow_reply = router::ShadowReply {
             topic: publish.topic,
             payload: publish.payload,

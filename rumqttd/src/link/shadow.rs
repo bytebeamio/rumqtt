@@ -78,6 +78,7 @@ impl ShadowLink {
             true,
             None,
             config.dynamic_filters,
+            None,
         )?;
         let connection_id = link_rx.id();
 

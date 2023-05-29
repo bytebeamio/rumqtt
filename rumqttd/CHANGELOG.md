@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Support for topic alias and message expiry in v5
 
 ### Changed
 - Certificate paths configured in config file are checked during startup and throws a panic if it is not valid.
