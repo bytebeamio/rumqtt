@@ -850,6 +850,16 @@ impl Router {
             }
         }
 
+        // set the shared cursor in case of shared subscription
+        if let Some(ref group_name) = group {
+            self.datalog
+                .native
+                .get_mut(filter_idx)
+                .unwrap()
+                .shared_cursors
+                .insert(group_name.to_string(), cursor);
+        }
+
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
 

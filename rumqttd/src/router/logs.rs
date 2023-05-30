@@ -173,7 +173,9 @@ impl DataLog {
             }
         };
 
-        (filter_idx, data.log.next_offset())
+        let offset = data.log.next_offset();
+
+        (filter_idx, offset)
     }
 
     pub fn native_readv(
@@ -297,6 +299,7 @@ pub struct Data<T> {
     pub log: CommitLog<T>,
     pub waiters: Waiters<DataRequest>,
     meter: SubscriptionMeter,
+    pub(crate) shared_cursors: HashMap<String, (u64, u64)>,
 }
 
 impl<T> Data<T>
@@ -313,6 +316,7 @@ where
             log,
             waiters,
             meter: metrics,
+            shared_cursors: HashMap::new(),
         }
     }
 
