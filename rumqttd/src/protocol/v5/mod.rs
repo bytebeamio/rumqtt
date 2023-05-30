@@ -404,7 +404,7 @@ impl Protocol for V5 {
                 let (suback, properties) = suback::read(fixed_header, packet)?;
                 Packet::SubAck(suback, properties)
             }
-            Packet::Unsubscribe => {
+            PacketType::Unsubscribe => {
                 let (unsubscribe, properties) = unsubscribe::read(fixed_header, packet)?;
                 Packet::Unsubscribe(unsubscribe, properties)
             }
