@@ -1199,13 +1199,25 @@ enum ConsumeStatus {
 /// 3. `inflight_full`: whether the inflight requests were completely filled
 fn forward_device_data(
     request: &mut DataRequest,
-    datalog: &DataLog,
+    datalog: &mut DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
     broker_topic_aliases: &mut Option<BrokerAliases>,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
+
+    if let Some(group_name) = &request.group {
+        // update the request cursor to use shared cursor
+        request.cursor = *datalog
+            .native
+            .get(request.filter_idx)
+            .unwrap()
+            .shared_cursors
+            .get(group_name)
+            .unwrap();
+    }
+
     trace!(
         "Reading from datalog: {}[{}, {}]",
         request.filter,
@@ -1268,6 +1280,16 @@ fn forward_device_data(
     request.read_count += publishes.len();
     request.cursor = next;
     // println!("{:?} {:?} {}", start, next, request.read_count);
+
+    if let Some(group_name) = &request.group {
+        // update the shared cursor
+        datalog
+            .native
+            .get_mut(request.filter_idx)
+            .unwrap()
+            .shared_cursors
+            .insert(group_name.to_string(), request.cursor);
+    }
 
     if publishes.is_empty() {
         return ConsumeStatus::FilterCaughtup;
