@@ -596,12 +596,12 @@ impl Router {
                         );
                     };
                 }
-                Packet::Subscribe(subscribe, _) => {
+                Packet::Subscribe(mut subscribe, _) => {
                     let mut return_codes = Vec::new();
                     let pkid = subscribe.pkid;
                     // let len = s.len();
 
-                    for f in &subscribe.filters {
+                    for f in &mut subscribe.filters {
                         let span =
                             tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
@@ -609,6 +609,25 @@ impl Router {
                         info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
 
+                        let mut group: Option<String> = None;
+
+                        if let Some(share_filter) = f.path.strip_prefix("$share/") {
+                            // TODO: handle error cases
+                            let filter_path = share_filter
+                                .split_once('/')
+                                .map(|(group_name, filter_path)| {
+                                    // set group name
+                                    group = Some(group_name.to_string());
+
+                                    filter_path.to_string()
+                                })
+                                .unwrap();
+
+                            f.path = filter_path;
+                        }
+
+                        // NOTE: we can pass only connection.tenant_prefix
+                        // instead of connection
                         if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
 
@@ -620,7 +639,7 @@ impl Router {
                         let qos = f.qos;
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
+                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8, group);
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
 
@@ -817,6 +836,7 @@ impl Router {
         filter_idx: FilterIdx,
         filter: String,
         qos: u8,
+        group: Option<String>,
     ) {
         // Add connection id to subscription list
         match self.subscription_map.get_mut(&filter) {
@@ -841,6 +861,7 @@ impl Router {
                 cursor,
                 read_count: 0,
                 max_count: 100,
+                group,
             };
 
             self.scheduler.track(id, request);
