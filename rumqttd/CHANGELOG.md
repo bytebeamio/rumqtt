@@ -8,10 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Support for topic alias and message expiry in v5
 
 ### Changed
-- Certificate paths configured in config file are checked during startup and throws a panic if it is not valid.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttd 0.15.0] - 30-05-2023
+
+### Added
+- Support for topic alias and message expiry in v5 (#616)
+
+### Changed
+- Certificate paths configured in config file are checked during startup and throws a panic if it is not valid. (#610)
 
 ### Deprecated
 
@@ -21,8 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MQTTv5: Read the Unsubscribe package in match arms (#625)
 
 ### Security
-
----
 
 ## [rumqttd 0.14.0] - 31-03-2023
 
