@@ -459,6 +459,15 @@ impl Router {
             for request in tracker.data_requests.iter_mut() {
                 if let Some(cursor) = retransmissions.get(&request.filter_idx) {
                     request.cursor = *cursor;
+                    // reset the group cursor as well
+                    if let Some(group_name) = &request.group {
+                        self.datalog
+                            .native
+                            .get_mut(request.filter_idx)
+                            .unwrap()
+                            .shared_cursors
+                            .insert(group_name.to_string(), *cursor);
+                    }
                 }
             }
 
@@ -1288,7 +1297,7 @@ fn forward_device_data(
             .get_mut(request.filter_idx)
             .unwrap()
             .shared_cursors
-            .insert(group_name.to_string(), request.cursor);
+            .insert(group_name.to_string(), next);
     }
 
     if publishes.is_empty() {
