@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- MQTTv5: Read the Unsubscribe package in match arms (#625)
 
 ### Security
 
