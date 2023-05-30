@@ -14,7 +14,6 @@ rumqttc v0.19.0
 - Fix examples to stop printing error in loop (#540)
 - MQTTv5!: Remove `Connect` from `ConnectionError::StateError` (#541)
 - MQTTv5: Send last_will and login info with connect (#478)
-- MQTTv5: Read the Unsubscribe package in match arms (#625)
 
 rumqttd v0.12.1
 -------
