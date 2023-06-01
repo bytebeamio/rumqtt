@@ -619,8 +619,9 @@ impl Router {
                         let connection = self.connections.get_mut(id).unwrap();
 
                         let mut group: Option<String> = None;
+                        let original_filter: String = f.path.clone();
 
-                        if let Some(share_filter) = f.path.strip_prefix("$share/") {
+                        if let Some(share_filter) = original_filter.strip_prefix("$share/") {
                             // TODO: handle error cases
                             let filter_path = share_filter
                                 .split_once('/')
@@ -632,6 +633,7 @@ impl Router {
                                 })
                                 .unwrap();
 
+                            // filter path without prefix and group name
                             f.path = filter_path;
                         }
 
@@ -648,7 +650,7 @@ impl Router {
                         let qos = f.qos;
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8, group);
+                        self.prepare_filter(id, cursor, idx, original_filter, qos as u8, group);
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
 
