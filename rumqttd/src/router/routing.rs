@@ -19,7 +19,6 @@ use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 use super::alertlog::{Alert, AlertLog};
-use super::connection::BrokerAliases;
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
@@ -596,7 +595,7 @@ impl Router {
                         );
                     };
                 }
-                Packet::Subscribe(subscribe, _) => {
+                Packet::Subscribe(subscribe, props) => {
                     let mut return_codes = Vec::new();
                     let pkid = subscribe.pkid;
                     // let len = s.len();
@@ -618,9 +617,17 @@ impl Router {
 
                         let filter = &f.path;
                         let qos = f.qos;
+                        let subscription_id = props.as_ref().and_then(|p| p.id);
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
+                        self.prepare_filter(
+                            id,
+                            cursor,
+                            idx,
+                            filter.clone(),
+                            qos as u8,
+                            subscription_id,
+                        );
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
 
@@ -669,6 +676,9 @@ impl Router {
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
                             }
+
+                            // remove the subscription id
+                            connection.subscription_ids.remove(filter);
 
                             let unsuback = UnsubAck {
                                 pkid,
@@ -817,6 +827,7 @@ impl Router {
         filter_idx: FilterIdx,
         filter: String,
         qos: u8,
+        subscription_id: Option<usize>,
     ) {
         // Add connection id to subscription list
         match self.subscription_map.get_mut(&filter) {
@@ -832,6 +843,12 @@ impl Router {
 
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
+
+        if let Some(subscription_id) = subscription_id {
+            connection
+                .subscription_ids
+                .insert(filter.clone(), subscription_id);
+        }
 
         if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
@@ -880,7 +897,6 @@ impl Router {
         ack_device_data(ackslog, outgoing);
 
         let connection = &mut self.connections[id];
-        let broker_topic_aliases = &mut connection.broker_topic_aliases;
 
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
@@ -898,13 +914,7 @@ impl Router {
                 }
             };
 
-            match forward_device_data(
-                &mut request,
-                datalog,
-                outgoing,
-                alertlog,
-                broker_topic_aliases,
-            ) {
+            match forward_device_data(&mut request, datalog, outgoing, alertlog, connection) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -1171,7 +1181,7 @@ fn forward_device_data(
     datalog: &DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
-    broker_topic_aliases: &mut Option<BrokerAliases>,
+    connection: &mut Connection,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
@@ -1242,6 +1252,7 @@ fn forward_device_data(
         return ConsumeStatus::FilterCaughtup;
     }
 
+    let broker_topic_aliases = &mut connection.broker_topic_aliases;
     let mut topic_alias = broker_topic_aliases
         .as_ref()
         .and_then(|aliases| aliases.get_alias(&request.filter));
@@ -1254,6 +1265,8 @@ fn forward_device_data(
             .as_mut()
             .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
     }
+
+    let subscription_id = connection.subscription_ids.get(&request.filter);
 
     // Fill and notify device data
     let forwards = publishes
@@ -1271,6 +1284,13 @@ fn forward_device_data(
             // We want to clear topic if we are using an existing alias
             if topic_alias_already_exists {
                 publish.topic.clear()
+            }
+
+            if let Some(&subscription_id) = subscription_id {
+                // create new props if not already exists
+                let mut props = properties.unwrap_or_default();
+                props.subscription_identifiers.push(subscription_id);
+                properties = Some(props);
             }
 
             Forward {
