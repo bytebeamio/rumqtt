@@ -619,6 +619,13 @@ impl Router {
                         let qos = f.qos;
                         let subscription_id = props.as_ref().and_then(|p| p.id);
 
+                        if subscription_id == Some(0) {
+                            error!("Subscription identifier can't be 0");
+                            disconnect = true;
+                            disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
+                            break;
+                        }
+
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
                         self.prepare_filter(
                             id,
