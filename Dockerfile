@@ -6,6 +6,5 @@ RUN cargo build --release -p rumqttd
 
 FROM alpine:latest
 COPY --from=builder /usr/src/rumqtt/target/release/rumqttd /usr/local/bin/rumqttd
-COPY ./rumqttd/rumqttd.toml .
 ENV RUST_LOG="info"
 ENTRYPOINT ["rumqttd"]

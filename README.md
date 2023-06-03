@@ -48,14 +48,14 @@ rumqttd can be used with docker by pulling the image from docker hub as follows:
 docker pull bytebeamio/rumqttd
 ```
 
-To use the rumqttd docker image with the included `rumqttd.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
+To run rumqttd docker image you can simply run:
 ```bash
-docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c rumqttd.toml
+docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd
 ```
 
-One can also mount the local directory containing configs as a volume and use the appropriate config file as follows:
+Or you can run `rumqttd` with the custom config file by mounting the file and passing it as argument:
 ```bash
-docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
+docker run -p 1883:1883 -p 1884:1884 -v /absolute/path/to/rumqttd.toml:/rumqttd.toml -it rumqttd -c /rumqttd.toml
 ```
 
 <br/>
