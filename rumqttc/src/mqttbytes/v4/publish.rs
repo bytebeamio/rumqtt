@@ -1,15 +1,46 @@
 use super::*;
 use bytes::{Buf, Bytes};
+use serde::Deserializer;
+use serde::ser::{Serializer};
+use serde::de::{Visitor};
 
 /// Publish packet
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
     pub retain: bool,
     pub topic: String,
     pub pkid: u16,
+
+    #[serde(serialize_with = "ser_bytes", deserialize_with = "deser_bytes")]
     pub payload: Bytes,
+}
+
+struct BytesVisitor;
+
+impl<'de> Visitor<'de> for BytesVisitor {
+    type Value = Bytes;
+
+    // Format a message stating what data this Visitor expects to receive.
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("Expects &[u8]")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+    {
+        Ok(Bytes::copy_from_slice(v))
+    }
+}
+
+fn ser_bytes<S: Serializer>(bytes: &Bytes, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bytes(bytes.as_ref())
+}
+
+fn deser_bytes<'de, D: Deserializer<'de> >(deserializer: D) -> Result<Bytes, D::Error> {
+    deserializer.deserialize_bytes(BytesVisitor { })
 }
 
 impl Publish {

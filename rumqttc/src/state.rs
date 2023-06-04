@@ -5,6 +5,7 @@ use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
+use std::sync::{Arc, Mutex};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +33,69 @@ pub enum StateError {
     Deserialization(#[from] mqttbytes::Error),
 }
 
+#[derive(Debug)]
+struct MqttPkidManager {
+    /// last generated pkid
+    last_pkid: u16,
+
+    /// Maximum pkid (also max inflight of eventloop queue)
+    max_pkid: u16
+}
+
+impl MqttPkidManager {
+    /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
+    /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
+    ///
+    pub fn next_pkid(&mut self) -> u16 {
+        let next_pkid = self.last_pkid + 1;
+
+        // When next packet id is at the edge of inflight queue,
+        // set await flag (last_pkid = 0). This instructs eventloop to stop
+        // processing requests until all the inflight publishes
+        // are acked
+        if next_pkid == self.max_pkid {
+            self.last_pkid = 0;
+            return next_pkid;
+        }
+
+        self.last_pkid = next_pkid;
+        next_pkid
+    }
+
+    pub fn get_last_pkid(&self) -> u16 {
+        self.last_pkid
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreadSafeMqttPkidManager(Arc<Mutex<MqttPkidManager>>);
+
+impl ThreadSafeMqttPkidManager {
+    pub fn new(max_pkid: u16) -> ThreadSafeMqttPkidManager {
+        ThreadSafeMqttPkidManager(Arc::new(Mutex::new(MqttPkidManager {
+            last_pkid: 0, max_pkid
+        })))
+    }
+
+    pub fn next_pkid(&self) -> Result<u16, StateError> {
+        match self.0.lock(){
+            Ok(mut guard) => Ok(guard.next_pkid()),
+            Err(_guard) => {
+                Err(StateError::InvalidState)
+            }
+        }
+    }
+
+    pub fn last_pkid(&self) -> Result<u16, StateError> {
+        match self.0.lock(){
+            Ok(guard) => Ok(guard.get_last_pkid()),
+            Err(_guard) => {
+                Err(StateError::InvalidState)
+            }
+        }
+    }
+}
+
 /// State of the mqtt connection.
 // Design: Methods will just modify the state of the object without doing any network operations
 // Design: All inflight queues are maintained in a pre initialized vec with index as packet id.
@@ -50,14 +114,10 @@ pub struct MqttState {
     last_incoming: Instant,
     /// Last outgoing packet time
     last_outgoing: Instant,
-    /// Packet id of the last outgoing packet
-    pub(crate) last_pkid: u16,
     /// Packet id of the last acked publish
     pub(crate) last_puback: u16,
     /// Number of outgoing inflight publishes
     pub(crate) inflight: u16,
-    /// Maximum number of allowed inflight
-    pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
     pub(crate) outgoing_pub: Vec<Option<Publish>>,
     /// Packet ids of released QoS 2 publishes
@@ -72,6 +132,8 @@ pub struct MqttState {
     pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
+
+    pub(crate) pkid_manager: ThreadSafeMqttPkidManager,
 }
 
 impl MqttState {
@@ -84,10 +146,8 @@ impl MqttState {
             collision_ping_count: 0,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
-            last_pkid: 0,
             last_puback: 0,
             inflight: 0,
-            max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
@@ -97,7 +157,12 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
+            pkid_manager: ThreadSafeMqttPkidManager::new(max_inflight)
         }
+    }
+
+    pub fn next_pkid(&mut self) -> Result<u16, StateError> {
+        self.pkid_manager.next_pkid()
     }
 
     /// Returns inflight outgoing packets and clears internal queues
@@ -324,7 +389,7 @@ impl MqttState {
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
-                publish.pkid = self.next_pkid();
+                publish.pkid = self.next_pkid()?;
             }
 
             let pkid = publish.pkid;
@@ -425,7 +490,7 @@ impl MqttState {
             return Err(StateError::EmptySubscription);
         }
 
-        let pkid = self.next_pkid();
+        let pkid = self.next_pkid()?;
         subscription.pkid = pkid;
 
         debug!(
@@ -440,7 +505,7 @@ impl MqttState {
     }
 
     fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
-        let pkid = self.next_pkid();
+        let pkid = self.next_pkid()?;
         unsub.pkid = pkid;
 
         debug!(
@@ -477,7 +542,7 @@ impl MqttState {
         let pubrel = match pubrel.pkid {
             // consider PacketIdentifier(0) as uninitialized packets
             0 => {
-                pubrel.pkid = self.next_pkid();
+                pubrel.pkid = self.next_pkid()?;
                 pubrel
             }
             _ => pubrel,
@@ -486,25 +551,6 @@ impl MqttState {
         self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
         self.inflight += 1;
         Ok(pubrel)
-    }
-
-    /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
-    /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
-    ///
-    fn next_pkid(&mut self) -> u16 {
-        let next_pkid = self.last_pkid + 1;
-
-        // When next packet id is at the edge of inflight queue,
-        // set await flag. This instructs eventloop to stop
-        // processing requests until all the inflight publishes
-        // are acked
-        if next_pkid == self.max_inflight {
-            self.last_pkid = 0;
-            return next_pkid;
-        }
-
-        self.last_pkid = next_pkid;
-        next_pkid
     }
 }
 
@@ -565,7 +611,7 @@ mod test {
 
         // QoS 0 publish shouldn't be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
-        assert_eq!(mqtt.last_pkid, 0);
+        assert_eq!(mqtt.pkid_manager.last_pkid(), 0);
         assert_eq!(mqtt.inflight, 0);
 
         // QoS1 Publish
@@ -573,12 +619,12 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
-        assert_eq!(mqtt.last_pkid, 1);
+        assert_eq!(mqtt.pkid_manager.last_pkid(), 1);
         assert_eq!(mqtt.inflight, 1);
 
         // Packet id should be incremented and publish should be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
-        assert_eq!(mqtt.last_pkid, 2);
+        assert_eq!(mqtt.pkid_manager.last_pkid(), 2);
         assert_eq!(mqtt.inflight, 2);
 
         // QoS1 Publish
@@ -586,12 +632,12 @@ mod test {
 
         // Packet id should be set and publish should be saved in queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
-        assert_eq!(mqtt.last_pkid, 3);
+        assert_eq!(mqtt.pkid_manager.last_pkid(), 3);
         assert_eq!(mqtt.inflight, 3);
 
         // Packet id should be incremented and publish should be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
-        assert_eq!(mqtt.last_pkid, 4);
+        assert_eq!(mqtt.pkid_manager.last_pkid(), 4);
         assert_eq!(mqtt.inflight, 4);
     }
 

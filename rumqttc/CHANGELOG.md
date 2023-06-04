@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `NetworkOptions` added to provide a way to configure low level network configurations (#545)
+- Added `Client::new_from_async` to make it possible to convert from `AsyncClient` to `Client`
 
 ### Changed
 - `options` in `Eventloop` now is called `mqtt_options` (#545)
