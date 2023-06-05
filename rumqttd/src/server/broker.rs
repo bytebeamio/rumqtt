@@ -2,13 +2,9 @@ use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, RemoteLink};
-#[cfg(feature = "websockets")]
-use crate::link::shadow::{self, ShadowLink};
 use crate::link::{bridge, timer};
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
-#[cfg(feature = "websockets")]
-use crate::protocol::ws::Ws;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
@@ -17,8 +13,6 @@ use flume::{RecvError, SendError, Sender};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument};
-#[cfg(feature = "websockets")]
-use websocket_codec::MessageCodec;
 
 use metrics::register_gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -219,19 +213,13 @@ impl Broker {
         if let Some(ws_config) = &self.config.ws {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
-                let server = Server::new(
-                    config,
-                    self.router_tx.clone(),
-                    Ws {
-                        codec: MessageCodec::server(),
-                    },
-                );
+                let server = Server::new(config, self.router_tx.clone(), V4);
                 server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Shadow).await {
+                        if let Err(e) = server.start(LinkType::Websocket).await {
                             error!(error=?e, "Server error - WS");
                         }
                     });
@@ -310,8 +298,10 @@ impl Broker {
 
 #[derive(Copy, Clone)]
 pub enum LinkType {
+    // #[cfg(feature = "websockets")]
+    // Shadow,
     #[cfg(feature = "websockets")]
-    Shadow,
+    Websocket,
     Remote,
 }
 
@@ -388,12 +378,13 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             let protocol = self.protocol.clone();
             match link_type {
                 #[cfg(feature = "websockets")]
-                LinkType::Shadow => task::spawn(
-                    shadow_connection(config, router_tx, network).instrument(tracing::info_span!(
-                        "shadow_connection",
-                        client_id = field::Empty,
-                        connection_id = field::Empty
-                    )),
+                LinkType::Websocket => task::spawn(
+                    websocket_connection(config, tenant_id.clone(), router_tx, network, protocol)
+                        .instrument(tracing::info_span!(
+                            "websocket_connection",
+                            client_id = field::Empty,
+                            connection_id = field::Empty
+                        )),
                 ),
                 LinkType::Remote => task::spawn(
                     remote(config, tenant_id.clone(), router_tx, network, protocol).instrument(
@@ -467,43 +458,63 @@ async fn remote<P: Protocol>(
 }
 
 #[cfg(feature = "websockets")]
-async fn shadow_connection(
+async fn websocket_connection<P: Protocol>(
     config: Arc<ConnectionSettings>,
+    tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
+    protocol: P,
 ) {
     // Start the link
+    use async_tungstenite::tokio::accept_async;
+    use ws_stream_tungstenite::WsStream;
 
-    use tracing::Span;
-    let mut link = match ShadowLink::new(config, router_tx.clone(), stream).await {
-        Ok(l) => l,
+    let stream = match accept_async(stream).await {
+        Ok(s) => s,
         Err(e) => {
-            error!(reason=?e, "Shadow link error");
+            error!(error=?e, "Websocket failed handshake");
             return;
         }
     };
+    let network = Network::new(
+        Box::new(WsStream::new(stream)),
+        config.max_payload_size,
+        100,
+        protocol,
+    );
+    // Start the link
+    let mut link =
+        match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(error=?e, "Remote link error");
+                return;
+            }
+        };
 
-    let client_id = link.client_id.clone();
+    let client_id = link.client_id.to_owned();
     let connection_id = link.connection_id;
-
-    Span::current().record("client_id", &client_id);
-    Span::current().record("connection_id", connection_id);
+    let mut execute_will = false;
 
     match link.start().await {
         // Connection get close. This shouldn't usually happen
         Ok(_) => error!("connection-stop"),
         // No need to send a disconnect message when disconnetion
         // originated internally in the router
-        Err(shadow::Error::Link(e)) => {
-            error!(reason=?e, "router-drop");
+        Err(remote::Error::Link(e)) => {
+            error!(error=?e, "router-drop");
             return;
         }
-        Err(e) => error!(?e),
+        // Any other error
+        Err(e) => {
+            error!(error=?e, "Disconnected!!");
+            execute_will = true;
+        }
     };
 
     let disconnect = Disconnection {
         id: client_id,
-        execute_will: false,
+        execute_will,
         pending: vec![],
     };
 
