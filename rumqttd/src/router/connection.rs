@@ -1,6 +1,8 @@
-use crate::protocol::LastWill;
+use slab::Slab;
+
 use crate::Filter;
-use std::collections::HashSet;
+use crate::{protocol::LastWill, Topic};
+use std::collections::{HashMap, HashSet};
 
 use super::ConnectionEvents;
 
@@ -22,6 +24,10 @@ pub struct Connection {
     pub last_will: Option<LastWill>,
     /// Connection events
     pub events: ConnectionEvents,
+    /// Topic aliases set by clients
+    pub(crate) topic_aliases: HashMap<u16, Topic>,
+    /// Topic aliases used by broker
+    pub(crate) broker_topic_aliases: Option<BrokerAliases>,
 }
 
 impl Connection {
@@ -32,6 +38,7 @@ impl Connection {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        topic_alias_max: u16,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
@@ -44,6 +51,13 @@ impl Connection {
             None => (client_id, None),
         };
 
+        // if topic_alias_max is 0, that means client doesn't want to use / support topic alias
+        let broker_topic_aliases = if topic_alias_max == 0 {
+            None
+        } else {
+            Some(BrokerAliases::new(topic_alias_max))
+        };
+
         Connection {
             client_id,
             tenant_prefix,
@@ -52,6 +66,61 @@ impl Connection {
             subscriptions: HashSet::default(),
             last_will,
             events: ConnectionEvents::default(),
+            topic_aliases: HashMap::new(),
+            broker_topic_aliases,
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BrokerAliases {
+    pub(crate) broker_topic_aliases: HashMap<Filter, u16>,
+    pub(crate) used_aliases: Slab<()>,
+    pub(crate) topic_alias_max: u16,
+}
+
+impl BrokerAliases {
+    fn new(topic_alias_max: u16) -> BrokerAliases {
+        let mut used_aliases = Slab::new();
+        // occupy 0th index as 0 is invalid topic alias
+        assert_eq!(0, used_aliases.insert(()));
+
+        let broker_topic_aliases = HashMap::new();
+
+        BrokerAliases {
+            broker_topic_aliases,
+            used_aliases,
+            topic_alias_max,
+        }
+    }
+
+    // unset / remove the alias for topic
+    pub fn remove_alias(&mut self, topic: &str) {
+        if let Some(alias) = self.broker_topic_aliases.remove(topic) {
+            self.used_aliases.remove(alias as usize);
+        }
+    }
+
+    // Get alias used for the topic, if it exists
+    pub fn get_alias(&self, topic: &str) -> Option<u16> {
+        self.broker_topic_aliases.get(topic).copied()
+    }
+
+    // Set new alias for a topic and return the alias
+    // returns None if can't set new alias
+    pub fn set_new_alias(&mut self, topic: &str) -> Option<u16> {
+        let alias_to_use = self.used_aliases.insert(());
+
+        // NOTE: maybe we can use self.used_aliases.len()
+        // to check for availability of alias
+        if alias_to_use > self.topic_alias_max as usize {
+            self.used_aliases.remove(alias_to_use);
+            return None;
+        }
+
+        let alias_to_use = alias_to_use as u16;
+        self.broker_topic_aliases
+            .insert(topic.to_owned(), alias_to_use);
+        Some(alias_to_use)
     }
 }
