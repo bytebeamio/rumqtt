@@ -11,13 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  - Added `outgoing_inflight_upper_limit` to MQTT5 `MqttOptions`. This sets the upper bound for the number of outgoing publish messages.
 
 ### Changed
+ - `MqttState::new` takes `max_outgoing_packet_size` which was set in `MqttOptions` but not used (#622)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
- - Missing headers on websocket upgrade request
+ - Enforce `max_outgoing_packet_size` on v3 client (#622)
+ - Missing headers on websocket upgrade request (#623)
+
 
 ### Security
 

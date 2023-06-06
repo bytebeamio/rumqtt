@@ -102,10 +102,11 @@ impl EventLoop {
         let pending = pending.into_iter();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
+        let max_outgoing_packet_size = mqtt_options.max_outgoing_packet_size;
 
         EventLoop {
             mqtt_options,
-            state: MqttState::new(max_inflight, manual_acks),
+            state: MqttState::new(max_inflight, manual_acks, max_outgoing_packet_size),
             requests_tx,
             requests_rx,
             pending,
@@ -230,7 +231,7 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
+                self.state.handle_outgoing_packet(Request::PingReq(PingReq))?;
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),

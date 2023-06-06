@@ -176,13 +176,32 @@ pub enum Request {
     PubRec(PubRec),
     PubComp(PubComp),
     PubRel(PubRel),
-    PingReq,
-    PingResp,
+    PingReq(PingReq),
+    PingResp(PingResp),
     Subscribe(Subscribe),
     SubAck(SubAck),
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
-    Disconnect,
+    Disconnect(Disconnect),
+}
+
+impl Request {
+    fn size(&self) -> usize {
+        match &self {
+            Request::Publish(publish) => publish.size(),
+            Request::PubAck(puback) => puback.size(),
+            Request::PubRec(pubrec) => pubrec.size(),
+            Request::PubComp(pubcomp) => pubcomp.size(),
+            Request::PubRel(pubrel) => pubrel.size(),
+            Request::PingReq(pingreq) => pingreq.size(),
+            Request::PingResp(pingresp) => pingresp.size(),
+            Request::Subscribe(subscribe) => subscribe.size(),
+            Request::SubAck(suback) => suback.size(),
+            Request::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Request::UnsubAck(unsuback) => unsuback.size(),
+            Request::Disconnect(disconn) => disconn.size(),
+        }
+    }
 }
 
 /// Key type for TLS authentication
@@ -418,9 +437,6 @@ pub struct MqttOptions {
     /// maximum incoming packet size (verifies remaining length of the packet)
     max_incoming_packet_size: usize,
     /// Maximum outgoing packet size (only verifies publish payload size)
-    // TODO Verify this with all packets. This can be packet.write but message left in
-    // the state might be a footgun as user has to explicitly clean it. Probably state
-    // has to be moved to network
     max_outgoing_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,

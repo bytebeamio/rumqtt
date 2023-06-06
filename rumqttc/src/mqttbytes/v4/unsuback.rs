@@ -13,6 +13,10 @@ impl UnsubAck {
         UnsubAck { pkid }
     }
 
+    pub fn size(&self) -> usize {
+        4
+    }
+
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         if fixed_header.remaining_len != 2 {
             return Err(Error::PayloadSizeIncorrect);
