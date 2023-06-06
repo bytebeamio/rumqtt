@@ -14,6 +14,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument};
 
+#[cfg(feature = "websockets")]
+use async_tungstenite::tokio::accept_async;
+#[cfg(feature = "websockets")]
+use ws_stream_tungstenite::WsStream;
+
 use metrics::register_gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
@@ -376,14 +381,24 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             let protocol = self.protocol.clone();
             match link_type {
                 #[cfg(feature = "websockets")]
-                LinkType::Websocket => task::spawn(
-                    websocket_connection(config, tenant_id.clone(), router_tx, network, protocol)
-                        .instrument(tracing::info_span!(
-                            "websocket_connection",
-                            client_id = field::Empty,
-                            connection_id = field::Empty
-                        )),
-                ),
+                LinkType::Websocket => {
+                    let stream = match accept_async(network).await {
+                        Ok(s) => Box::new(WsStream::new(s)),
+                        Err(e) => {
+                            error!(error=?e, "Websocket failed handshake");
+                            continue;
+                        }
+                    };
+                    task::spawn(
+                        remote(config, tenant_id.clone(), router_tx, stream, protocol).instrument(
+                            tracing::info_span!(
+                                "websocket_link",
+                                client_id = field::Empty,
+                                connection_id = field::Empty
+                            ),
+                        ),
+                    )
+                }
                 LinkType::Remote => task::spawn(
                     remote(config, tenant_id.clone(), router_tx, network, protocol).instrument(
                         tracing::error_span!(
@@ -414,72 +429,6 @@ async fn remote<P: Protocol>(
     protocol: P,
 ) {
     let network = Network::new(stream, config.max_payload_size, 100, protocol);
-    // Start the link
-    let mut link =
-        match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!(error=?e, "Remote link error");
-                return;
-            }
-        };
-
-    let client_id = link.client_id.to_owned();
-    let connection_id = link.connection_id;
-    let mut execute_will = false;
-
-    match link.start().await {
-        // Connection get close. This shouldn't usually happen
-        Ok(_) => error!("connection-stop"),
-        // No need to send a disconnect message when disconnetion
-        // originated internally in the router
-        Err(remote::Error::Link(e)) => {
-            error!(error=?e, "router-drop");
-            return;
-        }
-        // Any other error
-        Err(e) => {
-            error!(error=?e, "Disconnected!!");
-            execute_will = true;
-        }
-    };
-
-    let disconnect = Disconnection {
-        id: client_id,
-        execute_will,
-        pending: vec![],
-    };
-
-    let disconnect = Event::Disconnect(disconnect);
-    let message = (connection_id, disconnect);
-    router_tx.send(message).ok();
-}
-
-#[cfg(feature = "websockets")]
-async fn websocket_connection<P: Protocol>(
-    config: Arc<ConnectionSettings>,
-    tenant_id: Option<String>,
-    router_tx: Sender<(ConnectionId, Event)>,
-    stream: Box<dyn N>,
-    protocol: P,
-) {
-    // Start the link
-    use async_tungstenite::tokio::accept_async;
-    use ws_stream_tungstenite::WsStream;
-
-    let stream = match accept_async(stream).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!(error=?e, "Websocket failed handshake");
-            return;
-        }
-    };
-    let network = Network::new(
-        Box::new(WsStream::new(stream)),
-        config.max_payload_size,
-        100,
-        protocol,
-    );
     // Start the link
     let mut link =
         match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {
