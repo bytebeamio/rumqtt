@@ -298,8 +298,6 @@ impl Broker {
 
 #[derive(Copy, Clone)]
 pub enum LinkType {
-    // #[cfg(feature = "websockets")]
-    // Shadow,
     #[cfg(feature = "websockets")]
     Websocket,
     Remote,
