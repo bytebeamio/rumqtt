@@ -22,7 +22,7 @@ tokio-rustls = { version = "0.24", optional = true }
 rustls-webpki = { version = "0.100.1", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 rustls-pemfile = { version = "1", optional = true }
-async-tungstenite = { version = "0.22.2", default-features = false, features = ["tokio-rustls-webpki-roots"], optional = true }
+async-tungstenite = { version = "0.22.2", default-features = false, optional = true }
 ws_stream_tungstenite = { version = "0.10.0", default-features = false, features = ["tokio_io"], optional = true }
 x509-parser = {version= "0.9.2", optional = true}
 futures-util = { version = "0.3.16", optional = true}
@@ -37,8 +37,8 @@ axum = "0.6.4"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
-use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser", "async-tungstenite?/tokio-rustls-manual-roots"]
+use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser", "async-tungstenite?/tokio-native-tls"]
 websockets = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep:ws_stream_tungstenite"]
 validate-tenant-prefix = []
 allow-duplicate-clientid = []
