@@ -1,7 +1,7 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
     PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
-    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -673,7 +673,7 @@ impl Router {
                             let unsuback = UnsubAck {
                                 pkid,
                                 // reasons are used in MQTTv5
-                                reasons: vec![],
+                                reasons: vec![UnsubAckReason::Success],
                             };
                             let ackslog = self.ackslog.get_mut(id).unwrap();
                             ackslog.unsuback(unsuback);
