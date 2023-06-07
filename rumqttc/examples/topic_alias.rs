@@ -9,7 +9,7 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "broker.emqx.io", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
     mqttoptions.set_topic_alias_max(10.into());
 
@@ -43,7 +43,7 @@ async fn requests(client: AsyncClient) {
     client
         .publish_with_properties(
             "hello/world",
-            QoS::ExactlyOnce,
+            QoS::AtMostOnce,
             false,
             vec![3; 3],
             props.clone(),
@@ -57,7 +57,7 @@ async fn requests(client: AsyncClient) {
     client
         .publish_with_properties(
             "bye/world",
-            QoS::ExactlyOnce,
+            QoS::AtMostOnce,
             false,
             vec![3; 3],
             other.clone(),
@@ -72,7 +72,7 @@ async fn requests(client: AsyncClient) {
             props.clone()
         };
         client
-            .publish_with_properties("", QoS::ExactlyOnce, false, vec![1; i], properties)
+            .publish_with_properties("", QoS::AtMostOnce, false, vec![1; i], properties)
             .await
             .unwrap();
 
