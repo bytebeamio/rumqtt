@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttc 0.22.0] - 07-06-2023
+
+### Added
 - Added `outgoing_inflight_upper_limit` to MQTT5 `MqttOptions`. This sets the upper bound for the number of outgoing publish messages (#615)
 - Added support for HTTP(s) proxy (#608)
     - Added `proxy` feature gate
@@ -28,8 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforce `max_outgoing_packet_size` on v4 client (#622)
 
 ### Security
-
----
 
 ## [rumqttc 0.21.0] - 01-05-2023
 
