@@ -578,11 +578,19 @@ mod test {
     fn outgoing_max_packet_size_check() {
         let mut mqtt = MqttState::new(100, false, 200);
 
-        let small_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1;100]);
-        assert_eq!(mqtt.handle_outgoing_packet(Request::Publish(small_publish)).is_ok(), true);
+        let small_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; 100]);
+        assert_eq!(
+            mqtt.handle_outgoing_packet(Request::Publish(small_publish))
+                .is_ok(),
+            true
+        );
 
-        let large_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1;265]);
-        assert_eq!(mqtt.handle_outgoing_packet(Request::Publish(large_publish)).is_ok(), false);
+        let large_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; 265]);
+        assert_eq!(
+            mqtt.handle_outgoing_packet(Request::Publish(large_publish))
+                .is_ok(),
+            false
+        );
     }
 
     #[test]

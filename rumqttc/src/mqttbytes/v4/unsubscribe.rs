@@ -18,7 +18,7 @@ impl Unsubscribe {
 
     fn len(&self) -> usize {
         // len of pkid + vec![subscribe topics len]
-        2 + self.topics.iter().fold(0, |s, t| s + t.len())
+        2 + self.topics.iter().fold(0, |s, t| s + t.len() + 2)
     }
 
     pub fn size(&self) -> usize {
