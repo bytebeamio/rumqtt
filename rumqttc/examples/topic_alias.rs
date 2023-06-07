@@ -37,8 +37,10 @@ async fn requests(client: AsyncClient) {
         .await
         .unwrap();
 
-    let mut props = PublishProperties::default();
-    props.topic_alias = Some(28);
+    let props = PublishProperties {
+        topic_alias: Some(28),
+        ..Default::default()
+    };
 
     client
         .publish_with_properties(
@@ -51,8 +53,8 @@ async fn requests(client: AsyncClient) {
         .await
         .unwrap();
 
-    let mut other = props.clone();
-    other.topic_alias = Some(51);
+    let mut other_props = props.clone();
+    other_props.topic_alias = Some(51);
 
     client
         .publish_with_properties(
@@ -60,17 +62,20 @@ async fn requests(client: AsyncClient) {
             QoS::AtMostOnce,
             false,
             vec![3; 3],
-            other.clone(),
+            other_props.clone(),
         )
         .await
         .unwrap();
 
     for i in 1..=10 {
+        // alternately choose the properties
         let properties = if i % 2 == 0 {
-            other.clone()
+            other_props.clone()
         } else {
             props.clone()
         };
+
+        // no need to specify topic as we are using topic alias
         client
             .publish_with_properties("", QoS::AtMostOnce, false, vec![1; i], properties)
             .await
