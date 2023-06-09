@@ -202,14 +202,14 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
+        let request = Request::Disconnect(Disconnect);
         self.request_tx.send_async(request).await?;
         Ok(())
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
+        let request = Request::Disconnect(Disconnect);
         self.request_tx.try_send(request)?;
         Ok(())
     }
@@ -361,7 +361,7 @@ impl Client {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
+        let request = Request::Disconnect(Disconnect);
         self.client.request_tx.send(request)?;
         Ok(())
     }
