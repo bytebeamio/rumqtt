@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports)]
-use rumqttc::v5::mqttbytes::v5::Packet;
-use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::mqttbytes::v5::Packet;
+use rumqttc::mqttbytes::QoS;
 use tokio::{task, time};
 
 use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};

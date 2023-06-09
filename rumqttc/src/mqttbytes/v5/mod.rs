@@ -33,6 +33,21 @@ mod subscribe;
 mod unsuback;
 mod unsubscribe;
 
+/// Error during serialization and deserialization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ErrorV5 {
+    #[error("Invalid reason: {0}")]
+    InvalidReason(u8),
+    #[error("Invalid remaining length: {0}")]
+    InvalidRemainingLength(usize),
+    #[error("Invalid retain forward rule: {0}")]
+    InvalidRetainForwardRule(u8),
+    #[error("Subscription had id Zero")]
+    SubscriptionIdZero,
+    #[error("Payload is required: {0}")]
+    PayloadNotUtf8(#[from] std::str::Utf8Error),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
     Connect(Connect, Option<LastWill>, Option<Login>),
@@ -251,6 +266,7 @@ impl FixedHeader {
             13 => Ok(PacketType::PingResp),
             14 => Ok(PacketType::Disconnect),
             _ => Err(Error::InvalidPacketType(num)),
+            // FIXME: 15 is for AUTH packet. This code is just copied from mqtt3
         }
     }
 
@@ -397,15 +413,6 @@ fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
     }
 
     Ok(stream.split_to(len))
-}
-
-/// Reads a string from bytes stream
-fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
-    let s = read_mqtt_bytes(stream)?;
-    match String::from_utf8(s.to_vec()) {
-        Ok(v) => Ok(v),
-        Err(_e) => Err(Error::TopicNotUtf8),
-    }
 }
 
 /// Serializes bytes to stream (including length)

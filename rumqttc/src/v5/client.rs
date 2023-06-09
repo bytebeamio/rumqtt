@@ -2,13 +2,15 @@
 //! async eventloop.
 use std::time::Duration;
 
-use super::mqttbytes::v5::{
-    Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
-    Unsubscribe, UnsubscribeProperties,
+use crate::mqttbytes::{
+    v5::{
+        Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
+        Unsubscribe, UnsubscribeProperties,
+    },
+    valid_topic, QoS,
 };
-use super::mqttbytes::QoS;
+
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::valid_topic;
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -828,7 +830,7 @@ impl Iterator for Iter<'_> {
 
 #[cfg(test)]
 mod test {
-    use crate::v5::mqttbytes::v5::LastWill;
+    use crate::mqttbytes::v5::LastWill;
 
     use super::*;
 

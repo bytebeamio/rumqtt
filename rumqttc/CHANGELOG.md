@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+ - Move v4 client to separate module
+ - Move v5/mqttbytes to mqttbytes module
 
 ### Deprecated
 

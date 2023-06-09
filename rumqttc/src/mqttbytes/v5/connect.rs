@@ -403,7 +403,7 @@ impl LastWill {
                 let will_topic = read_mqtt_bytes(bytes)?;
                 let will_message = read_mqtt_bytes(bytes)?;
                 let qos_num = (connect_flags & 0b11000) >> 3;
-                let will_qos = qos(qos_num).ok_or(Error::InvalidQoS(qos_num))?;
+                let will_qos = qos(qos_num)?;
                 Some(LastWill {
                     topic: will_topic,
                     message: will_message,

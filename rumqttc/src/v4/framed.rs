@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::mqttbytes::{self, v4::*};
-use crate::{Incoming, MqttState, StateError};
+use crate::v4::{Incoming, MqttState, StateError};
 use std::io;
 
 /// Network transforms packets <-> frames efficiently. It takes

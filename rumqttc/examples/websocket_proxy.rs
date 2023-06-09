@@ -1,5 +1,5 @@
 #[cfg(all(feature = "websocket", feature = "proxy"))]
-use rumqttc::{self, AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
+use rumqttc::{AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
 #[cfg(all(feature = "websocket", feature = "proxy"))]
 use std::{error::Error, time::Duration};
 #[cfg(all(feature = "websocket", feature = "proxy"))]

@@ -1,9 +1,9 @@
-use super::mqttbytes::v5::{
+use crate::mqttbytes::v5::{
     ConnAck, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
     PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel, PubRelReason, Publish,
     SubAck, Subscribe, SubscribeReasonCode, UnsubAck, UnsubAckReason, Unsubscribe,
 };
-use super::mqttbytes::{self, QoS};
+use crate::mqttbytes::{self, QoS};
 
 use super::{Event, Incoming, Outgoing, Request};
 
