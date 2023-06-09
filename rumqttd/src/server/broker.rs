@@ -15,7 +15,11 @@ use std::sync::Arc;
 use tracing::{error, field, info, Instrument};
 
 #[cfg(feature = "websockets")]
-use async_tungstenite::tokio::accept_async;
+use async_tungstenite::tokio::accept_hdr_async;
+#[cfg(feature = "websockets")]
+use async_tungstenite::tungstenite::handshake::server::Callback;
+#[cfg(feature = "websockets")]
+use async_tungstenite::tungstenite::handshake::server::*;
 #[cfg(feature = "websockets")]
 use ws_stream_tungstenite::WsStream;
 
@@ -383,7 +387,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             match link_type {
                 #[cfg(feature = "websockets")]
                 LinkType::Websocket => {
-                    let stream = match accept_async(network).await {
+                    let stream = match accept_hdr_async(network, WSCallback).await {
                         Ok(s) => Box::new(WsStream::new(s)),
                         Err(e) => {
                             error!(error=?e, "Websocket failed handshake");
@@ -414,6 +418,25 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
             time::sleep(delay).await;
         }
+    }
+}
+
+/// Configures the Websocket connection to indicate the correct protocol
+/// by adding the "sec-websocket-protocol" with value of "mqtt" to the response header
+#[cfg(feature = "websockets")]
+struct WSCallback;
+#[cfg(feature = "websockets")]
+impl Callback for WSCallback {
+    fn on_request(
+        self,
+        _request: &Request,
+        mut response: Response,
+    ) -> Result<Response, ErrorResponse> {
+        response.headers_mut().insert(
+            "sec-websocket-protocol",
+            axum::http::HeaderValue::from_static("mqtt"),
+        );
+        Ok(response)
     }
 }
 
