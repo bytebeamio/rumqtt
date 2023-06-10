@@ -1,5 +1,6 @@
 #![allow(dead_code, unused)]
 
+pub mod dynamic;
 pub mod v4;
 pub mod v5;
 #[cfg(feature = "websockets")]
@@ -705,6 +706,8 @@ pub enum Error {
     InvalidProtocol,
     #[error("Invalid protocol level {0}. Make sure right port is being used.")]
     InvalidProtocolLevel(u8),
+    #[error("Unsupported protocol level. Make sure protocol level is supported on this port.")]
+    UnsupportedProtocolLevel,
     #[error("Invalid packet format")]
     IncorrectPacketFormat,
     #[error("Invalid packet type = {0}")]

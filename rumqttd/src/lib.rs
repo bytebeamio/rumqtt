@@ -42,7 +42,8 @@ pub use server::Broker;
 pub struct Config {
     pub id: usize,
     pub router: RouterConfig,
-    pub v4: HashMap<String, ServerSettings>,
+    pub tcp: Option<HashMap<String, ServerSettings>>,
+    pub v4: Option<HashMap<String, ServerSettings>>,
     pub v5: Option<HashMap<String, ServerSettings>>,
     pub ws: Option<HashMap<String, ServerSettings>>,
     pub cluster: Option<ClusterSettings>,
@@ -101,6 +102,8 @@ pub struct ServerSettings {
     pub tls: Option<TlsConfig>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
+    #[serde(default)]
+    pub sub_protocol: SubProtocol,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -191,4 +194,15 @@ pub enum MetricType {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MetricSettings {
     push_interval: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub enum SubProtocol {
+    #[serde(rename = "all")]
+    #[default]
+    All,
+    #[serde(rename = "v3.1.1")]
+    V4,
+    #[serde(rename = "v5")]
+    V5,
 }

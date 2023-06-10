@@ -88,10 +88,12 @@ fn main() {
 
 // Do any extra validation that needs to be done before starting the broker here.
 fn validate_config(configs: &rumqttd::Config) {
-    for (name, server_setting) in &configs.v4 {
-        if let Some(tls_config) = &server_setting.tls {
-            if !tls_config.validate_paths() {
-                panic!("Certificate path not valid for server v4.{name}.")
+    if let Some(v4) = &configs.v4 {
+        for (name, server_setting) in v4 {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server v4.{name}.")
+                }
             }
         }
     }
@@ -111,6 +113,16 @@ fn validate_config(configs: &rumqttd::Config) {
             if let Some(tls_config) = &server_setting.tls {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server ws.{name}.")
+                }
+            }
+        }
+    }
+
+    if let Some(tcp) = &configs.tcp {
+        for (name, server_setting) in tcp {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server tcp.{name}.")
                 }
             }
         }

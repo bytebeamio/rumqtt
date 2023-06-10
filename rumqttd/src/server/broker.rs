@@ -5,6 +5,7 @@ use crate::link::remote::{self, RemoteLink};
 #[cfg(feature = "websockets")]
 use crate::link::shadow::{self, ShadowLink};
 use crate::link::{bridge, timer};
+use crate::protocol::dynamic::Dynamic;
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 #[cfg(feature = "websockets")]
@@ -183,19 +184,40 @@ impl Broker {
         }
 
         // spawn servers in a separate thread
-        for (_, config) in self.config.v4.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
-            let server = Server::new(config, self.router_tx.clone(), V4);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        if let Some(tcp_config) = &self.config.tcp {
+            for (_, config) in tcp_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let sub_protocol = config.sub_protocol.clone();
+                let server =
+                    Server::new(config, self.router_tx.clone(), Dynamic::new(sub_protocol));
+                server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
 
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Server error - V4");
-                    }
-                });
-            })?;
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Remote).await {
+                            error!(error=?e, "Server error - TCP dynamic protocol");
+                        }
+                    });
+                })?;
+            }
+        }
+
+        if let Some(v4_config) = &self.config.v4 {
+            for (_, config) in v4_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let server = Server::new(config, self.router_tx.clone(), V4);
+                server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
+
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Remote).await {
+                            error!(error=?e, "Server error - V4");
+                        }
+                    });
+                })?;
+            }
         }
 
         if let Some(v5_config) = &self.config.v5 {
