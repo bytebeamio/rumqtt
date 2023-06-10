@@ -219,55 +219,6 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
     }
 }
 
-/// Serializes bytes to stream (including length)
-fn write_mqtt_bytes(stream: &mut BytesMut, bytes: &[u8]) {
-    stream.put_u16(bytes.len() as u16);
-    stream.extend_from_slice(bytes);
-}
-
-/// Serializes a string to stream
-fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
-    write_mqtt_bytes(stream, string.as_bytes());
-}
-
-/// Writes remaining length to stream and returns number of bytes for remaining length
-pub fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Error> {
-    if len > 268_435_455 {
-        return Err(Error::PayloadTooLong);
-    }
-
-    let mut done = false;
-    let mut x = len;
-    let mut count = 0;
-
-    while !done {
-        let mut byte = (x % 128) as u8;
-        x /= 128;
-        if x > 0 {
-            byte |= 128;
-        }
-
-        stream.put_u8(byte);
-        count += 1;
-        done = x == 0;
-    }
-
-    Ok(count)
-}
-
-/// Return number of remaining length bytes required for encoding length
-fn len_len(len: usize) -> usize {
-    if len >= 2_097_152 {
-        4
-    } else if len >= 16_384 {
-        3
-    } else if len >= 128 {
-        2
-    } else {
-        1
-    }
-}
-
 #[derive(Debug, Clone)]
 /// A protocol which dynamically determines how to read the packets.
 /// After the connect packet the following packets will be read as determined by
