@@ -308,34 +308,37 @@ impl Dynamic {
 impl Protocol for Dynamic {
     /// Reads a stream of bytes and extracts next MQTT packet out of it
     fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
-        let fixed_header = check(stream.iter(), max_size)?;
-
-        let packet_type = fixed_header.packet_type()?;
-
         /// Protocol is unknown and we recieved a connect packet, attempt to determine what protocol level is requested.
         /// Technically we will read the connect packet twice, once to determine the protocol level and once when actually parsing it
         /// in the specified protocol, could maybe be improved.
-        if self.protocol == CurrentProtocol::Unkown && packet_type == PacketType::Connect {
-            let mut stream_clone = stream.iter();
-            let mut packet: Bytes = stream_clone
-                .take(fixed_header.frame_length())
-                .copied()
-                .collect();
-            let variable_header_index = fixed_header.fixed_header_len;
-            packet.advance(variable_header_index);
+        if self.protocol == CurrentProtocol::Unkown {
+            let fixed_header = check(stream.iter(), max_size)?;
 
-            // Variable header
-            let protocol_name = read_mqtt_string(&mut packet)?;
-            let protocol_level = read_u8(&mut packet)?;
+            let packet_type = fixed_header.packet_type()?;
+            /// Protocol is currently unknown, we only want to peek the packet if it is a connect.
+            /// We should never not get a connect packet here, except for maybe a ping?
+            if packet_type == PacketType::Connect {
+                let mut stream_clone = stream.iter();
+                let mut packet: Bytes = stream_clone
+                    .take(fixed_header.frame_length())
+                    .copied()
+                    .collect();
+                let variable_header_index = fixed_header.fixed_header_len;
+                packet.advance(variable_header_index);
 
-            if protocol_name != "MQTT" {
-                return Err(Error::InvalidProtocol);
-            }
+                // Variable header
+                let protocol_name = read_mqtt_string(&mut packet)?;
+                let protocol_level = read_u8(&mut packet)?;
 
-            self.protocol = match protocol_level {
-                4 => CurrentProtocol::V4,
-                5 => CurrentProtocol::V5,
-                _ => return Err(Error::InvalidProtocolLevel(protocol_level)),
+                if protocol_name != "MQTT" {
+                    return Err(Error::InvalidProtocol);
+                }
+
+                self.protocol = match protocol_level {
+                    4 => CurrentProtocol::V4,
+                    5 => CurrentProtocol::V5,
+                    _ => return Err(Error::InvalidProtocolLevel(protocol_level)),
+                }
             }
         }
 
