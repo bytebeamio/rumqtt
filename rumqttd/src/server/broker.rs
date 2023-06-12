@@ -14,13 +14,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tracing::{error, field, info, Instrument};
 
-#[cfg(feature = "websockets")]
+#[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
-#[cfg(feature = "websockets")]
+#[cfg(feature = "websocket")]
 use async_tungstenite::tungstenite::handshake::server::Callback;
-#[cfg(feature = "websockets")]
+#[cfg(feature = "websocket")]
 use async_tungstenite::tungstenite::handshake::server::*;
-#[cfg(feature = "websockets")]
+#[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
 use metrics::register_gauge;
@@ -218,7 +218,7 @@ impl Broker {
             }
         }
 
-        #[cfg(feature = "websockets")]
+        #[cfg(feature = "websocket")]
         if let Some(ws_config) = &self.config.ws {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
@@ -308,7 +308,7 @@ impl Broker {
 
 #[derive(Copy, Clone)]
 pub enum LinkType {
-    #[cfg(feature = "websockets")]
+    #[cfg(feature = "websocket")]
     Websocket,
     Remote,
 }
@@ -385,7 +385,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
             let protocol = self.protocol.clone();
             match link_type {
-                #[cfg(feature = "websockets")]
+                #[cfg(feature = "websocket")]
                 LinkType::Websocket => {
                     let stream = match accept_hdr_async(network, WSCallback).await {
                         Ok(s) => Box::new(WsStream::new(s)),
@@ -423,9 +423,9 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
 
 /// Configures the Websocket connection to indicate the correct protocol
 /// by adding the "sec-websocket-protocol" with value of "mqtt" to the response header
-#[cfg(feature = "websockets")]
+#[cfg(feature = "websocket")]
 struct WSCallback;
-#[cfg(feature = "websockets")]
+#[cfg(feature = "websocket")]
 impl Callback for WSCallback {
     fn on_request(
         self,
