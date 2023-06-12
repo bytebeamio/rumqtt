@@ -1,7 +1,8 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
-    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
-    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck, UnsubAckReason,
+    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
+    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
