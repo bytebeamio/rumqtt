@@ -20,10 +20,18 @@ Example config file is provided on the root of the repo.
 
 #### Building the docker image
 
-In order to run rumqttd within a docker container, build the image by running `build_rumqttd_docker.sh` from the project's root directory. The shell script will use docker to build rumqttd and package it along in an [alpine](https://hub.docker.com/_/alpine) image. You can then run `rumqttd` with the included `rumqttd.toml` as follows(ensure you are in the project's root directory):
+In order to run rumqttd within a docker container, build the image by running `build_rumqttd_docker.sh` from the project's root directory. The shell script will use docker to build rumqttd and package it along in an [alpine](https://hub.docker.com/_/alpine) image. You can then run `rumqttd` using default config with:
+
 ```bash
 ./build_rumqttd_docker.sh
-docker run -p 1883:1883 -p 1884:1884 -it rumqttd -c rumqttd.toml
+docker run -p 1883:1883 -p 1884:1884 -it rumqttd
+```
+
+Or you can run `rumqttd` with the custom config file by mounting the file and passing it as argument:
+
+```bash
+./build_rumqttd_docker.sh
+docker run -p 1883:1883 -p 1884:1884 -v /absolute/path/to/rumqttd.toml:/rumqttd.toml -it rumqttd -c /rumqttd.toml
 ```
 
 # How to use with TLS

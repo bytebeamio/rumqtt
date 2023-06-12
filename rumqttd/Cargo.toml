@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.14.0"
+version = "0.15.0"
 license = "Apache-2.0"
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 authors = ["tekjar <raviteja@bytebeam.io>"]

@@ -24,6 +24,7 @@ use crate::tls;
 #[cfg(feature = "websocket")]
 use {
     crate::websockets::{split_url, UrlError},
+    async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
 
@@ -101,10 +102,11 @@ impl EventLoop {
         let pending = pending.into_iter();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
+        let max_outgoing_packet_size = mqtt_options.max_outgoing_packet_size;
 
         EventLoop {
             mqtt_options,
-            state: MqttState::new(max_inflight, manual_acks),
+            state: MqttState::new(max_inflight, manual_acks, max_outgoing_packet_size),
             requests_tx,
             requests_rx,
             pending,
@@ -229,7 +231,7 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
+                self.state.handle_outgoing_packet(Request::PingReq(PingReq))?;
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),
@@ -379,11 +381,10 @@ async fn network_connect(
         Transport::Unix => unreachable!(),
         #[cfg(feature = "websocket")]
         Transport::Ws => {
-            let request = http::Request::builder()
-                .method(http::Method::GET)
-                .uri(options.broker_addr.as_str())
-                .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())?;
+            let mut request = options.broker_addr.as_str().into_client_request()?;
+            request
+                .headers_mut()
+                .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
             let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
 
@@ -391,11 +392,10 @@ async fn network_connect(
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
-            let request = http::Request::builder()
-                .method(http::Method::GET)
-                .uri(options.broker_addr.as_str())
-                .header("Sec-WebSocket-Protocol", "mqttv3.1")
-                .body(())?;
+            let mut request = options.broker_addr.as_str().into_client_request()?;
+            request
+                .headers_mut()
+                .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
             let connector = tls::rustls_connector(&tls_config).await?;
 

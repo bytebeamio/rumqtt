@@ -45,6 +45,7 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        topic_alias_max: u16,
     ) -> (
         Event,
         Arc<Mutex<VecDeque<Packet>>>,
@@ -57,6 +58,7 @@ impl Link {
             clean,
             last_will,
             dynamic_filters,
+            topic_alias_max,
         );
         let incoming = Incoming::new(connection.client_id.to_owned());
         let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
@@ -80,12 +82,19 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        topic_alias_max: Option<u16>,
     ) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx) =
-            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
+        let (message, i, o, link_rx) = Link::prepare(
+            tenant_id,
+            client_id,
+            clean,
+            last_will,
+            dynamic_filters,
+            topic_alias_max.unwrap_or(0),
+        );
         router_tx.send((0, message))?;
 
         link_rx.recv()?;
@@ -110,12 +119,19 @@ impl Link {
         clean: bool,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
+        topic_alias_max: Option<u16>,
     ) -> Result<(LinkTx, LinkRx, ConnAck), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
 
-        let (message, i, o, link_rx) =
-            Link::prepare(tenant_id, client_id, clean, last_will, dynamic_filters);
+        let (message, i, o, link_rx) = Link::prepare(
+            tenant_id,
+            client_id,
+            clean,
+            last_will,
+            dynamic_filters,
+            topic_alias_max.unwrap_or(0),
+        );
         router_tx.send_async((0, message)).await?;
 
         link_rx.recv_async().await?;
@@ -123,7 +139,7 @@ impl Link {
         // Right now link identifies failure with dropped rx in router,
         // which is probably ok. We need this here to get id assigned by router
         let (id, ack) = match notification {
-            Notification::DeviceAck(Ack::ConnAck(id, ack)) => (id, ack),
+            Notification::DeviceAck(Ack::ConnAck(id, ack, _)) => (id, ack),
             _message => return Err(LinkError::NotConnectionAck),
         };
 

@@ -404,6 +404,10 @@ impl Protocol for V5 {
                 let (suback, properties) = suback::read(fixed_header, packet)?;
                 Packet::SubAck(suback, properties)
             }
+            PacketType::Unsubscribe => {
+                let (unsubscribe, properties) = unsubscribe::read(fixed_header, packet)?;
+                Packet::Unsubscribe(unsubscribe, properties)
+            }
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
             PacketType::Disconnect => {
