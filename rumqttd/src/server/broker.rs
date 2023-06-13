@@ -17,9 +17,9 @@ use tracing::{error, field, info, Instrument};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
 #[cfg(feature = "websocket")]
-use async_tungstenite::tungstenite::handshake::server::Callback;
+use async_tungstenite::tungstenite::handshake::server::{Callback, Request, Response};
 #[cfg(feature = "websocket")]
-use async_tungstenite::tungstenite::handshake::server::*;
+use async_tungstenite::tungstenite::http::HeaderValue;
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
@@ -432,10 +432,9 @@ impl Callback for WSCallback {
         _request: &Request,
         mut response: Response,
     ) -> Result<Response, ErrorResponse> {
-        response.headers_mut().insert(
-            "sec-websocket-protocol",
-            axum::http::HeaderValue::from_static("mqtt"),
-        );
+        response
+            .headers_mut()
+            .insert("sec-websocket-protocol", HeaderValue::from_static("mqtt"));
         Ok(response)
     }
 }
