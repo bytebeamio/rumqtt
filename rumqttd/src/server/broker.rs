@@ -17,7 +17,9 @@ use tracing::{error, field, info, Instrument};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
 #[cfg(feature = "websocket")]
-use async_tungstenite::tungstenite::handshake::server::{Callback, Request, Response};
+use async_tungstenite::tungstenite::handshake::server::{
+    Callback, ErrorResponse, Request, Response,
+};
 #[cfg(feature = "websocket")]
 use async_tungstenite::tungstenite::http::HeaderValue;
 #[cfg(feature = "websocket")]
