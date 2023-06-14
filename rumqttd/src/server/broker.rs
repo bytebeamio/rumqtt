@@ -282,21 +282,6 @@ impl Broker {
             })?;
         }
 
-        // for (_, config) in self.config.shadows.clone() {
-        //     let server_thread = thread::Builder::new().name(config.name.clone());
-        //     let server = Server::new(config, self.router_tx.clone());
-        //     server_thread.spawn(move || {
-        //         let mut runtime = tokio::runtime::Builder::new_current_thread();
-        //         let runtime = runtime.enable_all().build().unwrap();
-
-        //         runtime.block_on(async {
-        //             if let Err(e) = server.start(true).await {
-        //                 error!("Accept loop error: {:?}", e.to_string());
-        //             }
-        //         });
-        //     })?;
-        // }
-
         let console_link = ConsoleLink::new(self.config.console.clone(), self.router_tx.clone());
 
         let console_link = Arc::new(console_link);
