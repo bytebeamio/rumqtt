@@ -139,7 +139,7 @@ NOTE: Transition to ConnectionReady will schedule the connection for consumption
   - If ConnectionBusy
     - ConnectionBusy -> ConnectionReady
 
-## v2
+## Basic Concepts and Procedures
 
 ### Ontology
 
@@ -154,39 +154,39 @@ Here are a few terms to understand before we move on. These terms are used inter
    - `ibufs`: All incoming data to `rumqttd` (represented by a `Packet`) is stored immediately in `ibufs` (which holds a `VecDequeue`)
    - `obufs`: All outgoing data `rumqttd` (represented by `Notification`) is stored immediately in the `obufs` (which holds a `VecDequeue`).
 
-   `obufs` also has an _in-flight queue_ to track packets that have been sent.
+   `obufs` also has an _in-flight queue_ to track packets that have been sent via the network but have not been acknowledged.
 
 1. Broker
 
    Top-level entity that handles _everything_, including, but not limited to
 
-   - Config Validation
    - Configuring and creating the Router
    - Starting the Router
    - Maintaining a channel that communicates with the router
 
    When you start the Broker, the following happens ->
 
-   1. The Router is started
+   1. The Router is created and configured
    2. (on a new thread) Creates the metrics server
    3. (on a new thread) Starts all `mqttv4` servers
    4. (on a new thread) Starts all `mqttv5` servers
-   5. (on a new thread) Starts the prometheus listener
-   6. (on the same thread) Starts the ConsoleLink to allow
+   5. (on a new thread, if enabled) Starts all `websocket` servers
+   6. (on a new thread) Starts the prometheus listener
+   7. (on the same thread) Starts the ConsoleLink to allow HTTP queries to monitor and manage the broker itself.
 
 2. Router
 
-   Entity managed by the broker that controls the flow of data in `rumqttd`. The router is responsible for managing, authorizing, and scheduling the flow of data between components within and connected to `rumqttd`.
+   Entity created by the broker that controls the flow of data in `rumqttd`. The router is responsible for managing, authorizing, and scheduling the flow of data between components within and connected to `rumqttd`.
 
    <!-- At any given time, the router's event loop must choose between handling incoming messages or sending outgoing messages. -->
 
-   The router is built on the actor pattern, where it works primarily by _reacting_ to events that happen. As and when an event is added to `ibufs`, the router reacts by checking its current state (for a certain connection or message) and dispatching the appropriate action. This can involve changing other in-memory data structures, or writing the message to `obufs` to make sure it's handled by the appropriate link.
+   The router is built on the reactor pattern, where it works primarily by _reacting_ to events that happen. As and when an event is added to `ibufs`, the router reacts by checking its current state (for a certain connection or message) and dispatching the appropriate action. This can involve changing other in-memory data structures, or writing the message to `obufs` to make sure it's handled by the appropriate link.
 
    An action of any sort on the router's end which involves communication usually involves the router adding a structure or packet to one of these buffers.
 
    The router also shares Channels, which do not contain the events themselves, but rather contain notifications to events that might be added into the shared event buffers. This also has the added benefit of preventing lock contention between different futures/tasks, which would've happened if they had to keep checking the buffers
 
-   When you start the router, the following happens ->
+   When you create the router, the following happens ->
 
    1. Transmission Channels get created to and from the router
    2. A `Graveyard` to store information to persist connections
@@ -195,7 +195,7 @@ Here are a few terms to understand before we move on. These terms are used inter
    5. The two communication buffers `ibufs` and `obufs` get initialized
    6. Logs for message acknowledgements, subscriptions, and alerts get created
    7. A Packet Cache is created
-   8. The core Scheduler Object itself is created
+   8. The Scheduler struct is created
 
    Once all necessary things have been initialized, the `spawn` method intializes the router's event loop on a separate thread.
    This method returns a cloneable transmission channel that the Broker passes to all links so they can communicate with the router.
@@ -207,6 +207,7 @@ Here are a few terms to understand before we move on. These terms are used inter
    1. Messages incoming from devices (publish)
    2. Messages outgoing to devices (subscribe)
    3. Information about metrics
+   4. Other events such as pings
 
    There are various types of Links. Here they are, explored in minimal detail -
 
@@ -225,7 +226,7 @@ Here are a few terms to understand before we move on. These terms are used inter
 #### Folder Structure
 
 - `link` -> Contains all the different `link`s and their individual logic
-- `protocol` -> Pinned version of [mqttbytes](https://github.com/bytebeamio/mqttbytes)
+- `protocol` -> Handles serializing/deserializing MQTT v4 and v5 Packets while providing a unified abstraction to process the same. Pinned version of [mqttbytes](https://github.com/bytebeamio/mqttbytes)
 - `replicator` (not in use) -> Contains primitives for a clustered setup
 - `router` -> Contains the logic for the router, central I/O Buffers, Connection and Client Management, Scheduler, Timer
 - `segments` -> Contains the logic for disk persistence and Memory Management
