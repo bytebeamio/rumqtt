@@ -164,9 +164,11 @@ Here are a few terms to understand before we move on. These terms are used inter
    - Starting the Router
    - Maintaining a channel that communicates with the router
 
+   When you create a new Broker, a new Router is also automatically created.
+
    When you start the Broker, the following happens ->
 
-   1. The Router is created and configured
+   1. The Router is started, and we recieve a channel (`router_tx`), which all other Links and Servers pass `Event`s into
    2. (on a new thread) Creates the metrics server
    3. (on a new thread) Starts all `mqttv4` servers
    4. (on a new thread) Starts all `mqttv5` servers
