@@ -1,4 +1,4 @@
-use crate::{router::Ack, SubProtocol};
+use crate::{router::Ack, SupportedProtocol};
 
 use super::{v4::V4, v5::V5, *};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -225,7 +225,7 @@ fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
 /// the protocol level sent in connect (assuming it's valid & supported).
 pub struct Dynamic {
     protocol: CurrentProtocol,
-    supported_protocol: SubProtocol,
+    supported_protocol: SupportedProtocol,
     v4: V4,
     v5: V5,
 }
@@ -238,7 +238,7 @@ enum CurrentProtocol {
 }
 
 impl Dynamic {
-    pub fn new(sub_protocol: SubProtocol) -> Self {
+    pub fn new(sub_protocol: SupportedProtocol) -> Self {
         Self {
             protocol: CurrentProtocol::Unkown,
             supported_protocol: sub_protocol,
@@ -249,9 +249,9 @@ impl Dynamic {
 
     fn protocol_supported(&self) -> bool {
         match self.supported_protocol {
-            SubProtocol::All => true,
-            SubProtocol::V4 => self.protocol == CurrentProtocol::V4,
-            SubProtocol::V5 => self.protocol == CurrentProtocol::V5,
+            SupportedProtocol::All => true,
+            SupportedProtocol::V4 => self.protocol == CurrentProtocol::V4,
+            SupportedProtocol::V5 => self.protocol == CurrentProtocol::V5,
         }
     }
 }

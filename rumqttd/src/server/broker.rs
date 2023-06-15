@@ -187,7 +187,7 @@ impl Broker {
         if let Some(tcp_config) = &self.config.tcp {
             for (_, config) in tcp_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
-                let sub_protocol = config.sub_protocol.clone();
+                let sub_protocol = config.supported_protocol.clone();
                 let server =
                     Server::new(config, self.router_tx.clone(), Dynamic::new(sub_protocol));
                 server_thread.spawn(move || {

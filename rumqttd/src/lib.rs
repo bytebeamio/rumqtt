@@ -103,7 +103,7 @@ pub struct ServerSettings {
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
     #[serde(default)]
-    pub sub_protocol: SubProtocol,
+    pub supported_protocol: SupportedProtocol,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -197,7 +197,7 @@ pub struct MetricSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub enum SubProtocol {
+pub enum SupportedProtocol {
     #[serde(rename = "all")]
     #[default]
     All,
