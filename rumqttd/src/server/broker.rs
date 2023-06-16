@@ -64,7 +64,7 @@ impl Broker {
         let router_config = config.router.clone();
         let router: Router = Router::new(config.id, router_config);
 
-        // Setup cluster if cluster settings are configured
+        // Setup cluster if cluster settings are configured.
         match config.cluster.clone() {
             Some(_cluster_config) => {
                 // let node_id = cluster_config.node_id;
@@ -138,7 +138,7 @@ impl Broker {
 
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
-        // start the link. Router can sometimes reject the connection (ex max connection limit)
+        // start the link. Router can sometimes reject the connection (ex. max connection limit).
         let (link_tx, link_rx, _ack) = Link::new(
             None,
             client_id,
@@ -166,7 +166,7 @@ impl Broker {
             })?;
         }
 
-        // spawn bridge in a separate thread
+        // Spawn bridge in a separate thread.
         if let Some(bridge_config) = self.config.bridge.clone() {
             let bridge_thread = thread::Builder::new().name(bridge_config.name.clone());
             let router_tx = self.router_tx.clone();
@@ -182,7 +182,7 @@ impl Broker {
             })?;
         }
 
-        // spawn servers in a separate thread
+        // Spawn servers in a separate thread.
         for (_, config) in self.config.v4.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
             let server = Server::new(config, self.router_tx.clone(), V4);
@@ -412,11 +412,11 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
     }
 }
 
-/// A new network connection should wait for mqtt connect packet. This handling should be handled
-/// asynchronously to avoid listener from not blocking new connections while this connection is
+/// A new network connection should wait for a mqtt connect packet. This should be handled
+/// asynchronously to avoid blocking other new connections while this connection is
 /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
-/// denial of service attacks (rogue clients which only does network connection without sending
-/// mqtt connection packet to make make the server reach its concurrent connection limit)
+/// denial of service attacks (rogue clients which only establish network connections without
+/// sending a mqtt connection packet to make the server reach its concurrent connection limit).
 async fn remote<P: Protocol>(
     config: Arc<ConnectionSettings>,
     tenant_id: Option<String>,
@@ -440,10 +440,10 @@ async fn remote<P: Protocol>(
     let mut execute_will = false;
 
     match link.start().await {
-        // Connection get close. This shouldn't usually happen
+        // Connection got closed. This shouldn't usually happen.
         Ok(_) => error!("connection-stop"),
-        // No need to send a disconnect message when disconnetion
-        // originated internally in the router
+        // No need to send a disconnect message when disconnection
+        // originated internally in the router.
         Err(remote::Error::Link(e)) => {
             error!(error=?e, "router-drop");
             return;
