@@ -19,7 +19,7 @@ pub(crate) enum SegmentPosition {
     Next(u64),
     /// When the the returned absolute offset does not exist within the current segment, but
     /// instead is 1 beyond the highest absolute offset in this segment, meant for use with next
-    /// segment if exists
+    /// segment if any exists.
     Done(u64),
 }
 
@@ -63,7 +63,7 @@ where
         len: u64,
         out: &mut Vec<(T, Offset)>,
     ) -> io::Result<SegmentPosition> {
-        // this substraction can never overflow as checking of offset happens at
+        // This substraction can never overflow as checking of offset happens at
         // `CommitLog::readv`.
         let idx = cursor.1 - self.absolute_offset;
 
