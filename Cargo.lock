@@ -1969,7 +1969,7 @@ dependencies = [
  "bytes",
  "color-backtrace",
  "flume",
- "futures 0.3.25",
+ "futures-util",
  "http",
  "log",
  "matches",
