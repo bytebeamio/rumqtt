@@ -12,7 +12,7 @@ use crate::valid_topic;
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
-use futures::FutureExt;
+use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
 
