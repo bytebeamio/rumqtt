@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
 
 ### Changed
+- Synchronous client methods take `&self` instead of `&mut self` (#646)
 
 ### Deprecated
 
