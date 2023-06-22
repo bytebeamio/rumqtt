@@ -37,8 +37,8 @@ axum = "0.6.4"
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser", "async-tungstenite?/tokio-rustls-native-certs"]
-use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser", "async-tungstenite?/tokio-native-tls"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
+use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websocket = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep:ws_stream_tungstenite"]
 websockets = ["websocket"]
 validate-tenant-prefix = []
