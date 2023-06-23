@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Include reason code for UnsubAck in v5
+- The server should not send DISCONNECT packets to MQTT v4 clients
 
 ### Security
 
