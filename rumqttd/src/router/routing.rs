@@ -554,9 +554,7 @@ impl Router {
                     self.router_meters.total_publishes += 1;
 
                     // Ignore retained messages
-                    if publish.retain {
-                        publish.retain = false;
-                    }
+                    publish.retain = false;
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
