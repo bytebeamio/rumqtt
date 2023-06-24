@@ -1416,10 +1416,6 @@ fn validate_subscription(
         return Err(RouterError::UnsupportedQoS(filter.qos));
     }
 
-    if filter.path.starts_with('$') {
-        return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
-    }
-
     Ok(())
 }
 
