@@ -1442,7 +1442,7 @@ fn validate_filter_path(filter_path: &str) -> Result<(), RouterError> {
     // want to let them percolate further.
     //
     // The spec says that topics can not be any larger than this, but I don't see
-    // anything tha prevents an implementation from choosing a smaller cap.
+    // anything that prevents an implementation from choosing a smaller cap.
     if filter_path.as_bytes().len() >= 65_536 {
         return Err(RouterError::InvalidTopicFilter(
             filter_path.chars().take(32).chain("...".chars()).collect(),
