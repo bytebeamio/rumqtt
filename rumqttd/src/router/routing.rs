@@ -1420,27 +1420,25 @@ fn validate_subscription(
 }
 
 /// Validate the filter path to ensure that it conforms to MQTT Spec Section 4.7
-fn validate_filter_path(
-    filter_path: &str,
-) -> Result<(), RouterError> {
+fn validate_filter_path(filter_path: &str) -> Result<(), RouterError> {
     trace!("Validating filter path = {}", filter_path);
 
     if filter_path.is_empty() {
         return Err(RouterError::InvalidTopicFilter(
             filter_path.to_owned(),
-            "Topic filters must not be empty".to_owned()
+            "Topic filters must not be empty".to_owned(),
         ));
     }
 
     if filter_path.contains("\0") {
         return Err(RouterError::InvalidTopicFilter(
-            filter_path.to_owned(), 
-            "Topic filters must not contain null bytes".to_owned()
-        ))
+            filter_path.to_owned(),
+            "Topic filters must not contain null bytes".to_owned(),
+        ));
     }
 
     // If we are seeing topics of 65kb or more it is almost certainly malicious
-    // and ideally we would reject those earlier than this but we certainly don't 
+    // and ideally we would reject those earlier than this but we certainly don't
     // want to let them percolate further.
     //
     // The spec says that topics can not be any larger than this, but I don't see
@@ -1448,7 +1446,7 @@ fn validate_filter_path(
     if filter_path.as_bytes().len() >= 65_536 {
         return Err(RouterError::InvalidTopicFilter(
             filter_path.chars().take(32).chain("...".chars()).collect(),
-            "Topic filters must be encoded in < 2^16 bytes".to_owned()
+            "Topic filters must be encoded in < 2^16 bytes".to_owned(),
         ));
     }
 
@@ -1461,20 +1459,20 @@ fn validate_filter_path(
             if levels.peek() != None {
                 return Err(RouterError::InvalidTopicFilter(
                     filter_path.to_owned(),
-                    "Topic filters may only use the multi-level wildcard # in the last level".to_owned()
+                    "Topic filters may only use the multi-level wildcard # in the last level"
+                        .to_owned(),
                 ));
             }
         } else if level.contains("#") || level.contains("+") {
             return Err(RouterError::InvalidTopicFilter(
                 filter_path.to_owned(),
-                "Topic filter wild cards must not be mixed with string literals".to_owned()
+                "Topic filter wild cards must not be mixed with string literals".to_owned(),
             ));
         }
     }
 
     Ok(())
 }
-
 
 fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
     trace!("Validating Client ID = {}", client_id,);
@@ -1486,7 +1484,6 @@ fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1495,20 +1492,35 @@ mod tests {
 
     #[test]
     fn test_validate_filter_path() {
-        assert_matches!(validate_filter_path(""), Err(RouterError::InvalidTopicFilter(_, _)));
+        assert_matches!(
+            validate_filter_path(""),
+            Err(RouterError::InvalidTopicFilter(_, _))
+        );
         assert_matches!(validate_filter_path("/"), Ok(_));
         assert_matches!(validate_filter_path("//"), Ok(_));
         assert_matches!(validate_filter_path("#"), Ok(_));
         assert_matches!(validate_filter_path("+"), Ok(_));
         assert_matches!(validate_filter_path("sport/tennis/player1/#"), Ok(_));
-        assert_matches!(validate_filter_path("sport/tennis#"), Err(RouterError::InvalidTopicFilter(_, _)));
-        assert_matches!(validate_filter_path("sport/tennis/#/ranking"), Err(RouterError::InvalidTopicFilter(_, _)));
+        assert_matches!(
+            validate_filter_path("sport/tennis#"),
+            Err(RouterError::InvalidTopicFilter(_, _))
+        );
+        assert_matches!(
+            validate_filter_path("sport/tennis/#/ranking"),
+            Err(RouterError::InvalidTopicFilter(_, _))
+        );
         assert_matches!(validate_filter_path("+/tennis/#"), Ok(_));
-        assert_matches!(validate_filter_path("sport+"), Err(RouterError::InvalidTopicFilter(_, _)));
+        assert_matches!(
+            validate_filter_path("sport+"),
+            Err(RouterError::InvalidTopicFilter(_, _))
+        );
         assert_matches!(validate_filter_path("sport/+/player1"), Ok(_));
         assert_matches!(validate_filter_path("$SYS/#"), Ok(_));
         assert_matches!(validate_filter_path("accounts payable"), Ok(_));
-        assert_matches!(validate_filter_path("hello/w\u{0000}rld"), Err(RouterError::InvalidTopicFilter(_, _)));
+        assert_matches!(
+            validate_filter_path("hello/w\u{0000}rld"),
+            Err(RouterError::InvalidTopicFilter(_, _))
+        );
     }
     #[test]
     fn test_validate_filter_path_too_large() {
@@ -1516,9 +1528,11 @@ mod tests {
         assert_matches!(validate_filter_path(malicious_filter.as_str()), Ok(_));
 
         malicious_filter.push_str("hello");
-        assert_matches!(validate_filter_path(malicious_filter.as_str()), Err(RouterError::InvalidTopicFilter(_, _)));
+        assert_matches!(
+            validate_filter_path(malicious_filter.as_str()),
+            Err(RouterError::InvalidTopicFilter(_, _))
+        );
     }
-
 }
 
 // #[cfg(test)]

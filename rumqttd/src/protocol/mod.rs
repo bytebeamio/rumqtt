@@ -656,8 +656,6 @@ pub fn valid_filter(filter: &str) -> bool {
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
-
-
     let mut topics = topic.split('/').peekable();
     let mut filters = filter.split('/').peekable();
 
@@ -753,7 +751,6 @@ pub trait Protocol {
     fn write(&self, packet: Packet, write: &mut BytesMut) -> Result<usize, Error>;
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,8 +758,14 @@ mod tests {
     #[test]
     fn test_topic_matches() {
         assert!(matches("sport/tennis/player1", "sport/tennis/player1/#"));
-        assert!(matches("sport/tennis/player1/ranking", "sport/tennis/player1/#"));
-        assert!(matches("sport/tennis/player1/score/wimbledon", "sport/tennis/player1/#"));
+        assert!(matches(
+            "sport/tennis/player1/ranking",
+            "sport/tennis/player1/#"
+        ));
+        assert!(matches(
+            "sport/tennis/player1/score/wimbledon",
+            "sport/tennis/player1/#"
+        ));
         assert!(matches("sport", "sport/#"));
         assert!(matches("/finance", "+/+"));
         assert!(matches("/finance", "/+"));
@@ -776,7 +779,7 @@ mod tests {
         assert!(matches("$SYS/monitor/Clients", "$SYS/#"));
         assert!(matches("$SYS/monitor/Clients", "$SYS/monitor/+"));
         assert!(!matches("$SYS/foo", "$SYS/monitor/+"));
-        
+
         assert!(matches("sy$tem", "+"));
     }
 }
