@@ -192,9 +192,12 @@ impl Broker {
         if let Some(tcp_config) = &self.config.tcp {
             for (_, config) in tcp_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
-                let sub_protocol = config.supported_protocol.clone();
-                let server =
-                    Server::new(config, self.router_tx.clone(), Dynamic::new(sub_protocol));
+                let supported_protocol = config.supported_protocol.clone();
+                let server = Server::new(
+                    config,
+                    self.router_tx.clone(),
+                    Dynamic::new(supported_protocol),
+                );
                 server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
@@ -247,7 +250,12 @@ impl Broker {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
-                let server = Server::new(config, self.router_tx.clone(), V4);
+                let supported_protocol = config.supported_protocol.clone();
+                let server = Server::new(
+                    config,
+                    self.router_tx.clone(),
+                    Dynamic::new(supported_protocol),
+                );
                 server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();

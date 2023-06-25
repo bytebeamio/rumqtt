@@ -101,6 +101,9 @@ interval = 1
 [ws.1]
 name = "ws-1"
 listen = "0.0.0.0:8083"
+supported_protocol = "all"
+# supported_protocol = "v3.1.1"
+# supported_protocol = "v5"
 next_connection_delay_ms = 1
     [ws.1.connections]
     connection_timeout_ms = 60000
