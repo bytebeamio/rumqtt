@@ -149,7 +149,7 @@ Here are a few terms to understand before we move on. These terms are used inter
 
 0. Input and Output Queues (`ibufs` and `obufs`)
 
-   The basic foundation of `rumqttd` are two instances of `VecDequeue` from `std::collections`. Everything else just manages these and their interfaces to various other parts of the system. The queues are as follows -
+   The datapath of `rumqttd` are two instances of `VecDequeue` from `std::collections`. They are [`Slab`](https://docs.rs/slab/latest/slab/) datatypes, which pre-allocates storage. Everything else just manages these and their interfaces to various other parts of the system. The queues are as follows -
 
    - `ibufs`: All incoming data to `rumqttd` (represented by a `Packet`) is stored immediately in `ibufs` (which holds a `VecDequeue`)
    - `obufs`: All outgoing data `rumqttd` (represented by `Notification`) is stored immediately in the `obufs` (which holds a `VecDequeue`).
@@ -216,14 +216,12 @@ Here are a few terms to understand before we move on. These terms are used inter
    1. Bridge -> Can be used to link two `rumqttd` instances for high availability.
    2. Alerts -> Since `rumqttd` is embeddable, this allows developers to create custom hooks to handle alerts that `rumqttd` gives out.
    3. Console -> Creates a lightweight HTTP Server to obtain information and metrics from the `rumqttd` instance.
-   4. Local -> Contains functions to perform Publish and Subscribe actions to the router
+   4. Local -> Contains functions to perform Publish and Subscribe actions to the router. This is used inside RemoteLink.
    5. Meters -> Creates a link specifically to consume metrics, is useful for external observability or hooks
-   6. Network -> Contains the APIs for reading from and writing to sockets
-   7. Remote -> `RemoteLink` is an asynchronous entity that represents a network connection. It provides its own event loop, which does the following -
+   6. Remote -> `RemoteLink` is an asynchronous entity that represents a network connection. It provides its own event loop, which does the following -
       - Reads from the network socket, writes to `ibufs` and notifies the router
       - Writes to the network socket when required
-   8. Shadow -> TODO
-   9. Timer -> Handles timing actions for metrics
+   7. Timer -> Handles timing actions for metrics, and sends `Event`s related to alerts and metrics to their respective links.
 
 #### Folder Structure
 
