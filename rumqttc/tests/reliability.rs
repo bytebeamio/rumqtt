@@ -95,7 +95,7 @@ async fn connection_should_timeout_on_time() {
 
 #[tokio::test]
 async fn idle_connection_triggers_pings_on_time() {
-    let keep_alive = 5;
+    let keep_alive = 1;
 
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
     options.set_keep_alive(Duration::from_secs(keep_alive));
