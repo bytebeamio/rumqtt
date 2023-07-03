@@ -378,11 +378,13 @@ impl From<ClientConfig> for TlsConfiguration {
 }
 
 /// Provides a way to configure low level network connection configurations
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
     conn_timeout: u64,
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    bind_device: Option<String>,
 }
 
 impl NetworkOptions {
@@ -391,6 +393,8 @@ impl NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
             conn_timeout: 5,
+            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+            bind_device: None,
         }
     }
 
@@ -411,6 +415,17 @@ impl NetworkOptions {
     /// get timeout in secs
     pub fn connection_timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// bind connection to a specific network device by name
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))
+    )]
+    pub fn set_bind_device(&mut self, bind_device: &str) -> &mut Self {
+        self.bind_device = Some(bind_device.to_string());
+        self
     }
 }
 
