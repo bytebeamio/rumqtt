@@ -1,6 +1,12 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
+#[cfg(feature = "websocket")]
+use std::{
+    future::{Future, IntoFuture},
+    pin::Pin,
+    sync::Arc,
+};
 
 mod client;
 mod eventloop;
@@ -42,6 +48,10 @@ pub enum Request {
     UnsubAck(UnsubAck),
     Disconnect,
 }
+
+#[cfg(feature = "websocket")]
+type RequestModifierFn =
+    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>>>>;
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -89,6 +99,8 @@ pub struct MqttOptions {
     /// Upper limit on maximum number of inflight requests.
     /// The server may set its own maximum inflight limit, the smaller of the two will be used.
     outgoing_inflight_upper_limit: Option<u16>,
+    #[cfg(feature = "websocket")]
+    request_modifier: Option<Arc<Box<RequestModifierFn>>>,
 }
 
 impl MqttOptions {
@@ -133,6 +145,8 @@ impl MqttOptions {
             #[cfg(feature = "proxy")]
             proxy: None,
             outgoing_inflight_upper_limit: None,
+            #[cfg(feature = "websocket")]
+            request_modifier: None,
         }
     }
 
@@ -184,6 +198,27 @@ impl MqttOptions {
 
     pub fn last_will(&self) -> Option<LastWill> {
         self.last_will.clone()
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
+    where
+        F: Fn(http::Request<()>) -> O + 'static,
+        O: IntoFuture<Output = http::Request<()>>,
+    {
+        let request_modifier = Arc::new(Box::new(request_modifier));
+        self.request_modifier = Some(Arc::new(Box::new(move |request| {
+            Box::pin({
+                let request_modifier = Arc::clone(&request_modifier);
+                async move { request_modifier(request).into_future().await }
+            })
+        })));
+        self
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn request_modifier(&self) -> Option<Arc<Box<RequestModifierFn>>> {
+        self.request_modifier.clone()
     }
 
     pub fn set_transport(&mut self, transport: Transport) -> &mut Self {
