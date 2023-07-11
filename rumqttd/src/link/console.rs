@@ -1,4 +1,4 @@
-use crate::link::local::{LinkRx};
+use crate::link::local::LinkRx;
 use crate::local::LinkBuilder;
 use crate::router::{Event, Print};
 use crate::{ConnectionId, ConsoleSettings};

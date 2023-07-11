@@ -26,10 +26,7 @@ use tokio_rustls::{
 use tracing::*;
 
 use crate::{
-    link::{
-        local::{LinkError},
-        network::Network,
-    },
+    link::{local::LinkError, network::Network},
     local::LinkBuilder,
     protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
