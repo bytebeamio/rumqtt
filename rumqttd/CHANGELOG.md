@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Support for Websocket connections (#633)
+
 ### Changed
 
 ### Deprecated
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Include reason code for UnsubAck in v5
+- $ prefix topic filters handled according to spec (#650)
 
 ### Security
 

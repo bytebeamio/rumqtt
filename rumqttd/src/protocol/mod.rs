@@ -656,12 +656,16 @@ pub fn valid_filter(filter: &str) -> bool {
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
-    if !topic.is_empty() && topic[..1].contains('$') {
+    let mut topics = topic.split('/').peekable();
+    let mut filters = filter.split('/').peekable();
+
+    let first_topic_level = topics.peek().unwrap();
+    let first_filter_level = filters.peek().unwrap();
+
+    let first_wildcard = *first_filter_level == "#" || *first_filter_level == "+";
+    if first_topic_level.starts_with("$") && first_wildcard {
         return false;
     }
-
-    let mut topics = topic.split('/');
-    let mut filters = filter.split('/');
 
     for f in filters.by_ref() {
         // "#" being the last element is validated by the broker with 'valid_filter'
@@ -683,11 +687,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
     }
 
     // topic has remaining elements and filter's last element isn't "#"
-    if topics.next().is_some() {
-        return false;
-    }
-
-    true
+    topics.next().is_none()
 }
 
 /// Error during serialization and deserialization
@@ -749,4 +749,37 @@ pub enum Error {
 pub trait Protocol {
     fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error>;
     fn write(&self, packet: Packet, write: &mut BytesMut) -> Result<usize, Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_topic_matches() {
+        assert!(matches("sport/tennis/player1", "sport/tennis/player1/#"));
+        assert!(matches(
+            "sport/tennis/player1/ranking",
+            "sport/tennis/player1/#"
+        ));
+        assert!(matches(
+            "sport/tennis/player1/score/wimbledon",
+            "sport/tennis/player1/#"
+        ));
+        assert!(matches("sport", "sport/#"));
+        assert!(matches("/finance", "+/+"));
+        assert!(matches("/finance", "/+"));
+        assert!(!matches("/finance", "+"));
+    }
+
+    #[test]
+    fn test_dollar_topic_matches() {
+        assert!(!matches("$SYS/foo", "#"));
+        assert!(!matches("$SYS/monitor/Clients", "+/monitor/Clients"));
+        assert!(matches("$SYS/monitor/Clients", "$SYS/#"));
+        assert!(matches("$SYS/monitor/Clients", "$SYS/monitor/+"));
+        assert!(!matches("$SYS/foo", "$SYS/monitor/+"));
+
+        assert!(matches("sy$tem", "+"));
+    }
 }
