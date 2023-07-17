@@ -1,3 +1,4 @@
+use crate::protocol::matches as filter_match;
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
     PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
@@ -612,15 +613,16 @@ impl Router {
                     };
 
                     let topic = std::str::from_utf8(&publish.topic).unwrap();
-
-                    if let Some(groups) = self.groups_per_filter.get_mut(topic) {
-                        groups.iter().for_each(|group| {
-                            self.shared_subscriptions
-                                .get_mut(group)
-                                .unwrap()
-                                .update_next_client();
-                        });
-                    };
+                    for (filter, groups) in self.groups_per_filter.iter_mut() {
+                        if filter_match(topic, filter) {
+                            groups.iter().for_each(|group| {
+                                self.shared_subscriptions
+                                    .get_mut(group)
+                                    .unwrap()
+                                    .update_next_client();
+                            })
+                        }
+                    }
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
@@ -710,6 +712,10 @@ impl Router {
                                 );
                                 continue;
                             }
+
+                            self.shared_subscriptions
+                                .iter_mut()
+                                .for_each(|(_, group)| group.remove_client(id));
 
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
