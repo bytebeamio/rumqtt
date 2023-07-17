@@ -102,6 +102,8 @@ pub struct Router {
     cache: Option<VecDeque<Packet>>,
     /// Shared subscriptions map
     shared_subscriptions: HashMap<String, SharedGroup>,
+    // groups per filter
+    filer_group_map: HashMap<Filter, HashSet<String>>,
 }
 
 impl Router {
@@ -142,6 +144,7 @@ impl Router {
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
             shared_subscriptions: HashMap::new(),
+            filer_group_map: HashMap::new(),
         }
     }
 
@@ -608,6 +611,18 @@ impl Router {
                         }
                     };
 
+                    let topic = std::str::from_utf8(&publish.topic).unwrap();
+                    self.filer_group_map
+                        .get_mut(topic)
+                        .unwrap()
+                        .iter()
+                        .for_each(|group| {
+                            self.shared_subscriptions
+                                .get_mut(group)
+                                .unwrap()
+                                .update_next_client();
+                        });
+
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
                         error!(
@@ -636,7 +651,14 @@ impl Router {
                         }
 
                         let mut group = None;
+
                         if let Some((grp, filter_path)) = extract_group(&f.path) {
+                            let entry = self
+                                .filer_group_map
+                                .entry(filter_path.clone())
+                                .or_insert(HashSet::new());
+                            entry.insert(grp.clone());
+
                             group = Some(grp);
                             f.path = filter_path;
                         };
@@ -981,13 +1003,6 @@ impl Router {
                 ConsumeStatus::FilterCaughtup => {
                     let filter = &request.filter;
                     trace!(filter, "Filter caughtup {filter}, parking connection");
-
-                    if let Some(gname) = &request.group {
-                        self.shared_subscriptions
-                            .get_mut(gname)
-                            .unwrap()
-                            .update_next_client()
-                    };
 
                     // When all the data in the log is caught up, current request is
                     // registered in waiters and not added back to the tracker. This
@@ -1525,7 +1540,7 @@ fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
     Ok(())
 }
 
-fn extract_group(filter: &Filter) -> Option<(String, String)> {
+fn extract_group(filter: &str) -> Option<(String, String)> {
     filter.strip_prefix("$share/").and_then(|s| {
         s.split_once('/')
             .map(|(group, path)| (group.to_string(), path.to_string()))
