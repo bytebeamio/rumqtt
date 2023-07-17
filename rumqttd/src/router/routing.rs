@@ -102,8 +102,8 @@ pub struct Router {
     cache: Option<VecDeque<Packet>>,
     /// Shared subscriptions map
     shared_subscriptions: HashMap<String, SharedGroup>,
-    // groups per filter
-    filer_group_map: HashMap<Filter, HashSet<String>>,
+    // Groups per filter
+    groups_per_filter: HashMap<Filter, HashSet<String>>,
 }
 
 impl Router {
@@ -144,7 +144,7 @@ impl Router {
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
             shared_subscriptions: HashMap::new(),
-            filer_group_map: HashMap::new(),
+            groups_per_filter: HashMap::new(),
         }
     }
 
@@ -612,16 +612,15 @@ impl Router {
                     };
 
                     let topic = std::str::from_utf8(&publish.topic).unwrap();
-                    self.filer_group_map
-                        .get_mut(topic)
-                        .unwrap()
-                        .iter()
-                        .for_each(|group| {
+
+                    if let Some(groups) = self.groups_per_filter.get_mut(topic) {
+                        groups.iter().for_each(|group| {
                             self.shared_subscriptions
                                 .get_mut(group)
                                 .unwrap()
                                 .update_next_client();
                         });
+                    };
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
@@ -653,11 +652,10 @@ impl Router {
                         let mut group = None;
 
                         if let Some((grp, filter_path)) = extract_group(&f.path) {
-                            let entry = self
-                                .filer_group_map
+                            self.groups_per_filter
                                 .entry(filter_path.clone())
-                                .or_insert(HashSet::new());
-                            entry.insert(grp.clone());
+                                .or_insert(HashSet::new())
+                                .insert(grp.clone());
 
                             group = Some(grp);
                             f.path = filter_path;
