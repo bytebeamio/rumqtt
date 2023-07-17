@@ -612,16 +612,19 @@ impl Router {
                     };
 
                     let topic = std::str::from_utf8(&publish.topic).unwrap();
-                    for (filter, groups) in self.groups_per_filter.iter_mut() {
+
+                    //Make sure that we cleanup any groups/filters that are no longer present.
+                    self.groups_per_filter.retain(|filter, groups| {
                         if filter_match(topic, filter) {
-                            groups.iter().for_each(|group| {
+                            groups.retain(|group| {
                                 self.shared_subscriptions
                                     .get_mut(group)
-                                    .unwrap()
-                                    .update_next_client();
+                                    .and_then(|shared_sub| Some(shared_sub.update_next_client()))
+                                    .is_some()
                             })
                         }
-                    }
+                        !groups.is_empty()
+                    });
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
