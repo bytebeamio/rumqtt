@@ -447,8 +447,7 @@ impl Router {
         // Remove connections from all groups
         // TODO: find a better way to do this
         self.shared_subscriptions
-            .iter_mut()
-            .for_each(|(_, group)| group.remove_client(id));
+            .retain(|_, group| group.remove_client(id));
 
         // Add disconnection event to metrics
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -714,8 +713,7 @@ impl Router {
                             }
 
                             self.shared_subscriptions
-                                .iter_mut()
-                                .for_each(|(_, group)| group.remove_client(id));
+                                .retain(|_, group| group.remove_client(id));
 
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
