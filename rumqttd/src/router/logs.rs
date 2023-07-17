@@ -7,7 +7,7 @@ use crate::protocol::{
     PublishProperties, SubAck, UnsubAck,
 };
 use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
-use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
+use crate::{ConnectionId, Cursor, Filter, Offset, RouterConfig, Topic};
 
 use crate::segments::{CommitLog, Position};
 use crate::Storage;
@@ -297,6 +297,7 @@ pub struct Data<T> {
     pub log: CommitLog<T>,
     pub waiters: Waiters<DataRequest>,
     meter: SubscriptionMeter,
+    pub(crate) shared_cursors: HashMap<String, Cursor>,
 }
 
 impl<T> Data<T>
@@ -313,6 +314,7 @@ where
             log,
             waiters,
             meter: metrics,
+            shared_cursors: HashMap::new(),
         }
     }
 
