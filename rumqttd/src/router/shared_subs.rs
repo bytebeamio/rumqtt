@@ -18,6 +18,10 @@ impl SharedGroup {
             next_client: client,
         }
     }
+    pub fn is_empty(&self) -> bool {
+        self.clients.is_empty()
+    }
+
     pub fn add_client(&mut self, client: ClientType) {
         // let mut updated_clients: Vec<String> = self.clients.collect();
         // updated_clients.push(client);
@@ -25,21 +29,19 @@ impl SharedGroup {
         self.clients.push(client)
     }
 
-    pub fn remove_client(&mut self, client: ClientType) -> bool {
+    pub fn remove_client(&mut self, client: ClientType) {
         // remove client from vec
         // let updated_clients: Vec<String> = self.clients.filter(|&c| c != client).collect();
         // self.clients = updated_clients.into_iter().cycle();
 
         self.clients.retain(|c| c != &client);
-        // Exit with false if there are no remaining clients.
+        // Exit when there are no remaining clients.
         if self.clients.is_empty() {
-            return false;
+            return;
         }
         //Make sure that we are within bounds and that next client is the correct client.
-        self.client_cursor = self.client_cursor % self.clients.len();
+        self.client_cursor %= self.clients.len();
         self.next_client = self.clients[self.client_cursor];
-
-        true
     }
 
     pub fn update_next_client(&mut self) {

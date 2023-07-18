@@ -437,17 +437,21 @@ impl Router {
         let inflight_data_requests = self.datalog.clean(id);
         let retransmissions = outgoing.retransmission_map();
 
+        // Remove connections from all groups
+        // TODO: find a way to clear the self.groups_per_filter map of empty groups.
+        // TODO: find a better way to do this
+        self.shared_subscriptions.retain(|_, group| {
+            group.remove_client(id);
+            //Only keep subscriptions where there are clients present
+            !group.is_empty()
+        });
+
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
             if let Some(connections) = self.subscription_map.get_mut(filter) {
                 connections.remove(&id);
             }
         }
-
-        // Remove connections from all groups
-        // TODO: find a better way to do this
-        self.shared_subscriptions
-            .retain(|_, group| group.remove_client(id));
 
         // Add disconnection event to metrics
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -613,18 +617,16 @@ impl Router {
 
                     let topic = std::str::from_utf8(&publish.topic).unwrap();
 
-                    //Make sure that we cleanup any groups/filters that are no longer present.
-                    self.groups_per_filter.retain(|filter, groups| {
-                        if filter_match(topic, filter) {
-                            groups.retain(|group| {
-                                self.shared_subscriptions
-                                    .get_mut(group)
-                                    .and_then(|shared_sub| Some(shared_sub.update_next_client()))
-                                    .is_some()
-                            })
+                    for group in self
+                        .groups_per_filter
+                        .iter_mut()
+                        .filter(|(filter, _)| filter_match(topic, filter))
+                        .flat_map(|(_, groups)| groups.iter())
+                    {
+                        if let Some(shared_sub) = self.shared_subscriptions.get_mut(group) {
+                            shared_sub.update_next_client()
                         }
-                        !groups.is_empty()
-                    });
+                    }
 
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
@@ -715,8 +717,14 @@ impl Router {
                                 continue;
                             }
 
-                            self.shared_subscriptions
-                                .retain(|_, group| group.remove_client(id));
+                            // Remove connections from all groups
+                            // TODO: find a way to clear the self.groups_per_filter map of empty groups.
+                            // TODO: find a better way to do this
+                            self.shared_subscriptions.retain(|_, group| {
+                                group.remove_client(id);
+                                //Only keep subscriptions where there are clients present
+                                !group.is_empty()
+                            });
 
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
