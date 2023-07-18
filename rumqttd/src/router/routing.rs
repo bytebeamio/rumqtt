@@ -53,6 +53,7 @@ pub enum RouterError {
     Disconnect(DisconnectReasonCode),
 }
 
+// TODO: set this to some appropriate value
 const TOPIC_ALIAS_MAX: u16 = 4096;
 
 pub struct Router {
@@ -259,7 +260,7 @@ impl Router {
         &mut self,
         mut connection: Connection,
         incoming: Incoming,
-        outgoing: Outgoing,
+        mut outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
         if let Err(err) = validate_clientid(&client_id) {
@@ -295,10 +296,15 @@ impl Router {
         let saved = self.graveyard.retrieve(&client_id);
         let clean_session = connection.clean;
         let previous_session = saved.is_some();
+        // for qos2 pending pubrels
+        let mut pending_acks = VecDeque::new();
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
             connection.events = saved.metrics;
+            // for using in acklog
+            pending_acks = saved.pending_acks.clone();
+            outgoing.pending_acks = saved.pending_acks;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
@@ -342,13 +348,22 @@ impl Router {
         };
 
         let properties = ConnAckProperties {
-            // TODO: set this to some appropriate value
             topic_alias_max: Some(TOPIC_ALIAS_MAX),
             ..Default::default()
         };
 
         let ackslog = self.ackslog.get_mut(connection_id).unwrap();
         ackslog.connack(connection_id, ack, Some(properties));
+
+        pending_acks.into_iter().for_each(|pkid| {
+            // NOTE: will it be better if we store the whole PubRel
+            // instead of pkid in pending acks
+            let pubrel = PubRel {
+                pkid,
+                reason: PubRelReason::Success,
+            };
+            ackslog.pubrel(pubrel)
+        });
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
@@ -461,12 +476,20 @@ impl Router {
                 }
             }
 
-            self.graveyard
-                .save(tracker, connection.subscriptions, connection.events);
+            self.graveyard.save(
+                tracker,
+                connection.subscriptions,
+                connection.events,
+                outgoing.pending_acks,
+            );
         } else {
             // Only save metrics in clean session
-            self.graveyard
-                .save(Tracker::new(client_id), HashSet::new(), connection.events);
+            self.graveyard.save(
+                Tracker::new(client_id),
+                HashSet::new(),
+                connection.events,
+                VecDeque::new(),
+            );
         }
         self.router_meters.total_connections -= 1;
     }
@@ -711,6 +734,7 @@ impl Router {
                         reason: PubRelReason::Success,
                     };
 
+                    outgoing.register_pubrec(pubrel.pkid);
                     ackslog.pubrel(pubrel);
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
@@ -761,6 +785,13 @@ impl Router {
                 }
                 Packet::PubComp(pubcomp, _) => {
                     info!(pkid = pubcomp.pkid, "received pubcomp");
+                    let outgoing = self.obufs.get_mut(id).unwrap();
+                    let pkid = pubcomp.pkid;
+                    if outgoing.register_pubcomp(pkid).is_none() {
+                        error!(pkid, "Unsolicited/ooo ack received for pkid {}", pkid);
+                        disconnect = true;
+                        break;
+                    }
                 }
                 Packet::PingReq(_) => {
                     let ackslog = self.ackslog.get_mut(id).unwrap();

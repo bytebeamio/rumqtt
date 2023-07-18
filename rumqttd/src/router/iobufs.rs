@@ -60,6 +60,8 @@ pub struct Outgoing {
     pub(crate) handle: Sender<()>,
     /// The buffer to keep track of inflight packets.
     inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
+    /// PubRecs waiting for PubComp
+    pub(crate) pending_acks: VecDeque<u16>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -72,6 +74,7 @@ impl Outgoing {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
         let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
+        let pending_acks = VecDeque::with_capacity(100); // cuz acklog also has 100
 
         // Ensure that there won't be any new allocations
         assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
@@ -81,6 +84,7 @@ impl Outgoing {
             client_id,
             data_buffer: Arc::new(Mutex::new(data_buffer)),
             inflight_buffer,
+            pending_acks,
             handle,
             last_pkid: 0,
             meter: Default::default(),
@@ -164,6 +168,26 @@ impl Outgoing {
         let (head, _filter_idx, _cursor) = match self.inflight_buffer.pop_front() {
             Some(v) => v,
             None => return None,
+        };
+
+        // We don't support out of order acks
+        if pkid != head {
+            error!(pkid, head, "out of order ack.");
+            return None;
+        }
+
+        Some(())
+    }
+
+    pub fn register_pubrec(&mut self, pkid: u16) {
+        self.pending_acks.push_back(pkid)
+    }
+
+    // Returns (unsolicited, outoforder) flags
+    // Return: Out of order or unsolicited acks
+    pub fn register_pubcomp(&mut self, pkid: u16) -> Option<()> {
+        let Some(head) = self.pending_acks.pop_front() else {
+            return None;
         };
 
         // We don't support out of order acks
