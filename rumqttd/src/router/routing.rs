@@ -656,6 +656,7 @@ impl Router {
                         }
 
                         let mut group = None;
+                        let original_filter = f.path.clone();
 
                         if let Some((grp, filter_path)) = extract_group(&f.path) {
                             self.groups_per_filter
@@ -671,7 +672,7 @@ impl Router {
                         let qos = f.qos;
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8, group);
+                        self.prepare_filter(id, cursor, idx, original_filter, qos as u8, group);
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
 
