@@ -297,7 +297,7 @@ impl Router {
         let clean_session = connection.clean;
         let previous_session = saved.is_some();
         // for qos2 pending pubrels
-        let mut pending_acks = VecDeque::new();
+        let mut pending_acks = HashSet::new();
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
@@ -488,7 +488,7 @@ impl Router {
                 Tracker::new(client_id),
                 HashSet::new(),
                 connection.events,
-                VecDeque::new(),
+                HashSet::new(),
             );
         }
         self.router_meters.total_connections -= 1;
@@ -748,6 +748,10 @@ impl Router {
                         reason: PubCompReason::Success,
                     };
 
+                    // NOTE: client can try to resend previously unacked pubrels
+                    // on reconnection ( with clean session false )
+                    // we try to retrive publish assuming broker saved the previous state
+                    // successfully in graveyard.
                     let publish = match ackslog.pubcomp(pubcomp) {
                         Some(v) => v,
                         None => {
@@ -787,10 +791,14 @@ impl Router {
                     info!(pkid = pubcomp.pkid, "received pubcomp");
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = pubcomp.pkid;
-                    if outgoing.register_pubcomp(pkid).is_none() {
-                        error!(pkid, "Unsolicited/ooo ack received for pkid {}", pkid);
-                        disconnect = true;
-                        break;
+                    if outgoing.register_pubcomp(pkid) {
+                        error!(
+                            pkid,
+                            "ack received for pkid {}, but the pkid didn't exists!", pkid
+                        );
+                        // shall we ignore it or diconnect the client?
+                        // disconnect = true;
+                        // break;
                     }
                 }
                 Packet::PingReq(_) => {

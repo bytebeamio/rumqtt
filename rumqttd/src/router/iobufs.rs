@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -61,7 +61,7 @@ pub struct Outgoing {
     /// The buffer to keep track of inflight packets.
     inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
     /// PubRecs waiting for PubComp
-    pub(crate) pending_acks: VecDeque<u16>,
+    pub(crate) pending_acks: HashSet<u16>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -74,7 +74,7 @@ impl Outgoing {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
         let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
-        let pending_acks = VecDeque::with_capacity(100); // cuz acklog also has 100
+        let pending_acks = HashSet::with_capacity(100); // cuz acklog also has 100
 
         // Ensure that there won't be any new allocations
         assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
@@ -180,23 +180,15 @@ impl Outgoing {
     }
 
     pub fn register_pubrec(&mut self, pkid: u16) {
-        self.pending_acks.push_back(pkid)
+        // NOTE: we can return true of false
+        // to indicate whether this is duplicate or not
+        self.pending_acks.insert(pkid);
     }
 
-    // Returns (unsolicited, outoforder) flags
-    // Return: Out of order or unsolicited acks
-    pub fn register_pubcomp(&mut self, pkid: u16) -> Option<()> {
-        let Some(head) = self.pending_acks.pop_front() else {
-            return None;
-        };
-
-        // We don't support out of order acks
-        if pkid != head {
-            error!(pkid, head, "out of order ack.");
-            return None;
-        }
-
-        Some(())
+    // PubComp can be out of order!
+    // return false if pkid was not present
+    pub fn register_pubcomp(&mut self, pkid: u16) -> bool {
+        self.pending_acks.remove(&pkid)
     }
 
     // Here we are assuming that the first unique filter_idx we find while iterating will have the
