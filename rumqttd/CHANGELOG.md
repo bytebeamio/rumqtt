@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Support for Websocket connections (#633)
+- LinkBuilder for constructing LinkRx/LinkTx (#659)
+
 ### Changed
 
 ### Deprecated
+- Link and its implementation, use LinkBuilder instead
 
 ### Removed
 
