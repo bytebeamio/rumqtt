@@ -157,8 +157,8 @@ pub enum Transport {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientAuth {
-    certs: PathBuf,
-    key: PathBuf,
+    pub certs: PathBuf,
+    pub key: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]

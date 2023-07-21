@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub use serialconfig::BridgeConfig;
+pub use serialconfig::ClientAuth;
 pub use serialconfig::ClusterSettings;
 pub use serialconfig::ConsoleSettings;
 pub use serialconfig::MetricSettings;
@@ -32,11 +33,11 @@ pub trait Authenticator: Send + Sync {
 pub struct AllowConnAuthContext;
 
 impl ConnAuthContext for AllowConnAuthContext {
-    fn authorize_publish(&self, packet: &Publish) -> bool {
+    fn authorize_publish(&self, _packet: &Publish) -> bool {
         return true;
     }
 
-    fn authorize_notify(&self, packet: &Publish) -> bool {
+    fn authorize_notify(&self, _packet: &Publish) -> bool {
         return true;
     }
 }
@@ -45,7 +46,7 @@ impl ConnAuthContext for AllowConnAuthContext {
 pub struct AllowAuthenticator;
 
 impl Authenticator for AllowAuthenticator {
-    fn authenticate(&self, login: Option<Login>) -> Option<Box<dyn ConnAuthContext>> {
+    fn authenticate(&self, _login: Option<Login>) -> Option<Box<dyn ConnAuthContext>> {
         return Some(Box::new(AllowConnAuthContext));
     }
 }

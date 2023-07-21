@@ -120,7 +120,7 @@ impl<P: Protocol> Network<P> {
                 .read_mut(&mut self.read, self.max_incoming_size)
             {
                 Ok(packet) => {
-                    if !match packet {
+                    if !match &packet {
                         Packet::Publish(publish, _) => auth_ctx.authorize_publish(&publish),
                         _ => true,
                     } {

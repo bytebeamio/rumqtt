@@ -1,4 +1,4 @@
-use rumqttd::{Broker, Config, Notification};
+use rumqttd::{serialconfig::Config, Broker, Notification};
 
 use std::thread;
 
@@ -25,7 +25,7 @@ fn main() {
 
     dbg!(&config);
 
-    let mut broker = Broker::new(config);
+    let mut broker = Broker::new(config.into());
     let (mut link_tx, mut link_rx) = broker.link("singlenode").unwrap();
     thread::spawn(move || {
         broker.start().unwrap();

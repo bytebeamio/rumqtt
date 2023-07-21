@@ -41,7 +41,7 @@ use super::network;
 #[cfg(feature = "use-rustls")]
 use super::network::N;
 #[cfg(feature = "use-rustls")]
-use crate::ClientAuth;
+use crate::config::ClientAuth;
 
 pub async fn start<P>(
     config: BridgeConfig,

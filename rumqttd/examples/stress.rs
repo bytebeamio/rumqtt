@@ -4,6 +4,7 @@ use bytes::Bytes;
 use rumqttd::{
     local::LinkRx,
     protocol::{Packet, Publish},
+    serialconfig::Config,
     Broker, Notification,
 };
 
@@ -36,8 +37,8 @@ async fn main() {
         .build()
         .unwrap(); // Config::default() doesn't have working values
 
-    let config = config.try_deserialize().unwrap();
-    let broker = Broker::new(config);
+    let config: Config = config.try_deserialize().unwrap();
+    let broker = Broker::new(config.into());
 
     for i in 0..CONSUMERS {
         let client_id = format!("consumer_{i}");

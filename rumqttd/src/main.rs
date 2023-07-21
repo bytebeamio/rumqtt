@@ -75,19 +75,20 @@ fn main() {
         )),
     };
 
-    let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
+    let mut configs: rumqttd::serialconfig::Config =
+        config_builder.build().unwrap().try_deserialize().unwrap();
     configs.console.set_filter_reload_handle(reload_handle);
 
     validate_config(&configs);
 
     // println!("{:#?}", configs);
 
-    let mut broker = Broker::new(configs);
+    let mut broker = Broker::new(configs.into());
     broker.start().unwrap();
 }
 
 // Do any extra validation that needs to be done before starting the broker here.
-fn validate_config(configs: &rumqttd::Config) {
+fn validate_config(configs: &rumqttd::serialconfig::Config) {
     for (name, server_setting) in &configs.v4 {
         if let Some(tls_config) = &server_setting.tls {
             if !tls_config.validate_paths() {

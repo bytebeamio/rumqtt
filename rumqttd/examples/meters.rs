@@ -1,4 +1,4 @@
-use rumqttd::{Broker, Config, Notification};
+use rumqttd::{serialconfig::Config, Broker, Notification};
 use std::{thread, time::Duration};
 
 fn main() {
@@ -15,7 +15,7 @@ fn main() {
 
     dbg!(&config);
 
-    let mut broker = Broker::new(config);
+    let mut broker = Broker::new(config.into());
     let meters = broker.meters().unwrap();
 
     let (mut link_tx, mut link_rx) = broker.link("consumer").unwrap();
