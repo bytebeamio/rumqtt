@@ -129,6 +129,7 @@ impl<'a> LinkBuilder<'a> {
 
 pub struct Link;
 
+#[deprecated = "Link will be removed soon, please consider using LinkBuilder"]
 impl Link {
     #[allow(clippy::type_complexity)]
     fn prepare(
