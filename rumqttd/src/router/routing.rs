@@ -1220,7 +1220,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 {
+    let inflight_slots = if request.qos != 0 { // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
