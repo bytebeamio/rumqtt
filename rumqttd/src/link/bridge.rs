@@ -26,13 +26,14 @@ use tokio_rustls::{
 use tracing::*;
 
 use crate::{
+    config::{BridgeConfig, Transport},
     link::{
         local::{Link, LinkError},
         network::Network,
     },
     protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
-    BridgeConfig, ConnectionId, Notification, Transport,
+    ConnectionId, Notification,
 };
 
 use super::network;

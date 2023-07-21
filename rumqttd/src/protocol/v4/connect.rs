@@ -196,8 +196,4 @@ mod login {
 
         connect_flags
     }
-
-    pub fn validate(login: &Login, username: &str, password: &str) -> bool {
-        (login.username == *username) && (login.password == *password)
-    }
 }

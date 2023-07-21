@@ -1,6 +1,7 @@
+use crate::config::ConsoleSettings;
 use crate::link::local::{Link, LinkRx};
 use crate::router::{Event, Print};
-use crate::{ConnectionId, ConsoleSettings};
+use crate::ConnectionId;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::post;

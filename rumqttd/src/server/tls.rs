@@ -17,8 +17,7 @@ use tokio_rustls::rustls::{
 #[cfg(feature = "use-rustls")]
 use std::{io::BufReader, sync::Arc};
 
-use crate::link::network::N;
-use crate::TlsConfig;
+use crate::{config::TlsConfig, link::network::N};
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]

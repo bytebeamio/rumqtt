@@ -1,4 +1,5 @@
-use crate::RouterConfig;
+use crate::config::RouterConfig;
+
 use std::collections::VecDeque;
 
 pub mod alert {

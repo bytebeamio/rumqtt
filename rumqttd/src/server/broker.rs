@@ -1,3 +1,4 @@
+use crate::config::{Config, ConnectionSettings, ServerSettings};
 use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
@@ -8,7 +9,7 @@ use crate::protocol::v5::V5;
 use crate::protocol::Protocol;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -33,7 +34,7 @@ use std::{io, thread};
 use crate::link::console;
 use crate::link::local::{self, Link, LinkRx, LinkTx};
 use crate::router::{Disconnection, Event, Router};
-use crate::{Config, ConnectionId, ServerSettings};
+use crate::ConnectionId;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};

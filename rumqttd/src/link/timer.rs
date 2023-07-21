@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::{router::Event, MetricType};
-use crate::{ConnectionId, MetricSettings};
+use crate::config::MetricSettings;
+use crate::ConnectionId;
+use crate::{config::MetricType, router::Event};
 use flume::{SendError, Sender};
 use tokio::select;
 use tracing::error;

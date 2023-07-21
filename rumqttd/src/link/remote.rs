@@ -1,9 +1,10 @@
+use crate::config::{ConnAuthContext, ConnectionSettings};
 use crate::link::local::{Link, LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::protocol::{Connect, Packet, Protocol};
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings};
+use crate::ConnectionId;
 
 use flume::{RecvError, SendError, Sender, TrySendError};
 use std::collections::VecDeque;
@@ -53,6 +54,7 @@ pub struct RemoteLink<P> {
     link_tx: LinkTx,
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
+    auth_ctx: Box<dyn ConnAuthContext>,
 }
 
 impl<P: Protocol> RemoteLink<P> {
@@ -84,21 +86,12 @@ impl<P: Protocol> RemoteLink<P> {
         };
 
         // If authentication is configured in config file check for username and password
-        if let Some(auths) = &config.auth {
-            // if authentication is configured and connect packet doesn't have login details return
-            // an error
-            if let Some(login) = login {
-                let is_authenticated = auths
-                    .iter()
-                    .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
-
-                if !is_authenticated {
-                    return Err(Error::InvalidAuth);
-                }
-            } else {
+        let auth_ctx = match config.auth.authenticate(login) {
+            Some(c) => c,
+            None => {
                 return Err(Error::InvalidAuth);
             }
-        }
+        };
 
         // When keep_alive feature is disabled client can live forever, which is not good in
         // distributed broker context so currenlty we don't allow it.
@@ -146,6 +139,7 @@ impl<P: Protocol> RemoteLink<P> {
             link_tx,
             link_rx,
             notifications: VecDeque::with_capacity(100),
+            auth_ctx,
         })
     }
 
@@ -161,7 +155,7 @@ impl<P: Protocol> RemoteLink<P> {
                     let len = {
                         let mut buffer = self.link_tx.buffer();
                         buffer.push_back(packet);
-                        self.network.readv(&mut buffer)?;
+                        self.network.readv(&mut buffer, self.auth_ctx.as_ref())?;
                         buffer.len()
                     };
 
@@ -177,6 +171,12 @@ impl<P: Protocol> RemoteLink<P> {
 
                     for notif in self.notifications.drain(..) {
                         if let Some(packet) = notif.into() {
+                            if !match &packet {
+                                Packet::Publish(publish, _) => self.auth_ctx.authorize_notify(&publish),
+                                _ => true,
+                            } {
+                                continue;
+                            }
                             packets.push_back(packet);
                         } else {
                             unscheduled = true;

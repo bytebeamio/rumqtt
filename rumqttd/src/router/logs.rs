@@ -2,12 +2,13 @@ use super::Ack;
 use slab::Slab;
 use tracing::trace;
 
+use crate::config::RouterConfig;
 use crate::protocol::{
     matches, ConnAck, ConnAckProperties, PingResp, PubAck, PubComp, PubRec, PubRel, Publish,
     PublishProperties, SubAck, UnsubAck,
 };
 use crate::router::{DataRequest, FilterIdx, SubscriptionMeter, Waiters};
-use crate::{ConnectionId, Filter, Offset, RouterConfig, Topic};
+use crate::{ConnectionId, Filter, Offset, Topic};
 
 use crate::segments::{CommitLog, Position};
 use crate::Storage;
@@ -406,7 +407,7 @@ impl AckLog {
 #[cfg(test)]
 mod test {
     use super::DataLog;
-    use crate::RouterConfig;
+    use crate::config::RouterConfig;
 
     #[test]
     fn publish_filters_updating_correctly_on_new_topic_subscription() {
