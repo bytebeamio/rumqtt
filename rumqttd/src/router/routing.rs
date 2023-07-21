@@ -1,4 +1,3 @@
-use crate::protocol::matches as filter_match;
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
     PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
@@ -101,10 +100,8 @@ pub struct Router {
     router_meters: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
-    /// Shared subscriptions map
+    /// Shared subscriptions map <group-name, group>
     shared_subscriptions: HashMap<String, SharedGroup>,
-    // Groups per filter
-    groups_per_filter: HashMap<Filter, HashSet<String>>,
 }
 
 impl Router {
@@ -145,7 +142,6 @@ impl Router {
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
             shared_subscriptions: HashMap::new(),
-            groups_per_filter: HashMap::new(),
         }
     }
 
@@ -441,7 +437,7 @@ impl Router {
         // TODO: find a way to clear the self.groups_per_filter map of empty groups.
         // TODO: find a better way to do this
         self.shared_subscriptions.retain(|_, group| {
-            group.remove_client(id);
+            group.remove_client(&client_id);
             //Only keep subscriptions where there are clients present
             !group.is_empty()
         });
@@ -615,19 +611,6 @@ impl Router {
                         }
                     };
 
-                    let topic = std::str::from_utf8(&publish.topic).unwrap();
-
-                    for group in self
-                        .groups_per_filter
-                        .iter_mut()
-                        .filter(|(filter, _)| filter_match(topic, filter))
-                        .flat_map(|(_, groups)| groups.iter())
-                    {
-                        if let Some(shared_sub) = self.shared_subscriptions.get_mut(group) {
-                            shared_sub.update_next_client()
-                        }
-                    }
-
                     let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
                         error!(
@@ -659,11 +642,6 @@ impl Router {
                         let original_filter = f.path.clone();
 
                         if let Some((grp, filter_path)) = extract_group(&f.path) {
-                            self.groups_per_filter
-                                .entry(filter_path.clone())
-                                .or_insert(HashSet::new())
-                                .insert(grp.clone());
-
                             group = Some(grp);
                             f.path = filter_path;
                         };
@@ -672,6 +650,11 @@ impl Router {
                         let qos = f.qos;
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
+
+                        // in case of shared sub original_filter will be $share/group/topic
+                        // this is because we do want to treat is as diffrent subscription
+                        // and create DataRequest, while using the same datalog of "topic"
+                        // NOTE: topic & $share/group/topic will have same filteridx!
                         self.prepare_filter(id, cursor, idx, original_filter, qos as u8, group);
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
@@ -722,7 +705,7 @@ impl Router {
                             // TODO: find a way to clear the self.groups_per_filter map of empty groups.
                             // TODO: find a better way to do this
                             self.shared_subscriptions.retain(|_, group| {
-                                group.remove_client(id);
+                                group.remove_client(&client_id);
                                 //Only keep subscriptions where there are clients present
                                 !group.is_empty()
                             });
@@ -892,17 +875,19 @@ impl Router {
             }
         }
 
+        // Prepare consumer to pull data in case of subscription
+        let connection = self.connections.get_mut(id).unwrap();
+
         // Add/Create shared group
         if let Some(group_name) = &group {
-            match self.shared_subscriptions.get_mut(group_name) {
-                Some(group) => {
-                    group.add_client(id);
-                }
-                None => {
-                    let s = SharedGroup::new(id);
-                    self.shared_subscriptions.insert(group_name.to_string(), s);
-                }
-            }
+            let client_id = connection.client_id.clone();
+
+            let shared_group = self
+                .shared_subscriptions
+                .entry(group_name.to_string())
+                .or_insert(SharedGroup::new());
+
+            shared_group.add_client(client_id);
 
             // set the shared cursor
             self.datalog
@@ -912,9 +897,6 @@ impl Router {
                 .shared_cursors
                 .insert(group_name.to_string(), cursor);
         };
-
-        // Prepare consumer to pull data in case of subscription
-        let connection = self.connections.get_mut(id).unwrap();
 
         if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
@@ -982,20 +964,10 @@ impl Router {
                 }
             };
 
-            // skip forwarding for connection if its not its turn!
-            if let Some(gname) = &request.group {
-                // use Some(id) to indicate other strategies like random??
-                if id != self.shared_subscriptions.get(gname).unwrap().next_client {
-                    // do same thing as we do for filter caughtup
-                    // NOTE(swanandx): check what happends if we don't park the request
-                    let filter = &request.filter;
-                    trace!(filter, "Filter caughtup {filter}, parking connection");
-                    datalog.park(id, request);
-
-                    //skip
-                    continue;
-                }
-            };
+            let shared_group = request
+                .group
+                .as_ref()
+                .and_then(|name| self.shared_subscriptions.get_mut(name));
 
             match forward_device_data(
                 &mut request,
@@ -1003,6 +975,7 @@ impl Router {
                 outgoing,
                 alertlog,
                 broker_topic_aliases,
+                shared_group,
             ) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
@@ -1271,7 +1244,15 @@ fn forward_device_data(
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
     broker_topic_aliases: &mut Option<BrokerAliases>,
+    shared_group: Option<&mut SharedGroup>,
 ) -> ConsumeStatus {
+    if let Some(ref shared_group) = shared_group {
+        if Some(&outgoing.client_id) != shared_group.current_client() {
+            // skip forwarding for connection if its not its turn!
+            return ConsumeStatus::FilterCaughtup;
+        }
+    }
+
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
 
@@ -1304,6 +1285,10 @@ fn forward_device_data(
     } else {
         datalog.config.max_read_len
     };
+
+    // TODO: check if shared group with round robin!
+    // if it is, only read one message.
+    // let inflight_slots = 1;
 
     let (next, publishes) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
@@ -1422,6 +1407,12 @@ fn forward_device_data(
     }
 
     outgoing.handle.try_send(()).ok();
+
+    // update the state of shared subscription
+    if let Some(share) = shared_group {
+        share.update_next_client();
+    }
+
     if caughtup {
         ConsumeStatus::FilterCaughtup
     } else {

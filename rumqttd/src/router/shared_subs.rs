@@ -1,58 +1,46 @@
-type ClientType = usize;
-
 pub struct SharedGroup {
     // using Vec over HashSet for maintaining order of iter
-    clients: Vec<ClientType>,
+    clients: Vec<String>,
     // Index into clients, allows us to skip doing iter everytime
     client_cursor: usize,
-    // clients: Cycle<IntoIter<String>>,
-    pub next_client: ClientType,
+    // TODO; random, sticky strategy
+    // we can either have that logic in update_next_client or current_client
     // strategy: Strategy,
 }
 
 impl SharedGroup {
-    pub fn new(client: ClientType) -> Self {
+    pub fn new() -> Self {
         SharedGroup {
-            clients: vec![client],
+            clients: vec![],
             client_cursor: 0,
-            next_client: client,
         }
     }
+
     pub fn is_empty(&self) -> bool {
         self.clients.is_empty()
     }
 
-    pub fn add_client(&mut self, client: ClientType) {
-        // let mut updated_clients: Vec<String> = self.clients.collect();
-        // updated_clients.push(client);
-        // self.clients = updated_clients.into_iter().cycle();
+    pub fn current_client(&self) -> Option<&String> {
+        self.clients.get(self.client_cursor)
+    }
+
+    pub fn add_client(&mut self, client: String) {
         self.clients.push(client)
     }
 
-    pub fn remove_client(&mut self, client: ClientType) {
+    pub fn remove_client(&mut self, client: &String) {
         // remove client from vec
-        // let updated_clients: Vec<String> = self.clients.filter(|&c| c != client).collect();
-        // self.clients = updated_clients.into_iter().cycle();
+        self.clients.retain(|c| c != client);
 
-        self.clients.retain(|c| c != &client);
-        // Exit when there are no remaining clients.
-        if self.clients.is_empty() {
-            return;
+        // if there are no clients left, we have to avoid % by 0
+        if !self.clients.is_empty() {
+            // Make sure that we are within bounds and that next client is the correct client.
+            self.client_cursor %= self.clients.len();
         }
-        //Make sure that we are within bounds and that next client is the correct client.
-        self.client_cursor %= self.clients.len();
-        self.next_client = self.clients[self.client_cursor];
     }
 
     pub fn update_next_client(&mut self) {
-        // let mut clients = self.clients.iter().cycle();
-        // assert_eq!(
-        //     clients.find(|c| *c == &self.next_client),
-        //     Some(&self.next_client)
-        // );
-        // self.next_client = dbg!(*clients.next().unwrap());
         self.client_cursor = (self.client_cursor + 1) % self.clients.len();
-        self.next_client = self.clients[self.client_cursor];
     }
 }
 
