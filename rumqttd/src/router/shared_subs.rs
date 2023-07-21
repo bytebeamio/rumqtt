@@ -2,17 +2,19 @@ pub struct SharedGroup {
     // using Vec over HashSet for maintaining order of iter
     clients: Vec<String>,
     // Index into clients, allows us to skip doing iter everytime
-    client_cursor: usize,
+    current_client_index: usize,
+    pub cursor: (u64, u64),
     // TODO; random, sticky strategy
     // we can either have that logic in update_next_client or current_client
     // strategy: Strategy,
 }
 
 impl SharedGroup {
-    pub fn new() -> Self {
+    pub fn new(cursor: (u64, u64)) -> Self {
         SharedGroup {
             clients: vec![],
-            client_cursor: 0,
+            current_client_index: 0,
+            cursor,
         }
     }
 
@@ -21,7 +23,7 @@ impl SharedGroup {
     }
 
     pub fn current_client(&self) -> Option<&String> {
-        self.clients.get(self.client_cursor)
+        self.clients.get(self.current_client_index)
     }
 
     pub fn add_client(&mut self, client: String) {
@@ -35,12 +37,12 @@ impl SharedGroup {
         // if there are no clients left, we have to avoid % by 0
         if !self.clients.is_empty() {
             // Make sure that we are within bounds and that next client is the correct client.
-            self.client_cursor %= self.clients.len();
+            self.current_client_index %= self.clients.len();
         }
     }
 
     pub fn update_next_client(&mut self) {
-        self.client_cursor = (self.client_cursor + 1) % self.clients.len();
+        self.current_client_index = (self.current_client_index + 1) % self.clients.len();
     }
 }
 
@@ -52,21 +54,21 @@ mod tests {
     fn performs_round_robin() {
         let mut group = SharedGroup {
             clients: vec![1, 2, 3],
-            client_cursor: 0,
+            current_client_index: 0,
             next_client: 1,
         };
         group.update_next_client();
         assert_eq!(group.next_client, 2);
-        assert_eq!(group.client_cursor, 1);
+        assert_eq!(group.current_client_index, 1);
         group.update_next_client();
         assert_eq!(group.next_client, 3);
-        assert_eq!(group.client_cursor, 2);
+        assert_eq!(group.current_client_index, 2);
         group.update_next_client();
         assert_eq!(group.next_client, 1);
-        assert_eq!(group.client_cursor, 0);
+        assert_eq!(group.current_client_index, 0);
         group.add_client(4);
         assert_eq!(group.next_client, 1);
-        assert_eq!(group.client_cursor, 0);
+        assert_eq!(group.current_client_index, 0);
     }
 
     #[test]
@@ -76,18 +78,18 @@ mod tests {
         // [ B, C ] => Should be the next client (B)
         let mut group = SharedGroup {
             clients: vec![1, 2, 3],
-            client_cursor: 0,
+            current_client_index: 0,
             next_client: 1,
         };
         group.remove_client(1);
         assert_eq!(group.next_client, 2);
-        assert_eq!(group.client_cursor, 0);
+        assert_eq!(group.current_client_index, 0);
         group.update_next_client();
         assert_eq!(group.next_client, 3);
-        assert_eq!(group.client_cursor, 1);
+        assert_eq!(group.current_client_index, 1);
         group.update_next_client();
         assert_eq!(group.next_client, 2);
-        assert_eq!(group.client_cursor, 0);
+        assert_eq!(group.current_client_index, 0);
     }
 
     #[test]
@@ -97,17 +99,17 @@ mod tests {
         // [ A, B ] => Should be the next client (A)
         let mut group = SharedGroup {
             clients: vec![1, 2, 3],
-            client_cursor: 0,
+            current_client_index: 0,
             next_client: 1,
         };
         group.update_next_client();
         assert_eq!(group.next_client, 2);
-        assert_eq!(group.client_cursor, 1);
+        assert_eq!(group.current_client_index, 1);
         group.update_next_client();
         assert_eq!(group.next_client, 3);
-        assert_eq!(group.client_cursor, 2);
+        assert_eq!(group.current_client_index, 2);
         group.remove_client(3);
         assert_eq!(group.next_client, 1);
-        assert_eq!(group.client_cursor, 0);
+        assert_eq!(group.current_client_index, 0);
     }
 }

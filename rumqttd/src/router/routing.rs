@@ -474,12 +474,11 @@ impl Router {
                     request.cursor = *cursor;
                     // reset the group cursor
                     if let Some(group_name) = &request.group {
-                        self.datalog
-                            .native
-                            .get_mut(request.filter_idx)
+                        // TODO: Test this more
+                        self.shared_subscriptions
+                            .get_mut(group_name)
                             .unwrap()
-                            .shared_cursors
-                            .insert(group_name.to_string(), *cursor);
+                            .cursor = *cursor;
                     }
                 }
             }
@@ -885,17 +884,9 @@ impl Router {
             let shared_group = self
                 .shared_subscriptions
                 .entry(group_name.to_string())
-                .or_insert(SharedGroup::new());
+                .or_insert(SharedGroup::new(cursor));
 
             shared_group.add_client(client_id);
-
-            // set the shared cursor
-            self.datalog
-                .native
-                .get_mut(filter_idx)
-                .unwrap()
-                .shared_cursors
-                .insert(group_name.to_string(), cursor);
         };
 
         if connection.subscriptions.insert(filter.clone()) {
@@ -1251,21 +1242,13 @@ fn forward_device_data(
             // skip forwarding for connection if its not its turn!
             return ConsumeStatus::FilterCaughtup;
         }
+
+        // update the request cursor to use shared cursor
+        request.cursor = shared_group.cursor;
     }
 
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
-
-    if let Some(group_name) = &request.group {
-        // update the request cursor to use shared cursor
-        request.cursor = *datalog
-            .native
-            .get(request.filter_idx)
-            .unwrap()
-            .shared_cursors
-            .get(group_name)
-            .unwrap();
-    }
 
     trace!(
         "Reading from datalog: {}[{}, {}]",
@@ -1334,16 +1317,6 @@ fn forward_device_data(
     request.cursor = next;
     // println!("{:?} {:?} {}", start, next, request.read_count);
 
-    // update the shared cursor
-    if let Some(group_name) = &request.group {
-        datalog
-            .native
-            .get_mut(request.filter_idx)
-            .unwrap()
-            .shared_cursors
-            .insert(group_name.to_string(), next);
-    }
-
     if publishes.is_empty() {
         return ConsumeStatus::FilterCaughtup;
     }
@@ -1411,6 +1384,8 @@ fn forward_device_data(
     // update the state of shared subscription
     if let Some(share) = shared_group {
         share.update_next_client();
+        // update the shared cursor
+        share.cursor = request.cursor
     }
 
     if caughtup {

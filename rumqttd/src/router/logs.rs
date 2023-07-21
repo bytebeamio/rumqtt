@@ -297,7 +297,6 @@ pub struct Data<T> {
     pub log: CommitLog<T>,
     pub waiters: Waiters<DataRequest>,
     meter: SubscriptionMeter,
-    pub(crate) shared_cursors: HashMap<String, Cursor>,
 }
 
 impl<T> Data<T>
@@ -314,7 +313,6 @@ where
             log,
             waiters,
             meter: metrics,
-            shared_cursors: HashMap::new(),
         }
     }
 
