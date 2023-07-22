@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Support for Websocket connections (#633)
+
+- Pluggable auth (#661)
+
 ### Changed
 
 ### Deprecated

@@ -1,6 +1,8 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
+use protocol::{Login, Publish};
 use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
@@ -123,9 +125,15 @@ pub struct ConnectionSettings {
     pub max_payload_size: usize,
     pub max_inflight_count: u16,
     pub max_inflight_size: usize,
+    /// A mapping of username to password, where any connection matching any entry is granted full access.
+    /// Any non-matching connections are rejected.  If None, all connections are granted full access.
     pub auth: Option<HashMap<String, String>>,
     #[serde(default)]
     pub dynamic_filters: bool,
+    /// This provides a mechanism for implementing custom authentication and authorization methods.
+    /// If this is specified, it will be used to the exclusion of the alternative `auth` field.
+    #[serde(skip)]
+    pub dyn_auth: Option<Arc<dyn Authenticator>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,4 +199,30 @@ pub enum MetricType {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MetricSettings {
     push_interval: u64,
+}
+
+/// Data associated with a connection by the authenticator. Used to authorize messages.
+pub trait AuthStatus: Send + Sync {
+    fn authorize_publish(&self, publish: &Publish) -> bool;
+    fn authorize_notify(&self, publish: &Publish) -> bool;
+}
+
+/// Authenticates new connections and associates metadata with them.
+pub trait Authenticator: Send + Sync + std::fmt::Debug {
+    // Authenticate a connection.  A return value of `None` indicates to reject the connection.
+    // Otherwise, the returned context is associated with the connection.
+    fn authenticate(&self, login: Option<Login>) -> Option<Box<dyn AuthStatus>>;
+}
+
+/// Metadata to associate with a connection.
+pub struct AllowConnAuthContext;
+
+impl AuthStatus for AllowConnAuthContext {
+    fn authorize_publish(&self, _packet: &Publish) -> bool {
+        return true;
+    }
+
+    fn authorize_notify(&self, _packet: &Publish) -> bool {
+        return true;
+    }
 }
