@@ -25,7 +25,7 @@ futures-util = { version = "0.3", default_features = false, features = ["std"] }
 tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
 bytes = "1.0"
 log = "0.4"
-flume = "0.10"
+flume = { version = "0.10", default-features = false, features = ["async"]}
 thiserror = "1"
 
 # Optional

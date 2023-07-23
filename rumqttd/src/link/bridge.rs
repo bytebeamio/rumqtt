@@ -26,10 +26,8 @@ use tokio_rustls::{
 use tracing::*;
 
 use crate::{
-    link::{
-        local::{Link, LinkError},
-        network::Network,
-    },
+    link::{local::LinkError, network::Network},
+    local::LinkBuilder,
     protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
     BridgeConfig, ConnectionId, Notification, Transport,
@@ -59,7 +57,9 @@ where
         "Starting bridge with subscription on filter \"{}\"",
         &config.sub_path,
     );
-    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true, None)?;
+    let (mut tx, mut rx, _ack) = LinkBuilder::new(&config.name, router_tx)
+        .dynamic_filters(true)
+        .build()?;
 
     'outer: loop {
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {

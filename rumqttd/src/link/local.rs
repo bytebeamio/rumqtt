@@ -35,8 +35,101 @@ pub enum LinkError {
     Elapsed(#[from] tokio::time::error::Elapsed),
 }
 
+// used to build LinkTx and LinkRx
+pub struct LinkBuilder<'a> {
+    tenant_id: Option<String>,
+    client_id: &'a str,
+    router_tx: Sender<(ConnectionId, Event)>,
+    // true by default
+    clean_session: bool,
+    last_will: Option<LastWill>,
+    // false by default
+    dynamic_filters: bool,
+    // default to 0, indicating to not use topic alias
+    topic_alias_max: u16,
+}
+
+impl<'a> LinkBuilder<'a> {
+    pub fn new(client_id: &'a str, router_tx: Sender<(ConnectionId, Event)>) -> Self {
+        LinkBuilder {
+            client_id,
+            router_tx,
+            tenant_id: None,
+            clean_session: true,
+            last_will: None,
+            dynamic_filters: false,
+            topic_alias_max: 0,
+        }
+    }
+
+    pub fn tenant_id(mut self, tenant_id: Option<String>) -> Self {
+        self.tenant_id = tenant_id;
+        self
+    }
+
+    pub fn last_will(mut self, last_will: Option<LastWill>) -> Self {
+        self.last_will = last_will;
+        self
+    }
+
+    pub fn topic_alias_max(mut self, max: u16) -> Self {
+        self.topic_alias_max = max;
+        self
+    }
+
+    pub fn clean_session(mut self, clean: bool) -> Self {
+        self.clean_session = clean;
+        self
+    }
+
+    pub fn dynamic_filters(mut self, dynamic_filters: bool) -> Self {
+        self.dynamic_filters = dynamic_filters;
+        self
+    }
+
+    pub fn build(self) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
+        // Connect to router
+        // Local connections to the router shall have access to all subscriptions
+        let connection = Connection::new(
+            self.tenant_id,
+            self.client_id.to_owned(),
+            self.clean_session,
+            self.last_will,
+            self.dynamic_filters,
+            self.topic_alias_max,
+        );
+        let incoming = Incoming::new(connection.client_id.to_owned());
+        let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
+        let outgoing_data_buffer = outgoing.buffer();
+        let incoming_data_buffer = incoming.buffer();
+
+        let event = Event::Connect {
+            connection,
+            incoming,
+            outgoing,
+        };
+
+        self.router_tx.send((0, event))?;
+
+        link_rx.recv()?;
+        let notification = outgoing_data_buffer.lock().pop_front().unwrap();
+
+        // Right now link identifies failure with dropped rx in router,
+        // which is probably ok. We need this here to get id assigned by router
+        let id = match notification {
+            Notification::DeviceAck(Ack::ConnAck(id, ..)) => id,
+            _message => return Err(LinkError::NotConnectionAck),
+        };
+
+        let tx = LinkTx::new(id, self.router_tx.clone(), incoming_data_buffer);
+        let rx = LinkRx::new(id, self.router_tx, link_rx, outgoing_data_buffer);
+        Ok((tx, rx, notification))
+    }
+}
+
 pub struct Link;
 
+#[deprecated = "Link will be removed soon, please consider using LinkBuilder"]
 impl Link {
     #[allow(clippy::type_complexity)]
     fn prepare(
