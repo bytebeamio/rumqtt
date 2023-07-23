@@ -788,7 +788,9 @@ impl Router {
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
                 Packet::PubComp(pubcomp, _) => {
-                    info!(pkid = pubcomp.pkid, "received pubcomp");
+                    let span = tracing::info_span!("pubcomp", pkid = pubcomp.pkid);
+                    let _guard = span.enter();
+
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = pubcomp.pkid;
                     if outgoing.register_pubcomp(pkid) {
@@ -796,9 +798,8 @@ impl Router {
                             pkid,
                             "ack received for pkid {}, but the pkid didn't exists!", pkid
                         );
-                        // shall we ignore it or diconnect the client?
-                        // disconnect = true;
-                        // break;
+                        disconnect = true;
+                        break;
                     }
                 }
                 Packet::PingReq(_) => {
