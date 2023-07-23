@@ -297,14 +297,14 @@ impl Router {
         let clean_session = connection.clean;
         let previous_session = saved.is_some();
         // for qos2 pending pubrels
-        let mut pending_acks = HashSet::new();
+        let mut pending_acks = VecDeque::new();
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
             connection.events = saved.metrics;
             // for using in acklog
-            pending_acks = saved.pending_acks.clone();
-            outgoing.pending_acks = saved.pending_acks;
+            pending_acks = saved.unacked_pubrels.clone();
+            outgoing.unacked_pubrels = saved.unacked_pubrels;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
@@ -480,7 +480,7 @@ impl Router {
                 tracker,
                 connection.subscriptions,
                 connection.events,
-                outgoing.pending_acks,
+                outgoing.unacked_pubrels,
             );
         } else {
             // Only save metrics in clean session
@@ -488,7 +488,7 @@ impl Router {
                 Tracker::new(client_id),
                 HashSet::new(),
                 connection.events,
-                HashSet::new(),
+                VecDeque::new(),
             );
         }
         self.router_meters.total_connections -= 1;
@@ -793,7 +793,7 @@ impl Router {
 
                     let outgoing = self.obufs.get_mut(id).unwrap();
                     let pkid = pubcomp.pkid;
-                    if outgoing.register_pubcomp(pkid) {
+                    if outgoing.register_pubcomp(pkid).is_none() {
                         error!(
                             pkid,
                             "ack received for pkid {}, but the pkid didn't exists!", pkid
@@ -1221,7 +1221,8 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos != 0 { // for qos 1 & 2
+    let inflight_slots = if request.qos != 0 {
+        // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
