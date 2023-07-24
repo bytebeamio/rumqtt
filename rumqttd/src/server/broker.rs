@@ -376,24 +376,29 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         }
                     };
                     task::spawn(
-                        remote(config, tenant_id.clone(), router_tx, stream, protocol).instrument(
-                            tracing::info_span!(
+                        remote(config, tenant_id.clone(), router_tx, stream, protocol, addr)
+                            .instrument(tracing::info_span!(
                                 "websocket_link",
                                 client_id = field::Empty,
                                 connection_id = field::Empty
-                            ),
-                        ),
+                            )),
                     )
                 }
                 LinkType::Remote => task::spawn(
-                    remote(config, tenant_id.clone(), router_tx, network, protocol).instrument(
-                        tracing::error_span!(
-                            "remote_link",
-                            ?tenant_id,
-                            client_id = field::Empty,
-                            connection_id = field::Empty,
-                        ),
-                    ),
+                    remote(
+                        config,
+                        tenant_id.clone(),
+                        router_tx,
+                        network,
+                        protocol,
+                        addr,
+                    )
+                    .instrument(tracing::error_span!(
+                        "remote_link",
+                        ?tenant_id,
+                        client_id = field::Empty,
+                        connection_id = field::Empty,
+                    )),
                 ),
             };
 
@@ -431,17 +436,25 @@ async fn remote<P: Protocol>(
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
+    remote_addr: SocketAddr,
 ) {
     let network = Network::new(stream, config.max_payload_size, 100, protocol);
     // Start the link
-    let mut link =
-        match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!(error=?e, "Remote link error");
-                return;
-            }
-        };
+    let mut link = match RemoteLink::new(
+        config,
+        router_tx.clone(),
+        tenant_id.clone(),
+        network,
+        remote_addr,
+    )
+    .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            error!(error=?e, "Remote link error");
+            return;
+        }
+    };
 
     let client_id = link.client_id.to_owned();
     let connection_id = link.connection_id;

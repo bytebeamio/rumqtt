@@ -211,7 +211,11 @@ pub trait AuthStatus: Send + Sync {
 pub trait Authenticator: Send + Sync + std::fmt::Debug {
     // Authenticate a connection.  A return value of `None` indicates to reject the connection.
     // Otherwise, the returned context is associated with the connection.
-    fn authenticate(&self, login: Option<Login>) -> Option<Box<dyn AuthStatus>>;
+    fn authenticate(
+        &self,
+        login: Option<Login>,
+        remote_addr: SocketAddr,
+    ) -> Option<Box<dyn AuthStatus>>;
 }
 
 /// Metadata to associate with a connection.

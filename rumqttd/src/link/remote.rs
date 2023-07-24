@@ -9,6 +9,7 @@ use crate::{AllowConnAuthContext, AuthStatus, ConnectionId, ConnectionSettings};
 use flume::{RecvError, SendError, Sender, TrySendError};
 use std::collections::VecDeque;
 use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::error::Elapsed;
@@ -63,6 +64,7 @@ impl<P: Protocol> RemoteLink<P> {
         router_tx: Sender<(ConnectionId, Event)>,
         tenant_id: Option<String>,
         mut network: Network<P>,
+        remote_addr: SocketAddr,
     ) -> Result<RemoteLink<P>, Error> {
         // Wait for MQTT connect packet and error out if it's not received in time to prevent
         // DOS attacks by filling total connections that the server can handle with idle open
@@ -88,7 +90,7 @@ impl<P: Protocol> RemoteLink<P> {
         // If authentication is configured in config file check for username and password
         let auth_ctx;
         if let Some(dyn_auth) = &config.dyn_auth {
-            auth_ctx = match dyn_auth.authenticate(login) {
+            auth_ctx = match dyn_auth.authenticate(login, remote_addr) {
                 Some(c) => c,
                 None => {
                     return Err(Error::InvalidAuth);
