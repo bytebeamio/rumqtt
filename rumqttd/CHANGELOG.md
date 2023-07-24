@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttd 0.16.0] - 24-07-2023
+
+### Added
 - QoS2 support (#604)
 - Support for Websocket connections (#633)
 - LinkBuilder for constructing LinkRx/LinkTx (#659)
@@ -43,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MQTTv5: Read the Unsubscribe package in match arms (#625)
 
 ### Security
+
+---
 
 ## [rumqttd 0.14.0] - 31-03-2023
 
