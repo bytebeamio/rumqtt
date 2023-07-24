@@ -988,6 +988,7 @@ impl Router {
                     datalog.park(id, request);
                 }
                 ConsumeStatus::PartialRead => {
+                    dbg!("Partial read, pusing back request:");
                     requests.push_back(request);
                 }
             }
@@ -1237,18 +1238,13 @@ fn forward_device_data(
     broker_topic_aliases: &mut Option<BrokerAliases>,
     shared_group: Option<&mut SharedGroup>,
 ) -> ConsumeStatus {
-    if let Some(ref shared_group) = shared_group {
-        if Some(&outgoing.client_id) != shared_group.current_client() {
-            // skip forwarding for connection if its not its turn!
-            return ConsumeStatus::FilterCaughtup;
-        }
+    let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
+    let _guard = span.enter();
 
+    if let Some(ref shared_group) = shared_group {
         // update the request cursor to use shared cursor
         request.cursor = shared_group.cursor;
     }
-
-    let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
-    let _guard = span.enter();
 
     trace!(
         "Reading from datalog: {}[{}, {}]",
@@ -1271,7 +1267,7 @@ fn forward_device_data(
 
     // TODO: check if shared group with round robin!
     // if it is, only read one message.
-    // let inflight_slots = 1;
+    let inflight_slots = 1;
 
     let (next, publishes) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
@@ -1286,6 +1282,18 @@ fn forward_device_data(
         Position::Next { start, end } => (start, end, false),
         Position::Done { start, end } => (start, end, true),
     };
+
+    if let Some(ref shared_group) = shared_group {
+        let skip_current_client = Some(&outgoing.client_id) != shared_group.current_client();
+
+        if skip_current_client {
+            if caughtup {
+                return ConsumeStatus::FilterCaughtup;
+            } else {
+                return ConsumeStatus::PartialRead;
+            }
+        }
+    }
 
     if start != request.cursor {
         let error = format!(
@@ -1385,7 +1393,7 @@ fn forward_device_data(
     if let Some(share) = shared_group {
         share.update_next_client();
         // update the shared cursor
-        share.cursor = request.cursor
+        share.cursor = request.cursor;
     }
 
     if caughtup {
