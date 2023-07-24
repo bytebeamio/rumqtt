@@ -60,6 +60,8 @@ pub struct Outgoing {
     pub(crate) handle: Sender<()>,
     /// The buffer to keep track of inflight packets.
     inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
+    /// PubRels waiting for PubComp
+    pub(crate) unacked_pubrels: VecDeque<u16>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -72,6 +74,7 @@ impl Outgoing {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
         let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
+        let unacked_pubrels = VecDeque::with_capacity(MAX_INFLIGHT);
 
         // Ensure that there won't be any new allocations
         assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
@@ -81,6 +84,7 @@ impl Outgoing {
             client_id,
             data_buffer: Arc::new(Mutex::new(data_buffer)),
             inflight_buffer,
+            unacked_pubrels,
             handle,
             last_pkid: 0,
             meter: Default::default(),
@@ -169,6 +173,30 @@ impl Outgoing {
         // We don't support out of order acks
         if pkid != head {
             error!(pkid, head, "out of order ack.");
+            return None;
+        }
+
+        Some(())
+    }
+
+    pub fn register_pubrec(&mut self, pkid: u16) {
+        // NOTE: we can return true of false
+        // to indicate whether this is duplicate or not
+        self.unacked_pubrels.push_back(pkid);
+    }
+
+    // OASIS standards don't specify anything about ordering of PubComp
+    // https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901240
+    // But we don't support out of order / unsolicited pubcomps
+    // to be consistent with the behaviour with other acks
+    pub fn register_pubcomp(&mut self, pkid: u16) -> Option<()> {
+        let Some(id) = self.unacked_pubrels.pop_front() else {
+            return None;
+        };
+
+        // out of order acks
+        if pkid != id {
+            error!(pkid, id, "out of order ack.");
             return None;
         }
 

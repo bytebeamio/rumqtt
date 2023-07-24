@@ -1,6 +1,12 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
+#[cfg(feature = "websocket")]
+use std::{
+    future::{Future, IntoFuture},
+    pin::Pin,
+    sync::Arc,
+};
 
 mod client;
 mod eventloop;
@@ -8,18 +14,22 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
-#[cfg(feature = "use-rustls")]
-pub use crate::tls::Error as TlsError;
+use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
+
+use mqttbytes::v5::*;
+
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
-use mqttbytes::v5::*;
+#[cfg(feature = "use-rustls")]
+pub use crate::tls::Error as TlsError;
+
+#[cfg(feature = "proxy")]
+pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
-
-use crate::Outgoing;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
@@ -38,6 +48,10 @@ pub enum Request {
     UnsubAck(UnsubAck),
     Disconnect,
 }
+
+#[cfg(feature = "websocket")]
+type RequestModifierFn =
+    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>>>>;
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -79,6 +93,14 @@ pub struct MqttOptions {
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
     network_options: NetworkOptions,
+    #[cfg(feature = "proxy")]
+    /// Proxy configuration.
+    proxy: Option<Proxy>,
+    /// Upper limit on maximum number of inflight requests.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    outgoing_inflight_upper_limit: Option<u16>,
+    #[cfg(feature = "websocket")]
+    request_modifier: Option<Arc<Box<RequestModifierFn>>>,
 }
 
 impl MqttOptions {
@@ -120,6 +142,11 @@ impl MqttOptions {
             connect_properties: None,
             manual_acks: false,
             network_options: NetworkOptions::new(),
+            #[cfg(feature = "proxy")]
+            proxy: None,
+            outgoing_inflight_upper_limit: None,
+            #[cfg(feature = "websocket")]
+            request_modifier: None,
         }
     }
 
@@ -171,6 +198,27 @@ impl MqttOptions {
 
     pub fn last_will(&self) -> Option<LastWill> {
         self.last_will.clone()
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
+    where
+        F: Fn(http::Request<()>) -> O + 'static,
+        O: IntoFuture<Output = http::Request<()>>,
+    {
+        let request_modifier = Arc::new(Box::new(request_modifier));
+        self.request_modifier = Some(Arc::new(Box::new(move |request| {
+            Box::pin({
+                let request_modifier = Arc::clone(&request_modifier);
+                async move { request_modifier(request).into_future().await }
+            })
+        })));
+        self
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn request_modifier(&self) -> Option<Arc<Box<RequestModifierFn>>> {
+        self.request_modifier.clone()
     }
 
     pub fn set_transport(&mut self, transport: Transport) -> &mut Self {
@@ -465,6 +513,30 @@ impl MqttOptions {
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
         self
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn set_proxy(&mut self, proxy: Proxy) -> &mut Self {
+        self.proxy = Some(proxy);
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    pub fn proxy(&self) -> Option<Proxy> {
+        self.proxy.clone()
+    }
+
+    /// Get the upper limit on maximum number of inflight outgoing publishes.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    pub fn set_outgoing_inflight_upper_limit(&mut self, limit: u16) -> &mut Self {
+        self.outgoing_inflight_upper_limit = Some(limit);
+        self
+    }
+
+    /// Set the upper limit on maximum number of inflight outgoing publishes.
+    /// The server may set its own maximum inflight limit, the smaller of the two will be used.
+    pub fn get_outgoing_inflight_upper_limit(&self) -> Option<u16> {
+        self.outgoing_inflight_upper_limit
     }
 }
 

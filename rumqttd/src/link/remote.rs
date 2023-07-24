@@ -1,6 +1,7 @@
-use crate::link::local::{Link, LinkError, LinkRx, LinkTx};
+use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
+use crate::local::LinkBuilder;
 use crate::protocol::{Connect, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
@@ -73,12 +74,12 @@ impl<P: Protocol> RemoteLink<P> {
         })
         .await??;
 
-        let (connect, lastwill, login) = match packet {
-            Packet::Connect(connect, _, _lastwill, _, login) => {
+        let (connect, props, lastwill, login) = match packet {
+            Packet::Connect(connect, props, _lastwill, _, login) => {
                 Span::current().record("client_id", &connect.client_id);
 
                 // Ignore last will
-                (connect, None, login)
+                (connect, props, None, login)
             }
             packet => return Err(Error::NotConnectPacket(packet)),
         };
@@ -119,14 +120,16 @@ impl<P: Protocol> RemoteLink<P> {
             return Err(Error::InvalidClientId);
         }
 
-        let (link_tx, link_rx, notification) = Link::new(
-            tenant_id,
-            &client_id,
-            router_tx,
-            clean_session,
-            lastwill,
-            dynamic_filters,
-        )?;
+        let topic_alias_max = props.and_then(|p| p.topic_alias_max);
+
+        let (link_tx, link_rx, notification) = LinkBuilder::new(&client_id, router_tx)
+            .tenant_id(tenant_id)
+            .clean_session(clean_session)
+            .last_will(lastwill)
+            .dynamic_filters(dynamic_filters)
+            .topic_alias_max(topic_alias_max.unwrap_or(0))
+            .build()?;
+
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 

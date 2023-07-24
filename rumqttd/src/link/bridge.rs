@@ -21,15 +21,13 @@ use tokio_rustls::{
         client::InvalidDnsNameError, Certificate, ClientConfig, Error as TLSError,
         OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
     },
-    webpki, TlsConnector,
+    TlsConnector,
 };
 use tracing::*;
 
 use crate::{
-    link::{
-        local::{Link, LinkError},
-        network::Network,
-    },
+    link::{local::LinkError, network::Network},
+    local::LinkBuilder,
     protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
     BridgeConfig, ConnectionId, Notification, Transport,
@@ -59,7 +57,9 @@ where
         "Starting bridge with subscription on filter \"{}\"",
         &config.sub_path,
     );
-    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true)?;
+    let (mut tx, mut rx, _ack) = LinkBuilder::new(&config.name, router_tx)
+        .dynamic_filters(true)
+        .build()?;
 
     'outer: loop {
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
@@ -319,7 +319,7 @@ pub enum BridgeError {
     Network(#[from] network::Error),
     #[error("Web Pki - {0}")]
     #[cfg(feature = "use-rustls")]
-    WebPki(#[from] tokio_rustls::webpki::Error),
+    WebPki(#[from] webpki::Error),
     #[error("DNS name - {0}")]
     #[cfg(feature = "use-rustls")]
     DNSName(#[from] InvalidDnsNameError),

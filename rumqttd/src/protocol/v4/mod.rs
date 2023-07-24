@@ -345,7 +345,10 @@ impl Protocol for V4 {
             Packet::Connect(connect, None, last_will, None, login) => {
                 connect::write(&connect, &login, &last_will, buffer)?
             }
-            Packet::ConnAck(connack, None) => connack::write(&connack, buffer)?,
+            // TODO: set ConnAckProperties conditionally based on version
+            // currently we can't conditionally set them based on v5 or v4,
+            // so we ignore them, as properties can't be there in v4.
+            Packet::ConnAck(connack, _) => connack::write(&connack, buffer)?,
             Packet::Publish(publish, None) => publish::write(&publish, buffer)?,
             Packet::PubAck(puback, None) => puback::write(&puback, buffer)?,
             Packet::Subscribe(subscribe, None) => subscribe::write(&subscribe, buffer)?,

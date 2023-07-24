@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::{
     scheduler::{PauseReason, Tracker},
@@ -28,6 +28,7 @@ impl Graveyard {
         mut tracker: Tracker,
         subscriptions: HashSet<String>,
         metrics: ConnectionEvents,
+        unacked_pubrels: VecDeque<u16>,
     ) {
         tracker.pause(PauseReason::Busy);
         let id = tracker.id.clone();
@@ -38,6 +39,7 @@ impl Graveyard {
                 tracker,
                 subscriptions,
                 metrics,
+                unacked_pubrels,
             },
         );
     }
@@ -48,6 +50,8 @@ pub struct SavedState {
     pub tracker: Tracker,
     pub subscriptions: HashSet<String>,
     pub metrics: ConnectionEvents,
+    // used for pubrel in qos2
+    pub unacked_pubrels: VecDeque<u16>,
 }
 
 impl SavedState {
@@ -56,6 +60,7 @@ impl SavedState {
             tracker: Tracker::new(client_id),
             subscriptions: HashSet::new(),
             metrics: ConnectionEvents::default(),
+            unacked_pubrels: VecDeque::new(),
         }
     }
 }

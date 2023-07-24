@@ -9,7 +9,7 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "broker.emqx.io", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
     mqttoptions.set_topic_alias_max(10.into());
 
@@ -28,51 +28,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn requests(client: AsyncClient) {
     client
-        .subscribe_with_properties("hello/world", QoS::AtMostOnce, None)
+        .subscribe("hello/world", QoS::AtMostOnce)
         .await
         .unwrap();
 
     client
-        .subscribe_with_properties("bye/world", QoS::AtMostOnce, None)
+        .subscribe("bye/world", QoS::AtMostOnce)
         .await
         .unwrap();
 
-    let mut props = PublishProperties::default();
-    props.topic_alias = Some(28);
+    let props = PublishProperties {
+        topic_alias: Some(28),
+        ..Default::default()
+    };
 
     client
         .publish_with_properties(
             "hello/world",
-            QoS::ExactlyOnce,
+            QoS::AtMostOnce,
             false,
             vec![3; 3],
-            Some(props.clone()),
+            props.clone(),
         )
         .await
         .unwrap();
 
-    let mut other = props.clone();
-    other.topic_alias = Some(51);
+    let mut other_props = props.clone();
+    other_props.topic_alias = Some(51);
 
     client
         .publish_with_properties(
             "bye/world",
-            QoS::ExactlyOnce,
+            QoS::AtMostOnce,
             false,
             vec![3; 3],
-            Some(other.clone()),
+            other_props.clone(),
         )
         .await
         .unwrap();
 
     for i in 1..=10 {
+        // alternately choose the properties
         let properties = if i % 2 == 0 {
-            other.clone()
+            other_props.clone()
         } else {
             props.clone()
         };
+
+        // no need to specify topic as we are using topic alias
         client
-            .publish_with_properties("", QoS::ExactlyOnce, false, vec![1; i], Some(properties))
+            .publish_with_properties("", QoS::AtMostOnce, false, vec![1; i], properties)
             .await
             .unwrap();
 
