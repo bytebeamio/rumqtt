@@ -1004,6 +1004,7 @@ impl Router {
         }
 
         // Add requests back to the tracker if there are any
+        requests.extend(skipped_requests);
         self.scheduler.trackv(id, requests);
         Some(())
     }
