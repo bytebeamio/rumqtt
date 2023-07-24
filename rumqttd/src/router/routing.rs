@@ -938,6 +938,7 @@ impl Router {
 
         let connection = &mut self.connections[id];
         let broker_topic_aliases = &mut connection.broker_topic_aliases;
+        let mut skipped_requests = VecDeque::new();
 
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
@@ -950,7 +951,13 @@ impl Router {
                 // acks are completely caught up. Pending requests are registered
                 // in waiters and awaiting new notifications (device or replica data)
                 None => {
-                    self.scheduler.pause(id, PauseReason::Caughtup);
+                    if skipped_requests.is_empty() {
+                        // if no requests is in skip list, that means
+                        // we have nothing left to process, i.e. we caughtup
+                        self.scheduler.pause(id, PauseReason::Caughtup);
+                    }
+                    // add back the skipped requests!
+                    self.scheduler.trackv(id, skipped_requests);
                     return Some(());
                 }
             };
@@ -988,8 +995,10 @@ impl Router {
                     datalog.park(id, request);
                 }
                 ConsumeStatus::PartialRead => {
-                    dbg!("Partial read, pusing back request:");
                     requests.push_back(request);
+                }
+                ConsumeStatus::SkipRequest => {
+                    skipped_requests.push_back(request);
                 }
             }
         }
@@ -1222,6 +1231,9 @@ enum ConsumeStatus {
     FilterCaughtup,
     /// Some publishes on topic have been forwarded
     PartialRead,
+    /// Use to indicate we want to skip the datareqest
+    /// for shared subscriptions
+    SkipRequest,
 }
 
 /// Sweep datalog from offset in DataRequest and updates DataRequest
@@ -1287,11 +1299,11 @@ fn forward_device_data(
         let skip_current_client = Some(&outgoing.client_id) != shared_group.current_client();
 
         if skip_current_client {
-            if caughtup {
-                return ConsumeStatus::FilterCaughtup;
+            return if caughtup {
+                ConsumeStatus::FilterCaughtup
             } else {
-                return ConsumeStatus::PartialRead;
-            }
+                ConsumeStatus::SkipRequest
+            };
         }
     }
 
