@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- QoS2 support (#604)
 - Support for Websocket connections (#633)
 - LinkBuilder for constructing LinkRx/LinkTx (#659)
 
