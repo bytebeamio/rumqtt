@@ -1231,7 +1231,7 @@ fn forward_device_data(
 
         len as u64
     } else {
-        datalog.config.max_read_len
+        datalog.config.max_outgoing_packet_count
     };
 
     let (next, publishes) =

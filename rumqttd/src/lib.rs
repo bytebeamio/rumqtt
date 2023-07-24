@@ -119,10 +119,8 @@ pub struct BridgeConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
-    pub throttle_delay_ms: u64,
     pub max_payload_size: usize,
-    pub max_inflight_count: u16,
-    pub max_inflight_size: usize,
+    pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
     #[serde(default)]
     pub dynamic_filters: bool,
@@ -140,12 +138,18 @@ pub struct ClusterSettings {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RouterConfig {
-    pub instant_ack: bool,
+    pub max_connections: usize,
+    pub max_outgoing_packet_count: u64,
     pub max_segment_size: usize,
     pub max_segment_count: usize,
-    pub max_read_len: u64,
-    pub max_connections: usize,
+    pub custom_segment: Option<HashMap<String, SegmentConfig>>,
     pub initialized_filters: Option<Vec<Filter>>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SegmentConfig {
+    pub max_segment_size: usize,
+    pub max_segment_count: usize,
 }
 
 type ReloadHandle = Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;

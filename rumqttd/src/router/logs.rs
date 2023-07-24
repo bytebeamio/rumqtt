@@ -1,6 +1,6 @@
 use super::Ack;
 use slab::Slab;
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::protocol::{
     matches, ConnAck, ConnAckProperties, PingResp, PubAck, PubComp, PubRec, PubRel, Publish,
@@ -72,7 +72,7 @@ impl DataLog {
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
-                let data = Data::new(&filter, config.max_segment_size, config.max_segment_count);
+                let data = Data::new(&filter, &config);
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map
@@ -151,11 +151,7 @@ impl DataLog {
         let (filter_idx, data) = match filter_indexes.get(filter) {
             Some(idx) => (*idx, self.native.get(*idx).unwrap()),
             None => {
-                let data = Data::new(
-                    filter,
-                    self.config.max_segment_size,
-                    self.config.max_segment_count,
-                );
+                let data = Data::new(filter, &self.config);
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map
@@ -303,7 +299,22 @@ impl<T> Data<T>
 where
     T: Storage + Clone,
 {
-    pub fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data<T> {
+    pub fn new(filter: &str, router_config: &RouterConfig) -> Data<T> {
+        let mut max_segment_size = router_config.max_segment_size;
+        let mut max_mem_segments = router_config.max_segment_count;
+
+        // Override segment config for selected filter
+        if let Some(config) = &router_config.custom_segment {
+            for (f, segment_config) in config {
+                if matches(filter, f) {
+                    info!("Overriding segment config for filter: {}", filter);
+                    max_segment_size = segment_config.max_segment_size;
+                    max_mem_segments = segment_config.max_segment_count;
+                }
+            }
+        }
+
+        // max_segment_size: usize, max_mem_segments: usize
         let log = CommitLog::new(max_segment_size, max_mem_segments).unwrap();
 
         let waiters = Waiters::with_capacity(10);
@@ -409,11 +420,11 @@ mod test {
     #[test]
     fn publish_filters_updating_correctly_on_new_topic_subscription() {
         let config = RouterConfig {
-            instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
             max_segment_count: 10,
-            max_read_len: 1024,
+            max_outgoing_packet_count: 1024,
+            custom_segment: None,
             initialized_filters: None,
         };
         let mut data = DataLog::new(config).unwrap();
@@ -428,11 +439,11 @@ mod test {
     #[test]
     fn publish_filters_updating_correctly_on_new_publish() {
         let config = RouterConfig {
-            instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
             max_segment_count: 10,
-            max_read_len: 1024,
+            max_outgoing_packet_count: 1024,
+            custom_segment: None,
             initialized_filters: None,
         };
         let mut data = DataLog::new(config).unwrap();

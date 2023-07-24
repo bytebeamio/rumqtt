@@ -432,7 +432,12 @@ async fn remote<P: Protocol>(
     stream: Box<dyn N>,
     protocol: P,
 ) {
-    let network = Network::new(stream, config.max_payload_size, 100, protocol);
+    let network = Network::new(
+        stream,
+        config.max_payload_size,
+        config.max_inflight_count,
+        protocol,
+    );
     // Start the link
     let mut link =
         match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - QoS2 support (#604)
 - Support for Websocket connections (#633)
 - LinkBuilder for constructing LinkRx/LinkTx (#659)
+- Ability to configure segment size individually (#602)
 
 ### Changed
 
