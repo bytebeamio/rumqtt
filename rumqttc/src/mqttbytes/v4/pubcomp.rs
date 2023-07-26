@@ -12,6 +12,12 @@ impl PubComp {
         PubComp { pkid }
     }
 
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+        1 + remaining_len_size + len
+    }
+
     fn len(&self) -> usize {
         // pkid
         2

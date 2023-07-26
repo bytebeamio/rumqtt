@@ -85,3 +85,16 @@ pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
 
     Ok(packet)
 }
+
+/// Return number of remaining length bytes required for encoding length
+fn len_len(len: usize) -> usize {
+    if len >= 2_097_152 {
+        4
+    } else if len >= 16_384 {
+        3
+    } else if len >= 128 {
+        2
+    } else {
+        1
+    }
+}

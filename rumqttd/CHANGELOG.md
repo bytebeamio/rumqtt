@@ -21,6 +21,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [rumqttd 0.16.0] - 24-07-2023
+
+### Added
+- QoS2 support (#604)
+- Support for Websocket connections (#633)
+- LinkBuilder for constructing LinkRx/LinkTx (#659)
+- Ability to configure segment size individually (#602)
+
+### Changed
+
+### Deprecated
+- Link and its implementation, use LinkBuilder instead
+
+### Removed
+
+### Fixed
+- Include reason code for UnsubAck in v5
+
+### Security
+
+---
+
 ## [rumqttd 0.15.0] - 30-05-2023
 
 ### Added
@@ -37,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MQTTv5: Read the Unsubscribe package in match arms (#625)
 
 ### Security
+
+---
 
 ## [rumqttd 0.14.0] - 31-03-2023
 

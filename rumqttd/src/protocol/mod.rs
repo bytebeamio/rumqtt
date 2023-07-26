@@ -2,8 +2,6 @@
 
 pub mod v4;
 pub mod v5;
-#[cfg(feature = "websockets")]
-pub mod ws;
 
 use std::{io, str::Utf8Error, string::FromUtf8Error};
 

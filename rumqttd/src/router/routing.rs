@@ -1,7 +1,8 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
-    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
-    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
+    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -43,8 +44,6 @@ pub enum RouterError {
     BadTenant(String, String),
     #[error("No matching filters to topic {0}")]
     NoMatchingFilters(String),
-    #[error("Unsupported QoS {0:?}")]
-    UnsupportedQoS(QoS),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
@@ -53,6 +52,7 @@ pub enum RouterError {
     Disconnect(DisconnectReasonCode),
 }
 
+// TODO: set this to some appropriate value
 const TOPIC_ALIAS_MAX: u16 = 4096;
 
 pub struct Router {
@@ -259,7 +259,7 @@ impl Router {
         &mut self,
         mut connection: Connection,
         incoming: Incoming,
-        outgoing: Outgoing,
+        mut outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
         if let Err(err) = validate_clientid(&client_id) {
@@ -295,10 +295,15 @@ impl Router {
         let saved = self.graveyard.retrieve(&client_id);
         let clean_session = connection.clean;
         let previous_session = saved.is_some();
+        // for qos2 pending pubrels
+        let mut pending_acks = VecDeque::new();
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
             connection.events = saved.metrics;
+            // for using in acklog
+            pending_acks = saved.unacked_pubrels.clone();
+            outgoing.unacked_pubrels = saved.unacked_pubrels;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
@@ -342,13 +347,22 @@ impl Router {
         };
 
         let properties = ConnAckProperties {
-            // TODO: set this to some appropriate value
             topic_alias_max: Some(TOPIC_ALIAS_MAX),
             ..Default::default()
         };
 
         let ackslog = self.ackslog.get_mut(connection_id).unwrap();
         ackslog.connack(connection_id, ack, Some(properties));
+
+        pending_acks.into_iter().for_each(|pkid| {
+            // NOTE: will it be better if we store the whole PubRel
+            // instead of pkid in pending acks
+            let pubrel = PubRel {
+                pkid,
+                reason: PubRelReason::Success,
+            };
+            ackslog.pubrel(pubrel)
+        });
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
@@ -461,12 +475,20 @@ impl Router {
                 }
             }
 
-            self.graveyard
-                .save(tracker, connection.subscriptions, connection.events);
+            self.graveyard.save(
+                tracker,
+                connection.subscriptions,
+                connection.events,
+                outgoing.unacked_pubrels,
+            );
         } else {
             // Only save metrics in clean session
-            self.graveyard
-                .save(Tracker::new(client_id), HashSet::new(), connection.events);
+            self.graveyard.save(
+                Tracker::new(client_id),
+                HashSet::new(),
+                connection.events,
+                VecDeque::new(),
+            );
         }
         self.router_meters.total_connections -= 1;
     }
@@ -532,18 +554,15 @@ impl Router {
                             force_ack = true;
                         }
                         QoS::ExactlyOnce => {
-                            error!("QoS::ExactlyOnce is not yet supported");
-                            disconnect = true;
-                            break;
-                            // let pubrec = PubRec {
-                            //     pkid,
-                            //     reason: PubRecReason::Success,
-                            // };
-                            //
-                            // let ackslog = self.ackslog.get_mut(id).unwrap();
-                            // ackslog.pubrec(publish, pubrec);
-                            // force_ack = true;
-                            // continue;
+                            let pubrec = PubRec {
+                                pkid,
+                                reason: PubRecReason::Success,
+                            };
+
+                            let ackslog = self.ackslog.get_mut(id).unwrap();
+                            ackslog.pubrec(publish, pubrec);
+                            force_ack = true;
+                            continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing
@@ -690,7 +709,7 @@ impl Router {
                             let unsuback = UnsubAck {
                                 pkid,
                                 // reasons are used in MQTTv5
-                                reasons: vec![],
+                                reasons: vec![UnsubAckReason::Success],
                             };
                             let ackslog = self.ackslog.get_mut(id).unwrap();
                             ackslog.unsuback(unsuback);
@@ -732,6 +751,7 @@ impl Router {
                         reason: PubRelReason::Success,
                     };
 
+                    outgoing.register_pubrec(pubrel.pkid);
                     ackslog.pubrel(pubrel);
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
@@ -745,6 +765,10 @@ impl Router {
                         reason: PubCompReason::Success,
                     };
 
+                    // NOTE: client can try to resend previously unacked pubrels
+                    // on reconnection ( with clean session false )
+                    // we try to retrive publish assuming broker saved the previous state
+                    // successfully in graveyard.
                     let publish = match ackslog.pubcomp(pubcomp) {
                         Some(v) => v,
                         None => {
@@ -778,8 +802,23 @@ impl Router {
                             break;
                         }
                     };
+                    self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
-                Packet::PubComp(_pubcomp, _) => {}
+                Packet::PubComp(pubcomp, _) => {
+                    let span = tracing::info_span!("pubcomp", pkid = pubcomp.pkid);
+                    let _guard = span.enter();
+
+                    let outgoing = self.obufs.get_mut(id).unwrap();
+                    let pkid = pubcomp.pkid;
+                    if outgoing.register_pubcomp(pkid).is_none() {
+                        error!(
+                            pkid,
+                            "ack received for pkid {}, but the pkid didn't exists!", pkid
+                        );
+                        disconnect = true;
+                        break;
+                    }
+                }
                 Packet::PingReq(_) => {
                     let ackslog = self.ackslog.get_mut(id).unwrap();
                     ackslog.pingresp(PingResp);
@@ -794,7 +833,7 @@ impl Router {
                     break;
                 }
                 incoming => {
-                    warn!(packet=?incoming, "Packet not supported by router yet" );
+                    warn!(packet=?incoming, "Unexpected packet received, ignoring the packet." );
                 }
             }
         }
@@ -1199,7 +1238,8 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 {
+    let inflight_slots = if request.qos != 0 {
+        // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
@@ -1208,7 +1248,7 @@ fn forward_device_data(
 
         len as u64
     } else {
-        datalog.config.max_read_len
+        datalog.config.max_outgoing_packet_count
     };
 
     let (next, publishes) =
@@ -1437,10 +1477,6 @@ fn validate_subscription(
         if !filter.path.starts_with(tenant_prefix) {
             return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
         }
-    }
-
-    if filter.qos == QoS::ExactlyOnce {
-        return Err(RouterError::UnsupportedQoS(filter.qos));
     }
 
     if filter.path.starts_with('$') {

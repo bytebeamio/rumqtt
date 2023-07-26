@@ -30,6 +30,8 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
+    #[error("Cannot recieve packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
+    OutgoingPacketTooLarge { pkt_size: usize, max: usize },
 }
 
 /// State of the mqtt connection.
@@ -72,13 +74,15 @@ pub struct MqttState {
     pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
+    /// Maximum outgoing packet size, set via MqttOptions
+    pub max_outgoing_packet_size: usize,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, max_outgoing_packet_size: usize) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -97,6 +101,7 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
+            max_outgoing_packet_size,
         }
     }
 
@@ -141,13 +146,15 @@ impl MqttState {
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
+        // Enforce max outgoing packet size
+        self.check_size(request.size())?;
         match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
-            Request::PingReq => self.outgoing_ping()?,
-            Request::Disconnect => self.outgoing_disconnect()?,
+            Request::PingReq(_) => self.outgoing_ping()?,
+            Request::Disconnect(_) => self.outgoing_disconnect()?,
             Request::PubAck(puback) => self.outgoing_puback(puback)?,
             Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec)?,
             _ => unimplemented!(),
@@ -473,6 +480,17 @@ impl MqttState {
         None
     }
 
+    fn check_size(&self, pkt_size: usize) -> Result<(), StateError> {
+        if pkt_size > self.max_outgoing_packet_size {
+            Err(StateError::OutgoingPacketTooLarge {
+                pkt_size,
+                max: self.max_outgoing_packet_size,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
     fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {
         let pubrel = match pubrel.pkid {
             // consider PacketIdentifier(0) as uninitialized packets
@@ -536,7 +554,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(100, false)
+        MqttState::new(100, false, usize::MAX)
     }
 
     #[test]
@@ -554,6 +572,25 @@ mod test {
 
             assert_eq!(expected, pkid);
         }
+    }
+
+    #[test]
+    fn outgoing_max_packet_size_check() {
+        let mut mqtt = MqttState::new(100, false, 200);
+
+        let small_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; 100]);
+        assert_eq!(
+            mqtt.handle_outgoing_packet(Request::Publish(small_publish))
+                .is_ok(),
+            true
+        );
+
+        let large_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; 265]);
+        assert_eq!(
+            mqtt.handle_outgoing_packet(Request::Publish(large_publish))
+                .is_ok(),
+            false
+        );
     }
 
     #[test]
