@@ -22,7 +22,7 @@ pub mod iobufs;
 mod logs;
 mod routing;
 mod scheduler;
-mod shared_subs;
+pub(crate) mod shared_subs;
 mod waiters;
 
 pub use alertlog::Alert;

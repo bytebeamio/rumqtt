@@ -1,20 +1,21 @@
+use serde::{Deserialize, Serialize};
+
 pub struct SharedGroup {
     // using Vec over HashSet for maintaining order of iter
     clients: Vec<String>,
     // Index into clients, allows us to skip doing iter everytime
     current_client_index: usize,
     pub cursor: (u64, u64),
-    // TODO; random, sticky strategy
-    // we can either have that logic in update_next_client or current_client
-    // strategy: Strategy,
+    pub strategy: Strategy,
 }
 
 impl SharedGroup {
-    pub fn new(cursor: (u64, u64)) -> Self {
+    pub fn new(cursor: (u64, u64), strategy: Strategy) -> Self {
         SharedGroup {
             clients: vec![],
             current_client_index: 0,
             cursor,
+            strategy,
         }
     }
 
@@ -42,8 +43,27 @@ impl SharedGroup {
     }
 
     pub fn update_next_client(&mut self) {
-        self.current_client_index = (self.current_client_index + 1) % self.clients.len();
+        match self.strategy {
+            Strategy::RoundRobin => {
+                self.current_client_index = (self.current_client_index + 1) % self.clients.len();
+            }
+            Strategy::Random => {
+                // how shall we randomly choose client
+                // we might need to add extra dependency
+                todo!()
+            }
+            Strategy::Sticky => {}
+        }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Strategy {
+    #[default]
+    RoundRobin,
+    Random,
+    Sticky,
 }
 
 #[cfg(test)]

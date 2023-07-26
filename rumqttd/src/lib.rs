@@ -38,6 +38,8 @@ pub use link::meters;
 pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
 pub use server::Broker;
 
+use self::router::shared_subs::Strategy;
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub id: usize,
@@ -146,6 +148,9 @@ pub struct RouterConfig {
     pub max_read_len: u64,
     pub max_connections: usize,
     pub initialized_filters: Option<Vec<Filter>>,
+    // defaults to Round Robin
+    #[serde(default)]
+    pub shared_subscriptions_strategy: Strategy,
 }
 
 type ReloadHandle = Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;

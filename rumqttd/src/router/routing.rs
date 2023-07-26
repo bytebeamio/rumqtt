@@ -884,7 +884,10 @@ impl Router {
             let shared_group = self
                 .shared_subscriptions
                 .entry(group_name.to_string())
-                .or_insert(SharedGroup::new(cursor));
+                .or_insert(SharedGroup::new(
+                    cursor,
+                    self.config.shared_subscriptions_strategy.clone(),
+                ));
 
             shared_group.add_client(client_id);
         };
@@ -1266,7 +1269,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 {
+    let mut inflight_slots = if request.qos == 1 {
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
@@ -1278,9 +1281,14 @@ fn forward_device_data(
         datalog.config.max_read_len
     };
 
-    // TODO: check if shared group with round robin!
-    // if it is, only read one message.
-    let inflight_slots = 1;
+    if shared_group
+        .as_ref()
+        .is_some_and(|g| g.strategy == Strategy::RoundRobin)
+    {
+        // only read one message in case of round robin
+        // so that messages get equally distributed!
+        inflight_slots = 1;
+    }
 
     let (next, publishes) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
