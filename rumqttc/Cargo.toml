@@ -31,7 +31,7 @@ thiserror = "1"
 # Optional
 # rustls
 tokio-rustls = { version = "0.24", optional = true }
-rustls-webpki = { version = "0.100.1", optional = true }
+rustls-webpki = { version = "0.101.1", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 rustls-native-certs = { version = "0.6", optional = true }
 # websockets
@@ -48,10 +48,10 @@ async-http-proxy = { version = "1.2.5", features = ["runtime-tokio", "basic-auth
 
 [dev-dependencies]
 bincode = "1.3.3"
-color-backtrace = "0.4"
+color-backtrace = "0.5"
 matches = "0.1"
 pretty_assertions = "1"
-pretty_env_logger = "0.4"
+pretty_env_logger = "0.5"
 rustls = "0.21"
 rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
