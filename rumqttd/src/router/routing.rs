@@ -1085,6 +1085,17 @@ fn append_to_commitlog(
         p.topic_alias.take()
     });
 
+    // TODO: broker should properly send the disconnect packet!
+    if properties
+        .as_ref()
+        .is_some_and(|p| !p.subscription_identifiers.is_empty())
+    {
+        error!("A PUBLISH packet sent from a Client to a Server MUST NOT contain a Subscription Identifier");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::MalformedPacket,
+        ));
+    }
+
     if let Some(alias) = topic_alias {
         validate_and_set_topic_alias(&mut publish, connection, alias)?;
     };
