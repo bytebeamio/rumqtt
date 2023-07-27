@@ -3,6 +3,7 @@ use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
 use crate::link::remote::{self, RemoteLink};
 use crate::link::{bridge, timer};
+use crate::local::LinkBuilder;
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 use crate::protocol::Protocol;
@@ -31,7 +32,7 @@ use std::time::Duration;
 use std::{io, thread};
 
 use crate::link::console;
-use crate::link::local::{self, Link, LinkRx, LinkTx};
+use crate::link::local::{self, LinkRx, LinkTx};
 use crate::router::{Disconnection, Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
 use tokio::net::{TcpListener, TcpStream};
@@ -144,15 +145,8 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex. max connection limit).
-        let (link_tx, link_rx, _ack) = Link::new(
-            None,
-            client_id,
-            self.router_tx.clone(),
-            true,
-            None,
-            false,
-            None,
-        )?;
+        let (link_tx, link_rx, _ack) =
+            LinkBuilder::new(client_id, self.router_tx.clone()).build()?;
         Ok((link_tx, link_rx))
     }
 
@@ -438,7 +432,12 @@ async fn remote<P: Protocol>(
     stream: Box<dyn N>,
     protocol: P,
 ) {
-    let network = Network::new(stream, config.max_payload_size, 100, protocol);
+    let network = Network::new(
+        stream,
+        config.max_payload_size,
+        config.max_inflight_count,
+        protocol,
+    );
     // Start the link
     let mut link =
         match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {

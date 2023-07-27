@@ -1,4 +1,5 @@
-use crate::link::local::{Link, LinkRx};
+use crate::link::local::LinkRx;
+use crate::local::LinkBuilder;
 use crate::router::{Event, Print};
 use crate::{ConnectionId, ConsoleSettings};
 use axum::extract::{Path, State};
@@ -23,8 +24,10 @@ impl ConsoleLink {
     /// Requires the corresponding Router to be running to complete
     pub fn new(config: ConsoleSettings, router_tx: Sender<(ConnectionId, Event)>) -> ConsoleLink {
         let tx = router_tx.clone();
-        let (link_tx, link_rx, _ack) =
-            Link::new(None, "console", tx, true, None, true, None).unwrap();
+        let (link_tx, link_rx, _ack) = LinkBuilder::new("console", tx)
+            .dynamic_filters(true)
+            .build()
+            .unwrap();
         let connection_id = link_tx.connection_id;
         ConsoleLink {
             config,
