@@ -67,26 +67,25 @@ pub enum Strategy {
 
 #[cfg(test)]
 mod tests {
+    use crate::router::shared_subs::Strategy;
+
     use super::SharedGroup;
 
     #[test]
     fn performs_round_robin() {
         let mut group = SharedGroup {
-            clients: vec![1, 2, 3],
+            clients: vec!["A".into(), "B".into(), "C".into()],
             current_client_index: 0,
-            next_client: 1,
+            cursor: (0, 0),
+            strategy: Strategy::RoundRobin,
         };
         group.update_next_client();
-        assert_eq!(group.next_client, 2);
         assert_eq!(group.current_client_index, 1);
         group.update_next_client();
-        assert_eq!(group.next_client, 3);
         assert_eq!(group.current_client_index, 2);
         group.update_next_client();
-        assert_eq!(group.next_client, 1);
         assert_eq!(group.current_client_index, 0);
-        group.add_client(4);
-        assert_eq!(group.next_client, 1);
+        group.add_client("D".into());
         assert_eq!(group.current_client_index, 0);
     }
 
@@ -96,18 +95,16 @@ mod tests {
         // we remove A
         // [ B, C ] => Should be the next client (B)
         let mut group = SharedGroup {
-            clients: vec![1, 2, 3],
+            clients: vec!["A".into(), "B".into(), "C".into()],
             current_client_index: 0,
-            next_client: 1,
+            cursor: (0, 0),
+            strategy: Strategy::RoundRobin,
         };
-        group.remove_client(1);
-        assert_eq!(group.next_client, 2);
+        group.remove_client(&"A".into());
         assert_eq!(group.current_client_index, 0);
         group.update_next_client();
-        assert_eq!(group.next_client, 3);
         assert_eq!(group.current_client_index, 1);
         group.update_next_client();
-        assert_eq!(group.next_client, 2);
         assert_eq!(group.current_client_index, 0);
     }
 
@@ -117,18 +114,16 @@ mod tests {
         // we remove C
         // [ A, B ] => Should be the next client (A)
         let mut group = SharedGroup {
-            clients: vec![1, 2, 3],
+            clients: vec!["A".into(), "B".into(), "C".into()],
             current_client_index: 0,
-            next_client: 1,
+            cursor: (0, 0),
+            strategy: Strategy::RoundRobin,
         };
         group.update_next_client();
-        assert_eq!(group.next_client, 2);
         assert_eq!(group.current_client_index, 1);
         group.update_next_client();
-        assert_eq!(group.next_client, 3);
         assert_eq!(group.current_client_index, 2);
-        group.remove_client(3);
-        assert_eq!(group.next_client, 1);
+        group.remove_client(&"C".into());
         assert_eq!(group.current_client_index, 0);
     }
 }
