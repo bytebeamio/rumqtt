@@ -1,3 +1,4 @@
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 pub struct SharedGroup {
@@ -48,9 +49,7 @@ impl SharedGroup {
                 self.current_client_index = (self.current_client_index + 1) % self.clients.len();
             }
             Strategy::Random => {
-                // how shall we randomly choose client
-                // we might need to add extra dependency
-                todo!()
+                self.current_client_index = rand::thread_rng().gen_range(0..self.clients.len());
             }
             Strategy::Sticky => {}
         }
