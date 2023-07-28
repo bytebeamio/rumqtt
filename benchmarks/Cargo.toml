@@ -8,9 +8,9 @@ edition = "2018"
 [dependencies]
 bytes = "1"
 futures = { version = "0.3", features = ["compat"] }
-itoa = "0.4"
-pprof = { version = "0.11", features = ["flamegraph", "prost-codec"] }
-pretty_env_logger = "0.4"
+itoa = "1.0"
+pprof = { version = "0.12", features = ["flamegraph", "prost-codec"] }
+pretty_env_logger = "0.5"
 rumqttc = { path = "../rumqttc" }
 rumqttd = { path = "../rumqttd" }
 serde = { version = "1", features = ["derive"] }
