@@ -102,11 +102,6 @@ pub struct Router {
     cache: Option<VecDeque<Packet>>,
     /// Shared subscriptions map <group-name, group>
     shared_subscriptions: HashMap<String, SharedGroup>,
-    /// Keep track of temporarily skipped DataRequest
-    /// for a call to consume()
-    /// We skip so that the strategy for shared subscription
-    /// works out.
-    skipped_requests: VecDeque<DataRequest>,
 }
 
 impl Router {
@@ -147,7 +142,6 @@ impl Router {
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
             shared_subscriptions: HashMap::new(),
-            skipped_requests: VecDeque::new(),
         }
     }
 
@@ -985,6 +979,10 @@ impl Router {
         let connection = &mut self.connections[id];
         let broker_topic_aliases = &mut connection.broker_topic_aliases;
 
+        // Keep track of temporarily skipped DataRequest
+        // NOTE: VecDeque::new() doesn't allocate memory until elements are pushed
+        let mut skipped_requests: VecDeque<DataRequest> = VecDeque::new();
+
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
         // So a new connection is always scheduled with at least one request
@@ -996,14 +994,13 @@ impl Router {
                 // acks are completely caught up. Pending requests are registered
                 // in waiters and awaiting new notifications (device or replica data)
                 None => {
-                    if self.skipped_requests.is_empty() {
+                    if skipped_requests.is_empty() {
                         // if no requests is in skip list, that means
                         // we have nothing left to process, i.e. we caughtup
                         self.scheduler.pause(id, PauseReason::Caughtup);
                     }
                     // add back the skipped requests!
-                    self.scheduler
-                        .trackv(id, self.skipped_requests.drain(..).collect());
+                    self.scheduler.trackv(id, skipped_requests);
                     return Some(());
                 }
             };
@@ -1044,13 +1041,13 @@ impl Router {
                     requests.push_back(request);
                 }
                 ConsumeStatus::SkipRequest => {
-                    self.skipped_requests.push_back(request);
+                    skipped_requests.push_back(request);
                 }
             }
         }
 
         // Add requests back to the tracker if there are any
-        requests.extend(self.skipped_requests.drain(..));
+        requests.extend(skipped_requests);
         self.scheduler.trackv(id, requests);
         Some(())
     }
