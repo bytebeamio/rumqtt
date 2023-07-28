@@ -447,12 +447,11 @@ impl Router {
         let inflight_data_requests = self.datalog.clean(id);
         let retransmissions = outgoing.retransmission_map();
 
-        // Remove connections from all groups
-        // TODO: find a way to clear the self.groups_per_filter map of empty groups.
-        // TODO: find a better way to do this
+        // Remove connections from all groups and
+        // discard empty group ( group with no client )
+        // note: can we do this in better way?
         self.shared_subscriptions.retain(|_, group| {
             group.remove_client(&client_id);
-            //Only keep subscriptions where there are clients present
             !group.is_empty()
         });
 
@@ -491,7 +490,7 @@ impl Router {
                         // TODO: Test this more
                         self.shared_subscriptions
                             .get_mut(group_name)
-                            .unwrap()
+                            .expect("group must exists")
                             .cursor = *cursor;
                     }
                 }
@@ -720,11 +719,10 @@ impl Router {
                             }
 
                             // Remove connections from all groups
-                            // TODO: find a way to clear the self.groups_per_filter map of empty groups.
-                            // TODO: find a better way to do this
+                            // discard empty group ( group with no client )
+                            // note: can we do this in better way?
                             self.shared_subscriptions.retain(|_, group| {
                                 group.remove_client(&client_id);
-                                //Only keep subscriptions where there are clients present
                                 !group.is_empty()
                             });
 
