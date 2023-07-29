@@ -7,10 +7,7 @@ use std::{
 };
 use tokio::time::{error::Elapsed, Duration};
 
-use crate::{
-    protocol::{self, Packet, Protocol},
-    AuthStatus,
-};
+use crate::protocol::{self, Packet, Protocol};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -109,23 +106,13 @@ impl<P: Protocol> Network<P> {
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
-    pub fn readv(
-        &mut self,
-        packets: &mut VecDeque<Packet>,
-        auth_ctx: &dyn AuthStatus,
-    ) -> Result<usize, Error> {
+    pub fn readv(&mut self, packets: &mut VecDeque<Packet>) -> Result<usize, Error> {
         loop {
             match self
                 .protocol
                 .read_mut(&mut self.read, self.max_incoming_size)
             {
                 Ok(packet) => {
-                    if !match &packet {
-                        Packet::Publish(publish, _) => auth_ctx.authorize_publish(&publish),
-                        _ => true,
-                    } {
-                        continue;
-                    }
                     packets.push_back(packet);
                     let connection_buffer_length = packets.len();
                     if connection_buffer_length >= self.max_connection_buffer_len {

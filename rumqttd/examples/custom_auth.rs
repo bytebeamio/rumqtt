@@ -1,5 +1,5 @@
 use pwhash::bcrypt;
-use rumqttd::{AuthStatus, Authenticator, Broker, Config, Notification, ServerSettings};
+use rumqttd::{AuthStatus, Authenticator, Broker, Config, ServerSettings};
 use serde::Deserialize;
 
 use std::{collections::HashMap, str::FromStr, sync::Arc, thread};
@@ -12,6 +12,7 @@ struct UserConfig {
     topic: String,
 }
 
+#[derive(Debug)]
 struct MyConnAuthStatus {
     topic: String,
 }

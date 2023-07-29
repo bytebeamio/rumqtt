@@ -6,7 +6,7 @@ use crate::router::{
     iobufs::{Incoming, Outgoing},
     Connection, Event, Notification, ShadowRequest,
 };
-use crate::ConnectionId;
+use crate::{AuthStatus, ConnectionId};
 use bytes::Bytes;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 use parking_lot::lock_api::MutexGuard;
@@ -47,6 +47,7 @@ pub struct LinkBuilder<'a> {
     dynamic_filters: bool,
     // default to 0, indicating to not use topic alias
     topic_alias_max: u16,
+    auth_status: Option<Box<dyn AuthStatus>>,
 }
 
 impl<'a> LinkBuilder<'a> {
@@ -59,6 +60,7 @@ impl<'a> LinkBuilder<'a> {
             last_will: None,
             dynamic_filters: false,
             topic_alias_max: 0,
+            auth_status: None,
         }
     }
 
@@ -87,6 +89,11 @@ impl<'a> LinkBuilder<'a> {
         self
     }
 
+    pub fn auth_status(mut self, auth_status: Box<dyn AuthStatus>) -> Self {
+        self.auth_status = Some(auth_status);
+        self
+    }
+
     pub fn build(self) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
@@ -97,6 +104,7 @@ impl<'a> LinkBuilder<'a> {
             self.last_will,
             self.dynamic_filters,
             self.topic_alias_max,
+            self.auth_status,
         );
         let incoming = Incoming::new(connection.client_id.to_owned());
         let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
@@ -139,6 +147,7 @@ impl Link {
         last_will: Option<LastWill>,
         dynamic_filters: bool,
         topic_alias_max: u16,
+        auth_status: Option<Box<dyn AuthStatus>>,
     ) -> (
         Event,
         Arc<Mutex<VecDeque<Packet>>>,
@@ -152,6 +161,7 @@ impl Link {
             last_will,
             dynamic_filters,
             topic_alias_max,
+            auth_status,
         );
         let incoming = Incoming::new(connection.client_id.to_owned());
         let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
@@ -176,6 +186,7 @@ impl Link {
         last_will: Option<LastWill>,
         dynamic_filters: bool,
         topic_alias_max: Option<u16>,
+        auth_status: Option<Box<dyn AuthStatus>>,
     ) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
@@ -187,6 +198,7 @@ impl Link {
             last_will,
             dynamic_filters,
             topic_alias_max.unwrap_or(0),
+            auth_status,
         );
         router_tx.send((0, message))?;
 
@@ -213,6 +225,7 @@ impl Link {
         last_will: Option<LastWill>,
         dynamic_filters: bool,
         topic_alias_max: Option<u16>,
+        auth_status: Option<Box<dyn AuthStatus>>,
     ) -> Result<(LinkTx, LinkRx, ConnAck), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
@@ -224,6 +237,7 @@ impl Link {
             last_will,
             dynamic_filters,
             topic_alias_max.unwrap_or(0),
+            auth_status,
         );
         router_tx.send_async((0, message)).await?;
 

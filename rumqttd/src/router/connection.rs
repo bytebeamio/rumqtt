@@ -1,7 +1,7 @@
 use slab::Slab;
 
-use crate::Filter;
 use crate::{protocol::LastWill, Topic};
+use crate::{AuthStatus, Filter};
 use std::collections::{HashMap, HashSet};
 
 use super::ConnectionEvents;
@@ -28,6 +28,8 @@ pub struct Connection {
     pub(crate) topic_aliases: HashMap<u16, Topic>,
     /// Topic aliases used by broker
     pub(crate) broker_topic_aliases: Option<BrokerAliases>,
+    /// Auth data associated with connection
+    pub auth_status: Option<Box<dyn AuthStatus>>,
 }
 
 impl Connection {
@@ -39,6 +41,7 @@ impl Connection {
         last_will: Option<LastWill>,
         dynamic_filters: bool,
         topic_alias_max: u16,
+        auth_ctx: Option<Box<dyn AuthStatus>>,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
@@ -68,6 +71,7 @@ impl Connection {
             events: ConnectionEvents::default(),
             topic_aliases: HashMap::new(),
             broker_topic_aliases,
+            auth_status: auth_ctx,
         }
     }
 }

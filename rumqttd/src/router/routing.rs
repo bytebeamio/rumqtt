@@ -504,6 +504,15 @@ impl Router {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
+                    if !self.connections[id]
+                        .auth_status
+                        .as_ref()
+                        .map(|c| c.authorize_publish(&publish))
+                        .unwrap_or(true)
+                    {
+                        continue;
+                    }
+
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
@@ -899,6 +908,7 @@ impl Router {
             };
 
             match forward_device_data(
+                &connection.auth_status,
                 &mut request,
                 datalog,
                 outgoing,
@@ -1167,6 +1177,7 @@ enum ConsumeStatus {
 /// 2. `done`: whether the connection was busy or not.
 /// 3. `inflight_full`: whether the inflight requests were completely filled
 fn forward_device_data(
+    auth_status: &Option<Box<dyn AuthStatus>>,
     request: &mut DataRequest,
     datalog: &DataLog,
     outgoing: &mut Outgoing,
@@ -1258,6 +1269,12 @@ fn forward_device_data(
     // Fill and notify device data
     let forwards = publishes
         .into_iter()
+        .filter(|((publish, _properties), _offset)| {
+            auth_status
+                .as_ref()
+                .map(|c| c.authorize_notify(&publish))
+                .unwrap_or(true)
+        })
         .map(|((mut publish, mut properties), offset)| {
             publish.qos = protocol::qos(qos).unwrap();
 

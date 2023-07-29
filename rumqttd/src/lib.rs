@@ -202,7 +202,7 @@ pub struct MetricSettings {
 }
 
 /// Data associated with a connection by the authenticator. Used to authorize messages.
-pub trait AuthStatus: Send + Sync {
+pub trait AuthStatus: Send + Sync + std::fmt::Debug {
     fn authorize_publish(&self, publish: &Publish) -> bool;
     fn authorize_notify(&self, publish: &Publish) -> bool;
 }
@@ -216,17 +216,4 @@ pub trait Authenticator: Send + Sync + std::fmt::Debug {
         login: Option<Login>,
         remote_addr: SocketAddr,
     ) -> Option<Box<dyn AuthStatus>>;
-}
-
-/// Metadata to associate with a connection.
-pub struct AllowConnAuthContext;
-
-impl AuthStatus for AllowConnAuthContext {
-    fn authorize_publish(&self, _packet: &Publish) -> bool {
-        return true;
-    }
-
-    fn authorize_notify(&self, _packet: &Publish) -> bool {
-        return true;
-    }
 }

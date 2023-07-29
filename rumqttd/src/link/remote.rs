@@ -4,7 +4,7 @@ use crate::link::network::Network;
 use crate::local::LinkBuilder;
 use crate::protocol::{Connect, Packet, Protocol};
 use crate::router::{Event, Notification};
-use crate::{AllowConnAuthContext, AuthStatus, ConnectionId, ConnectionSettings};
+use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
 use std::collections::VecDeque;
@@ -55,7 +55,6 @@ pub struct RemoteLink<P> {
     link_tx: LinkTx,
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
-    auth_ctx: Box<dyn AuthStatus>,
 }
 
 impl<P: Protocol> RemoteLink<P> {
@@ -88,10 +87,10 @@ impl<P: Protocol> RemoteLink<P> {
         };
 
         // If authentication is configured in config file check for username and password
-        let auth_ctx;
+        let auth_status;
         if let Some(dyn_auth) = &config.dyn_auth {
-            auth_ctx = match dyn_auth.authenticate(login, remote_addr) {
-                Some(c) => c,
+            auth_status = match dyn_auth.authenticate(login, remote_addr) {
+                Some(c) => Some(c),
                 None => {
                     return Err(Error::InvalidAuth);
                 }
@@ -108,12 +107,12 @@ impl<P: Protocol> RemoteLink<P> {
                     return Err(Error::InvalidAuth);
                 }
 
-                auth_ctx = Box::new(AllowConnAuthContext);
+                auth_status = None;
             } else {
                 return Err(Error::InvalidAuth);
             }
         } else {
-            auth_ctx = Box::new(AllowConnAuthContext);
+            auth_status = None;
         }
 
         // When keep_alive feature is disabled client can live forever, which is not good in
@@ -137,13 +136,16 @@ impl<P: Protocol> RemoteLink<P> {
 
         let topic_alias_max = props.and_then(|p| p.topic_alias_max);
 
-        let (link_tx, link_rx, notification) = LinkBuilder::new(&client_id, router_tx)
+        let mut link_builder = LinkBuilder::new(&client_id, router_tx)
             .tenant_id(tenant_id)
             .clean_session(clean_session)
             .last_will(lastwill)
             .dynamic_filters(dynamic_filters)
-            .topic_alias_max(topic_alias_max.unwrap_or(0))
-            .build()?;
+            .topic_alias_max(topic_alias_max.unwrap_or(0));
+        if let Some(auth_status) = auth_status {
+            link_builder = link_builder.auth_status(auth_status);
+        }
+        let (link_tx, link_rx, notification) = link_builder.build()?;
 
         let id = link_rx.id();
         Span::current().record("connection_id", id);
@@ -160,7 +162,6 @@ impl<P: Protocol> RemoteLink<P> {
             link_tx,
             link_rx,
             notifications: VecDeque::with_capacity(100),
-            auth_ctx,
         })
     }
 
@@ -176,7 +177,7 @@ impl<P: Protocol> RemoteLink<P> {
                     let len = {
                         let mut buffer = self.link_tx.buffer();
                         buffer.push_back(packet);
-                        self.network.readv(&mut buffer, self.auth_ctx.as_ref())?;
+                        self.network.readv(&mut buffer)?;
                         buffer.len()
                     };
 
@@ -192,12 +193,6 @@ impl<P: Protocol> RemoteLink<P> {
 
                     for notif in self.notifications.drain(..) {
                         if let Some(packet) = notif.into() {
-                            if !match &packet {
-                                Packet::Publish(publish, _) => self.auth_ctx.authorize_notify(&publish),
-                                _ => true,
-                            } {
-                                continue;
-                            }
                             packets.push_back(packet);
                         } else {
                             unscheduled = true;
