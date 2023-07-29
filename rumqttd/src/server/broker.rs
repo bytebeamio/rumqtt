@@ -438,7 +438,12 @@ async fn remote<P: Protocol>(
     protocol: P,
     remote_addr: SocketAddr,
 ) {
-    let network = Network::new(stream, config.max_payload_size, 100, protocol);
+    let network = Network::new(
+        stream,
+        config.max_payload_size,
+        config.max_inflight_count,
+        protocol,
+    );
     // Start the link
     let mut link = match RemoteLink::new(
         config,

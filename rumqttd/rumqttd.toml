@@ -5,11 +5,17 @@ id = 0
 # latencies of other connection. Not a problem with preempting runtimes
 [router]
 id = 0
-instant_ack = true
+max_connections = 10010
+max_outgoing_packet_count = 200
 max_segment_size = 104857600
 max_segment_count = 10
-max_read_len = 10240
-max_connections = 10010
+# Any filters that match to configured filter will have custom segment size.
+    # [router.custom_segment.'/office/+/devices/status']
+    # max_segment_size = 102400
+    # max_segment_count = 2
+    # [router.custom_segment.'/home/+/devices/status']
+    # max_segment_size = 51200
+    # max_segment_count = 2
 
 # [bridge]
 # name = "bridge-1"
@@ -21,11 +27,8 @@ max_connections = 10010
 # timeout_delay = 5
 #     [bridge.connections]
 #     connection_timeout_ms = 60000
-#     max_client_id_len = 256
-#     throttle_delay_ms = 0
 #     max_payload_size = 20480
 #     max_inflight_count = 500
-#     max_inflight_size = 1024
 #     dynamic_filters = true
 #     [bridge.transport.tls]
 #     ca = "ca.cert.pem"
@@ -38,11 +41,8 @@ listen = "0.0.0.0:1883"
 next_connection_delay_ms = 1
     [v4.1.connections]
     connection_timeout_ms = 60000
-    max_client_id_len = 256
-    throttle_delay_ms = 0
     max_payload_size = 20480
-    max_inflight_count = 500
-    max_inflight_size = 1024
+    max_inflight_count = 100
     dynamic_filters = true
  #   auth = { user1 = "p@ssw0rd", user2 = "password" }
  #      [v4.1.connections.auth]
@@ -72,11 +72,8 @@ listen = "0.0.0.0:1884"
 next_connection_delay_ms = 1
     [v5.1.connections]
     connection_timeout_ms = 60000
-    max_client_id_len = 256
-    throttle_delay_ms = 0
     max_payload_size = 20480
-    max_inflight_count = 500
-    max_inflight_size = 1024
+    max_inflight_count = 100
 
 [prometheus]
 listen = "127.0.0.1:9042"

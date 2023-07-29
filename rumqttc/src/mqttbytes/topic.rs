@@ -195,5 +195,17 @@ mod test {
         let filter2 = "a/+/+/d";
         assert!(super::matches(filter1, filter2));
         assert!(!super::matches(filter2, filter1));
+
+        let filter1 = "a/b/c/d/e";
+        let filter2 = "a/+/+/+/e";
+        assert!(super::matches(filter1, filter2));
+
+        let filter1 = "a/+/c/+/e";
+        let filter2 = "a/+/+/+/e";
+        assert!(super::matches(filter1, filter2));
+
+        let filter1 = "a/+/+/+/e";
+        let filter2 = "a/+/+/+/e";
+        assert!(super::matches(filter1, filter2));
     }
 }

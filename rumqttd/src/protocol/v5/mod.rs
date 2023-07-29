@@ -414,6 +414,18 @@ impl Protocol for V5 {
                 let (disconnect, properties) = disconnect::read(fixed_header, packet)?;
                 Packet::Disconnect(disconnect, properties)
             }
+            PacketType::PubRec => {
+                let (pubrec, properties) = pubrec::read(fixed_header, packet)?;
+                Packet::PubRec(pubrec, properties)
+            }
+            PacketType::PubRel => {
+                let (pubrel, properties) = pubrel::read(fixed_header, packet)?;
+                Packet::PubRel(pubrel, properties)
+            }
+            PacketType::PubComp => {
+                let (pubcomp, properties) = pubcomp::read(fixed_header, packet)?;
+                Packet::PubComp(pubcomp, properties)
+            }
             _ => unreachable!(),
         };
 
