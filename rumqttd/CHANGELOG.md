@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pluggable auth (#661)
+
 ### Changed
 
 ### Deprecated
@@ -28,7 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for Websocket connections (#633)
 - LinkBuilder for constructing LinkRx/LinkTx (#659)
 - Ability to configure segment size individually (#602)
-- Pluggable auth (#661)
 
 ### Changed
 
