@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
-use protocol::{Login, Publish};
+use protocol::{Connect, Login, Publish};
 use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
@@ -217,6 +217,7 @@ pub trait Authenticator: Send + Sync + std::fmt::Debug {
     // Otherwise, the returned context is associated with the connection.
     fn authenticate(
         &self,
+        connect: &Connect,
         login: Option<Login>,
         remote_addr: SocketAddr,
     ) -> Option<Box<dyn AuthStatus>>;

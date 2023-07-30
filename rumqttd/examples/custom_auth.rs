@@ -1,5 +1,5 @@
 use pwhash::bcrypt;
-use rumqttd::{AuthStatus, Authenticator, Broker, Config, ServerSettings};
+use rumqttd::{protocol::Connect, AuthStatus, Authenticator, Broker, Config, ServerSettings};
 use serde::Deserialize;
 
 use std::{collections::HashMap, str::FromStr, sync::Arc, thread};
@@ -35,6 +35,7 @@ struct MyCustomAuth {
 impl Authenticator for MyCustomAuth {
     fn authenticate(
         &self,
+        _connect: &Connect,
         login: Option<rumqttd::protocol::Login>,
         _remote_addr: std::net::SocketAddr,
     ) -> Option<Box<dyn rumqttd::AuthStatus>> {

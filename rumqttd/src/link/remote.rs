@@ -89,7 +89,7 @@ impl<P: Protocol> RemoteLink<P> {
         // If authentication is configured in config file check for username and password
         let auth_status;
         if let Some(dyn_auth) = &config.dyn_auth {
-            auth_status = match dyn_auth.authenticate(login, remote_addr) {
+            auth_status = match dyn_auth.authenticate(&connect, login, remote_addr) {
                 Some(c) => Some(c),
                 None => {
                     return Err(Error::InvalidAuth);
