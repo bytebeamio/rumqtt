@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed `cap` parameter's type from `usize` to `Option<usize>` in `Client::new` and `AsyncClient::new` to decide whether the channel is bounded or unbounded.
+
 ### Deprecated
 
 ### Removed
