@@ -134,6 +134,12 @@ pub struct ConnectionSettings {
     pub dyn_auth: Option<Arc<dyn Authenticator>>,
 }
 
+impl ConnectionSettings {
+    pub fn add_auth(&mut self, auth: impl Authenticator + 'static) {
+        self.dyn_auth = Some(Arc::new(auth));
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterSettings {
     /// Id with which this node connects to other nodes of the mesh

@@ -1312,7 +1312,7 @@ fn forward_device_data(
         .filter(|((publish, _properties), _offset)| {
             auth_status
                 .as_ref()
-                .map(|c| c.authorize_notify(&publish))
+                .map(|c| c.authorize_notify(publish))
                 .unwrap_or(true)
         })
         .map(|((mut publish, mut properties), offset)| {
