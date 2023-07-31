@@ -47,8 +47,8 @@ pub struct AsyncClient {
 impl AsyncClient {
     /// Create a new `AsyncClient`.
     ///
-    /// `cap` specifies the capacity of the bounded async channel.
-    pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
+    /// `cap` specifies the capacity of the bounded async channel. If is `None`, the channel is unbounded.
+    pub fn new(options: MqttOptions, cap: Option<usize>) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
 
@@ -242,8 +242,8 @@ pub struct Client {
 impl Client {
     /// Create a new `Client`
     ///
-    /// `cap` specifies the capacity of the bounded async channel.
-    pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
+    /// `cap` specifies the capacity of the bounded async channel. If is `None`, the channel is unbounded.
+    pub fn new(options: MqttOptions, cap: Option<usize>) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
         let client = Client { client };
         let runtime = runtime::Builder::new_current_thread()
@@ -498,7 +498,7 @@ mod test {
             .set_keep_alive(Duration::from_secs(5))
             .set_last_will(will);
 
-        let (_, mut connection) = Client::new(mqttoptions, 10);
+        let (_, mut connection) = Client::new(mqttoptions, Some(10));
         let _ = connection.iter();
         let _ = connection.iter();
     }

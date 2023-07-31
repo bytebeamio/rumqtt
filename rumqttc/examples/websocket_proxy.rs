@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         port: 8100,
     });
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, Some(10));
     task::spawn(async move {
         requests(client).await;
         time::sleep(Duration::from_secs(3)).await;

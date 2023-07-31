@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     mqttoptions.set_transport(Transport::Ws);
     mqttoptions.set_keep_alive(Duration::from_secs(60));
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, Some(10));
     task::spawn(async move {
         requests(client).await;
         time::sleep(Duration::from_secs(3)).await;
