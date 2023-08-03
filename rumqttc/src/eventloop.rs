@@ -4,7 +4,7 @@ use crate::{MqttOptions, Outgoing};
 
 use crate::framed::N;
 use crate::mqttbytes::v4::*;
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, unbounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
 use tokio::time::{self, Instant, Sleep};
@@ -96,8 +96,11 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+    pub fn new(mqtt_options: MqttOptions, cap: Option<usize>) -> EventLoop {
+        let (requests_tx, requests_rx) = match cap {
+            Some(cap) => bounded(cap),
+            None => unbounded(),
+        };
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = mqtt_options.inflight;

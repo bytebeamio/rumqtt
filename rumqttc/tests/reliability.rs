@@ -78,7 +78,7 @@ async fn connection_should_timeout_on_time() {
 
     time::sleep(Duration::from_secs(1)).await;
     let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-    let mut eventloop = EventLoop::new(options, 5);
+    let mut eventloop = EventLoop::new(options, Some(5));
 
     let start = Instant::now();
     let o = eventloop.poll().await;
@@ -102,7 +102,7 @@ async fn idle_connection_triggers_pings_on_time() {
 
     // Create client eventloop and poll
     task::spawn(async move {
-        let mut eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, Some(5));
         run(&mut eventloop, false).await.unwrap();
     });
 
@@ -138,7 +138,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
 
     // Start sending publishes
     task::spawn(async move {
@@ -181,7 +181,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     options.set_keep_alive(Duration::from_secs(keep_alive));
 
     task::spawn(async move {
-        let mut eventloop = EventLoop::new(options, 5);
+        let mut eventloop = EventLoop::new(options, Some(5));
         run(&mut eventloop, false).await.unwrap();
     });
 
@@ -225,7 +225,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
 
     time::sleep(Duration::from_secs(1)).await;
     let start = Instant::now();
-    let mut eventloop = EventLoop::new(options, 5);
+    let mut eventloop = EventLoop::new(options, Some(5));
     loop {
         if let Err(e) = eventloop.poll().await {
             match e {
@@ -250,7 +250,7 @@ async fn requests_are_blocked_after_max_inflight_queue_size() {
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
     task::spawn(async move {
         start_requests(10, QoS::AtLeastOnce, 1, client).await;
     });
@@ -275,7 +275,7 @@ async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
     options.set_inflight(3);
 
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
 
     task::spawn(async move {
         start_requests(5, QoS::AtLeastOnce, 1, client).await;
@@ -314,7 +314,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
     options.set_inflight(10);
 
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
 
     task::spawn(async move {
         start_requests(15, QoS::AtLeastOnce, 0, client).await;
@@ -436,7 +436,7 @@ async fn next_poll_after_connect_failure_reconnects() {
     });
 
     time::sleep(Duration::from_secs(1)).await;
-    let mut eventloop = EventLoop::new(options, 5);
+    let mut eventloop = EventLoop::new(options, Some(5));
 
     match eventloop.poll().await {
         Err(ConnectionError::ConnectionRefused(ConnectReturnCode::BadUserNamePassword)) => (),
@@ -458,7 +458,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     options.set_keep_alive(Duration::from_secs(5));
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
     task::spawn(async move {
         start_requests(10, QoS::AtLeastOnce, 1, client).await;
         time::sleep(Duration::from_secs(10)).await;
@@ -499,7 +499,7 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
     task::spawn(async move {
         start_requests(10, QoS::AtLeastOnce, 1, client).await;
         time::sleep(Duration::from_secs(10)).await;
@@ -532,7 +532,7 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
     let mut network_options = NetworkOptions::new();
     network_options.set_tcp_send_buffer_size(1024);
 
-    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    let (client, mut eventloop) = AsyncClient::new(options, Some(5));
     eventloop.set_network_options(network_options);
     task::spawn(async move {
         start_requests_with_payload(100, QoS::AtLeastOnce, 0, client, 5000).await;

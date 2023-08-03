@@ -11,7 +11,7 @@ fn create_conn() -> (AsyncClient, EventLoop) {
         .set_manual_acks(true)
         .set_clean_session(false);
 
-    AsyncClient::new(mqttoptions, 10)
+    AsyncClient::new(mqttoptions, Some(10))
 }
 
 #[tokio::main(worker_threads = 1)]
