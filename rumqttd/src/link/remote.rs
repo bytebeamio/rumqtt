@@ -102,12 +102,12 @@ impl<P: Protocol> RemoteLink<P> {
         }
 
         // When keep_alive feature is disabled client can live forever, which is not good in
-        // distributed broker context so currenlty we don't allow it.
+        // distributed broker context so currently we don't allow it.
         if connect.keep_alive == 0 {
             return Err(Error::ZeroKeepAlive);
         }
 
-        // Register this connection with the router. Router replys with ack which if ok will
+        // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = connect.client_id.clone();
         let clean_session = connect.clean_session;

@@ -410,7 +410,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
 //
 //     time::sleep(Duration::from_secs(1)).await;
 //
-//     // Collision error but no network disconneciton
+//     // Collision error but no network disconnection
 //     match run(&mut eventloop, false).await.unwrap() {
 //         Event::Outgoing(Outgoing::AwaitAck(1)) => (),
 //         o => panic!("Expecting collision error. Found = {:?}", o),

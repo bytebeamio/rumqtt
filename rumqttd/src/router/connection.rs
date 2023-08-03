@@ -12,7 +12,7 @@ use super::ConnectionEvents;
 #[derive(Debug)]
 pub struct Connection {
     pub client_id: String,
-    /// Id of client's organisation/tenant and the prefix associated with tenant's MQTT topic
+    /// Id of client's organization/tenant and the prefix associated with tenant's MQTT topic
     pub tenant_prefix: Option<String>,
     /// Dynamically create subscription filters incase they didn't exist during a publish
     pub dynamic_filters: bool,
@@ -28,7 +28,7 @@ pub struct Connection {
     pub(crate) topic_aliases: HashMap<u16, Topic>,
     /// Topic aliases used by broker
     pub(crate) broker_topic_aliases: Option<BrokerAliases>,
-    /// subscription IDs for a connection
+    /// Subscription IDs for a connection
     pub(crate) subscription_ids: HashMap<Filter, usize>,
 }
 

@@ -317,7 +317,7 @@ pub(crate) mod connack {
         session_present: bool,
         buffer: &mut BytesMut,
     ) -> Result<usize, Error> {
-        // sesssion present + code
+        // session present + code
         let len = 1 + 1;
         buffer.put_u8(0x20);
 

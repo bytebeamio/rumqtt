@@ -218,7 +218,7 @@ impl Broker {
         if let Some(ws_config) = &self.config.ws {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
-                //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
+                //TODO: Add support for V5 protocol with websockets. Registered in config or on ServerSettings
                 let server = Server::new(config, self.router_tx.clone(), V4);
                 server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
@@ -448,7 +448,7 @@ async fn remote<P: Protocol>(
             }
         };
 
-    let client_id = link.client_id.to_owned();
+    let client_id = link.client_id.clone();
     let connection_id = link.connection_id;
     let mut execute_will = false;
 

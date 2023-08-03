@@ -19,7 +19,7 @@ pub enum StateError {
     #[error("Io error: {0:?}")]
     Io(#[from] io::Error),
     #[error("Conversion error {0:?}")]
-    Coversion(#[from] core::num::TryFromIntError),
+    Conversion(#[from] core::num::TryFromIntError),
     /// Invalid state for a given operation
     #[error("Invalid state for a given operation")]
     InvalidState,
@@ -44,7 +44,7 @@ pub enum StateError {
     InvalidAlias { alias: u16, max: u16 },
     #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
     OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
-    #[error("Cannot recieve packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
+    #[error("Cannot receive packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
     IncommingPacketTooLarge { pkt_size: usize, max: usize },
     #[error("Server sent disconnect with reason `{reason_string:?}` and code '{reason_code:?}' ")]
     ServerDisconnect {
@@ -57,7 +57,7 @@ pub enum StateError {
     SubFail { reason: SubscribeReasonCode },
     #[error("Publish acknowledgement failed with reason '{reason:?}' ")]
     PubAckFail { reason: PubAckReason },
-    #[error("Publish recieve failed with reason '{reason:?}' ")]
+    #[error("Publish receive failed with reason '{reason:?}' ")]
     PubRecFail { reason: PubRecReason },
     #[error("Publish release failed with reason '{reason:?}' ")]
     PubRelFail { reason: PubRelReason },
@@ -104,7 +104,7 @@ pub struct MqttState {
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
     /// Map of alias_id->topic
-    topic_alises: HashMap<u16, Bytes>,
+    topic_aliases: HashMap<u16, Bytes>,
     /// `topic_alias_maximum` RECEIVED via connack packet
     pub broker_topic_alias_max: u16,
     /// The broker's `max_packet_size` received via connack
@@ -136,7 +136,7 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
-            topic_alises: HashMap::new(),
+            topic_aliases: HashMap::new(),
             // Set via CONNACK
             broker_topic_alias_max: 0,
             max_outgoing_packet_size: None,
@@ -309,8 +309,8 @@ impl MqttState {
         })
     }
 
-    /// Results in a publish notification in all the QoS cases. Replys with an ack
-    /// in case of QoS1 and Replys rec in case of QoS while also storing the message
+    /// Results in a publish notification in all the QoS cases. Replies with an ack
+    /// in case of QoS1 and Replies rec in case of QoS while also storing the message
     fn handle_incoming_publish(&mut self, publish: &mut Publish) -> Result<(), StateError> {
         let qos = publish.qos;
 
@@ -321,10 +321,10 @@ impl MqttState {
 
         if !publish.topic.is_empty() {
             if let Some(alias) = topic_alias {
-                self.topic_alises.insert(alias, publish.topic.clone());
+                self.topic_aliases.insert(alias, publish.topic.clone());
             }
         } else if let Some(alias) = topic_alias {
-            if let Some(topic) = self.topic_alises.get(&alias) {
+            if let Some(topic) = self.topic_aliases.get(&alias) {
                 publish.topic = topic.to_owned();
             } else {
                 self.handle_protocol_error()?;
@@ -804,7 +804,7 @@ mod test {
         assert_eq!(mqtt.last_pkid, 0);
         assert_eq!(mqtt.inflight, 2);
 
-        // This should cause a collition
+        // This should cause a collision
         mqtt.outgoing_publish(publish.clone()).unwrap();
         assert_eq!(mqtt.last_pkid, 1);
         assert_eq!(mqtt.inflight, 2);

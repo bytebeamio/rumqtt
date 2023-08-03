@@ -1,0 +1,177 @@
+name: ci
+
+on:
+    push:
+        branches: [main]
+        tags:
+            - '^rumqttd-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+            - '^rumqttc-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+    pull_request:
+        branches: [main]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    pre-check:
+        runs-on: "ubuntu-latest"
+        outputs:
+            rumqttd-version: ${{ steps.versions.outputs.rumqttd-version }}
+            rumqttc-version: ${{ steps.versions.outputs.rumqttc-version }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v3
+              with:
+                  node-version: 18.x
+
+            - name: Install Dependencies
+              run: npm ci
+
+            - name: Check
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: npm run check
+
+            - name: Define Versions
+              id: versions
+              run: |
+                  _tag_version=$(printf "%s\n" "${{ github.ref_name }}" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' || printf "\n")
+                  _rumqttc_version=$(grep -m 1 'version' ./rumqttc/Cargo.toml | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
+                  _rumqttd_version=$(grep -m 1 'version' ./rumqttd/Cargo.toml | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
+
+                  printf "tag-version=%s\n" "$_tag_version" >> "$GITHUB_OUTPUT"
+                  printf "rumqttc-version=%s\n" "$_rumqttc_version" >> "$GITHUB_OUTPUT"
+                  printf "rumqttd-version=%s\n" "$_rumqttd_version" >> "$GITHUB_OUTPUT"
+
+            - name: Check rumqttc == Git tag
+              if: startsWith(github.ref, 'refs/tags/rumqttc-')
+              run: |
+                  if [ ! "${{ steps.versions.outputs.rumqttc-version }}" = "${{ steps.versions.outputs.tag-version }}" ]; then
+                    printf '[ERROR]: rumqttc (%s) != Git tag (%s)\n' "${{ steps.versions.outputs.rumqttc-version }}" "${{ steps.versions.outputs.tag-version }}"
+                    exit 1
+                  fi
+
+            - name: Check rumqttd == Git tag
+              if: startsWith(github.ref, 'refs/tags/rumqttd-')
+              run: |
+                  if [ ! "${{ steps.versions.outputs.rumqttd-version }}" = "${{ steps.versions.outputs.tag-version }}" ]; then
+                    printf '[ERROR]: rumqttd (%s) != Git tag (%s)\n' "${{ steps.versions.outputs.rumqttd-version }}" "${{ steps.versions.outputs.tag-version }}"
+                    exit 1
+                  fi
+
+    check:
+        needs: pre-check
+        if: needs.pre-check.result == 'success'
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: true
+            matrix:
+                os: [ubuntu-latest, windows-latest, macos-latest]
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
+
+            - name: Setup Rust Toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy, rustfmt
+
+            - name: Setup Cargo Hack
+              uses: taiki-e/install-action@v2
+              with:
+                  tool: cargo-hack
+
+            - name: Setup Rust Cache
+              uses: Swatinem/rust-cache@v2
+
+            - name: Fmt
+              run: cargo hack fmt --verbose --no-dev-deps --package rumqttc --package rumqttd -- --check
+
+            - name: Clippy
+              env:
+                  RUSTFLAGS: -D warnings
+              run: cargo hack clippy --verbose --each-feature --no-dev-deps --optional-deps url --package rumqttc --package rumqttd -- --deny clippy::pedantic
+
+            - name: Documentation
+              run: cargo hack doc --verbose --each-feature --no-dev-deps --no-deps --optional-deps url --package rumqttc --package rumqttd
+
+            - name: Test
+              run: cargo hack test --verbose --each-feature --optional-deps url --package rumqttc --package rumqttd
+
+    release-rumqttd:
+        needs: [pre-check, check]
+        if: needs.check.result == 'success' && startsWith(github.ref, 'refs/tags/rumqttd-')
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
+
+            - name: Setup Rust Toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Setup Cross
+              run: cargo install cross --git https://github.com/cross-rs/cross
+
+            - name: Setup QEMU
+              uses: docker/setup-qemu-action@v2
+
+            - name: Setup Docker Buildx
+              uses: docker/setup-buildx-action@v2
+
+            - name: Login Docker Hub
+              uses: docker/login-action@v2
+              with:
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+            - name: Build Binaries
+              run: |
+                  chmod +x ./scripts/rumqttd/build.sh
+
+                  ./scripts/rumqttd/build.sh \
+                    --disable-color \
+                    --log-level debug \
+                    --version ${{ needs.pre-check.outputs.rumqttd-version }}
+                    --move ./
+
+            - name: Publish Binaries
+              uses: softprops/action-gh-release@v1
+              with:
+                  files: rumqttd.${{ needs.pre-check.outputs.rumqttd-version }}.*
+
+            - name: Build & Publish Docker image
+              run: |
+                  chmod +x ./scripts/rumqttd/docker.sh
+
+                  ./scripts/rumqttd/docker.sh \
+                    --disable-color \
+                    --log-level debug
+
+    release-rumqttc:
+        needs: [pre-check, check]
+        if: needs.check.result == 'success' && startsWith(github.ref, 'refs/tags/rumqttc-')
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
+
+            - name: Setup Rust Toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Publish
+              uses: katyo/publish-crates@v2
+              with:
+                  args: --package rumqttc
+                  registry-token: ${{ secrets.CRATES_TOKEN }}

@@ -181,10 +181,7 @@ impl TLSAcceptor {
             let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert_path.clone()))?;
             let certs = rustls_pemfile::certs(&mut BufReader::new(cert_file));
             let certs = certs.map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
-            let certs = certs
-                .iter()
-                .map(|cert| Certificate(cert.to_owned()))
-                .collect();
+            let certs = certs.iter().map(|cert| Certificate(cert.clone())).collect();
 
             // Get private key
             let key_file = File::open(key_path);

@@ -1,0 +1,19 @@
+{
+    "recommendations": [
+        "DavidAnson.vscode-markdownlint",
+        "dbaeumer.vscode-eslint",
+        "EditorConfig.EditorConfig",
+        "esbenp.prettier-vscode",
+        "github.vscode-github-actions",
+        "Gruntfuggly.todo-tree",
+        "mads-hartmann.bash-ide-vscode",
+        "ms-azuretools.vscode-docker",
+        "rust-lang.rust-analyzer",
+        "serayuzgur.crates",
+        "streetsidesoftware.code-spell-checker",
+        "tamasfe.even-better-toml",
+        "timonwong.shellcheck",
+        "usernamehw.errorlens",
+        "vadimcn.vscode-lldb"
+    ]
+}

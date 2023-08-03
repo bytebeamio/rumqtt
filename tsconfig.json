@@ -1,0 +1,30 @@
+{
+    "compilerOptions": {
+        "target": "es2021",
+        "module": "ESNext",
+        "moduleResolution": "NodeNext",
+        "declaration": false,
+        "sourceMap": false,
+        "outDir": "./build",
+        "removeComments": true,
+        "importHelpers": true,
+        "strict": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noFallthroughCasesInSwitch": true,
+        "allowSyntheticDefaultImports": true,
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "skipLibCheck": true,
+        "resolveJsonModule": true
+    },
+    "exclude": ["./node_modules", "./build", "./target"],
+    "include": ["./utils/mqttverifier"],
+    "ts-node": {
+        "esm": true
+    }
+}

@@ -1,0 +1,23 @@
+name: stale
+
+on:
+    schedule:
+        - cron: "0 0 * * *"
+
+jobs:
+    stale:
+        runs-on: ubuntu-latest
+        permissions:
+            issues: write
+            pull-requests: write
+        steps:
+            - uses: actions/stale@v8
+              with:
+                  days-before-stale: 20
+                  days-before-close: -1
+                  stale-issue-label: stale
+                  stale-pr-label: stale
+                  stale-issue-message: ""
+                  stale-pr-message: ""
+                  exempt-issue-labels: "in-pipeline,help wanted,bug"
+                  exempt-pr-labels: "in-pipeline,help wanted,bug"

@@ -37,7 +37,7 @@ pub trait Storage {
 /// - The total size in bytes for each segment in memory should not increase beyond the
 ///   max_segment_size by more than the overflowing bytes of the last packet.
 ///
-/// ### Seperation of implementation
+/// ### Separation of implementation
 ///    - `index` & `segment` - everything directly related to files, no bounds check except when
 ///      bounds exceed file's existing size.
 ///    - `chunk` - abstraction to deal with index and segment combined. Basically we only need
@@ -53,7 +53,7 @@ pub struct CommitLog<T> {
     max_segment_size: usize,
     /// Maximum number of segments in memory, apart from the active segment.
     max_mem_segments: usize,
-    /// Total size of active segment, used for enforcing the contraints.
+    /// Total size of active segment, used for enforcing the constraints.
     segments: VecDeque<Segment<T>>,
 }
 
@@ -61,7 +61,7 @@ impl<T> CommitLog<T>
 where
     T: Storage + Clone,
 {
-    /// Create a new `CommitLog` with the given contraints. If `max_mem_segments` is 0, then only
+    /// Create a new `CommitLog` with the given constraints. If `max_mem_segments` is 0, then only
     /// the active segment is maintained.
     pub fn new(max_segment_size: usize, max_mem_segments: usize) -> io::Result<Self> {
         if max_segment_size < 1024 {
@@ -221,7 +221,7 @@ where
                 // no offset returned -> we reached end
                 // if len unfulfilled -> try next segment with remaining length
                 SegmentPosition::Done(next_offset) => {
-                    // This condition is needed in case cursor.1 > 0 (when the user provies cursor.1
+                    // This condition is needed in case cursor.1 > 0 (when the user provides cursor.1
                     // beyond segment's last offset which can happen due to next readv offset
                     // being off by 1 before jumping to next segment or while manually reading
                     // from a particular cursor). In such case, the no. of read data points is
@@ -246,7 +246,7 @@ where
             return Ok(Position::Done { start, end: cursor });
         }
 
-        // We need to read seperately from active segment because if `None` is returned for active
+        // We need to read separately from active segment because if `None` is returned for active
         // segment's `readv`, then we should return `None` as well as it is not possible to read
         // further, whereas for older segments we simply jump on to the new one to read more.
 

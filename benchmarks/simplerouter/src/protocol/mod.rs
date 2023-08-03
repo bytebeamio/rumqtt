@@ -14,8 +14,8 @@ pub fn valid_filter(filter: &str) -> bool {
         return false;
     }
 
-    let hirerarchy = filter.split('/').collect::<Vec<&str>>();
-    if let Some((last, remaining)) = hirerarchy.split_last() {
+    let hierarchy = filter.split('/').collect::<Vec<&str>>();
+    if let Some((last, remaining)) = hierarchy.split_last() {
         for entry in remaining.iter() {
             // # is not allowed in filter except as a last entry
             // invalid: sport/tennis#/player

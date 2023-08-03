@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     while let Ok(event) = eventloop.poll().await {
-        println!("{:?}", event);
+        println!("{event:?}");
     }
 
     Ok(())

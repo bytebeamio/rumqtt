@@ -63,7 +63,7 @@ fn main() {
 
     builder
         .try_init()
-        .expect("initialized subscriber succesfully");
+        .expect("initialized subscriber successfully");
 
     let mut config_builder = config::Config::builder();
 
@@ -118,11 +118,11 @@ fn validate_config(configs: &rumqttd::Config) {
 }
 
 fn banner() {
-    const B: &str = r#"                                              
-         ___ _   _ __  __  ___ _____ _____ ___  
-        | _ \ | | |  \/  |/ _ \_   _|_   _|   \ 
+    const B: &str = r#"
+         ___ _   _ __  __  ___ _____ _____ ___
+        | _ \ | | |  \/  |/ _ \_   _|_   _|   \
         |   / |_| | |\/| | (_) || |   | | | |) |
-        |_|_\\___/|_|  |_|\__\_\|_|   |_| |___/ 
+        |_|_\\___/|_|  |_|\__\_\|_|   |_| |___/
     "#;
 
     println!("{B}\n");

@@ -1,24 +1,3 @@
-use crate::protocol::{
-    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
-    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
-    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
-    UnsubAckReason,
-};
-use crate::router::alertlog::alert;
-use crate::router::graveyard::SavedState;
-use crate::router::scheduler::{PauseReason, Tracker};
-use crate::router::Forward;
-use crate::segments::Position;
-use crate::*;
-use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use slab::Slab;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::str::Utf8Error;
-use std::thread;
-use std::time::SystemTime;
-use thiserror::Error;
-use tracing::{debug, error, info, trace, warn};
-
 use super::alertlog::{Alert, AlertLog};
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
@@ -28,6 +7,27 @@ use super::{
     packetid, Connection, DataRequest, Event, FilterIdx, Meter, Notification, Print, RouterMeter,
     ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
 };
+use crate::protocol::{
+    self, ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
+    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
+    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    UnsubAckReason,
+};
+use crate::router::alertlog::alert;
+use crate::router::graveyard::SavedState;
+use crate::router::scheduler::{PauseReason, Tracker};
+use crate::router::Forward;
+use crate::router::{self};
+use crate::segments::Position;
+use crate::{ConnectionId, Filter, Offset, RouterConfig, RouterId};
+use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
+use slab::Slab;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::str::Utf8Error;
+use std::thread;
+use std::time::SystemTime;
+use thiserror::Error;
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Error, Debug)]
 pub enum RouterError {
@@ -73,9 +73,9 @@ pub struct Router {
     /// Subscription map to interested connection ids
     subscription_map: HashMap<Filter, HashSet<ConnectionId>>,
     /// Incoming data grouped by connection
-    ibufs: Slab<Incoming>,
+    inbufs: Slab<Incoming>,
     /// Outgoing data grouped by connection
-    obufs: Slab<Outgoing>,
+    outbufs: Slab<Outgoing>,
     /// Data log of all the subscriptions
     datalog: DataLog,
     /// Data log of all the alert subscriptions
@@ -107,8 +107,8 @@ impl Router {
         let meters = Slab::with_capacity(10);
         let alerts = Slab::with_capacity(10);
         let connections = Slab::with_capacity(config.max_connections);
-        let ibufs = Slab::with_capacity(config.max_connections);
-        let obufs = Slab::with_capacity(config.max_connections);
+        let inbufs = Slab::with_capacity(config.max_connections);
+        let outbufs = Slab::with_capacity(config.max_connections);
         let ackslog = Slab::with_capacity(config.max_connections);
 
         let router_metrics = RouterMeter {
@@ -124,10 +124,10 @@ impl Router {
             meters,
             alerts,
             connections,
-            connection_map: Default::default(),
-            subscription_map: Default::default(),
-            ibufs,
-            obufs,
+            connection_map: HashMap::default(),
+            subscription_map: HashMap::default(),
+            inbufs,
+            outbufs,
             datalog: DataLog::new(config.clone()).unwrap(),
             alertlog: AlertLog::new(config),
             ackslog,
@@ -239,11 +239,11 @@ impl Router {
             Event::NewAlert(tx) => self.handle_new_alert(tx),
             Event::DeviceData => self.handle_device_payload(id),
             Event::Disconnect(disconnect) => {
-                self.handle_disconnection(id, disconnect.execute_will, None)
+                self.handle_disconnection(id, disconnect.execute_will, None);
             }
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
             Event::Shadow(request) => {
-                retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
+                retrieve_shadow(&mut self.datalog, &mut self.outbufs[id], request);
             }
             Event::SendAlerts => {
                 self.send_alerts();
@@ -297,7 +297,12 @@ impl Router {
         let previous_session = saved.is_some();
         // for qos2 pending pubrels
         let mut pending_acks = VecDeque::new();
-        let tracker = if !clean_session {
+        let tracker = if clean_session {
+            // Only retrieve metrics in clean session
+            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
+            connection.events = saved.metrics;
+            Tracker::new(client_id.clone())
+        } else {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
             connection.events = saved.metrics;
@@ -305,11 +310,6 @@ impl Router {
             pending_acks = saved.unacked_pubrels.clone();
             outgoing.unacked_pubrels = saved.unacked_pubrels;
             saved.tracker
-        } else {
-            // Only retrieve metrics in clean session
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.events = saved.metrics;
-            Tracker::new(client_id.clone())
         };
         let ackslog = AckLog::new();
 
@@ -326,8 +326,8 @@ impl Router {
         }
 
         let connection_id = self.connections.insert(connection);
-        assert_eq!(self.ibufs.insert(incoming), connection_id);
-        assert_eq!(self.obufs.insert(outgoing), connection_id);
+        assert_eq!(self.inbufs.insert(incoming), connection_id);
+        assert_eq!(self.outbufs.insert(outgoing), connection_id);
 
         self.connection_map.insert(client_id.clone(), connection_id);
         info!(connection_id, "Client connection registered");
@@ -361,7 +361,7 @@ impl Router {
                 pkid,
                 reason: PubRelReason::Success,
             };
-            ackslog.pubrel(pubrel)
+            ackslog.pubrel(pubrel);
         });
 
         self.scheduler
@@ -386,7 +386,7 @@ impl Router {
     ) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
-        let client_id = match &self.obufs.get(id) {
+        let client_id = match &self.outbufs.get(id) {
             Some(v) => v.client_id.clone(),
             None => {
                 error!("no-connection id {} is already gone", id);
@@ -406,7 +406,7 @@ impl Router {
         info!("Disconnecting connection");
 
         if let Some(reason_code) = reason {
-            let outgoing = match self.obufs.get_mut(id) {
+            let outgoing = match self.outbufs.get_mut(id) {
                 Some(v) => v,
                 None => {
                     error!("no-connection id {} is already gone", id);
@@ -428,8 +428,8 @@ impl Router {
 
         // Remove connection from router
         let mut connection = self.connections.remove(id);
-        let _incoming = self.ibufs.remove(id);
-        let outgoing = self.obufs.remove(id);
+        let _incoming = self.inbufs.remove(id);
+        let outgoing = self.outbufs.remove(id);
         let mut tracker = self.scheduler.remove(id);
         self.connection_map.remove(&client_id);
         self.ackslog.remove(id);
@@ -463,7 +463,15 @@ impl Router {
         }
 
         // Save state for persistent sessions
-        if !connection.clean {
+        if connection.clean {
+            // Only save metrics in clean session
+            self.graveyard.save(
+                Tracker::new(client_id),
+                HashSet::new(),
+                connection.events,
+                VecDeque::new(),
+            );
+        } else {
             // Add inflight data requests back to tracker
             inflight_data_requests
                 .into_iter()
@@ -481,22 +489,14 @@ impl Router {
                 connection.events,
                 outgoing.unacked_pubrels,
             );
-        } else {
-            // Only save metrics in clean session
-            self.graveyard.save(
-                Tracker::new(client_id),
-                HashSet::new(),
-                connection.events,
-                VecDeque::new(),
-            );
         }
         self.router_meters.total_connections -= 1;
     }
 
     /// Handles new incoming data on a topic
     fn handle_device_payload(&mut self, id: ConnectionId) {
-        // TODO: Retun errors and move error handling to the caller
-        let incoming = match self.ibufs.get_mut(id) {
+        // TODO: Return errors and move error handling to the caller
+        let incoming = match self.inbufs.get_mut(id) {
             Some(v) => v,
             None => {
                 error!("no-connection id {} is already gone", id);
@@ -600,14 +600,14 @@ impl Router {
                             disconnect = true;
 
                             if let RouterError::Disconnect(code) = e {
-                                disconnect_reason = Some(code)
+                                disconnect_reason = Some(code);
                             }
 
                             break;
                         }
                     };
 
-                    let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
+                    let meter = &mut self.inbufs.get_mut(id).unwrap().meter;
                     if let Err(e) = meter.register_publish(&publish) {
                         error!(
                             reason = ?e, "Failed to write to incoming meter"
@@ -688,7 +688,7 @@ impl Router {
                                 continue;
                             }
 
-                            let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
+                            let meter = &mut self.inbufs.get_mut(id).unwrap().meter;
                             meter.unregister_subscription(filter);
 
                             if !connection.subscriptions.remove(filter) {
@@ -723,7 +723,7 @@ impl Router {
                     let span = tracing::info_span!("puback", pkid = puback.pkid);
                     let _guard = span.enter();
 
-                    let outgoing = self.obufs.get_mut(id).unwrap();
+                    let outgoing = self.outbufs.get_mut(id).unwrap();
                     let pkid = puback.pkid;
                     if outgoing.register_ack(pkid).is_none() {
                         error!(pkid, "Unsolicited/ooo ack received for pkid {}", pkid);
@@ -737,7 +737,7 @@ impl Router {
                     let span = tracing::info_span!("pubrec", pkid = pubrec.pkid);
                     let _guard = span.enter();
 
-                    let outgoing = self.obufs.get_mut(id).unwrap();
+                    let outgoing = self.outbufs.get_mut(id).unwrap();
                     let pkid = pubrec.pkid;
                     if outgoing.register_ack(pkid).is_none() {
                         error!(pkid, "Unsolicited/ooo ack received for pkid {}", pkid);
@@ -767,7 +767,7 @@ impl Router {
 
                     // NOTE: client can try to resend previously unacked pubrels
                     // on reconnection ( with clean session false )
-                    // we try to retrive publish assuming broker saved the previous state
+                    // we try to retrieve publish assuming broker saved the previous state
                     // successfully in graveyard.
                     let publish = match ackslog.pubcomp(pubcomp) {
                         Some(v) => v,
@@ -808,7 +808,7 @@ impl Router {
                     let span = tracing::info_span!("pubcomp", pkid = pubcomp.pkid);
                     let _guard = span.enter();
 
-                    let outgoing = self.obufs.get_mut(id).unwrap();
+                    let outgoing = self.outbufs.get_mut(id).unwrap();
                     let pkid = pubcomp.pkid;
                     if outgoing.register_pubcomp(pkid).is_none() {
                         error!(
@@ -857,9 +857,9 @@ impl Router {
             }
         }
 
-        // Incase BytesMut represents 10 packets, publish error/diconnect event
+        // Incase BytesMut represents 10 packets, publish error/disconnect event
         // on say 5th packet should not block new data notifications for packets
-        // 1 - 4. Hence we use a flag instead of diconnecting immediately
+        // 1 - 4. Hence we use a flag instead of disconnecting immediately
         if disconnect {
             self.handle_disconnection(id, execute_will, disconnect_reason);
         }
@@ -911,7 +911,7 @@ impl Router {
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         }
 
-        let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
+        let meter = &mut self.inbufs.get_mut(id).unwrap().meter;
         meter.register_subscription(filter);
     }
 
@@ -925,7 +925,7 @@ impl Router {
         let span = tracing::info_span!("[<] outgoing", connection_id = id);
         let _guard = span.enter();
 
-        let outgoing = match self.obufs.get_mut(id) {
+        let outgoing = match self.outbufs.get_mut(id) {
             Some(v) => v,
             None => {
                 error!("Connection is already disconnected");
@@ -1041,8 +1041,12 @@ impl Router {
             meters.push(Meter::Router(self.id, router_meter));
         }
         for f in self.subscription_map.keys() {
-            let filter = f.to_owned();
-            if let Some(subscription_meter) = self.datalog.meter(f).and_then(|meter| meter.get()) {
+            let filter = f.clone();
+            if let Some(subscription_meter) = self
+                .datalog
+                .meter(f)
+                .and_then(router::SubscriptionMeter::get)
+            {
                 meters.push(Meter::Subscription(filter, subscription_meter));
             }
         }
@@ -1173,7 +1177,7 @@ fn validate_and_set_topic_alias(
                 ));
             };
         // set the publish topic before further processing
-        publish.topic = alias_topic.to_owned().into();
+        publish.topic = alias_topic.clone().into();
     } else {
         // if publish topic isn't empty, that means
         // publisher wants to establish new mapping for topic & alias
@@ -1227,7 +1231,7 @@ enum ConsumeStatus {
     PartialRead,
 }
 
-/// Sweep datalog from offset in DataRequest and updates DataRequest
+/// Sweep datalog from offset in `DataRequest` and updates `DataRequest`
 /// for next sweep. Returns (busy, caughtup) status
 /// Returned arguments:
 /// 1. `busy`: whether the data request was completed or not.
@@ -1249,7 +1253,9 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos != 0 {
+    let inflight_slots = if request.qos == 0 {
+        datalog.config.max_outgoing_packet_count
+    } else {
         // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
@@ -1258,8 +1264,6 @@ fn forward_device_data(
         }
 
         len as u64
-    } else {
-        datalog.config.max_outgoing_packet_count
     };
 
     let (next, publishes) =
@@ -1321,7 +1325,7 @@ fn forward_device_data(
     if !topic_alias_already_exists {
         topic_alias = broker_topic_aliases
             .as_mut()
-            .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
+            .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter));
     }
 
     let subscription_id = connection.subscription_ids.get(&request.filter);
@@ -1341,7 +1345,7 @@ fn forward_device_data(
 
             // We want to clear topic if we are using an existing alias
             if topic_alias_already_exists {
-                publish.topic.clear()
+                publish.topic.clear();
             }
 
             if let Some(&subscription_id) = subscription_id {
@@ -1442,10 +1446,10 @@ fn print_status(router: &mut Router, metrics: Print) {
                 .map(|(filter, connections)| {
                     let connections = connections
                         .iter()
-                        .map(|id| router.obufs[*id].client_id.clone())
+                        .map(|id| router.outbufs[*id].client_id.clone())
                         .collect();
 
-                    (filter.to_owned(), connections)
+                    (filter.clone(), connections)
                 })
                 .collect();
 
@@ -1460,7 +1464,7 @@ fn print_status(router: &mut Router, metrics: Print) {
                 let v: Vec<(String, DataRequest)> = waiters
                     .waiters()
                     .iter()
-                    .map(|(id, request)| (router.obufs[*id].client_id.clone(), request.clone()))
+                    .map(|(id, request)| (router.outbufs[*id].client_id.clone(), request.clone()))
                     .collect();
 
                 println!("{v:#?}");
@@ -1491,7 +1495,7 @@ fn validate_subscription(
     }
 
     if filter.path.starts_with('$') {
-        return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
+        return Err(RouterError::InvalidFilterPrefix(filter.path.clone()));
     }
 
     Ok(())
@@ -1564,7 +1568,7 @@ fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
 //     }
 
 //     #[test]
-//     fn test_graveyard_retreive_metrics_always() {
+//     fn test_graveyard_retrieve_metrics_always() {
 //         let (mut router, mut links) = new_router(1, false);
 //         let (tx, _) = links.pop_front().unwrap();
 //         let id = tx.connection_id;
@@ -1768,7 +1772,7 @@ fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
 //         //     = router.run times * topics * subscribers per topic
 //         //     = 2 * 2 * 2 = 8
 //         //
-//         // we also call consume 2 times per subsriber, and one time it will call
+//         // we also call consume 2 times per subscriber, and one time it will call
 //         // forward_device_data again, but no data will actually be forwarded.
 //         // as 256 publishes at once, and router's config only reads 128 at a time, data needs to be
 //         // read from same log twice, and thus half of the times the data reading is not done
