@@ -24,11 +24,13 @@ DIRNAME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # CONFIGURATION
 # ================
 # Version
-RUMQTTD_VERSION=$(grep -m 1 'version' "$DIRNAME/../../rumqttc/Cargo.toml" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
+RUMQTTD_VERSION=$(grep -m 1 'version' "$DIRNAME/../../rumqttd/Cargo.toml" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
 # Cross configuration
 CROSS_CONFIG="$DIRNAME/../../Cross.toml"
-# Move directory
-MOVE_DIR=
+# Copy binaries
+COPY=false
+# Output directory
+OUT_DIR=
 
 # ================
 # FUNCTIONS
@@ -36,16 +38,20 @@ MOVE_DIR=
 # Show help message
 show_help() {
     cat << EOF
-Usage: $(basename "$0") [--disable-color] [--cross-config <FILE>] [--help]
-                        [--log-level <LEVEL>] [--move <DIR>] [--version <VERSION>]
+Usage: $(basename "$0") [--copy] [--cross-config <FILE>] [--disable-color]
+                        [--help] [--log-level <LEVEL>] [--output <DIR>]
+                        [--version <VERSION>]
 
 rumqttd binary builder.
 
 Options:
-  --disable-color        Disable color
+  --copy                 Copy binaries instead of move
+                         Default: $COPY
 
   --cross-config <FILE>  Cross configuration file
                          Default: $CROSS_CONFIG
+
+  --disable-color        Disable color
 
   --help                 Show this help message and exit
 
@@ -58,8 +64,8 @@ Options:
                            info     Informational level
                            debug    Debug level
 
-  --move <DIR>           Move directory
-                         Default: $MOVE_DIR
+  --output <DIR>         Output directory
+                         Default: $OUT_DIR
 
   --version <VERSION>    Version
                          Default: $RUMQTTD_VERSION
@@ -74,6 +80,10 @@ parse_args() {
         _shifts=1
 
         case $1 in
+            --copy)
+                # Copy binaries
+                COPY=true
+                ;;
             --cross-config)
                 # Cross configuration
                 parse_args_assert_value "$@"
@@ -86,11 +96,11 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --move)
-                # Move directory
+            --output)
+                # Output directory
                 parse_args_assert_value "$@"
 
-                MOVE_DIR=$2
+                OUT_DIR=$2
                 _shifts=2
                 ;;
             --version)
@@ -124,7 +134,7 @@ verify_system() {
 
     [ -f "$CROSS_CONFIG" ] || FATAL "Cross configuration '$CROSS_CONFIG' does not exists"
     printf "%s\n" "$RUMQTTD_VERSION" | grep -q -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' || FATAL "Version '$RUMQTTD_VERSION' is not valid"
-    if [ -n "$MOVE_DIR" ] && [ ! -d "$MOVE_DIR" ]; then FATAL "Move directory '$MOVE_DIR' does not exists"; fi
+    if [ -n "$OUT_DIR" ] && [ ! -d "$OUT_DIR" ]; then FATAL "Output directory '$OUT_DIR' does not exists"; fi
 
     DEBUG "Successfully verified system"
 }
@@ -133,11 +143,6 @@ verify_system() {
 # @param $1 Target
 build_target() {
     _target=$1
-    _name="rumqttd-$RUMQTTD_VERSION-$_target"
-    # Add .exe if target is windows
-    if printf "%s\n" "$_target" | grep -q -P '^.+-.+-windows-.+$'; then _name="$_name.exe"; fi
-    _binary_old="$DIRNAME/../../target/$_target/release/rumqttd"
-    _binary_new="$DIRNAME/../../target/$_target/release/$_name"
 
     INFO "Building '$_target'"
 
@@ -147,15 +152,20 @@ build_target() {
         --package rumqttd \
         --target "$_target"
 
-    INFO "Renaming '$_binary_old' as '$_binary_new'"
-    mv "$_binary_old" "$_binary_new"
+    if [ -n "$OUT_DIR" ]; then
+        _name="rumqttd-$RUMQTTD_VERSION-$_target"
+        # Add .exe if target is windows
+        if printf "%s\n" "$_target" | grep -q -P '^.+-.+-windows-.+$'; then _name="$_name.exe"; fi
+        _binary_old="$DIRNAME/../../target/$_target/release/rumqttd"
+        _binary_new="$OUT_DIR/$_name"
 
-    if [ -n "$MOVE_DIR" ]; then
-        _binary_old=$_binary_new
-        _binary_new="$MOVE_DIR/$_name"
-
-        INFO "Moving '$_binary_old' to '$_binary_new'"
-        mv "$_binary_old" "$_binary_new"
+        if [ "$COPY" = true ]; then
+            INFO "Copying '$_binary_old' to '$_binary_new'"
+            cp "$_binary_old" "$_binary_new"
+        else
+            INFO "Moving '$_binary_old' to '$_binary_new'"
+            mv "$_binary_old" "$_binary_new"
+        fi
     fi
 
     DEBUG "Successfully built '$_target'"

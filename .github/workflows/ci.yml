@@ -142,7 +142,7 @@ jobs:
                     --disable-color \
                     --log-level debug \
                     --version ${{ needs.pre-check.outputs.rumqttd-version }}
-                    --move ./
+                    --output ./
 
             - name: Publish Binaries
               uses: softprops/action-gh-release@v1

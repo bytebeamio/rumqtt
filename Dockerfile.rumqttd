@@ -4,7 +4,7 @@
 # CONFIGURATION
 # ================
 # Rust version
-ARG RUST_VERSION="1.64.0"
+ARG RUST_VERSION="1.70.0"
 # Distroless tag
 ARG DISTROLESS_TAG="latest"
 # Working directory
@@ -22,8 +22,7 @@ WORKDIR ${WORKDIR}
 # Install packages
 RUN apk add \
     build-base \
-    openssl-dev \
-    protoc
+    openssl-dev
 
 # Copy
 COPY . .

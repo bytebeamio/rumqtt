@@ -7,9 +7,9 @@ pre-build = [
 [target.x86_64-unknown-linux-musl]
 image.name = "alpine:edge"
 image.toolchain = ["x86_64-unknown-linux-musl"]
-pre-build = ["apk add --no-cache gcc musl-dev pkgconfig openssl-dev libc-dev git"]
+pre-build = ["apk add --no-cache build-base openssl-dev"]
 
 [target.aarch64-unknown-linux-musl]
 image.name = "alpine:edge"
 image.toolchain = ["aarch64-unknown-linux-musl"]
-pre-build = ["apk add --no-cache gcc musl-dev pkgconfig openssl-dev libc-dev git"]
+pre-build = ["apk add --no-cache build-base openssl-dev"]

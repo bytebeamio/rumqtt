@@ -33,7 +33,7 @@ impl Incoming {
     pub(crate) fn new(client_id: String) -> Self {
         Self {
             buffer: Arc::new(Mutex::new(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY))),
-            meter: Default::default(),
+            meter: IncomingMeter::default(),
             client_id,
         }
     }
@@ -87,7 +87,7 @@ impl Outgoing {
             unacked_pubrels,
             handle,
             last_pkid: 0,
-            meter: Default::default(),
+            meter: OutgoingMeter::default(),
         };
 
         (outgoing, rx)
@@ -165,10 +165,7 @@ impl Outgoing {
     // Returns (unsolicited, outoforder) flags
     // Return: Out of order or unsolicited acks
     pub fn register_ack(&mut self, pkid: u16) -> Option<()> {
-        let (head, _filter_idx, _cursor) = match self.inflight_buffer.pop_front() {
-            Some(v) => v,
-            None => return None,
-        };
+        let Some((head, _, _)) = self.inflight_buffer.pop_front() else {return None;};
 
         // We don't support out of order acks
         if pkid != head {
@@ -207,7 +204,7 @@ impl Outgoing {
     // least corresponding cursor because of the way we insert into the inflight_buffer
     pub fn retransmission_map(&self) -> HashMap<FilterIdx, Cursor> {
         let mut o = HashMap::new();
-        for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
+        for (_, filter_idx, cursor) in &self.inflight_buffer {
             if !o.contains_key(filter_idx) {
                 o.insert(*filter_idx, *cursor);
             }

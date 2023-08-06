@@ -208,10 +208,10 @@ impl Scheduler {
 
         let all_uniq = readyqueue.iter().all(|x| uniq.insert(x));
 
-        if !all_uniq {
-            Some(readyqueue)
-        } else {
+        if all_uniq {
             None
+        } else {
+            Some(readyqueue)
         }
     }
 
@@ -223,10 +223,10 @@ impl Scheduler {
 
         let all_uniq = tracker_data_req.iter().all(|x| uniq.insert(x.filter_idx));
 
-        if !all_uniq {
-            Some(&tracker.data_requests)
-        } else {
+        if all_uniq {
             None
+        } else {
+            Some(&tracker.data_requests)
         }
     }
 }
