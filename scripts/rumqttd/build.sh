@@ -153,11 +153,15 @@ build_target() {
         --target "$_target"
 
     if [ -n "$OUT_DIR" ]; then
-        _name="rumqttd-$RUMQTTD_VERSION-$_target"
-        # Add .exe if target is windows
-        if printf "%s\n" "$_target" | grep -q -P '^.+-.+-windows-.+$'; then _name="$_name.exe"; fi
-        _binary_old="$DIRNAME/../../target/$_target/release/rumqttd"
-        _binary_new="$OUT_DIR/$_name"
+        _name_old="rumqttd"
+        _name_new="rumqttd-$RUMQTTD_VERSION-$_target"
+        # Add .exe if Windows
+        if printf "%s\n" "$_target" | grep -q -P '^.+-.+-windows-.+$'; then
+            _name_old="$_name_old.exe"
+            _name_new="$_name_new.exe"
+        fi
+        _binary_old="$DIRNAME/../../target/$_target/release/$_name_old"
+        _binary_new="$OUT_DIR/$_name_new"
 
         if [ "$COPY" = true ]; then
             INFO "Copying '$_binary_old' to '$_binary_new'"
@@ -190,5 +194,6 @@ build_targets() {
         aarch64-unknown-linux-gnu \
         aarch64-unknown-linux-musl \
         x86_64-unknown-linux-gnu \
-        x86_64-unknown-linux-musl
+        x86_64-unknown-linux-musl \
+        x86_64-pc-windows-gnu
 }
