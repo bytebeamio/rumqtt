@@ -17,8 +17,8 @@ fi
 DIRNAME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 # Load commons
-# shellcheck source=SCRIPTDIR/../__commons.sh
-. "$DIRNAME/../__commons.sh"
+# shellcheck source=SCRIPTDIR/../../scripts/__commons.sh
+. "$DIRNAME/../../scripts/__commons.sh"
 
 # ================
 # CONFIGURATION
@@ -27,7 +27,7 @@ DIRNAME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RUMQTTD_RUST_VERSION=$(
     _cargo_toml=""
     _cargo_toml_root="$DIRNAME/../../Cargo.toml"
-    _cargo_toml_rumqttd="$DIRNAME/../../rumqttd/Cargo.toml"
+    _cargo_toml_rumqttd="$DIRNAME/../Cargo.toml"
     if grep -m 1 -q -P '^[[:blank:]]*rust-version\.workspace[[:blank:]]*=[[:blank:]]*true[[:blank:]]*$' "$_cargo_toml_rumqttd"; then
         _cargo_toml=$_cargo_toml_root
     else
@@ -39,13 +39,13 @@ RUMQTTD_RUST_VERSION=$(
 # Docker platform
 RUMQTTD_DOCKER_PLATFORM="linux/amd64,linux/arm64"
 # Dockerfile
-RUMQTTD_DOCKER_DOCKERFILE="$DIRNAME/../../Dockerfile.rumqttd"
+RUMQTTD_DOCKER_DOCKERFILE="$DIRNAME/../Dockerfile"
 # Docker image repository
 RUMQTTD_DOCKER_IMAGE_REPOSITORY="registry-1.docker.io"
 # Docker image name
 RUMQTTD_DOCKER_IMAGE_NAME="bytebeamio/rumqttd"
 # Docker image version
-RUMQTTD_DOCKER_IMAGE_VERSION=$(grep -m 1 'version' "$DIRNAME/../../rumqttd/Cargo.toml" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
+RUMQTTD_DOCKER_IMAGE_VERSION=$(grep -m 1 'version' "$DIRNAME/../Cargo.toml" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
 # Docker context
 RUMQTTD_DOCKER_CONTEXT="$DIRNAME/../.."
 

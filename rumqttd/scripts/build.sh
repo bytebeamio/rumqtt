@@ -17,14 +17,14 @@ fi
 DIRNAME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 # Load commons
-# shellcheck source=SCRIPTDIR/../__commons.sh
-. "$DIRNAME/../__commons.sh"
+# shellcheck source=SCRIPTDIR/../../scripts/__commons.sh
+. "$DIRNAME/../../scripts/__commons.sh"
 
 # ================
 # CONFIGURATION
 # ================
 # Version
-RUMQTTD_VERSION=$(grep -m 1 'version' "$DIRNAME/../../rumqttd/Cargo.toml" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
+RUMQTTD_VERSION=$(grep -m 1 'version' "$DIRNAME/../Cargo.toml" | grep -o -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
 # Cross configuration
 CROSS_CONFIG="$DIRNAME/../../Cross.toml"
 # Copy binaries

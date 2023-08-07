@@ -136,9 +136,9 @@ jobs:
 
             - name: Build Binaries
               run: |
-                  chmod +x ./scripts/rumqttd/build.sh
+                  chmod +x ./rumqttd/scripts/build.sh
 
-                  ./scripts/rumqttd/build.sh \
+                  ./rumqttd/scripts/build.sh \
                     --disable-color \
                     --log-level debug \
                     --version ${{ needs.pre-check.outputs.rumqttd-version }}
@@ -151,9 +151,9 @@ jobs:
 
             - name: Build & Publish Docker image
               run: |
-                  chmod +x ./scripts/rumqttd/docker.sh
+                  chmod +x ./rumqttd/scripts/docker.sh
 
-                  ./scripts/rumqttd/docker.sh \
+                  ./rumqttd/scripts/docker.sh \
                     --disable-color \
                     --log-level debug
 
