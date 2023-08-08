@@ -178,8 +178,6 @@ impl MqttOptions {
     /// options.set_transport(Transport::tls_with_config(client_config.into()));
     /// ```
     pub fn parse_url<S: Into<String>>(url: S) -> Result<MqttOptions, OptionError> {
-        use std::convert::TryFrom;
-
         let url = url::Url::parse(&url.into())?;
         let options = MqttOptions::try_from(url)?;
 
