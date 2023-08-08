@@ -1,8 +1,0 @@
-daysUntilStale: 20
-staleLabel: "stale"
-daysUntilClose: false
-markComment: false
-exemptLabels:
-  - "in-pipeline"
-  - "help wanted"
-  - "bug"
