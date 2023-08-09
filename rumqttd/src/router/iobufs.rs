@@ -59,9 +59,10 @@ pub struct Outgoing {
     /// Handle which is given to router to allow router to communicate with this connection
     pub(crate) handle: Sender<()>,
     /// The buffer to keep track of inflight packets.
-    inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
+    inflight_buffer: VecDeque<(u16, FilterIdx, Option<Cursor>)>,
     /// PubRels waiting for PubComp
     pub(crate) unacked_pubrels: VecDeque<u16>,
+    // pub(crate) inflight_retained: VecDeque<(u16, FilterIdx)>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -208,8 +209,8 @@ impl Outgoing {
     pub fn retransmission_map(&self) -> HashMap<FilterIdx, Cursor> {
         let mut o = HashMap::new();
         for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
-            if !o.contains_key(filter_idx) {
-                o.insert(*filter_idx, *cursor);
+            if !o.contains_key(filter_idx) && cursor.is_some() {
+                o.insert(*filter_idx, cursor.unwrap());
             }
         }
 

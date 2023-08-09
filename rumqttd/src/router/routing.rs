@@ -1,8 +1,8 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
     PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
-    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
-    UnsubAckReason,
+    PubRelReason, Publish, PublishProperties, QoS, RetainForwardRule, SubAck, SubscribeReasonCode,
+    UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -521,7 +521,7 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(mut publish, properties) => {
+                Packet::Publish(publish, properties) => {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
@@ -570,11 +570,6 @@ impl Router {
                     };
 
                     self.router_meters.total_publishes += 1;
-
-                    // Ignore retained messages
-                    if publish.retain {
-                        publish.retain = false;
-                    }
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -652,10 +647,9 @@ impl Router {
                             idx,
                             filter.clone(),
                             qos as u8,
+                            &f.retain_forward_rule,
                             subscription_id,
                         );
-                        self.datalog
-                            .handle_retained_messages(filter, &mut self.notifications);
 
                         let code = match qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
@@ -866,6 +860,7 @@ impl Router {
     }
 
     /// Apply filter and prepare this connection to receive subscription data
+    /// Handle retained messages as per subscription options!
     fn prepare_filter(
         &mut self,
         id: ConnectionId,
@@ -873,6 +868,7 @@ impl Router {
         filter_idx: FilterIdx,
         filter: String,
         qos: u8,
+        retain_forward_rule: &RetainForwardRule,
         subscription_id: Option<usize>,
     ) {
         // Add connection id to subscription list
@@ -904,12 +900,20 @@ impl Router {
                 cursor,
                 read_count: 0,
                 max_count: 100,
+                forward_retained_msg: true,
             };
 
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         }
+
+        // NOTE(swanandx): figure out a way to update the existing datareq
+        // match retain_forward_rule {
+        //     protocol::RetainForwardRule::OnEverySubscribe
+        //     | protocol::RetainForwardRule::OnNewSubscribe => {}
+        //     _ => {}
+        // }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
         meter.register_subscription(filter);
@@ -1077,7 +1081,7 @@ fn append_to_commitlog(
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
-) -> Result<Offset, RouterError> {
+) -> Result<Option<Offset>, RouterError> {
     let connection = connections.get_mut(id).unwrap();
 
     let topic_alias = properties.as_mut().and_then(|p| {
@@ -1116,11 +1120,12 @@ fn append_to_commitlog(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        error!("Unexpected: retain field was not unset");
         datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+        return Ok(None);
     }
 
-    publish.retain = false;
+    // NOTE(swanandx): why we unset the retain field?
+    // publish.retain = false;
     let pkid = publish.pkid;
 
     let filter_idxs = datalog.matches(topic);
@@ -1149,7 +1154,7 @@ fn append_to_commitlog(
     }
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
-    Ok(o)
+    Ok(Some(o))
 }
 
 fn validate_and_set_topic_alias(
@@ -1235,7 +1240,7 @@ enum ConsumeStatus {
 /// 3. `inflight_full`: whether the inflight requests were completely filled
 fn forward_device_data(
     request: &mut DataRequest,
-    datalog: &DataLog,
+    datalog: &mut DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
     connection: &mut Connection,
@@ -1249,7 +1254,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos != 0 {
+    let mut inflight_slots = if request.qos != 0 {
         // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
@@ -1262,7 +1267,18 @@ fn forward_device_data(
         datalog.config.max_outgoing_packet_count
     };
 
-    let (next, publishes) =
+    let mut publishes = Vec::new();
+    if request.forward_retained_msg {
+        // NOTE(swanandx): limit the number of read messages
+        // and skip the messages previously read.
+        // for now, just dropping the excess msgs
+        let mut retained_publishes = datalog.read_retained_messages(&request.filter);
+        retained_publishes.truncate(inflight_slots as usize);
+        inflight_slots -= retained_publishes.len() as u64;
+        publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
+    }
+
+    let (next, publishes_from_datalog) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
             Ok(v) => v,
             Err(e) => {
@@ -1270,6 +1286,12 @@ fn forward_device_data(
                 return ConsumeStatus::FilterCaughtup;
             }
         };
+
+    publishes.extend(
+        publishes_from_datalog
+            .into_iter()
+            .map(|(p, offset)| (p, Some(offset))),
+    );
 
     let (start, next, caughtup) = match next {
         Position::Next { start, end } => (start, end, false),
