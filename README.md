@@ -28,6 +28,7 @@ rumqtt is an opensource set of libraries written in rust-lang to implement the M
         * [Run using docker](#run-using-docker)
         * [Prebuild binaries](#prebuilt-binaries)
         * [Install using cargo](#install-using-cargo)
+        * [Install using AUR](#install-using-aur)
         * [Compile from source](#compile-from-source)
     * [rumqttc](#rumqttc)
 * [Features](#features)
@@ -85,6 +86,16 @@ rumqttd --config rumqttd.toml
 ```
 
 Note: Make sure to you correct rumqttd.toml file for a specific version of rumqttd
+
+<br/>
+
+### Install using AUR
+
+```
+yay -S rumqttd-bin
+```
+
+Note: Configuration is found in `/etc/rumqtt/config.toml` and systemd service name `rumqtt.service`
 
 <br/>
 
