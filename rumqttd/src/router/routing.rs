@@ -1,8 +1,8 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
     PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
-    PubRelReason, Publish, PublishProperties, QoS, RetainForwardRule, SubAck, SubscribeReasonCode,
-    UnsubAck, UnsubAckReason,
+    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
+    UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -630,7 +630,6 @@ impl Router {
                         }
 
                         let filter = &f.path;
-                        let qos = f.qos;
                         let subscription_id = props.as_ref().and_then(|p| p.id);
 
                         if subscription_id == Some(0) {
@@ -641,17 +640,9 @@ impl Router {
                         }
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(
-                            id,
-                            cursor,
-                            idx,
-                            filter.clone(),
-                            qos as u8,
-                            &f.retain_forward_rule,
-                            subscription_id,
-                        );
+                        self.prepare_filter(id, cursor, idx, f, subscription_id);
 
-                        let code = match qos {
+                        let code = match f.qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
                             QoS::AtLeastOnce => SubscribeReasonCode::QoS1,
                             QoS::ExactlyOnce => SubscribeReasonCode::QoS2,
@@ -866,20 +857,22 @@ impl Router {
         id: ConnectionId,
         cursor: Offset,
         filter_idx: FilterIdx,
-        filter: String,
-        qos: u8,
-        retain_forward_rule: &RetainForwardRule,
+        filter: &protocol::Filter,
         subscription_id: Option<usize>,
     ) {
+        let filter_path = &filter.path;
+        let retain_forward_rule = &filter.retain_forward_rule;
+
         // Add connection id to subscription list
-        match self.subscription_map.get_mut(&filter) {
+        match self.subscription_map.get_mut(filter_path) {
             Some(connections) => {
                 connections.insert(id);
             }
             None => {
                 let mut connections = HashSet::new();
                 connections.insert(id);
-                self.subscription_map.insert(filter.clone(), connections);
+                self.subscription_map
+                    .insert(filter_path.clone(), connections);
             }
         }
 
@@ -889,34 +882,39 @@ impl Router {
         if let Some(subscription_id) = subscription_id {
             connection
                 .subscription_ids
-                .insert(filter.clone(), subscription_id);
+                .insert(filter_path.clone(), subscription_id);
         }
 
-        if connection.subscriptions.insert(filter.clone()) {
+        let forward_retained_msg = retain_forward_rule != &protocol::RetainForwardRule::Never;
+
+        if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
-                filter: filter.clone(),
+                filter: filter_path.clone(),
                 filter_idx,
-                qos,
+                qos: filter.qos as u8,
                 cursor,
                 read_count: 0,
                 max_count: 100,
-                forward_retained_msg: true,
+                // set true for new subscriptions
+                forward_retained_msg,
             };
 
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
+        } else if retain_forward_rule == &protocol::RetainForwardRule::OnEverySubscribe {
+            // update forward_retained_msg to true incase of existing subscriptions
+            // when retain_forward_rule is OnEverySubscribe
+            self.scheduler.trackers[id]
+                .data_requests
+                .iter_mut()
+                .find(|r| r.filter_idx == filter_idx)
+                .map(|r| r.forward_retained_msg = true)
+                .unwrap();
         }
 
-        // NOTE(swanandx): figure out a way to update the existing datareq
-        // match retain_forward_rule {
-        //     protocol::RetainForwardRule::OnEverySubscribe
-        //     | protocol::RetainForwardRule::OnNewSubscribe => {}
-        //     _ => {}
-        // }
-
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-        meter.register_subscription(filter);
+        meter.register_subscription(filter_path.clone());
     }
 
     /// When a connection is ready, it should sweep native data from 'datalog',
@@ -1268,14 +1266,19 @@ fn forward_device_data(
     };
 
     let mut publishes = Vec::new();
+
     if request.forward_retained_msg {
-        // NOTE(swanandx): limit the number of read messages
+        // NOTE: limit the number of read messages
         // and skip the messages previously read.
         // for now, just dropping the excess msgs
         let mut retained_publishes = datalog.read_retained_messages(&request.filter);
         retained_publishes.truncate(inflight_slots as usize);
-        inflight_slots -= retained_publishes.len() as u64;
+
         publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
+        inflight_slots -= publishes.len() as u64;
+
+        // we only want to forward retained messages once
+        request.forward_retained_msg = false;
     }
 
     let (next, publishes_from_datalog) =

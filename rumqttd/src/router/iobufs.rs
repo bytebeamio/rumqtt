@@ -209,6 +209,7 @@ impl Outgoing {
     pub fn retransmission_map(&self) -> HashMap<FilterIdx, Cursor> {
         let mut o = HashMap::new();
         for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
+            // if cursor in None, it means it was a retained publish
             if !o.contains_key(filter_idx) && cursor.is_some() {
                 o.insert(*filter_idx, cursor.unwrap());
             }

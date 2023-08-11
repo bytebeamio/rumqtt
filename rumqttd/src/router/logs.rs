@@ -269,24 +269,6 @@ impl DataLog {
         self.retained_publishes.remove(&topic);
     }
 
-    pub fn handle_retained_messages(
-        &mut self,
-        filter: &str,
-        notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
-    ) {
-        trace!(info = "retain-msg", filter = &filter);
-
-        let idx = self.filter_indexes.get(filter).unwrap();
-
-        let datalog = self.native.get_mut(*idx).unwrap();
-
-        for (topic, publish) in self.retained_publishes.iter_mut() {
-            if matches(topic, filter) {
-                datalog.append(publish.clone(), notifications);
-            }
-        }
-    }
-
     pub fn read_retained_messages(&mut self, filter: &str) -> Vec<PubWithProp> {
         trace!(info = "reading retain msg", filter = &filter);
         let now = Instant::now();
