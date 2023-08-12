@@ -92,8 +92,10 @@ Note: Make sure to you correct rumqttd.toml file for a specific version of rumqt
 ### Install using AUR
 
 ```
-yay -S rumqttd-bin
+paru -S rumqttd-bin
 ```
+
+replace `paru` with whatever AUR helper you are using.
 
 Note: Configuration is found in `/etc/rumqtt/config.toml` and systemd service name `rumqtt.service`
 
