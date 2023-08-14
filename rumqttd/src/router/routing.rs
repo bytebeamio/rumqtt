@@ -654,16 +654,14 @@ impl Router {
                             break;
                         }
 
+                        let mut filter = f.path.clone();
                         let mut group = None;
-                        let original_filter = f.path.clone();
 
                         if let Some((grp, filter_path)) = extract_group(&f.path) {
                             group = Some(grp);
-                            f.path = filter_path;
+                            filter = filter_path;
                         };
 
-                        let filter = &f.path;
-                        let qos = f.qos;
                         let subscription_id = props.as_ref().and_then(|p| p.id);
 
                         if subscription_id == Some(0) {
@@ -673,25 +671,17 @@ impl Router {
                             break;
                         }
 
-                        let (idx, cursor) = self.datalog.next_native_offset(filter);
+                        let (idx, cursor) = self.datalog.next_native_offset(&filter);
 
                         // in case of shared sub original_filter will be $share/group/topic
                         // this is because we do want to treat is as diffrent subscription
                         // and create DataRequest, while using the same datalog of "topic"
                         // NOTE: topic & $share/group/topic will have same filteridx!
-                        self.prepare_filter(
-                            id,
-                            cursor,
-                            idx,
-                            original_filter,
-                            qos as u8,
-                            group,
-                            subscription_id,
-                        );
+                        self.prepare_filter(id, cursor, idx, f, group, subscription_id);
                         self.datalog
-                            .handle_retained_messages(filter, &mut self.notifications);
+                            .handle_retained_messages(&filter, &mut self.notifications);
 
-                        let code = match qos {
+                        let code = match f.qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
                             QoS::AtLeastOnce => SubscribeReasonCode::QoS1,
                             QoS::ExactlyOnce => SubscribeReasonCode::QoS2,
@@ -913,20 +903,22 @@ impl Router {
         id: ConnectionId,
         cursor: Offset,
         filter_idx: FilterIdx,
-        filter: String,
-        qos: u8,
+        filter: &protocol::Filter,
         group: Option<String>,
         subscription_id: Option<usize>,
     ) {
+        let filter_path = &filter.path;
+
         // Add connection id to subscription list
-        match self.subscription_map.get_mut(&filter) {
+        match self.subscription_map.get_mut(filter_path) {
             Some(connections) => {
                 connections.insert(id);
             }
             None => {
                 let mut connections = HashSet::new();
                 connections.insert(id);
-                self.subscription_map.insert(filter.clone(), connections);
+                self.subscription_map
+                    .insert(filter_path.clone(), connections);
             }
         }
 
@@ -951,14 +943,14 @@ impl Router {
         if let Some(subscription_id) = subscription_id {
             connection
                 .subscription_ids
-                .insert(filter.clone(), subscription_id);
+                .insert(filter_path.clone(), subscription_id);
         }
 
-        if connection.subscriptions.insert(filter.clone()) {
+        if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
-                filter: filter.clone(),
+                filter: filter_path.clone(),
                 filter_idx,
-                qos,
+                qos: filter.qos as u8,
                 cursor,
                 read_count: 0,
                 max_count: 100,
@@ -971,7 +963,7 @@ impl Router {
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-        meter.register_subscription(filter);
+        meter.register_subscription(filter_path.clone());
     }
 
     /// When a connection is ready, it should sweep native data from 'datalog',
