@@ -20,7 +20,6 @@ use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 use super::alertlog::{Alert, AlertLog};
-use super::connection::BrokerAliases;
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
@@ -635,7 +634,7 @@ impl Router {
                         );
                     };
                 }
-                Packet::Subscribe(mut subscribe, _) => {
+                Packet::Subscribe(mut subscribe, props) => {
                     let mut return_codes = Vec::new();
                     let pkid = subscribe.pkid;
                     // let len = s.len();
@@ -665,6 +664,14 @@ impl Router {
 
                         let filter = &f.path;
                         let qos = f.qos;
+                        let subscription_id = props.as_ref().and_then(|p| p.id);
+
+                        if subscription_id == Some(0) {
+                            error!("Subscription identifier can't be 0");
+                            disconnect = true;
+                            disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
+                            break;
+                        }
 
                         let (idx, cursor) = self.datalog.next_native_offset(filter);
 
@@ -672,7 +679,15 @@ impl Router {
                         // this is because we do want to treat is as diffrent subscription
                         // and create DataRequest, while using the same datalog of "topic"
                         // NOTE: topic & $share/group/topic will have same filteridx!
-                        self.prepare_filter(id, cursor, idx, original_filter, qos as u8, group);
+                        self.prepare_filter(
+                            id,
+                            cursor,
+                            idx,
+                            original_filter,
+                            qos as u8,
+                            group,
+                            subscription_id,
+                        );
                         self.datalog
                             .handle_retained_messages(filter, &mut self.notifications);
 
@@ -729,6 +744,9 @@ impl Router {
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
                             }
+
+                            // remove the subscription id
+                            connection.subscription_ids.remove(filter);
 
                             let unsuback = UnsubAck {
                                 pkid,
@@ -898,6 +916,7 @@ impl Router {
         filter: String,
         qos: u8,
         group: Option<String>,
+        subscription_id: Option<usize>,
     ) {
         // Add connection id to subscription list
         match self.subscription_map.get_mut(&filter) {
@@ -928,6 +947,12 @@ impl Router {
 
             shared_group.add_client(client_id);
         };
+
+        if let Some(subscription_id) = subscription_id {
+            connection
+                .subscription_ids
+                .insert(filter.clone(), subscription_id);
+        }
 
         if connection.subscriptions.insert(filter.clone()) {
             let request = DataRequest {
@@ -977,7 +1002,6 @@ impl Router {
         ack_device_data(ackslog, outgoing);
 
         let connection = &mut self.connections[id];
-        let broker_topic_aliases = &mut connection.broker_topic_aliases;
 
         // Keep track of temporarily skipped DataRequest
         // NOTE: VecDeque::new() doesn't allocate memory until elements are pushed
@@ -1015,7 +1039,7 @@ impl Router {
                 datalog,
                 outgoing,
                 alertlog,
-                broker_topic_aliases,
+                connection,
                 shared_group,
             ) {
                 ConsumeStatus::BufferFull => {
@@ -1145,6 +1169,17 @@ fn append_to_commitlog(
         // clear the received value as it is irrelevant while forwarding publishes
         p.topic_alias.take()
     });
+
+    // TODO: broker should properly send the disconnect packet!
+    if properties
+        .as_ref()
+        .is_some_and(|p| !p.subscription_identifiers.is_empty())
+    {
+        error!("A PUBLISH packet sent from a Client to a Server MUST NOT contain a Subscription Identifier");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::MalformedPacket,
+        ));
+    }
 
     if let Some(alias) = topic_alias {
         validate_and_set_topic_alias(&mut publish, connection, alias)?;
@@ -1291,7 +1326,7 @@ fn forward_device_data(
     datalog: &mut DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
-    broker_topic_aliases: &mut Option<BrokerAliases>,
+    connection: &mut Connection,
     shared_group: Option<&mut SharedGroup>,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
@@ -1391,6 +1426,7 @@ fn forward_device_data(
         return ConsumeStatus::FilterCaughtup;
     }
 
+    let broker_topic_aliases = &mut connection.broker_topic_aliases;
     let mut topic_alias = broker_topic_aliases
         .as_ref()
         .and_then(|aliases| aliases.get_alias(&request.filter));
@@ -1403,6 +1439,8 @@ fn forward_device_data(
             .as_mut()
             .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
     }
+
+    let subscription_id = connection.subscription_ids.get(&request.filter);
 
     // Fill and notify device data
     let forwards = publishes
@@ -1420,6 +1458,13 @@ fn forward_device_data(
             // We want to clear topic if we are using an existing alias
             if topic_alias_already_exists {
                 publish.topic.clear()
+            }
+
+            if let Some(&subscription_id) = subscription_id {
+                // create new props if not already exists
+                let mut props = properties.unwrap_or_default();
+                props.subscription_identifiers.push(subscription_id);
+                properties = Some(props);
             }
 
             Forward {

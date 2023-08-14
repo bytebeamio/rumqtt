@@ -28,6 +28,8 @@ pub struct Connection {
     pub(crate) topic_aliases: HashMap<u16, Topic>,
     /// Topic aliases used by broker
     pub(crate) broker_topic_aliases: Option<BrokerAliases>,
+    /// subscription IDs for a connection
+    pub(crate) subscription_ids: HashMap<Filter, usize>,
 }
 
 impl Connection {
@@ -68,6 +70,7 @@ impl Connection {
             events: ConnectionEvents::default(),
             topic_aliases: HashMap::new(),
             broker_topic_aliases,
+            subscription_ids: HashMap::new(),
         }
     }
 }
