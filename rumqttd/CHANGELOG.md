@@ -8,8 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttd 0.17.0] - 15-08-2023
+
+### Added
 - Subscription IDs in v5 publish packets (#632)
 - Shared Subscriptions with configurable strategies (#668)
+- Bump dependencies to latest (#666)
 
 ### Changed
 
