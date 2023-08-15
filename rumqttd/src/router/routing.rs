@@ -24,6 +24,7 @@ use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
+use super::shared_subs::SharedGroup;
 use super::{
     packetid, Connection, DataRequest, Event, FilterIdx, Meter, Notification, Print, RouterMeter,
     ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
@@ -98,6 +99,8 @@ pub struct Router {
     router_meters: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
+    /// Shared subscriptions map <group-name, group>
+    shared_subscriptions: HashMap<String, SharedGroup>,
 }
 
 impl Router {
@@ -137,6 +140,7 @@ impl Router {
             router_tx,
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
+            shared_subscriptions: HashMap::new(),
         }
     }
 
@@ -442,6 +446,14 @@ impl Router {
         let inflight_data_requests = self.datalog.clean(id);
         let retransmissions = outgoing.retransmission_map();
 
+        // Remove connections from all groups and
+        // discard empty group ( group with no client )
+        // note: can we do this in better way?
+        self.shared_subscriptions.retain(|_, group| {
+            group.remove_client(&client_id);
+            !group.is_empty()
+        });
+
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
             if let Some(connections) = self.subscription_map.get_mut(filter) {
@@ -472,6 +484,14 @@ impl Router {
             for request in tracker.data_requests.iter_mut() {
                 if let Some(cursor) = retransmissions.get(&request.filter_idx) {
                     request.cursor = *cursor;
+                    // reset the group cursor
+                    if let Some(group_name) = &request.group {
+                        // TODO: Test this more
+                        self.shared_subscriptions
+                            .get_mut(group_name)
+                            .expect("group must exists")
+                            .cursor = *cursor;
+                    }
                 }
             }
 
@@ -614,12 +634,12 @@ impl Router {
                         );
                     };
                 }
-                Packet::Subscribe(subscribe, props) => {
+                Packet::Subscribe(mut subscribe, props) => {
                     let mut return_codes = Vec::new();
                     let pkid = subscribe.pkid;
                     // let len = s.len();
 
-                    for f in &subscribe.filters {
+                    for f in &mut subscribe.filters {
                         let span =
                             tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
@@ -634,8 +654,14 @@ impl Router {
                             break;
                         }
 
-                        let filter = &f.path;
-                        let qos = f.qos;
+                        let mut filter = f.path.clone();
+                        let mut group = None;
+
+                        if let Some((grp, filter_path)) = extract_group(&f.path) {
+                            group = Some(grp);
+                            filter = filter_path;
+                        };
+
                         let subscription_id = props.as_ref().and_then(|p| p.id);
 
                         if subscription_id == Some(0) {
@@ -645,19 +671,17 @@ impl Router {
                             break;
                         }
 
-                        let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(
-                            id,
-                            cursor,
-                            idx,
-                            filter.clone(),
-                            qos as u8,
-                            subscription_id,
-                        );
-                        self.datalog
-                            .handle_retained_messages(filter, &mut self.notifications);
+                        let (idx, cursor) = self.datalog.next_native_offset(&filter);
 
-                        let code = match qos {
+                        // in case of shared sub original_filter will be $share/group/topic
+                        // this is because we do want to treat is as diffrent subscription
+                        // and create DataRequest, while using the same datalog of "topic"
+                        // NOTE: topic & $share/group/topic will have same filteridx!
+                        self.prepare_filter(id, cursor, idx, f, group, subscription_id);
+                        self.datalog
+                            .handle_retained_messages(&filter, &mut self.notifications);
+
+                        let code = match f.qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
                             QoS::AtLeastOnce => SubscribeReasonCode::QoS1,
                             QoS::ExactlyOnce => SubscribeReasonCode::QoS2,
@@ -698,6 +722,14 @@ impl Router {
                                 );
                                 continue;
                             }
+
+                            // Remove connections from all groups
+                            // discard empty group ( group with no client )
+                            // note: can we do this in better way?
+                            self.shared_subscriptions.retain(|_, group| {
+                                group.remove_client(&client_id);
+                                !group.is_empty()
+                            });
 
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
@@ -871,39 +903,58 @@ impl Router {
         id: ConnectionId,
         cursor: Offset,
         filter_idx: FilterIdx,
-        filter: String,
-        qos: u8,
+        filter: &protocol::Filter,
+        group: Option<String>,
         subscription_id: Option<usize>,
     ) {
+        let filter_path = &filter.path;
+
         // Add connection id to subscription list
-        match self.subscription_map.get_mut(&filter) {
+        match self.subscription_map.get_mut(filter_path) {
             Some(connections) => {
                 connections.insert(id);
             }
             None => {
                 let mut connections = HashSet::new();
                 connections.insert(id);
-                self.subscription_map.insert(filter.clone(), connections);
+                self.subscription_map
+                    .insert(filter_path.clone(), connections);
             }
         }
 
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
 
+        // Add/Create shared group
+        if let Some(group_name) = &group {
+            let client_id = connection.client_id.clone();
+
+            let shared_group = self
+                .shared_subscriptions
+                .entry(group_name.to_string())
+                .or_insert(SharedGroup::new(
+                    cursor,
+                    self.config.shared_subscriptions_strategy.clone(),
+                ));
+
+            shared_group.add_client(client_id);
+        };
+
         if let Some(subscription_id) = subscription_id {
             connection
                 .subscription_ids
-                .insert(filter.clone(), subscription_id);
+                .insert(filter_path.clone(), subscription_id);
         }
 
-        if connection.subscriptions.insert(filter.clone()) {
+        if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
-                filter: filter.clone(),
+                filter: filter_path.clone(),
                 filter_idx,
-                qos,
+                qos: filter.qos as u8,
                 cursor,
                 read_count: 0,
                 max_count: 100,
+                group,
             };
 
             self.scheduler.track(id, request);
@@ -912,7 +963,7 @@ impl Router {
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-        meter.register_subscription(filter);
+        meter.register_subscription(filter_path.clone());
     }
 
     /// When a connection is ready, it should sweep native data from 'datalog',
@@ -944,6 +995,10 @@ impl Router {
 
         let connection = &mut self.connections[id];
 
+        // Keep track of temporarily skipped DataRequest
+        // NOTE: VecDeque::new() doesn't allocate memory until elements are pushed
+        let mut skipped_requests: VecDeque<DataRequest> = VecDeque::new();
+
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
         // So a new connection is always scheduled with at least one request
@@ -955,12 +1010,30 @@ impl Router {
                 // acks are completely caught up. Pending requests are registered
                 // in waiters and awaiting new notifications (device or replica data)
                 None => {
-                    self.scheduler.pause(id, PauseReason::Caughtup);
+                    if skipped_requests.is_empty() {
+                        // if no requests is in skip list, that means
+                        // we have nothing left to process, i.e. we caughtup
+                        self.scheduler.pause(id, PauseReason::Caughtup);
+                    }
+                    // add back the skipped requests!
+                    self.scheduler.trackv(id, skipped_requests);
                     return Some(());
                 }
             };
 
-            match forward_device_data(&mut request, datalog, outgoing, alertlog, connection) {
+            let shared_group = request
+                .group
+                .as_ref()
+                .and_then(|name| self.shared_subscriptions.get_mut(name));
+
+            match forward_device_data(
+                &mut request,
+                datalog,
+                outgoing,
+                alertlog,
+                connection,
+                shared_group,
+            ) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
                     self.scheduler.pause(id, PauseReason::Busy);
@@ -983,10 +1056,14 @@ impl Router {
                 ConsumeStatus::PartialRead => {
                     requests.push_back(request);
                 }
+                ConsumeStatus::SkipRequest => {
+                    skipped_requests.push_back(request);
+                }
             }
         }
 
         // Add requests back to the tracker if there are any
+        requests.extend(skipped_requests);
         self.scheduler.trackv(id, requests);
         Some(())
     }
@@ -1225,6 +1302,9 @@ enum ConsumeStatus {
     FilterCaughtup,
     /// Some publishes on topic have been forwarded
     PartialRead,
+    /// Use to indicate we want to skip the datareqest
+    /// for shared subscriptions
+    SkipRequest,
 }
 
 /// Sweep datalog from offset in DataRequest and updates DataRequest
@@ -1235,13 +1315,20 @@ enum ConsumeStatus {
 /// 3. `inflight_full`: whether the inflight requests were completely filled
 fn forward_device_data(
     request: &mut DataRequest,
-    datalog: &DataLog,
+    datalog: &mut DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
     connection: &mut Connection,
+    shared_group: Option<&mut SharedGroup>,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
+
+    if let Some(ref shared_group) = shared_group {
+        // update the request cursor to use shared cursor
+        request.cursor = shared_group.cursor;
+    }
+
     trace!(
         "Reading from datalog: {}[{}, {}]",
         request.filter,
@@ -1249,7 +1336,7 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos != 0 {
+    let mut inflight_slots = if request.qos != 0 {
         // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
@@ -1261,6 +1348,15 @@ fn forward_device_data(
     } else {
         datalog.config.max_outgoing_packet_count
     };
+
+    if shared_group
+        .as_ref()
+        .is_some_and(|g| g.strategy == Strategy::RoundRobin)
+    {
+        // only read one message in case of round robin
+        // so that messages get equally distributed!
+        inflight_slots = 1;
+    }
 
     let (next, publishes) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
@@ -1275,6 +1371,18 @@ fn forward_device_data(
         Position::Next { start, end } => (start, end, false),
         Position::Done { start, end } => (start, end, true),
     };
+
+    if let Some(ref shared_group) = shared_group {
+        let skip_current_client = Some(&outgoing.client_id) != shared_group.current_client();
+
+        if skip_current_client {
+            return if caughtup {
+                ConsumeStatus::FilterCaughtup
+            } else {
+                ConsumeStatus::SkipRequest
+            };
+        }
+    }
 
     if start != request.cursor {
         let error = format!(
@@ -1379,6 +1487,14 @@ fn forward_device_data(
     }
 
     outgoing.handle.try_send(()).ok();
+
+    // update the state of shared subscription
+    if let Some(share) = shared_group {
+        share.update_next_client();
+        // update the shared cursor
+        share.cursor = request.cursor;
+    }
+
     if caughtup {
         ConsumeStatus::FilterCaughtup
     } else {
@@ -1490,7 +1606,7 @@ fn validate_subscription(
         }
     }
 
-    if filter.path.starts_with('$') {
+    if filter.path.starts_with('$') && !filter.path.starts_with("$share") {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
     }
 
@@ -1507,6 +1623,12 @@ fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
     Ok(())
 }
 
+fn extract_group(filter: &str) -> Option<(String, String)> {
+    filter.strip_prefix("$share/").and_then(|s| {
+        s.split_once('/')
+            .map(|(group, path)| (group.to_string(), path.to_string()))
+    })
+}
 // #[cfg(test)]
 // #[allow(non_snake_case)]
 // mod test {

@@ -9,6 +9,7 @@ max_connections = 10010
 max_outgoing_packet_count = 200
 max_segment_size = 104857600
 max_segment_count = 10
+# shared_subscriptions_strategy = "random" # "sticky" | "roundrobin" ( default ) | "random"
 # Any filters that match to configured filter will have custom segment size.
     # [router.custom_segment.'/office/+/devices/status']
     # max_segment_size = 102400
