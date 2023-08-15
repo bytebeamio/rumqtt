@@ -941,7 +941,8 @@ impl Router {
                 .insert(filter_path.clone(), subscription_id);
         }
 
-        let forward_retained_msg = retain_forward_rule != &protocol::RetainForwardRule::Never;
+        let forward_retained_msg =
+            (retain_forward_rule != &protocol::RetainForwardRule::Never) && group.is_none();
 
         if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
@@ -959,7 +960,9 @@ impl Router {
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
-        } else if retain_forward_rule == &protocol::RetainForwardRule::OnEverySubscribe {
+        } else if retain_forward_rule == &protocol::RetainForwardRule::OnEverySubscribe
+            && group.is_none()
+        {
             // update forward_retained_msg to true incase of existing subscriptions
             // when retain_forward_rule is OnEverySubscribe
             self.scheduler.trackers[id]
