@@ -438,6 +438,7 @@ impl AckLog {
 #[cfg(test)]
 mod test {
     use super::DataLog;
+    use crate::router::shared_subs::Strategy;
     use crate::RouterConfig;
 
     #[test]
@@ -449,6 +450,7 @@ mod test {
             max_outgoing_packet_count: 1024,
             custom_segment: None,
             initialized_filters: None,
+            shared_subscriptions_strategy: Strategy::RoundRobin,
         };
         let mut data = DataLog::new(config).unwrap();
         data.next_native_offset("topic/a");
@@ -468,6 +470,7 @@ mod test {
             max_outgoing_packet_count: 1024,
             custom_segment: None,
             initialized_filters: None,
+            shared_subscriptions_strategy: Strategy::RoundRobin,
         };
         let mut data = DataLog::new(config).unwrap();
         data.next_native_offset("+/+");

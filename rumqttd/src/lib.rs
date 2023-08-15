@@ -38,6 +38,8 @@ pub use link::meters;
 pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
 pub use server::Broker;
 
+use self::router::shared_subs::Strategy;
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub id: usize,
@@ -144,6 +146,9 @@ pub struct RouterConfig {
     pub max_segment_count: usize,
     pub custom_segment: Option<HashMap<String, SegmentConfig>>,
     pub initialized_filters: Option<Vec<Filter>>,
+    // defaults to Round Robin
+    #[serde(default)]
+    pub shared_subscriptions_strategy: Strategy,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

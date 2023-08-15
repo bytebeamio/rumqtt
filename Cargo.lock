@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "rumqttd"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "async-tungstenite",
  "axum",
@@ -1892,6 +1892,7 @@ dependencies = [
  "parking_lot",
  "pretty_assertions",
  "pretty_env_logger",
+ "rand",
  "rustls-pemfile",
  "rustls-webpki 0.101.1",
  "serde",

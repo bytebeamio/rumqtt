@@ -22,6 +22,7 @@ pub mod iobufs;
 mod logs;
 mod routing;
 mod scheduler;
+pub(crate) mod shared_subs;
 mod waiters;
 
 pub use alertlog::Alert;
@@ -192,6 +193,7 @@ pub struct DataRequest {
     /// Maximum count of payload buffer per replica
     max_count: usize,
     pub(crate) forward_retained_msg: bool,
+    pub(crate) group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
