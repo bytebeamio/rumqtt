@@ -961,15 +961,15 @@ impl Router {
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         } else if retain_forward_rule == &protocol::RetainForwardRule::OnEverySubscribe
-            && group.is_none()
+            && forward_retained_msg
         {
             // update forward_retained_msg to true incase of existing subscriptions
             // when retain_forward_rule is OnEverySubscribe
             self.scheduler.trackers[id]
                 .data_requests
                 .iter_mut()
-                .find(|r| r.filter_idx == filter_idx)
-                .map(|r| r.forward_retained_msg = true)
+                .find(|r| (r.filter_idx == filter_idx) && r.group.is_none())
+                .map(|r| r.forward_retained_msg = forward_retained_msg)
                 .unwrap();
         }
 

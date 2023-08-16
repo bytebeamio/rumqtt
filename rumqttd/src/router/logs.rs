@@ -299,15 +299,12 @@ impl DataLog {
             is_valid
         });
 
-        let mut retained = Vec::new();
-
         // no need to include timestamp when returning
         self.retained_publishes
             .iter()
             .filter(|(topic, _)| matches(topic, filter))
-            .for_each(|(_, p)| retained.push((p.publish.clone(), p.properties.clone())));
-
-        retained
+            .map(|(_, p)| (p.publish.clone(), p.properties.clone()))
+            .collect()
     }
 }
 
