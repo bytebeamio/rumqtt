@@ -61,7 +61,7 @@ mod filter {
                 qos: qos(requested_qos).ok_or(Error::InvalidQoS(requested_qos))?,
                 nolocal: false,
                 preserve_retain: false,
-                retain_forward_rule: RetainForwardRule::Never,
+                retain_forward_rule: RetainForwardRule::OnEverySubscribe,
             });
         }
 
