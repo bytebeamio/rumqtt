@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.16.0"
+version = "0.17.0"
 publish = false
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
@@ -36,6 +36,7 @@ metrics = "0.21.1"
 metrics-exporter-prometheus = "0.12.1"
 clap = { version = "4.2", features = ["derive"] }
 axum = "0.6.4"
+rand = "0.8.5"
 
 [features]
 default = ["use-rustls"]
