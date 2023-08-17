@@ -941,9 +941,13 @@ impl Router {
                 .insert(filter_path.clone(), subscription_id);
         }
 
+        // check is group is None because retained messages aren't sent
+        // for shared subscriptions
         let forward_retained_msg =
             (retain_forward_rule != &protocol::RetainForwardRule::Never) && group.is_none();
 
+        // call to `insert(_)` returns `true` if it didn't contain the filter_path already
+        // i.e. its a new subscription
         if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
                 filter: filter_path.clone(),
@@ -968,6 +972,9 @@ impl Router {
             self.scheduler.trackers[id]
                 .data_requests
                 .iter_mut()
+                // there can be two data request with same filter_idx
+                // one shared and one non-shared / regular subscription
+                // we want to find the non-shared request
                 .find(|r| (r.filter_idx == filter_idx) && r.group.is_none())
                 .map(|r| r.forward_retained_msg = forward_retained_msg)
                 .unwrap();
@@ -1208,8 +1215,6 @@ fn append_to_commitlog(
         return Ok(None);
     }
 
-    // NOTE(swanandx): why we unset the retain field?
-    // publish.retain = false;
     let pkid = publish.pkid;
 
     let filter_idxs = datalog.matches(topic);
@@ -1373,9 +1378,9 @@ fn forward_device_data(
     let mut publishes = Vec::new();
 
     if request.forward_retained_msg {
-        // NOTE: limit the number of read messages
-        // and skip the messages previously read.
-        // for now, just dropping the excess msgs
+        // NOTE: ideally we want to limit the number of read messages
+        // and skip the messages previously read while reading next time.
+        // but for now, we just try to read all messages and drop the excess ones
         let mut retained_publishes = datalog.read_retained_messages(&request.filter);
         retained_publishes.truncate(inflight_slots as usize);
 

@@ -62,7 +62,6 @@ pub struct Outgoing {
     inflight_buffer: VecDeque<(u16, FilterIdx, Option<Cursor>)>,
     /// PubRels waiting for PubComp
     pub(crate) unacked_pubrels: VecDeque<u16>,
-    // pub(crate) inflight_retained: VecDeque<(u16, FilterIdx)>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
