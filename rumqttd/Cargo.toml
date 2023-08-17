@@ -1,13 +1,15 @@
 [package]
 name = "rumqttd"
 version = "0.17.0"
-license = "Apache-2.0"
+publish = true
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
-authors = ["tekjar <raviteja@bytebeam.io>"]
-edition = "2021"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
 categories = ["network-programming"]
-repository = "https://github.com/bytebeamio/rumqtt/"
+rust-version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [dependencies]
 tokio = { version = "1.0", features = ["rt", "time", "net", "io-util", "macros"]}

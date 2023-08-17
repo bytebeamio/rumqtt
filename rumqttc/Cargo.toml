@@ -1,13 +1,15 @@
 [package]
 name = "rumqttc"
 version = "0.22.0"
+publish = true
 description = "An efficient and robust mqtt client for your connected devices"
-license = "Apache-2.0"
-repository = "https://github.com/bytebeamio/rumqtt"
-authors = ["tekjar"]
-edition = "2018"
 keywords = ["mqtt", "iot", "coap", "http"]
 categories = ["network-programming"]
+rust-version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
