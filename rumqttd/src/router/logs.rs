@@ -269,22 +269,42 @@ impl DataLog {
         self.retained_publishes.remove(&topic);
     }
 
-    pub fn handle_retained_messages(
-        &mut self,
-        filter: &str,
-        notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
-    ) {
-        trace!(info = "retain-msg", filter = &filter);
+    pub fn read_retained_messages(&mut self, filter: &str) -> Vec<PubWithProp> {
+        trace!(info = "reading retain msg", filter = &filter);
+        let now = Instant::now();
 
-        let idx = self.filter_indexes.get(filter).unwrap();
+        // discard expired retained messages
+        self.retained_publishes.retain(|_, pubdata| {
+            // Keep data if no properties exists, which implies no message expiry!
+            let Some(properties) = pubdata.properties.as_mut() else {
+                return true
+            };
 
-        let datalog = self.native.get_mut(*idx).unwrap();
+            // Keep data if there is no message_expiry_interval
+            let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
+                return true
+            };
 
-        for (topic, publish) in self.retained_publishes.iter_mut() {
-            if matches(topic, filter) {
-                datalog.append(publish.clone(), notifications);
+            let time_spent = (now - pubdata.timestamp).as_secs() as u32;
+
+            let is_valid = time_spent < *message_expiry_interval;
+
+            // ignore expired messages
+            if is_valid {
+                // set message_expiry_interval to (original value - time spent waiting in server)
+                // ref: https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901112
+                *message_expiry_interval -= time_spent;
             }
-        }
+
+            is_valid
+        });
+
+        // no need to include timestamp when returning
+        self.retained_publishes
+            .iter()
+            .filter(|(topic, _)| matches(topic, filter))
+            .map(|(_, p)| (p.publish.clone(), p.properties.clone()))
+            .collect()
     }
 }
 

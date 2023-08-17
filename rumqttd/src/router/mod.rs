@@ -110,7 +110,7 @@ impl From<Notification> for MaybePacket {
 
 #[derive(Debug, Clone)]
 pub struct Forward {
-    pub cursor: (u64, u64),
+    pub cursor: Option<(u64, u64)>,
     pub size: usize,
     pub publish: Publish,
     pub properties: Option<PublishProperties>,
@@ -192,6 +192,7 @@ pub struct DataRequest {
     pub read_count: usize,
     /// Maximum count of payload buffer per replica
     max_count: usize,
+    pub(crate) forward_retained: bool,
     pub(crate) group: Option<String>,
 }
 

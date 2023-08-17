@@ -541,7 +541,7 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(mut publish, properties) => {
+                Packet::Publish(publish, properties) => {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
@@ -590,11 +590,6 @@ impl Router {
                     };
 
                     self.router_meters.total_publishes += 1;
-
-                    // Ignore retained messages
-                    if publish.retain {
-                        publish.retain = false;
-                    }
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -678,8 +673,6 @@ impl Router {
                         // and create DataRequest, while using the same datalog of "topic"
                         // NOTE: topic & $share/group/topic will have same filteridx!
                         self.prepare_filter(id, cursor, idx, f, group, subscription_id);
-                        self.datalog
-                            .handle_retained_messages(&filter, &mut self.notifications);
 
                         let code = match f.qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
@@ -898,6 +891,7 @@ impl Router {
     }
 
     /// Apply filter and prepare this connection to receive subscription data
+    /// Handle retained messages as per subscription options!
     fn prepare_filter(
         &mut self,
         id: ConnectionId,
@@ -946,6 +940,13 @@ impl Router {
                 .insert(filter_path.clone(), subscription_id);
         }
 
+        // check is group is None because retained messages aren't sent
+        // for shared subscriptions
+        // TODO: use retain forward rules
+        let forward_retained = group.is_none();
+
+        // call to `insert(_)` returns `true` if it didn't contain the filter_path already
+        // i.e. its a new subscription
         if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
                 filter: filter_path.clone(),
@@ -954,6 +955,8 @@ impl Router {
                 cursor,
                 read_count: 0,
                 max_count: 100,
+                // set true for new subscriptions
+                forward_retained,
                 group,
             };
 
@@ -961,6 +964,10 @@ impl Router {
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         }
+
+        // TODO: figure out how we can update existing DataRequest
+        // helpful in re-subscriptions and forwarding retained messages on
+        // every subscribe
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
         meter.register_subscription(filter_path.clone());
@@ -1193,10 +1200,11 @@ fn append_to_commitlog(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        error!("Unexpected: retain field was not unset");
         datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
     }
 
+    // after recording retained message, we also send that message to existing subscribers
+    // as normal publish message. Therefore we are setting retain to false
     publish.retain = false;
     let pkid = publish.pkid;
 
@@ -1358,7 +1366,23 @@ fn forward_device_data(
         inflight_slots = 1;
     }
 
-    let (next, publishes) =
+    let mut publishes = Vec::new();
+
+    if request.forward_retained {
+        // NOTE: ideally we want to limit the number of read messages
+        // and skip the messages previously read while reading next time.
+        // but for now, we just try to read all messages and drop the excess ones
+        let mut retained_publishes = datalog.read_retained_messages(&request.filter);
+        retained_publishes.truncate(inflight_slots as usize);
+
+        publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
+        inflight_slots -= publishes.len() as u64;
+
+        // we only want to forward retained messages once
+        request.forward_retained = false;
+    }
+
+    let (next, publishes_from_datalog) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
             Ok(v) => v,
             Err(e) => {
@@ -1366,6 +1390,12 @@ fn forward_device_data(
                 return ConsumeStatus::FilterCaughtup;
             }
         };
+
+    publishes.extend(
+        publishes_from_datalog
+            .into_iter()
+            .map(|(p, offset)| (p, Some(offset))),
+    );
 
     let (start, next, caughtup) = match next {
         Position::Next { start, end } => (start, end, false),
