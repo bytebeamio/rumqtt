@@ -192,7 +192,7 @@ pub struct DataRequest {
     pub read_count: usize,
     /// Maximum count of payload buffer per replica
     max_count: usize,
-    pub(crate) forward_retained_msg: bool,
+    pub(crate) forward_retained: bool,
     pub(crate) group: Option<String>,
 }
 

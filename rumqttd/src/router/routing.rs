@@ -902,7 +902,6 @@ impl Router {
         subscription_id: Option<usize>,
     ) {
         let filter_path = &filter.path;
-        let retain_forward_rule = &filter.retain_forward_rule;
 
         // Add connection id to subscription list
         match self.subscription_map.get_mut(filter_path) {
@@ -943,8 +942,8 @@ impl Router {
 
         // check is group is None because retained messages aren't sent
         // for shared subscriptions
-        let forward_retained_msg =
-            (retain_forward_rule != &protocol::RetainForwardRule::Never) && group.is_none();
+        // TODO: use retain forward rules
+        let forward_retained = group.is_none();
 
         // call to `insert(_)` returns `true` if it didn't contain the filter_path already
         // i.e. its a new subscription
@@ -957,28 +956,18 @@ impl Router {
                 read_count: 0,
                 max_count: 100,
                 // set true for new subscriptions
-                forward_retained_msg,
+                forward_retained,
                 group,
             };
 
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
-        } else if retain_forward_rule == &protocol::RetainForwardRule::OnEverySubscribe
-            && forward_retained_msg
-        {
-            // update forward_retained_msg to true incase of existing subscriptions
-            // when retain_forward_rule is OnEverySubscribe
-            self.scheduler.trackers[id]
-                .data_requests
-                .iter_mut()
-                // there can be two data request with same filter_idx
-                // one shared and one non-shared / regular subscription
-                // we want to find the non-shared request
-                .find(|r| (r.filter_idx == filter_idx) && r.group.is_none())
-                .map(|r| r.forward_retained_msg = forward_retained_msg)
-                .unwrap();
         }
+
+        // TODO: figure out how we can update existing DataRequest
+        // helpful in re-subscriptions and forwarding retained messages on
+        // every subscribe
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
         meter.register_subscription(filter_path.clone());
@@ -1379,7 +1368,7 @@ fn forward_device_data(
 
     let mut publishes = Vec::new();
 
-    if request.forward_retained_msg {
+    if request.forward_retained {
         // NOTE: ideally we want to limit the number of read messages
         // and skip the messages previously read while reading next time.
         // but for now, we just try to read all messages and drop the excess ones
@@ -1390,7 +1379,7 @@ fn forward_device_data(
         inflight_slots -= publishes.len() as u64;
 
         // we only want to forward retained messages once
-        request.forward_retained_msg = false;
+        request.forward_retained = false;
     }
 
     let (next, publishes_from_datalog) =
