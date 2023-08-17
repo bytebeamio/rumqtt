@@ -1,7 +1,7 @@
 [package]
 name = "rumqttd"
 version = "0.17.0"
-publish = false
+publish = true
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
 categories = ["network-programming"]
