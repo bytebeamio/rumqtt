@@ -1172,7 +1172,7 @@ fn append_to_commitlog(
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
-) -> Result<Option<Offset>, RouterError> {
+) -> Result<Offset, RouterError> {
     let connection = connections.get_mut(id).unwrap();
 
     let topic_alias = properties.as_mut().and_then(|p| {
@@ -1212,9 +1212,11 @@ fn append_to_commitlog(
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
         datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
-        return Ok(None);
     }
 
+    // after recording retained message, we also send that message to existing subscribers
+    // as normal publish message. Therefore we are setting retain to false
+    publish.retain = false;
     let pkid = publish.pkid;
 
     let filter_idxs = datalog.matches(topic);
@@ -1243,7 +1245,7 @@ fn append_to_commitlog(
     }
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
-    Ok(Some(o))
+    Ok(o)
 }
 
 fn validate_and_set_topic_alias(
