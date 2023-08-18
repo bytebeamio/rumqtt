@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 ### Removed
+- Link and its implementation which were deprecated.
 
 ### Fixed
 - Retained Messages
