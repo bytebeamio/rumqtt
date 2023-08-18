@@ -74,12 +74,12 @@ impl<P: Protocol> RemoteLink<P> {
         })
         .await??;
 
-        let (connect, props, lastwill, login) = match packet {
-            Packet::Connect(connect, props, lastwill, _, login) => {
+        let (connect, props, lastwill, lastwill_props, login) = match packet {
+            Packet::Connect(connect, props, lastwill, lastwill_props, login) => {
                 Span::current().record("client_id", &connect.client_id);
 
                 // Ignore last will
-                (connect, props, lastwill, login)
+                (connect, props, lastwill, lastwill_props, login)
             }
             packet => return Err(Error::NotConnectPacket(packet)),
         };
@@ -126,6 +126,7 @@ impl<P: Protocol> RemoteLink<P> {
             .tenant_id(tenant_id)
             .clean_session(clean_session)
             .last_will(lastwill)
+            .last_will_properties(lastwill_props)
             .dynamic_filters(dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
             .build()?;

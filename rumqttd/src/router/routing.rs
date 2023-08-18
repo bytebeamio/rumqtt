@@ -1077,10 +1077,13 @@ impl Router {
 
     pub fn handle_last_will(&mut self, id: ConnectionId) {
         let connection = self.connections.get_mut(id).unwrap();
+
         let will = match connection.last_will.take() {
             Some(v) => v,
             None => return,
         };
+
+        let will_props = connection.last_will_properties.take();
 
         let publish = Publish {
             dup: false,
@@ -1091,7 +1094,16 @@ impl Router {
             payload: will.message,
         };
 
-        let properties = None;
+        let properties = will_props.map(|props| PublishProperties {
+            payload_format_indicator: props.payload_format_indicator,
+            message_expiry_interval: props.message_expiry_interval,
+            response_topic: props.response_topic,
+            correlation_data: props.correlation_data,
+            user_properties: props.user_properties,
+            content_type: props.content_type,
+            ..Default::default()
+        });
+
         match append_to_commitlog(
             id,
             publish,
