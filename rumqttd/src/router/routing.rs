@@ -1082,7 +1082,6 @@ impl Router {
             None => return,
         };
 
-        error!("Unexpected: last will not unset");
         let publish = Publish {
             dup: false,
             qos: will.qos,

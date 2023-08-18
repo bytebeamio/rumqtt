@@ -75,11 +75,11 @@ impl<P: Protocol> RemoteLink<P> {
         .await??;
 
         let (connect, props, lastwill, login) = match packet {
-            Packet::Connect(connect, props, _lastwill, _, login) => {
+            Packet::Connect(connect, props, lastwill, _, login) => {
                 Span::current().record("client_id", &connect.client_id);
 
                 // Ignore last will
-                (connect, props, None, login)
+                (connect, props, lastwill, login)
             }
             packet => return Err(Error::NotConnectPacket(packet)),
         };
