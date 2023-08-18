@@ -1,11 +1,14 @@
-**/*.pem
-**/*.der
-**/*.pb
-**/perf.data*
-**/cachegrind.out
+# Certificates
+*.pem
+*.der
+*.pb
+# Performance analysis
+perf.data*
+# Valgrind
+cachegrind.out
+# Plot
 /plot
 **/.uuid
-**/build/
 # Logs
 **/logs/
 *.log
