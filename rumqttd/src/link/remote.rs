@@ -2,7 +2,7 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
-use crate::protocol::{Connect, ConnectProperties, LastWill, LastWillProperties, Packet, Protocol};
+use crate::protocol::{Connect, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
@@ -58,13 +58,15 @@ pub struct RemoteLink<P> {
 
 impl<P: Protocol> RemoteLink<P> {
     pub async fn new(
-        config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,
         tenant_id: Option<String>,
         mut network: Network<P>,
+        connect_packet: Packet,
+        dynamic_filters: bool,
     ) -> Result<RemoteLink<P>, Error> {
-        let dynamic_filters = config.dynamic_filters;
-        let (connect, props, lastwill, lastwill_props) = mqtt_connect(config, &mut network).await?;
+        let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
+            return Err(Error::NotConnectPacket(connect_packet));
+        };
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
@@ -149,15 +151,7 @@ impl<P: Protocol> RemoteLink<P> {
 pub async fn mqtt_connect<P>(
     config: Arc<ConnectionSettings>,
     network: &mut Network<P>,
-) -> Result<
-    (
-        Connect,
-        Option<ConnectProperties>,
-        Option<LastWill>,
-        Option<LastWillProperties>,
-    ),
-    Error,
->
+) -> Result<Packet, Error>
 where
     P: Protocol,
 {
@@ -171,10 +165,8 @@ where
     })
     .await??;
 
-    let (connect, props, lastwill, lastwill_props, login) = match packet {
-        Packet::Connect(connect, props, lastwill, lastwill_props, login) => {
-            (connect, props, lastwill, lastwill_props, login)
-        }
+    let (connect, _props, login) = match packet {
+        Packet::Connect(ref connect, ref props, _, _, ref login) => (connect, props, login),
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
@@ -214,5 +206,6 @@ where
         return Err(Error::InvalidClientId);
     }
 
-    Ok((connect, props, lastwill, lastwill_props))
+    // Ok((connect, props, lastwill, lastwill_props))
+    Ok(packet)
 }

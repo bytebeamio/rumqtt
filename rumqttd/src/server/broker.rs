@@ -1,7 +1,7 @@
 use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
 use crate::link::network::{Network, N};
-use crate::link::remote::{self, RemoteLink};
+use crate::link::remote::{self, mqtt_connect, RemoteLink};
 use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
 use crate::protocol::v4::V4;
@@ -432,21 +432,39 @@ async fn remote<P: Protocol>(
     stream: Box<dyn N>,
     protocol: P,
 ) {
-    let network = Network::new(
+    let mut network = Network::new(
         stream,
         config.max_payload_size,
         config.max_inflight_count,
         protocol,
     );
+
+    let dynamic_filters = config.dynamic_filters;
+
+    let connect_packet = match mqtt_connect(config, &mut network).await {
+        Ok(p) => p,
+        Err(e) => {
+            error!(error=?e, "Error while handling MQTT connect packet");
+            return;
+        }
+    };
+
     // Start the link
-    let mut link =
-        match RemoteLink::new(config, router_tx.clone(), tenant_id.clone(), network).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!(error=?e, "Remote link error");
-                return;
-            }
-        };
+    let mut link = match RemoteLink::new(
+        router_tx.clone(),
+        tenant_id.clone(),
+        network,
+        connect_packet,
+        dynamic_filters,
+    )
+    .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            error!(error=?e, "Remote link error");
+            return;
+        }
+    };
 
     let client_id = link.client_id.to_owned();
     let connection_id = link.connection_id;
