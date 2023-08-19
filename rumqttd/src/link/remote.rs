@@ -31,6 +31,8 @@ pub enum Error {
     Send(#[from] SendError<(ConnectionId, Event)>),
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
+    #[error("Got new session, disconnecting old one")]
+    SessionEnd,
     #[error("Persistent session requires valid client id")]
     InvalidClientId,
     #[error("Unexpected router message")]
@@ -48,12 +50,12 @@ pub enum Error {
 /// Orchestrates between Router and Network.
 pub struct RemoteLink<P> {
     connect: Connect,
-    pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
     network: Network<P>,
     link_tx: LinkTx,
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
+    pub(crate) will_delay_interval: u32,
 }
 
 impl<P: Protocol> RemoteLink<P> {
@@ -70,12 +72,17 @@ impl<P: Protocol> RemoteLink<P> {
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let client_id = connect.client_id.clone();
+        let client_id = &connect.client_id;
         let clean_session = connect.clean_session;
 
         let topic_alias_max = props.and_then(|p| p.topic_alias_max);
 
-        let (link_tx, link_rx, notification) = LinkBuilder::new(&client_id, router_tx)
+        let will_delay_interval = lastwill_props
+            .as_ref()
+            .and_then(|f| f.delay_interval)
+            .unwrap_or(0);
+
+        let (link_tx, link_rx, notification) = LinkBuilder::new(client_id, router_tx)
             .tenant_id(tenant_id)
             .clean_session(clean_session)
             .last_will(lastwill)
@@ -93,12 +100,12 @@ impl<P: Protocol> RemoteLink<P> {
 
         Ok(RemoteLink {
             connect,
-            client_id,
             connection_id: id,
             network,
             link_tx,
             link_rx,
             notifications: VecDeque::with_capacity(100),
+            will_delay_interval,
         })
     }
 

@@ -6,13 +6,14 @@ use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
-use crate::protocol::Protocol;
+use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
 use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, Instrument};
 
 #[cfg(feature = "websocket")]
@@ -33,7 +34,7 @@ use std::{io, thread};
 
 use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
-use crate::router::{Disconnection, Event, Router};
+use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
@@ -184,7 +185,7 @@ impl Broker {
         // Spawn servers in a separate thread.
         for (_, config) in self.config.v4.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
-            let server = Server::new(config, self.router_tx.clone(), V4);
+            let mut server = Server::new(config, self.router_tx.clone(), V4);
             server_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
@@ -200,7 +201,7 @@ impl Broker {
         if let Some(v5_config) = &self.config.v5 {
             for (_, config) in v5_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
-                let server = Server::new(config, self.router_tx.clone(), V5);
+                let mut server = Server::new(config, self.router_tx.clone(), V5);
                 server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
@@ -294,10 +295,17 @@ pub enum LinkType {
     Remote,
 }
 
+#[derive(PartialEq)]
+enum AwaitingWill {
+    Cancel,
+    Fire,
+}
+
 struct Server<P> {
     config: ServerSettings,
     router_tx: Sender<(ConnectionId, Event)>,
     protocol: P,
+    existion_connections: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
 }
 
 impl<P: Protocol + Clone + Send + 'static> Server<P> {
@@ -310,6 +318,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             config,
             router_tx,
             protocol,
+            existion_connections: Arc::new(Mutex::new(HashMap::default())),
         }
     }
 
@@ -327,7 +336,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&self, link_type: LinkType) -> Result<(), Error> {
+    async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -386,14 +395,20 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                     )
                 }
                 LinkType::Remote => task::spawn(
-                    remote(config, tenant_id.clone(), router_tx, network, protocol).instrument(
-                        tracing::error_span!(
-                            "remote_link",
-                            ?tenant_id,
-                            client_id = field::Empty,
-                            connection_id = field::Empty,
-                        ),
-                    ),
+                    remote(
+                        config,
+                        tenant_id.clone(),
+                        router_tx,
+                        network,
+                        protocol,
+                        self.existion_connections.clone(),
+                    )
+                    .instrument(tracing::error_span!(
+                        "remote_link",
+                        ?tenant_id,
+                        client_id = field::Empty,
+                        connection_id = field::Empty,
+                    )),
                 ),
             };
 
@@ -431,6 +446,7 @@ async fn remote<P: Protocol>(
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
+    connections: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
 ) {
     let mut network = Network::new(
         stream,
@@ -449,6 +465,29 @@ async fn remote<P: Protocol>(
         }
     };
 
+    let (client_id, clean_session) = match &connect_packet {
+        Packet::Connect(ref connect, _, _, _, _) => {
+            (connect.client_id.clone(), connect.clean_session)
+        }
+        _ => unreachable!(),
+    };
+
+    if let Some(sender) = connections.lock().unwrap().remove(&client_id) {
+        let w = if clean_session {
+            AwaitingWill::Fire
+        } else {
+            AwaitingWill::Cancel
+        };
+        // TODO(swanandx): use send_async?
+        dbg!(sender.send(w)).unwrap();
+    }
+
+    let (reconnection_tx, reconnection_rx) = flume::bounded::<AwaitingWill>(1);
+    connections
+        .lock()
+        .unwrap()
+        .insert(client_id.clone(), reconnection_tx);
+
     // Start the link
     let mut link = match RemoteLink::new(
         router_tx.clone(),
@@ -466,9 +505,9 @@ async fn remote<P: Protocol>(
         }
     };
 
-    let client_id = link.client_id.to_owned();
     let connection_id = link.connection_id;
-    let mut execute_will = false;
+    let will_delay_interval = link.will_delay_interval;
+    let mut send_disconnect = false;
 
     match link.start().await {
         // Connection got closed. This shouldn't usually happen.
@@ -477,22 +516,39 @@ async fn remote<P: Protocol>(
         // originated internally in the router.
         Err(remote::Error::Link(e)) => {
             error!(error=?e, "router-drop");
-            return;
         }
         // Any other error
         Err(e) => {
             error!(error=?e, "Disconnected!!");
-            execute_will = true;
+            send_disconnect = true;
         }
     };
 
-    let disconnect = Disconnection {
-        id: client_id,
-        execute_will,
-        pending: vec![],
+    if send_disconnect {
+        let disconnect = Event::Disconnect;
+        let message = (connection_id, disconnect);
+        router_tx.send(message).ok();
+    }
+
+    drop(link);
+
+    let publish_will = match tokio::time::timeout(
+        Duration::from_secs(will_delay_interval as u64),
+        reconnection_rx.recv_async(),
+    )
+    .await
+    {
+        Ok(w) => dbg!(w.is_ok_and(|k| k == AwaitingWill::Fire)),
+        Err(_) => {
+            // no need to keep the sender after timeout
+            connections.lock().unwrap().remove(&client_id);
+            // as will delay interval has passed, publish the will message
+            true
+        }
     };
 
-    let disconnect = Event::Disconnect(disconnect);
-    let message = (connection_id, disconnect);
-    router_tx.send(message).ok();
+    if publish_will {
+        let message = Event::PublishWill(client_id);
+        router_tx.send((connection_id, message)).ok();
+    }
 }

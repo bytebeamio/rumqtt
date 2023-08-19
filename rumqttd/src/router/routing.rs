@@ -1,8 +1,8 @@
 use crate::protocol::{
-    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
-    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
-    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
-    UnsubAckReason,
+    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, LastWill,
+    LastWillProperties, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec,
+    PubRecReason, PubRel, PubRelReason, Publish, PublishProperties, QoS, SubAck,
+    SubscribeReasonCode, UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -101,6 +101,8 @@ pub struct Router {
     cache: Option<VecDeque<Packet>>,
     /// Shared subscriptions map <group-name, group>
     shared_subscriptions: HashMap<String, SharedGroup>,
+    /// Will messages per client_id
+    last_wills: HashMap<String, (LastWill, Option<LastWillProperties>)>,
 }
 
 impl Router {
@@ -141,6 +143,7 @@ impl Router {
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
             shared_subscriptions: HashMap::new(),
+            last_wills: HashMap::new(),
         }
     }
 
@@ -242,9 +245,7 @@ impl Router {
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::NewAlert(tx) => self.handle_new_alert(tx),
             Event::DeviceData => self.handle_device_payload(id),
-            Event::Disconnect(disconnect) => {
-                self.handle_disconnection(id, disconnect.execute_will, None)
-            }
+            Event::Disconnect => self.handle_disconnection(id, None),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
@@ -256,6 +257,7 @@ impl Router {
                 self.send_meters();
             }
             Event::PrintStatus(metrics) => print_status(self, metrics),
+            Event::PublishWill(client_id) => self.handle_last_will(client_id),
         }
     }
 
@@ -284,7 +286,7 @@ impl Router {
                     "Duplicate client_id, dropping previous connection with connection_id: {}",
                     connection_id
                 );
-                self.handle_disconnection(*connection_id, true, None);
+                self.handle_disconnection(*connection_id, None);
             }
         }
 
@@ -327,6 +329,13 @@ impl Router {
 
         if connection.events.events.len() > 10 {
             connection.events.events.pop_front();
+        }
+
+        if let Some(will) = connection.last_will.take() {
+            self.last_wills.insert(
+                client_id.clone(),
+                (will, connection.last_will_properties.take()),
+            );
         }
 
         let connection_id = self.connections.insert(connection);
@@ -382,12 +391,7 @@ impl Router {
         let _alert_id = self.alerts.insert(tx);
     }
 
-    fn handle_disconnection(
-        &mut self,
-        id: ConnectionId,
-        execute_last_will: bool,
-        reason: Option<DisconnectReasonCode>,
-    ) {
+    fn handle_disconnection(&mut self, id: ConnectionId, reason: Option<DisconnectReasonCode>) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
         let client_id = match &self.obufs.get(id) {
@@ -403,9 +407,9 @@ impl Router {
 
         // must handle last will before sending disconnect packet
         // as the disconnecting client might have subscribed to will topic.
-        if execute_last_will {
-            self.handle_last_will(id);
-        }
+        // if execute_last_will {
+        //     self.handle_last_will(id);
+        // }
 
         info!("Disconnecting connection");
 
@@ -511,6 +515,7 @@ impl Router {
             );
         }
         self.router_meters.total_connections -= 1;
+        dbg!("DISCONNECTED AND DROPPED");
     }
 
     /// Handles new incoming data on a topic
@@ -535,7 +540,6 @@ impl Router {
         let mut new_data = false;
         let mut disconnect = false;
         let mut disconnect_reason: Option<DisconnectReasonCode> = None;
-        let mut execute_will = true;
 
         // info!("{:15.15}[I] {:20} count = {}", client_id, "packets", packets.len());
 
@@ -854,7 +858,8 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
                     disconnect = true;
-                    execute_will = false;
+                    // delete the last will message
+                    self.last_wills.remove(&client_id);
                     break;
                 }
                 incoming => {
@@ -886,7 +891,7 @@ impl Router {
         // on say 5th packet should not block new data notifications for packets
         // 1 - 4. Hence we use a flag instead of diconnecting immediately
         if disconnect {
-            self.handle_disconnection(id, execute_will, disconnect_reason);
+            self.handle_disconnection(id, disconnect_reason);
         }
     }
 
@@ -1075,15 +1080,10 @@ impl Router {
         Some(())
     }
 
-    pub fn handle_last_will(&mut self, id: ConnectionId) {
-        let connection = self.connections.get_mut(id).unwrap();
-
-        let will = match connection.last_will.take() {
-            Some(v) => v,
-            None => return,
+    pub fn handle_last_will(&mut self, client_id: String) {
+        let Some((will, will_props)) = self.last_wills.remove(&client_id) else {
+            return
         };
-
-        let will_props = connection.last_will_properties.take();
 
         let publish = Publish {
             dup: false,
@@ -1104,13 +1104,11 @@ impl Router {
             ..Default::default()
         });
 
-        match append_to_commitlog(
-            id,
+        match append_will_message(
             publish,
             properties,
             &mut self.datalog,
             &mut self.notifications,
-            &mut self.connections,
         ) {
             Ok(_offset) => {
                 // Prepare all the consumers which are waiting for new data
@@ -1245,6 +1243,73 @@ fn append_to_commitlog(
     }
 
     // error!("{:15.15}[E] {:20} topic = {}", connections[id].client_id, "no-filter", topic);
+    Ok(o)
+}
+
+fn append_will_message(
+    mut publish: Publish,
+    properties: Option<PublishProperties>,
+    datalog: &mut DataLog,
+    notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
+) -> Result<Offset, RouterError> {
+    // TODO: broker should properly send the disconnect packet!
+    if properties
+        .as_ref()
+        .is_some_and(|p| !p.subscription_identifiers.is_empty())
+    {
+        error!("A PUBLISH packet sent from a Client to a Server MUST NOT contain a Subscription Identifier");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::MalformedPacket,
+        ));
+    }
+
+    let topic = std::str::from_utf8(&publish.topic)?;
+
+    // Ensure that only clients associated with a tenant can publish to tenant's topic
+    // NOTE(swanandx): how will we do this as connection is already gone?
+    // shall we split client_id if its tenant_id.client_id ?
+    // or get tenant_id as argument and generate prefix here?
+    #[cfg(feature = "validate-tenant-prefix")]
+    if let Some(tenant_prefix) = &connection.tenant_prefix {
+        if !topic.starts_with(tenant_prefix) {
+            return Err(RouterError::BadTenant(
+                tenant_prefix.to_owned(),
+                topic.to_owned(),
+            ));
+        }
+    }
+
+    if publish.payload.is_empty() {
+        datalog.remove_from_retained_publishes(topic.to_owned());
+    } else if publish.retain {
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+    }
+
+    // after recording retained message, we also send that message to existing subscribers
+    // as normal publish message. Therefore we are setting retain to false
+    publish.retain = false;
+    let pkid = publish.pkid;
+
+    let filter_idxs = datalog.matches(topic);
+
+    let filter_idxs = match filter_idxs {
+        Some(v) => v,
+        None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
+    };
+
+    let mut o = (0, 0);
+    for filter_idx in filter_idxs {
+        let datalog = datalog.native.get_mut(filter_idx).unwrap();
+        let publish_data = (publish.clone(), properties.clone());
+        let (offset, filter) = datalog.append(publish_data.into(), notifications);
+        debug!(
+            pkid,
+            "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
+        );
+
+        o = offset;
+    }
+
     Ok(o)
 }
 
