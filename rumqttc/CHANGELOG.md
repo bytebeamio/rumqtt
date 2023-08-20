@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added `bind_device` to `NetworkOptions` to enable `TCPSocket.bind_device()`
 
 - Added `MqttOptions::set_request_modifier` for setting a handler for modifying a websocket request before sending it.
 

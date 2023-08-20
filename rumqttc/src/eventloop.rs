@@ -131,7 +131,7 @@ impl EventLoop {
         if self.network.is_none() {
             let (network, connack) = match time::timeout(
                 Duration::from_secs(self.network_options.connection_timeout()),
-                connect(&self.mqtt_options, self.network_options),
+                connect(&self.mqtt_options, self.network_options.clone()),
             )
             .await
             {
@@ -242,7 +242,7 @@ impl EventLoop {
     }
 
     pub fn network_options(&self) -> NetworkOptions {
-        self.network_options
+        self.network_options.clone()
     }
 
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
@@ -311,6 +311,16 @@ pub(crate) async fn socket_connect(
         if let Some(recv_buffer_size) = network_options.tcp_recv_buffer_size {
             socket.set_recv_buffer_size(recv_buffer_size).unwrap();
         }
+
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+        socket
+            .bind_device(
+                network_options
+                    .bind_device
+                    .as_ref()
+                    .map(|bind_device| bind_device.as_bytes()),
+            )
+            .unwrap();
 
         match socket.connect(addr).await {
             Ok(s) => return Ok(s),
