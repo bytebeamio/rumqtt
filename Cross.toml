@@ -1,3 +1,5 @@
+# N.B. The following dependencies are required for all targets to be built: 'qemu' and 'qemu-user-static'
+
 [build]
 pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
