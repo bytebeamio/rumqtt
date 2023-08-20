@@ -7,6 +7,7 @@ use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
+use std::cmp::min;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
@@ -75,12 +76,20 @@ impl<P: Protocol> RemoteLink<P> {
         let client_id = &connect.client_id;
         let clean_session = connect.clean_session;
 
-        let topic_alias_max = props.and_then(|p| p.topic_alias_max);
+        let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
+        let session_expiry = props
+            .as_ref()
+            .and_then(|p| p.session_expiry_interval)
+            .unwrap_or(0);
 
-        let will_delay_interval = lastwill_props
+        let delay_interval = lastwill_props
             .as_ref()
             .and_then(|f| f.delay_interval)
             .unwrap_or(0);
+
+        // The Server delays publishing the Client’s Will Message until
+        // the Will Delay Interval has passed or the Session ends, whichever happens first
+        let will_delay_interval = min(session_expiry, delay_interval);
 
         let (link_tx, link_rx, notification) = LinkBuilder::new(client_id, router_tx)
             .tenant_id(tenant_id)
