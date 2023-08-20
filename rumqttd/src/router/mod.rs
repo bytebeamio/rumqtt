@@ -64,7 +64,7 @@ pub enum Event {
     /// Get metrics of a connection or all connections
     PrintStatus(Print),
     /// Publish Will message
-    PublishWill(String),
+    PublishWill((String, Option<String>)),
 }
 
 /// Notification from router to connection

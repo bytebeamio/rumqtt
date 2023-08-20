@@ -220,7 +220,7 @@ impl Broker {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
-                let server = Server::new(config, self.router_tx.clone(), V4);
+                let mut server = Server::new(config, self.router_tx.clone(), V4);
                 server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
@@ -305,7 +305,7 @@ struct Server<P> {
     config: ServerSettings,
     router_tx: Sender<(ConnectionId, Event)>,
     protocol: P,
-    existion_connections: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
+    awaiting_will_handler: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
 }
 
 impl<P: Protocol + Clone + Send + 'static> Server<P> {
@@ -318,7 +318,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             config,
             router_tx,
             protocol,
-            existion_connections: Arc::new(Mutex::new(HashMap::default())),
+            awaiting_will_handler: Arc::new(Mutex::new(HashMap::default())),
         }
     }
 
@@ -385,13 +385,19 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         }
                     };
                     task::spawn(
-                        remote(config, tenant_id.clone(), router_tx, stream, protocol).instrument(
-                            tracing::info_span!(
-                                "websocket_link",
-                                client_id = field::Empty,
-                                connection_id = field::Empty
-                            ),
-                        ),
+                        remote(
+                            config,
+                            tenant_id.clone(),
+                            router_tx,
+                            stream,
+                            protocol,
+                            self.awaiting_will_handler.clone(),
+                        )
+                        .instrument(tracing::info_span!(
+                            "websocket_link",
+                            client_id = field::Empty,
+                            connection_id = field::Empty
+                        )),
                     )
                 }
                 LinkType::Remote => task::spawn(
@@ -401,7 +407,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         router_tx,
                         network,
                         protocol,
-                        self.existion_connections.clone(),
+                        self.awaiting_will_handler.clone(),
                     )
                     .instrument(tracing::error_span!(
                         "remote_link",
@@ -446,7 +452,7 @@ async fn remote<P: Protocol>(
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
     protocol: P,
-    connections: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
+    will_handlers: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
 ) {
     let mut network = Network::new(
         stream,
@@ -465,28 +471,34 @@ async fn remote<P: Protocol>(
         }
     };
 
-    let (client_id, clean_session) = match &connect_packet {
+    let (mut client_id, clean_session) = match &connect_packet {
         Packet::Connect(ref connect, _, _, _, _) => {
             (connect.client_id.clone(), connect.clean_session)
         }
         _ => unreachable!(),
     };
 
-    if let Some(sender) = connections.lock().unwrap().remove(&client_id) {
-        let w = if clean_session {
+    if let Some(tenant_id) = &tenant_id {
+        // client_id is set to "tenant_id.client_id"
+        // this is to make sure we are consistent,
+        // as Connection uses this format of client_id
+        client_id = format!("{tenant_id}.{client_id}");
+    }
+
+    if let Some(sender) = will_handlers.lock().unwrap().remove(&client_id) {
+        let awaiting_will = if clean_session {
             AwaitingWill::Fire
         } else {
             AwaitingWill::Cancel
         };
-        // TODO(swanandx): use send_async?
-        dbg!(sender.send(w)).unwrap();
+        sender.try_send(awaiting_will).unwrap();
     }
 
-    let (reconnection_tx, reconnection_rx) = flume::bounded::<AwaitingWill>(1);
-    connections
+    let (will_tx, will_rx) = flume::bounded::<AwaitingWill>(1);
+    will_handlers
         .lock()
         .unwrap()
-        .insert(client_id.clone(), reconnection_tx);
+        .insert(client_id.clone(), will_tx);
 
     // Start the link
     let mut link = match RemoteLink::new(
@@ -507,7 +519,7 @@ async fn remote<P: Protocol>(
 
     let connection_id = link.connection_id;
     let will_delay_interval = link.will_delay_interval;
-    let mut send_disconnect = false;
+    let mut send_disconnect = true;
 
     match link.start().await {
         // Connection got closed. This shouldn't usually happen.
@@ -516,11 +528,11 @@ async fn remote<P: Protocol>(
         // originated internally in the router.
         Err(remote::Error::Link(e)) => {
             error!(error=?e, "router-drop");
+            send_disconnect = false;
         }
         // Any other error
         Err(e) => {
             error!(error=?e, "Disconnected!!");
-            send_disconnect = true;
         }
     };
 
@@ -530,25 +542,31 @@ async fn remote<P: Protocol>(
         router_tx.send(message).ok();
     }
 
+    // this is important to stop the connection
     drop(link);
 
     let publish_will = match tokio::time::timeout(
         Duration::from_secs(will_delay_interval as u64),
-        reconnection_rx.recv_async(),
+        will_rx.recv_async(),
     )
     .await
     {
-        Ok(w) => dbg!(w.is_ok_and(|k| k == AwaitingWill::Fire)),
+        Ok(w) => w.is_ok_and(|k| k == AwaitingWill::Fire),
         Err(_) => {
             // no need to keep the sender after timeout
-            connections.lock().unwrap().remove(&client_id);
+            will_handlers.lock().unwrap().remove(&client_id);
             // as will delay interval has passed, publish the will message
             true
         }
     };
 
     if publish_will {
-        let message = Event::PublishWill(client_id);
+        let message = Event::PublishWill((client_id, tenant_id));
+        // is this connection_id really correct at this point?
+        // as we have disconnected already, some other connection
+        // might be using this connection ID!
+        // It won't matter in this case as we don't use it
+        // but might affect logs?
         router_tx.send((connection_id, message)).ok();
     }
 }

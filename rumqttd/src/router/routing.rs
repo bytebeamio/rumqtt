@@ -257,7 +257,11 @@ impl Router {
                 self.send_meters();
             }
             Event::PrintStatus(metrics) => print_status(self, metrics),
-            Event::PublishWill(client_id) => self.handle_last_will(client_id),
+            Event::PublishWill((client_id, _tenant_id)) => self.handle_last_will(
+                client_id,
+                #[cfg(feature = "validate-tenant-prefix")]
+                _tenant_id,
+            ),
         }
     }
 
@@ -515,7 +519,6 @@ impl Router {
             );
         }
         self.router_meters.total_connections -= 1;
-        dbg!("DISCONNECTED AND DROPPED");
     }
 
     /// Handles new incoming data on a topic
@@ -1080,7 +1083,14 @@ impl Router {
         Some(())
     }
 
-    pub fn handle_last_will(&mut self, client_id: String) {
+    pub fn handle_last_will(
+        &mut self,
+        client_id: String,
+        #[cfg(feature = "validate-tenant-prefix")] tenant_id: Option<String>,
+    ) {
+        #[cfg(feature = "validate-tenant-prefix")]
+        let tenant_prefix = tenant_id.map(|id| format!("/tenants/{id}/"));
+
         let Some((will, will_props)) = self.last_wills.remove(&client_id) else {
             return
         };
@@ -1109,6 +1119,8 @@ impl Router {
             properties,
             &mut self.datalog,
             &mut self.notifications,
+            #[cfg(feature = "validate-tenant-prefix")]
+            tenant_prefix,
         ) {
             Ok(_offset) => {
                 // Prepare all the consumers which are waiting for new data
@@ -1251,6 +1263,7 @@ fn append_will_message(
     properties: Option<PublishProperties>,
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
+    #[cfg(feature = "validate-tenant-prefix")] tenant_prefix: Option<String>,
 ) -> Result<Offset, RouterError> {
     // TODO: broker should properly send the disconnect packet!
     if properties
@@ -1266,12 +1279,9 @@ fn append_will_message(
     let topic = std::str::from_utf8(&publish.topic)?;
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
-    // NOTE(swanandx): how will we do this as connection is already gone?
-    // shall we split client_id if its tenant_id.client_id ?
-    // or get tenant_id as argument and generate prefix here?
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connection.tenant_prefix {
-        if !topic.starts_with(tenant_prefix) {
+    if let Some(tenant_prefix) = tenant_prefix {
+        if !topic.starts_with(&tenant_prefix) {
             return Err(RouterError::BadTenant(
                 tenant_prefix.to_owned(),
                 topic.to_owned(),
