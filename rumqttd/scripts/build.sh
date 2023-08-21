@@ -132,6 +132,9 @@ verify_system() {
     assert_cmd cross
     assert_cmd docker
 
+    assert_pkg qemu
+    assert_pkg qemu-user-static
+
     [ -f "$CROSS_CONFIG" ] || FATAL "Cross configuration '$CROSS_CONFIG' does not exists"
     printf "%s\n" "$RUMQTTD_VERSION" | grep -q -P '(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' || FATAL "Version '$RUMQTTD_VERSION' is not valid"
     if [ -n "$OUT_DIR" ] && [ ! -d "$OUT_DIR" ]; then FATAL "Output directory '$OUT_DIR' does not exists"; fi
@@ -144,7 +147,7 @@ verify_system() {
 build_target() {
     _target=$1
 
-    INFO "Building '$_target'"
+    DEBUG "Building '$_target'"
 
     CROSS_CONFIG="$CROSS_CONFIG" \
         cross build \
@@ -178,10 +181,19 @@ build_target() {
 # Build targets
 # @param $1 Targets
 build_targets() {
+    _targets_len=$#
+    DEBUG "Building $_targets_len targets '$*'"
+
     while [ $# -gt 0 ]; do
+        _targets_i=$((_targets_i = _targets_len - $# + 1))
+
+        INFO "Building target $_targets_i/$_targets_len '$1'"
         build_target "$1"
+
         shift
     done
+
+    DEBUG "Successfully built $_targets_len targets"
 }
 
 # ================

@@ -174,6 +174,13 @@ assert_cmd() {
     DEBUG "Command '$1' found at '$(command -v "$1")'"
 }
 
+# Assert package is installed
+# @param $1 Package name
+assert_pkg() {
+    check_pkg "$1" || FATAL "Package '$1' not found"
+    DEBUG "Package '$1' found"
+}
+
 # ================
 # FUNCTIONS
 # ================
@@ -181,6 +188,35 @@ assert_cmd() {
 # @param $1 Command name
 check_cmd() {
     command -v "$1" > /dev/null 2>&1
+}
+
+# Check package is installed
+# @param $1 Package name
+check_pkg() {
+    if check_cmd dpkg; then
+        # Aptitude (Ubuntu, Debian, ...)
+        dpkg -s "$1" > /dev/null 2>&1
+    elif check_cmd apk; then
+        # Alpine Package Keeper (Alpine Linux, ...)
+        apk info -e "$1" > /dev/null 2>&1
+    elif check_cmd pacman; then
+        # Pacman (Arch Linux, ...)
+        pacman -Q "$1" > /dev/null 2>&1
+    elif check_cmd rpm; then
+        # Red Hat Package Manager (Fedora, RHEL, ...)
+        rpm -q "$1" > /dev/null 2>&1
+    elif check_cmd pkg; then
+        # Pkg (OpenBSD, FreeBSD, ...)
+        pkg info -e "$1" > /dev/null 2>&1
+    elif check_cmd eix; then
+        # Portage (Gentoo, ...)
+        eix -I "$1" > /dev/null 2>&1
+    elif check_cmd slapt-get; then
+        # Slackpkg (Slackware, ...)
+        slackpkg search "$1" | grep -q -E "^\[[[:space:]]installed[[:space:]]\][[:space:]]-[[:space:]]$1-" > /dev/null 2>&1
+    else
+        return 1
+    fi
 }
 
 # ================
