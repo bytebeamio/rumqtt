@@ -33,7 +33,7 @@ thiserror = "1"
 # Optional
 # rustls
 tokio-rustls = { version = "0.24", optional = true }
-rustls-webpki = { version = "0.101.1", optional = true }
+rustls-webpki = { version = "0.101.4", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 rustls-native-certs = { version = "0.6", optional = true }
 # websockets
