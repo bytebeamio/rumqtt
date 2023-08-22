@@ -13,7 +13,7 @@ RETVAL=
 # @param $1 Argument name
 # @param $2 Argument value
 parse_args_assert_value() {
-    [ -n "$2" ] || FATAL "Argument '$1' requires a non-empty value"
+    [ -n "${2+x}" ] || FATAL "Argument '$1' requires a non-empty value"
 }
 # Parse command line arguments
 # @param $@ Arguments
