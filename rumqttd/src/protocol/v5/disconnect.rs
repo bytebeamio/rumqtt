@@ -7,10 +7,6 @@ use super::*;
 use super::{property, PropertyType};
 
 fn len(disconnect: &Disconnect, properties: &Option<DisconnectProperties>) -> usize {
-    if disconnect.reason_code == DisconnectReasonCode::NormalDisconnection && properties.is_none() {
-        return 2; // Packet type + 0x00
-    }
-
     let mut length = 0;
     if let Some(properties) = &properties {
         length += 1; // Disconnect Reason Code
@@ -18,7 +14,7 @@ fn len(disconnect: &Disconnect, properties: &Option<DisconnectProperties>) -> us
         let properties_len_len = len_len(properties_len);
         length += properties_len_len + properties_len;
     } else {
-        length += 1;
+        length += 2;
     }
 
     length
