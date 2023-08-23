@@ -21,7 +21,7 @@ slab = "0.4.3"
 thiserror = "1.0.24"
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 tokio-rustls = { version = "0.24", optional = true }
-rustls-webpki = { version = "0.101.1", optional = true }
+rustls-webpki = { version = "0.101.4", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 async-tungstenite = { version = "0.22.2", default-features = false, features = ["tokio-runtime"], optional = true }
