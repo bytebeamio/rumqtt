@@ -10,7 +10,6 @@ use std::{
 
 mod connack;
 mod connect;
-mod disconnect;
 mod ping;
 mod puback;
 mod pubcomp;
@@ -358,9 +357,12 @@ impl Protocol for V4 {
             Packet::PubComp(pubcomp, None) => pubcomp::write(&pubcomp, buffer)?,
             Packet::Unsubscribe(unsubscribe, None) => unsubscribe::write(&unsubscribe, buffer)?,
             Packet::UnsubAck(unsuback, None) => unsuback::write(&unsuback, buffer)?,
-            Packet::Disconnect(disconnect, None) => disconnect::write(&disconnect, buffer)?,
             Packet::PingReq(pingreq) => ping::pingreq::write(buffer)?,
             Packet::PingResp(pingresp) => ping::pingresp::write(buffer)?,
+            Packet::Disconnect(..) => {
+                // server never sends disconnect packet to client in v4
+                0
+            }
             _ => unreachable!(
                 "This branch only matches for packets with Properties, which is not possible in v4",
             ),
