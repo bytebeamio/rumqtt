@@ -371,12 +371,6 @@ impl Protocol for V5 {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
-                PacketType::Disconnect => Ok(Packet::Disconnect(
-                    Disconnect {
-                        reason_code: DisconnectReasonCode::NormalDisconnection,
-                    },
-                    None,
-                )),
                 _ => Err(Error::PayloadRequired),
             };
         }
