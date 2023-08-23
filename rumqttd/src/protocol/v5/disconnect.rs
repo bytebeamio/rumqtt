@@ -65,11 +65,6 @@ pub fn write(
 
     let length = len(disconnect, properties);
 
-    if length == 2 {
-        buffer.put_u8(0x00);
-        return Ok(length);
-    }
-
     let len_len = write_remaining_length(buffer, length)?;
 
     buffer.put_u8(code(disconnect.reason_code));
