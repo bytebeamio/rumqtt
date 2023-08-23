@@ -587,11 +587,8 @@ impl MqttState {
         self.await_pingresp = true;
 
         debug!(
-            "Pingreq,
-            last incoming packet before {} millisecs,
-            last outgoing request before {} millisecs",
-            elapsed_in.as_millis(),
-            elapsed_out.as_millis()
+            "Pingreq, last incoming packet before {:?}, last outgoing request before {:?}",
+            elapsed_in, elapsed_out,
         );
 
         Packet::PingReq(PingReq).write(&mut self.write)?;
