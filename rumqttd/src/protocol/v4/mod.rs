@@ -10,6 +10,7 @@ use std::{
 
 mod connack;
 mod connect;
+mod disconnect;
 mod ping;
 mod puback;
 mod pubcomp;
