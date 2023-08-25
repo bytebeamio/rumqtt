@@ -40,6 +40,7 @@ pub struct LinkBuilder<'a> {
     router_tx: Sender<(ConnectionId, Event)>,
     // true by default
     clean_session: bool,
+    session_expiry_interval: Option<u32>,
     last_will: Option<LastWill>,
     // false by default
     dynamic_filters: bool,
@@ -57,6 +58,7 @@ impl<'a> LinkBuilder<'a> {
             last_will: None,
             dynamic_filters: false,
             topic_alias_max: 0,
+            session_expiry_interval: Some(0),
         }
     }
 
@@ -80,6 +82,11 @@ impl<'a> LinkBuilder<'a> {
         self
     }
 
+    pub fn session_expiry_interval(mut self, interval: Option<u32>) -> Self {
+        self.session_expiry_interval = interval;
+        self
+    }
+
     pub fn dynamic_filters(mut self, dynamic_filters: bool) -> Self {
         self.dynamic_filters = dynamic_filters;
         self
@@ -92,6 +99,7 @@ impl<'a> LinkBuilder<'a> {
             self.tenant_id,
             self.client_id.to_owned(),
             self.clean_session,
+            self.session_expiry_interval,
             self.last_will,
             self.dynamic_filters,
             self.topic_alias_max,

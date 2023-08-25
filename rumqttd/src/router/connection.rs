@@ -18,6 +18,8 @@ pub struct Connection {
     pub dynamic_filters: bool,
     /// Clean session
     pub clean: bool,
+    /// Session Expiry Interval, None indicates session never expires
+    pub expiry_interval: Option<u32>,
     /// Subscriptions
     pub subscriptions: HashSet<Filter>,
     /// Last will of this connection
@@ -38,6 +40,7 @@ impl Connection {
         tenant_id: Option<String>,
         client_id: String,
         clean: bool,
+        expiry_interval: Option<u32>,
         last_will: Option<LastWill>,
         dynamic_filters: bool,
         topic_alias_max: u16,
@@ -65,6 +68,7 @@ impl Connection {
             tenant_prefix,
             dynamic_filters,
             clean,
+            expiry_interval,
             subscriptions: HashSet::default(),
             last_will,
             events: ConnectionEvents::default(),

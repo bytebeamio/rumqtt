@@ -120,11 +120,22 @@ impl<P: Protocol> RemoteLink<P> {
             return Err(Error::InvalidClientId);
         }
 
-        let topic_alias_max = props.and_then(|p| p.topic_alias_max);
+        let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
+        // If session expiry interval is absent, use 0 as default.
+        // If the Session Expiry Interval is 0xFFFFFFFF (UINT_MAX), the Session does not expire.
+        // so we set expiry as None
+        let session_expiry_interval = props.as_ref().and_then(|p| {
+            let interval = p.session_expiry_interval.unwrap_or(0);
+            if interval == u32::MAX {
+                return None;
+            }
+            Some(interval)
+        });
 
         let (link_tx, link_rx, notification) = LinkBuilder::new(&client_id, router_tx)
             .tenant_id(tenant_id)
             .clean_session(clean_session)
+            .session_expiry_interval(session_expiry_interval)
             .last_will(lastwill)
             .dynamic_filters(dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
