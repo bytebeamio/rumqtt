@@ -861,9 +861,27 @@ impl Router {
 
                     force_ack = true;
                 }
-                Packet::Disconnect(_, _) => {
+                Packet::Disconnect(_disconn, props) => {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
+
+                    let session_expiry = props.as_ref().and_then(|p| p.session_expiry_interval);
+
+                    // NOTE: shall session_expiry be passed as argument to handle disconnect?
+                    match session_expiry {
+                        Some(exp) if exp > 0 => {
+                            let connection = self.connections.get_mut(id).unwrap();
+                            // If the Session Expiry Interval in the CONNECT packet was zero,
+                            // then it is a Protocol Error to set a non-zero Session Expiry Interval in the DISCONNECT packet sent by the Client
+                            if connection.expiry_interval == 0 {
+                                disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
+                            } else {
+                                connection.expiry_interval = exp;
+                            }
+                        }
+                        _ => {}
+                    }
+
                     disconnect = true;
                     execute_will = false;
                     break;
