@@ -18,7 +18,7 @@ pub struct Connection {
     pub dynamic_filters: bool,
     /// Clean session
     pub clean: bool,
-    /// Session Expiry Interval, None indicates session never expires
+    /// Session Expiry Interval
     pub expiry_interval: u32,
     /// Subscriptions
     pub subscriptions: HashSet<Filter>,

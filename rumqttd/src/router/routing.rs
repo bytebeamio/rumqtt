@@ -870,7 +870,8 @@ impl Router {
                         Some(exp) if exp > 0 => {
                             let connection = self.connections.get_mut(id).unwrap();
                             // If the Session Expiry Interval in the CONNECT packet was zero,
-                            // then it is a Protocol Error to set a non-zero Session Expiry Interval in the DISCONNECT packet sent by the Client
+                            // then it is a Protocol Error to set a non-zero Session Expiry Interval
+                            // in the DISCONNECT packet sent by the Client
                             if connection.expiry_interval == 0 {
                                 disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
                             } else {

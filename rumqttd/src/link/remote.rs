@@ -121,9 +121,8 @@ impl<P: Protocol> RemoteLink<P> {
         }
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
+
         // If session expiry interval is absent, use 0 as default.
-        // If the Session Expiry Interval is 0xFFFFFFFF (UINT_MAX), the Session does not expire.
-        // so we set expiry as None
         let session_expiry_interval = props
             .as_ref()
             .and_then(|p| p.session_expiry_interval)
