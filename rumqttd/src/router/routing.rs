@@ -475,7 +475,9 @@ impl Router {
         }
 
         // Save state for persistent sessions
-        if !connection.clean {
+        // In v5: whether to store session or not is determined
+        // by session expiry interval, not by clean start flag!
+        if !connection.clean || connection.expiry_interval > 0 {
             // Add inflight data requests back to tracker
             inflight_data_requests
                 .into_iter()
