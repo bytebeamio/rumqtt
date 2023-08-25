@@ -15,7 +15,7 @@ use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
@@ -497,11 +497,19 @@ impl Router {
                 }
             }
 
+            let expiry_interval = match connection.expiry_interval {
+                // If the Session Expiry Interval is 0xFFFFFFFF (UINT_MAX)
+                // the Session does not expire.
+                u32::MAX => None,
+                exp => Some(Instant::now() + Duration::from_secs(exp as u64)),
+            };
+
             self.graveyard.save(
                 tracker,
                 connection.subscriptions,
                 connection.events,
                 outgoing.unacked_pubrels,
+                expiry_interval,
             );
         } else {
             // Only save metrics in clean session
@@ -510,6 +518,7 @@ impl Router {
                 HashSet::new(),
                 connection.events,
                 VecDeque::new(),
+                None,
             );
         }
         self.router_meters.total_connections -= 1;
