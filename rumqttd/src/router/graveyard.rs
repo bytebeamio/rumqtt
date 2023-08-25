@@ -10,12 +10,14 @@ use super::{
 
 pub struct Graveyard {
     connections: HashMap<String, SavedState>,
+    metrics: HashMap<String, ConnectionEvents>,
 }
 
 impl Graveyard {
     pub fn new() -> Graveyard {
         Graveyard {
             connections: HashMap::new(),
+            metrics: HashMap::new(),
         }
     }
 
@@ -24,6 +26,10 @@ impl Graveyard {
     pub fn retrieve(&mut self, id: &str) -> Option<SavedState> {
         self.cleanup_expired_sessions();
         self.connections.remove(id)
+    }
+
+    pub fn retrieve_metrics(&mut self, id: &str) -> Option<ConnectionEvents> {
+        self.metrics.remove(id)
     }
 
     fn cleanup_expired_sessions(&mut self) {
@@ -41,7 +47,6 @@ impl Graveyard {
         &mut self,
         mut tracker: Tracker,
         subscriptions: HashSet<String>,
-        metrics: ConnectionEvents,
         unacked_pubrels: VecDeque<u16>,
         expiry_interval: Option<Instant>,
     ) {
@@ -53,11 +58,14 @@ impl Graveyard {
             SavedState {
                 tracker,
                 subscriptions,
-                metrics,
                 unacked_pubrels,
                 expiry: expiry_interval,
             },
         );
+    }
+
+    pub fn save_metrics(&mut self, id: String, metrics: ConnectionEvents) {
+        self.metrics.insert(id, metrics);
     }
 }
 
@@ -65,7 +73,6 @@ impl Graveyard {
 pub struct SavedState {
     pub tracker: Tracker,
     pub subscriptions: HashSet<String>,
-    pub metrics: ConnectionEvents,
     // used for pubrel in qos2
     pub unacked_pubrels: VecDeque<u16>,
     // session expiry interval
@@ -77,7 +84,6 @@ impl SavedState {
         SavedState {
             tracker: Tracker::new(client_id),
             subscriptions: HashSet::new(),
-            metrics: ConnectionEvents::default(),
             unacked_pubrels: VecDeque::new(),
             expiry: None,
         }

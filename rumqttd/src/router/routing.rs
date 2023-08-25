@@ -297,6 +297,11 @@ impl Router {
 
         // Retrieve previous connection state from graveyard
         let saved = self.graveyard.retrieve(&client_id);
+        let saved_metrics = self
+            .graveyard
+            .retrieve_metrics(&client_id)
+            .unwrap_or_default();
+
         let clean_session = connection.clean;
         let previous_session = saved.is_some();
         // for qos2 pending pubrels
@@ -304,15 +309,14 @@ impl Router {
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
-            connection.events = saved.metrics;
+            connection.events = saved_metrics;
             // for using in acklog
             pending_acks = saved.unacked_pubrels.clone();
             outgoing.unacked_pubrels = saved.unacked_pubrels;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.events = saved.metrics;
+            connection.events = saved_metrics;
             Tracker::new(client_id.clone())
         };
         let ackslog = AckLog::new();
@@ -507,19 +511,13 @@ impl Router {
             self.graveyard.save(
                 tracker,
                 connection.subscriptions,
-                connection.events,
                 outgoing.unacked_pubrels,
                 expiry_interval,
             );
+            self.graveyard.save_metrics(client_id, connection.events);
         } else {
             // Only save metrics in clean session
-            self.graveyard.save(
-                Tracker::new(client_id),
-                HashSet::new(),
-                connection.events,
-                VecDeque::new(),
-                None,
-            );
+            self.graveyard.save_metrics(client_id, connection.events);
         }
         self.router_meters.total_connections -= 1;
     }
@@ -1602,10 +1600,14 @@ fn print_status(router: &mut Router, metrics: Print) {
 
             let metrics = match metrics {
                 Some(v) => Some(v),
-                None => router
-                    .graveyard
-                    .retrieve(&id)
-                    .map(|v| (v.metrics, v.tracker)),
+                None => router.graveyard.retrieve_metrics(&id).map(|m| {
+                    let t = router
+                        .graveyard
+                        .retrieve(&id)
+                        .map(|v| v.tracker)
+                        .unwrap_or(Tracker::new(id));
+                    (m, t)
+                }),
             };
 
             println!("{metrics:#?}");
