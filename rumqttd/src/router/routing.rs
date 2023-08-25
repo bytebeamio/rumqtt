@@ -957,6 +957,7 @@ impl Router {
                 max_count: 100,
                 // set true for new subscriptions
                 forward_retained,
+                preserve_retain: filter.preserve_retain,
                 group,
             };
 
@@ -1377,6 +1378,12 @@ fn forward_device_data(
 
         publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
         inflight_slots -= publishes.len() as u64;
+
+        if !request.preserve_retain {
+            publishes.iter_mut().for_each(|((p, _), _)| {
+                p.retain = false;
+            })
+        }
 
         // we only want to forward retained messages once
         request.forward_retained = false;
