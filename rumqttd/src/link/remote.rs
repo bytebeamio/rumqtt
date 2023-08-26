@@ -120,7 +120,11 @@ impl<P: Protocol> RemoteLink<P> {
             return Err(Error::InvalidClientId);
         }
 
-        let topic_alias_max = props.and_then(|p| p.topic_alias_max);
+        let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
+        let max_inflight = props
+            .as_ref()
+            .and_then(|p| p.receive_maximum)
+            .unwrap_or(100);
 
         let (link_tx, link_rx, notification) = LinkBuilder::new(&client_id, router_tx)
             .tenant_id(tenant_id)
@@ -128,6 +132,7 @@ impl<P: Protocol> RemoteLink<P> {
             .last_will(lastwill)
             .dynamic_filters(dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
+            .max_inflight(max_inflight as usize)
             .build()?;
 
         let id = link_rx.id();

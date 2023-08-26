@@ -15,9 +15,6 @@ use crate::{
 
 use super::{Forward, IncomingMeter, OutgoingMeter};
 
-const MAX_INFLIGHT: usize = 100;
-const MAX_PKID: u16 = MAX_INFLIGHT as u16;
-
 #[derive(Debug)]
 pub struct Incoming {
     /// Identifier associated with connected client
@@ -66,18 +63,19 @@ pub struct Outgoing {
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
     pub(crate) meter: OutgoingMeter,
+    max_inflight: usize,
 }
 
 impl Outgoing {
     #[inline]
-    pub(crate) fn new(client_id: String) -> (Self, Receiver<()>) {
+    pub(crate) fn new(client_id: String, max_inflight: usize) -> (Self, Receiver<()>) {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
-        let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
-        let unacked_pubrels = VecDeque::with_capacity(MAX_INFLIGHT);
+        let inflight_buffer = VecDeque::with_capacity(max_inflight);
+        let unacked_pubrels = VecDeque::with_capacity(max_inflight);
 
         // Ensure that there won't be any new allocations
-        assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
+        assert!(max_inflight <= inflight_buffer.capacity());
         assert!(MAX_CHANNEL_CAPACITY <= data_buffer.capacity());
 
         let outgoing = Self {
@@ -88,6 +86,7 @@ impl Outgoing {
             handle,
             last_pkid: 0,
             meter: Default::default(),
+            max_inflight,
         };
 
         (outgoing, rx)
@@ -99,7 +98,7 @@ impl Outgoing {
     }
 
     pub fn free_slots(&self) -> usize {
-        MAX_INFLIGHT - self.inflight_buffer.len()
+        self.max_inflight - self.inflight_buffer.len()
     }
 
     pub fn push_notification(&mut self, notification: Notification) -> usize {
@@ -140,7 +139,8 @@ impl Outgoing {
                 .push_back((self.last_pkid, filter_idx, p.cursor));
 
             // Place max pkid packet at index 0
-            if self.last_pkid == MAX_PKID {
+            // MAX_PKID = MAX_INFLIGHT as u16;
+            if self.last_pkid == self.max_inflight as u16 {
                 self.last_pkid = 0;
             }
 
@@ -152,10 +152,10 @@ impl Outgoing {
         let buffer_count = buffer.len();
         let inflight_count = self.inflight_buffer.len();
 
-        if inflight_count > MAX_INFLIGHT {
+        if inflight_count > self.max_inflight {
             warn!(
                 "More inflight publishes than max allowed, inflight count = {}, max allowed = {}",
-                inflight_count, MAX_INFLIGHT
+                inflight_count, self.max_inflight
             );
         }
 
@@ -224,7 +224,7 @@ mod test {
 
     #[test]
     fn retransmission_map_is_calculated_accurately() {
-        let (mut outgoing, _) = Outgoing::new("retransmission-test".to_string());
+        let (mut outgoing, _) = Outgoing::new("retransmission-test".to_string(), 100);
         let mut result = HashMap::new();
 
         result.insert(0, (0, 8));

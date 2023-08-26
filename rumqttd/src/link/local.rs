@@ -45,6 +45,7 @@ pub struct LinkBuilder<'a> {
     dynamic_filters: bool,
     // default to 0, indicating to not use topic alias
     topic_alias_max: u16,
+    max_inflight: usize,
 }
 
 impl<'a> LinkBuilder<'a> {
@@ -57,6 +58,7 @@ impl<'a> LinkBuilder<'a> {
             last_will: None,
             dynamic_filters: false,
             topic_alias_max: 0,
+            max_inflight: 100,
         }
     }
 
@@ -85,6 +87,11 @@ impl<'a> LinkBuilder<'a> {
         self
     }
 
+    pub fn max_inflight(mut self, max: usize) -> Self {
+        self.max_inflight = max;
+        self
+    }
+
     pub fn build(self) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
@@ -97,7 +104,7 @@ impl<'a> LinkBuilder<'a> {
             self.topic_alias_max,
         );
         let incoming = Incoming::new(connection.client_id.to_owned());
-        let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
+        let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned(), self.max_inflight);
         let outgoing_data_buffer = outgoing.buffer();
         let incoming_data_buffer = incoming.buffer();
 
