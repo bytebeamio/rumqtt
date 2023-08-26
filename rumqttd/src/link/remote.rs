@@ -138,8 +138,13 @@ impl<P: Protocol> RemoteLink<P> {
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 
-        if let Some(packet) = notification.into() {
-            network.write(packet).await?;
+        if let Some(mut packet) = notification.into() {
+            if let Packet::ConnAck(_ack, props) = &mut packet {
+                let mut new_props = props.clone().unwrap_or_default();
+                new_props.receive_max = Some(config.max_inflight_count as u16);
+                *props = Some(new_props);
+                network.write(packet).await?;
+            }
         }
 
         Ok(RemoteLink {
