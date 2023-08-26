@@ -118,12 +118,12 @@ fn validate_config(configs: &rumqttd::Config) {
 }
 
 fn banner() {
-    const B: &str = r#"                                              
+    const B: &str = r"                                              
          ___ _   _ __  __  ___ _____ _____ ___  
         | _ \ | | |  \/  |/ _ \_   _|_   _|   \ 
         |   / |_| | |\/| | (_) || |   | | | |) |
         |_|_\\___/|_|  |_|\__\_\|_|   |_| |___/ 
-    "#;
+    ";
 
     println!("{B}\n");
 }
