@@ -1,8 +1,8 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
     PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel,
-    PubRelReason, Publish, PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck,
-    UnsubAckReason,
+    PubRelReason, Publish, PublishProperties, QoS, RetainForwardRule, SubAck, SubscribeReasonCode,
+    UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
 use crate::router::graveyard::SavedState;
@@ -940,10 +940,13 @@ impl Router {
                 .insert(filter_path.clone(), subscription_id);
         }
 
+        let not_shared_subscription = group.is_none();
+        let retain_forward_rule = &filter.retain_forward_rule;
         // check is group is None because retained messages aren't sent
         // for shared subscriptions
-        // TODO: use retain forward rules
-        let forward_retained = group.is_none();
+        // don't forward if retain forward rule is never
+        let forward_retained =
+            not_shared_subscription && retain_forward_rule != &RetainForwardRule::Never;
 
         // call to `insert(_)` returns `true` if it didn't contain the filter_path already
         // i.e. its a new subscription
@@ -964,11 +967,37 @@ impl Router {
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
-        }
+        } else {
+            let req_in_tracker = self
+                .scheduler
+                .trackers
+                .get_mut(id)
+                .unwrap()
+                .data_requests
+                .iter_mut()
+                .find(|r| r.filter_idx == filter_idx && r.group == group);
 
-        // TODO: figure out how we can update existing DataRequest
-        // helpful in re-subscriptions and forwarding retained messages on
-        // every subscribe
+            let req_in_waiters = self
+                .datalog
+                .native
+                .get_mut(filter_idx)
+                .unwrap()
+                .waiters
+                .get_mut()
+                .iter_mut()
+                .find(|(_, r)| r.filter_idx == filter_idx && r.group == group)
+                .map(|(_, r)| r);
+
+            // there must be only one datareq
+            let datareq = req_in_tracker.xor(req_in_waiters).unwrap();
+
+            let forward_retained = retain_forward_rule == &RetainForwardRule::OnEverySubscribe
+                && not_shared_subscription;
+
+            datareq.forward_retained = forward_retained;
+            datareq.qos = filter.qos as u8;
+            datareq.preserve_retain = filter.preserve_retain;
+        }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
         meter.register_subscription(filter_path.clone());
@@ -1253,11 +1282,9 @@ fn validate_and_set_topic_alias(
     if publish.topic.is_empty() {
         // if publish topic is empty, publisher must have set a valid alias
         let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
-                error!("Empty topic name with invalid alias");
-                return Err(RouterError::Disconnect(
-                    DisconnectReasonCode::ProtocolError,
-                ));
-            };
+            error!("Empty topic name with invalid alias");
+            return Err(RouterError::Disconnect(DisconnectReasonCode::ProtocolError));
+        };
         // set the publish topic before further processing
         publish.topic = alias_topic.to_owned().into();
     } else {
