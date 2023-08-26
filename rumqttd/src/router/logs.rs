@@ -194,12 +194,12 @@ impl DataLog {
         o.retain_mut(|(pubdata, _)| {
             // Keep data if no properties exists, which implies no message expiry!
             let Some(properties) = pubdata.properties.as_mut() else {
-                return true
+                return true;
             };
 
             // Keep data if there is no message_expiry_interval
             let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
-                return true
+                return true;
             };
 
             let time_spent = (now - pubdata.timestamp).as_secs() as u32;
@@ -277,12 +277,12 @@ impl DataLog {
         self.retained_publishes.retain(|_, pubdata| {
             // Keep data if no properties exists, which implies no message expiry!
             let Some(properties) = pubdata.properties.as_mut() else {
-                return true
+                return true;
             };
 
             // Keep data if there is no message_expiry_interval
             let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
-                return true
+                return true;
             };
 
             let time_spent = (now - pubdata.timestamp).as_secs() as u32;
