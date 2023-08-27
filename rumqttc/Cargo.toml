@@ -24,10 +24,10 @@ proxy = ["dep:async-http-proxy"]
 
 [dependencies]
 futures-util = { version = "0.3", default_features = false, features = ["std"] }
-tokio = { version = "1.0", features = ["rt", "macros", "io-util", "net", "time"] }
-bytes = "1.0"
+tokio = { version = "1.32", features = ["rt", "macros", "io-util", "net", "time"] }
+bytes = "1.4"
 log = "0.4"
-flume = { version = "0.10", default-features = false, features = ["async"]}
+flume = { version = "0.11", default-features = false, features = ["async"]}
 thiserror = "1"
 
 # Optional
@@ -41,8 +41,8 @@ async-tungstenite = { version = "0.22", default-features = false, features = ["t
 ws_stream_tungstenite = { version = "0.10", default-features = false, features = ["tokio_io"], optional = true }
 http = { version = "0.2", optional = true }
 # native-tls
-tokio-native-tls = { version = "0.3.0", optional = true }
-native-tls = { version = "0.2.8", optional = true }
+tokio-native-tls = { version = "0.3.1", optional = true }
+native-tls = { version = "0.2.11", optional = true }
 # url
 url = { version = "2", default-features = false, optional = true }
 # proxy
@@ -50,7 +50,7 @@ async-http-proxy = { version = "1.2.5", features = ["runtime-tokio", "basic-auth
 
 [dev-dependencies]
 bincode = "1.3.3"
-color-backtrace = "0.5"
+color-backtrace = "0.6"
 matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.5"

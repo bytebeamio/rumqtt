@@ -1252,11 +1252,9 @@ fn validate_and_set_topic_alias(
     if publish.topic.is_empty() {
         // if publish topic is empty, publisher must have set a valid alias
         let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
-                error!("Empty topic name with invalid alias");
-                return Err(RouterError::Disconnect(
-                    DisconnectReasonCode::ProtocolError,
-                ));
-            };
+            error!("Empty topic name with invalid alias");
+            return Err(RouterError::Disconnect(DisconnectReasonCode::ProtocolError));
+        };
         // set the publish topic before further processing
         publish.topic = alias_topic.to_owned().into();
     } else {
