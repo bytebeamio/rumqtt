@@ -139,10 +139,13 @@ impl<P: Protocol> RemoteLink<P> {
         Span::current().record("connection_id", id);
 
         if let Some(mut packet) = notification.into() {
-            if let Packet::ConnAck(_ack, props) = &mut packet {
-                let mut new_props = props.clone().unwrap_or_default();
-                new_props.receive_max = Some(config.max_inflight_count as u16);
-                *props = Some(new_props);
+            if let Packet::ConnAck(_ack, _props) = &mut packet {
+                // NOTE: config.max_inflight_count is for all packets
+                // receive_max is only for limiting Publish with qos > 0.
+                //
+                // let mut new_props = props.clone().unwrap_or_default();
+                // new_props.receive_max = Some(config.max_inflight_count as u16);
+                // *props = Some(new_props);
                 network.write(packet).await?;
             }
         }
