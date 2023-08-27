@@ -868,7 +868,7 @@ impl Router {
         // Prepare AcksRequest in tracker if router is operating in a
         // single node mode or force ack request for subscriptions
         if force_ack {
-            self.scheduler.reschedule(id, ScheduleReason::FreshData);
+            self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
         }
 
         // Notify waiting consumers only if there is publish data. During
