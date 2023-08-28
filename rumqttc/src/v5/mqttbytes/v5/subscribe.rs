@@ -116,6 +116,10 @@ impl Filter {
         }
     }
 
+    pub fn builder() -> FilterBuilder {
+        FilterBuilder::default()
+    }
+
     fn len(&self) -> usize {
         // filter len + filter + options
         2 + self.path.len() + 1
@@ -176,6 +180,58 @@ impl Filter {
 
         write_mqtt_string(buffer, self.path.as_str());
         buffer.put_u8(options);
+    }
+}
+
+#[derive(Default)]
+pub struct FilterBuilder {
+    path: Option<String>,
+    qos: Option<QoS>,
+    nolocal: bool,
+    preserve_retain: bool,
+    retain_forward_rule: Option<RetainForwardRule>,
+}
+
+impl FilterBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn path<S: Into<String>>(mut self, path: S) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    pub fn qos(mut self, qos: Option<QoS>) -> Self {
+        self.qos = qos;
+        self
+    }
+
+    pub fn nolocal(mut self, nolocal: bool) -> Self {
+        self.nolocal = nolocal;
+        self
+    }
+
+    pub fn preserve_retain(mut self, preserve_retain: bool) -> Self {
+        self.preserve_retain = preserve_retain;
+        self
+    }
+
+    pub fn retain_forward_rule(mut self, retain_forward_rule: Option<RetainForwardRule>) -> Self {
+        self.retain_forward_rule = retain_forward_rule;
+        self
+    }
+
+    pub fn build(self) -> Filter {
+        Filter {
+            path: self.path.unwrap_or(String::default()),
+            qos: self.qos.unwrap_or(QoS::AtMostOnce),
+            nolocal: self.nolocal,
+            preserve_retain: self.preserve_retain,
+            retain_forward_rule: self
+                .retain_forward_rule
+                .unwrap_or(RetainForwardRule::default()),
+        }
     }
 }
 

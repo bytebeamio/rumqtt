@@ -1,3 +1,4 @@
+use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
@@ -35,7 +36,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn requests(client: AsyncClient) {
     client
-        .subscribe("hello/world", QoS::AtMostOnce)
+        .subscribe(
+            Filter::builder()
+                .path("hello/world")
+                .qos(Some(QoS::AtMostOnce))
+                .build(),
+        )
         .await
         .unwrap();
 

@@ -1,5 +1,5 @@
 #![allow(dead_code, unused_imports)]
-use rumqttc::v5::mqttbytes::v5::Packet;
+use rumqttc::v5::mqttbytes::v5::{Filter, Packet};
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
@@ -27,7 +27,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // subscribe example topic
     client
-        .subscribe("hello/world", QoS::AtLeastOnce)
+        .subscribe(
+            Filter::builder()
+                .path("hello/world")
+                .qos(Some(QoS::AtLeastOnce))
+                .build(),
+        )
         .await
         .unwrap();
 
