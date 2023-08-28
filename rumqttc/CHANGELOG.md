@@ -12,7 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `MqttOptions::set_request_modifier` for setting a handler for modifying a websocket request before sending it.
 
+- Added `FilterBuilder` to make it easier to specify MQTTv5 subscription options
+
 ### Changed
+
+- Changed subscribe methods on `Client` and `AsyncClient` to receive a `Filter` as a parameter (instead a topic and a QoS)
 
 ### Deprecated
 
