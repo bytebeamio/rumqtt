@@ -60,6 +60,7 @@ pub enum Error {
     Remote(#[from] remote::Error),
 }
 
+#[derive(Clone)]
 pub struct Broker {
     config: Arc<Config>,
     router_tx: Sender<(ConnectionId, Event)>,
@@ -152,7 +153,7 @@ impl Broker {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn start(&mut self) -> Result<(), Error> {
+    pub fn start(&self) -> Result<(), Error> {
         if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
