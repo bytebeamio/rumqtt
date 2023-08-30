@@ -968,35 +968,42 @@ impl Router {
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         } else {
-            let req_in_tracker = self
-                .scheduler
-                .trackers
-                .get_mut(id)
-                .unwrap()
-                .data_requests
-                .iter_mut()
-                .find(|r| r.filter_idx == filter_idx && r.group == group);
-
-            let req_in_waiters = self
+            let waiters = self
                 .datalog
                 .native
                 .get_mut(filter_idx)
                 .unwrap()
                 .waiters
-                .get_mut()
-                .iter_mut()
-                .find(|(_, r)| r.filter_idx == filter_idx && r.group == group)
-                .map(|(_, r)| r);
+                .get_mut();
 
-            // there must be only one datareq
-            let datareq = req_in_tracker.xor(req_in_waiters).unwrap();
+            let req_pos = waiters
+                .iter()
+                .position(|(_, r)| r.filter_idx == filter_idx && r.group == group);
+
+            let mut request = if let Some(pos) = req_pos {
+                // remove req from waiters
+                let (_, r) = waiters.remove(pos).unwrap();
+                r
+            } else {
+                // if req was not in waiters, it MUST be in tracker
+                // so we find and remove it
+                let tracker_reqs = &mut self.scheduler.trackers.get_mut(id).unwrap().data_requests;
+                let req_pos = tracker_reqs
+                    .iter()
+                    .position(|r| r.filter_idx == filter_idx && r.group == group)
+                    .unwrap();
+                tracker_reqs.remove(req_pos).unwrap()
+            };
 
             let forward_retained = retain_forward_rule == &RetainForwardRule::OnEverySubscribe
                 && not_shared_subscription;
 
-            datareq.forward_retained = forward_retained;
-            datareq.qos = filter.qos as u8;
-            datareq.preserve_retain = filter.preserve_retain;
+            request.forward_retained = forward_retained;
+            request.qos = filter.qos as u8;
+            request.preserve_retain = filter.preserve_retain;
+
+            self.scheduler.track(id, request);
+            self.scheduler.reschedule(id, ScheduleReason::NewFilter);
         }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
