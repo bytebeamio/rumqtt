@@ -580,7 +580,7 @@ impl Router {
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.pubrec(publish, pubrec);
+                            ackslog.pubrec(publish, properties, pubrec);
                             force_ack = true;
                             continue;
                         }
@@ -794,7 +794,7 @@ impl Router {
                     // on reconnection ( with clean session false )
                     // we try to retrive publish assuming broker saved the previous state
                     // successfully in graveyard.
-                    let publish = match ackslog.pubcomp(pubcomp) {
+                    let (publish, props) = match ackslog.pubcomp(pubcomp) {
                         Some(v) => v,
                         None => {
                             disconnect = true;
@@ -806,7 +806,7 @@ impl Router {
                     match append_to_commitlog(
                         id,
                         publish,
-                        None,
+                        props,
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
