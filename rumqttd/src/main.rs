@@ -82,7 +82,7 @@ fn main() {
 
     // println!("{:#?}", configs);
 
-    let mut broker = Broker::new(configs);
+    let broker = Broker::new(configs);
     broker.start().unwrap();
 }
 
