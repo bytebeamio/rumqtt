@@ -7,6 +7,7 @@ use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
+use std::cmp::min;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
@@ -31,6 +32,8 @@ pub enum Error {
     Send(#[from] SendError<(ConnectionId, Event)>),
     #[error("Channel recv error")]
     Recv(#[from] RecvError),
+    #[error("Got new session, disconnecting old one")]
+    SessionEnd,
     #[error("Persistent session requires valid client id")]
     InvalidClientId,
     #[error("Unexpected router message")]
@@ -48,84 +51,51 @@ pub enum Error {
 /// Orchestrates between Router and Network.
 pub struct RemoteLink<P> {
     connect: Connect,
-    pub(crate) client_id: String,
     pub(crate) connection_id: ConnectionId,
     network: Network<P>,
     link_tx: LinkTx,
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
+    pub(crate) will_delay_interval: u32,
 }
 
 impl<P: Protocol> RemoteLink<P> {
     pub async fn new(
-        config: Arc<ConnectionSettings>,
         router_tx: Sender<(ConnectionId, Event)>,
         tenant_id: Option<String>,
         mut network: Network<P>,
+        connect_packet: Packet,
+        dynamic_filters: bool,
     ) -> Result<RemoteLink<P>, Error> {
-        // Wait for MQTT connect packet and error out if it's not received in time to prevent
-        // DOS attacks by filling total connections that the server can handle with idle open
-        // connections which results in server rejecting new connections
-        let connection_timeout_ms = config.connection_timeout_ms.into();
-        let dynamic_filters = config.dynamic_filters;
-        let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
-            let packet = network.read().await?;
-            Ok::<_, network::Error>(packet)
-        })
-        .await??;
-
-        let (connect, props, lastwill, login) = match packet {
-            Packet::Connect(connect, props, _lastwill, _, login) => {
-                Span::current().record("client_id", &connect.client_id);
-
-                // Ignore last will
-                (connect, props, None, login)
-            }
-            packet => return Err(Error::NotConnectPacket(packet)),
+        let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
+            return Err(Error::NotConnectPacket(connect_packet));
         };
-
-        // If authentication is configured in config file check for username and password
-        if let Some(auths) = &config.auth {
-            // if authentication is configured and connect packet doesn't have login details return
-            // an error
-            if let Some(login) = login {
-                let is_authenticated = auths
-                    .iter()
-                    .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
-
-                if !is_authenticated {
-                    return Err(Error::InvalidAuth);
-                }
-            } else {
-                return Err(Error::InvalidAuth);
-            }
-        }
-
-        // When keep_alive feature is disabled client can live forever, which is not good in
-        // distributed broker context so currenlty we don't allow it.
-        if connect.keep_alive == 0 {
-            return Err(Error::ZeroKeepAlive);
-        }
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let client_id = connect.client_id.clone();
+        let client_id = &connect.client_id;
         let clean_session = connect.clean_session;
 
-        if cfg!(feature = "allow-duplicate-clientid") {
-            if !clean_session && client_id.is_empty() {
-                return Err(Error::InvalidClientId);
-            }
-        } else if client_id.is_empty() {
-            return Err(Error::InvalidClientId);
-        }
+        let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
+        let session_expiry = props
+            .as_ref()
+            .and_then(|p| p.session_expiry_interval)
+            .unwrap_or(0);
 
-        let topic_alias_max = props.and_then(|p| p.topic_alias_max);
+        let delay_interval = lastwill_props
+            .as_ref()
+            .and_then(|f| f.delay_interval)
+            .unwrap_or(0);
 
-        let (link_tx, link_rx, notification) = LinkBuilder::new(&client_id, router_tx)
+        // The Server delays publishing the Client’s Will Message until
+        // the Will Delay Interval has passed or the Session ends, whichever happens first
+        let will_delay_interval = min(session_expiry, delay_interval);
+
+        let (link_tx, link_rx, notification) = LinkBuilder::new(client_id, router_tx)
             .tenant_id(tenant_id)
             .clean_session(clean_session)
             .last_will(lastwill)
+            .last_will_properties(lastwill_props)
             .dynamic_filters(dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
             .build()?;
@@ -139,12 +109,12 @@ impl<P: Protocol> RemoteLink<P> {
 
         Ok(RemoteLink {
             connect,
-            client_id,
             connection_id: id,
             network,
             link_tx,
             link_rx,
             notifications: VecDeque::with_capacity(100),
+            will_delay_interval,
         })
     }
 
@@ -190,4 +160,68 @@ impl<P: Protocol> RemoteLink<P> {
             }
         }
     }
+}
+
+/// Read MQTT connect packet from network and verify it.
+/// authentication and checks are done here.
+pub async fn mqtt_connect<P>(
+    config: Arc<ConnectionSettings>,
+    network: &mut Network<P>,
+) -> Result<Packet, Error>
+where
+    P: Protocol,
+{
+    // Wait for MQTT connect packet and error out if it's not received in time to prevent
+    // DOS attacks by filling total connections that the server can handle with idle open
+    // connections which results in server rejecting new connections
+    let connection_timeout_ms = config.connection_timeout_ms.into();
+    let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
+        let packet = network.read().await?;
+        Ok::<_, network::Error>(packet)
+    })
+    .await??;
+
+    let (connect, _props, login) = match packet {
+        Packet::Connect(ref connect, ref props, _, _, ref login) => (connect, props, login),
+        packet => return Err(Error::NotConnectPacket(packet)),
+    };
+
+    // If authentication is configured in config file check for username and password
+    if let Some(auths) = &config.auth {
+        // if authentication is configured and connect packet doesn't have login details return
+        // an error
+        if let Some(login) = login {
+            let is_authenticated = auths
+                .iter()
+                .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
+
+            if !is_authenticated {
+                return Err(Error::InvalidAuth);
+            }
+        } else {
+            return Err(Error::InvalidAuth);
+        }
+    }
+
+    // When keep_alive feature is disabled client can live forever, which is not good in
+    // distributed broker context so currenlty we don't allow it.
+    if connect.keep_alive == 0 {
+        return Err(Error::ZeroKeepAlive);
+    }
+
+    // Register this connection with the router. Router replys with ack which if ok will
+    // start the link. Router can sometimes reject the connection (ex max connection limit)
+    let empty_client_id = connect.client_id.is_empty();
+    let clean_session = connect.clean_session;
+
+    if cfg!(feature = "allow-duplicate-clientid") {
+        if !clean_session && empty_client_id {
+            return Err(Error::InvalidClientId);
+        }
+    } else if empty_client_id {
+        return Err(Error::InvalidClientId);
+    }
+
+    // Ok((connect, props, lastwill, lastwill_props))
+    Ok(packet)
 }
