@@ -185,7 +185,20 @@ dependencies = [
  "rustls-native-certs",
  "tokio",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.19.0",
+]
+
+[[package]]
+name = "async-tungstenite"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1e9efbe14612da0a19fb983059a0b621e9cf6225d7018ecab4f9988215540dc"
+dependencies = [
+ "futures-io",
+ "futures-util",
+ "log",
+ "pin-project-lite",
+ "tungstenite 0.20.0",
 ]
 
 [[package]]
@@ -1840,7 +1853,7 @@ name = "rumqttc"
 version = "0.22.0"
 dependencies = [
  "async-http-proxy",
- "async-tungstenite",
+ "async-tungstenite 0.22.2",
  "bincode",
  "bytes",
  "color-backtrace",
@@ -1869,7 +1882,7 @@ dependencies = [
 name = "rumqttd"
 version = "0.17.0"
 dependencies = [
- "async-tungstenite",
+ "async-tungstenite 0.22.2",
  "axum",
  "bytes",
  "clap",
@@ -2611,6 +2624,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tungstenite"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e862a1c4128df0112ab625f55cd5c934bcb4312ba80b39ae4b4835a3fd58e649"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "log",
+ "rand",
+ "thiserror",
+ "utf-8",
+]
+
+[[package]]
 name = "typenum"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3027,10 +3054,9 @@ checksum = "1a515f5799fe4961cb532f983ce2b23082366b898e52ffbce459c86f67c8378a"
 [[package]]
 name = "ws_stream_tungstenite"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b6e7a5ba9436eb3868b052be83377dc685fad6d2f4cddaa2a2251b673472071"
+source = "git+https://github.com/swanandx/ws_stream_tungstenite#1dc6b3f52672922c1fc9a3473ceb980e3cab89af"
 dependencies = [
- "async-tungstenite",
+ "async-tungstenite 0.23.0",
  "async_io_stream",
  "bitflags 2.2.1",
  "futures-core",
@@ -3041,7 +3067,7 @@ dependencies = [
  "pharos",
  "rustc_version",
  "tokio",
- "tungstenite",
+ "tungstenite 0.20.0",
 ]
 
 [[package]]
