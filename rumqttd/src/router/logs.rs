@@ -194,12 +194,12 @@ impl DataLog {
         o.retain_mut(|(pubdata, _)| {
             // Keep data if no properties exists, which implies no message expiry!
             let Some(properties) = pubdata.properties.as_mut() else {
-                return true
+                return true;
             };
 
             // Keep data if there is no message_expiry_interval
             let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
-                return true
+                return true;
             };
 
             let time_spent = (now - pubdata.timestamp).as_secs() as u32;
@@ -277,12 +277,12 @@ impl DataLog {
         self.retained_publishes.retain(|_, pubdata| {
             // Keep data if no properties exists, which implies no message expiry!
             let Some(properties) = pubdata.properties.as_mut() else {
-                return true
+                return true;
             };
 
             // Keep data if there is no message_expiry_interval
             let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
-                return true
+                return true;
             };
 
             let time_spent = (now - pubdata.timestamp).as_secs() as u32;
@@ -373,7 +373,7 @@ pub struct AckLog {
     // Committed acks per connection. First pkid, last pkid, data
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
-    recorded: VecDeque<Publish>,
+    recorded: VecDeque<(Publish, Option<PublishProperties>)>,
 }
 
 impl AckLog {
@@ -400,9 +400,9 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    pub fn pubrec(&mut self, publish: Publish, ack: PubRec) {
+    pub fn pubrec(&mut self, publish: Publish, props: Option<PublishProperties>, ack: PubRec) {
         let ack = Ack::PubRec(ack);
-        self.recorded.push_back(publish);
+        self.recorded.push_back((publish, props));
         self.committed.push_back(ack);
     }
 
@@ -411,7 +411,7 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    pub fn pubcomp(&mut self, ack: PubComp) -> Option<Publish> {
+    pub fn pubcomp(&mut self, ack: PubComp) -> Option<(Publish, Option<PublishProperties>)> {
         let ack = Ack::PubComp(ack);
         self.committed.push_back(ack);
         self.recorded.pop_front()

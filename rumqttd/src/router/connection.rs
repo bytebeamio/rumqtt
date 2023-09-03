@@ -1,5 +1,6 @@
 use slab::Slab;
 
+use crate::protocol::LastWillProperties;
 use crate::Filter;
 use crate::{protocol::LastWill, Topic};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +25,8 @@ pub struct Connection {
     pub subscriptions: HashSet<Filter>,
     /// Last will of this connection
     pub last_will: Option<LastWill>,
+    /// Properties of Last will
+    pub last_will_properties: Option<LastWillProperties>,
     /// Connection events
     pub events: ConnectionEvents,
     /// Topic aliases set by clients
@@ -42,6 +45,7 @@ impl Connection {
         clean: bool,
         expiry_interval: u32,
         last_will: Option<LastWill>,
+        last_will_properties: Option<LastWillProperties>,
         dynamic_filters: bool,
         topic_alias_max: u16,
     ) -> Connection {
@@ -71,6 +75,7 @@ impl Connection {
             expiry_interval,
             subscriptions: HashSet::default(),
             last_will,
+            last_will_properties,
             events: ConnectionEvents::default(),
             topic_aliases: HashMap::new(),
             broker_topic_aliases,

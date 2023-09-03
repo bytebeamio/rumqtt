@@ -54,7 +54,7 @@ pub enum Event {
     /// Data for native commitlog
     DeviceData,
     /// Disconnection request
-    Disconnect(Disconnection),
+    Disconnect,
     /// Shadow
     Shadow(ShadowRequest),
     /// Collect and send alerts to all alerts links
@@ -63,6 +63,8 @@ pub enum Event {
     SendMeters,
     /// Get metrics of a connection or all connections
     PrintStatus(Print),
+    /// Publish Will message
+    PublishWill((String, Option<String>)),
 }
 
 /// Notification from router to connection
