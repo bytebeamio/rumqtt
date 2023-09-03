@@ -1,4 +1,6 @@
-use crate::protocol::{Filter, LastWill, Packet, Publish, QoS, RetainForwardRule, Subscribe};
+use crate::protocol::{
+    Filter, LastWill, LastWillProperties, Packet, Publish, QoS, RetainForwardRule, Subscribe,
+};
 use crate::router::Ack;
 use crate::router::{
     iobufs::{Incoming, Outgoing},
@@ -41,6 +43,7 @@ pub struct LinkBuilder<'a> {
     // true by default
     clean_session: bool,
     last_will: Option<LastWill>,
+    last_will_properties: Option<LastWillProperties>,
     // false by default
     dynamic_filters: bool,
     // default to 0, indicating to not use topic alias
@@ -55,6 +58,7 @@ impl<'a> LinkBuilder<'a> {
             tenant_id: None,
             clean_session: true,
             last_will: None,
+            last_will_properties: None,
             dynamic_filters: false,
             topic_alias_max: 0,
         }
@@ -67,6 +71,14 @@ impl<'a> LinkBuilder<'a> {
 
     pub fn last_will(mut self, last_will: Option<LastWill>) -> Self {
         self.last_will = last_will;
+        self
+    }
+
+    pub fn last_will_properties(
+        mut self,
+        last_will_properties: Option<LastWillProperties>,
+    ) -> Self {
+        self.last_will_properties = last_will_properties;
         self
     }
 
@@ -93,6 +105,7 @@ impl<'a> LinkBuilder<'a> {
             self.client_id.to_owned(),
             self.clean_session,
             self.last_will,
+            self.last_will_properties,
             self.dynamic_filters,
             self.topic_alias_max,
         );
