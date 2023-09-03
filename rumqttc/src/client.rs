@@ -489,7 +489,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn calling_iter_twice_on_connection_shouldnt_panic() {
+    fn calling_iter_twice_on_connection_should_not_panic() {
         use std::time::Duration;
 
         let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);

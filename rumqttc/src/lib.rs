@@ -348,7 +348,7 @@ pub enum TlsConfiguration {
         password: String,
     },
     #[cfg(feature = "use-rustls")]
-    /// Injected rustls ClientConfig for TLS, to allow more customisation.
+    /// Injected rustls ClientConfig for TLS, to allow more customization
     Rustls(Arc<ClientConfig>),
     #[cfg(feature = "use-native-tls")]
     Native,

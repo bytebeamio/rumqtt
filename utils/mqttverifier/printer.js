@@ -1,6 +1,6 @@
 /**
  * Print the buffer to console.
- * 
+ *
  * @param {Buffer} buffer - Buffer
  * @returns {void}
  */
