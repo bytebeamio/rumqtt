@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Will delay interval for MQTTv5 (#686)
 
 ### Changed
 
@@ -17,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Link and its implementation which were deprecated.
 
 ### Fixed
+- Will Messages
 - Retained Messages
+- Publish properties in QoS2 publish
 
 ### Security
 
