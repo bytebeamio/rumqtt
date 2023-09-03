@@ -71,7 +71,7 @@ impl<P: Protocol> RemoteLink<P> {
             return Err(Error::NotConnectPacket(connect_packet));
         };
 
-        // Register this connection with the router. Router replys with ack which if ok will
+        // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = &connect.client_id;
         let clean_session = connect.clean_session;
@@ -204,12 +204,12 @@ where
     }
 
     // When keep_alive feature is disabled client can live forever, which is not good in
-    // distributed broker context so currenlty we don't allow it.
+    // distributed broker context so currently we don't allow it.
     if connect.keep_alive == 0 {
         return Err(Error::ZeroKeepAlive);
     }
 
-    // Register this connection with the router. Router replys with ack which if ok will
+    // Register this connection with the router. Router replies with ack which if ok will
     // start the link. Router can sometimes reject the connection (ex max connection limit)
     let empty_client_id = connect.client_id.is_empty();
     let clean_session = connect.clean_session;

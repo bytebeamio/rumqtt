@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 fn len() -> usize {
-    // sesssion present + code
+    // session present + code
     1 + 1
 }
 

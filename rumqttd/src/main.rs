@@ -63,7 +63,7 @@ fn main() {
 
     builder
         .try_init()
-        .expect("initialized subscriber succesfully");
+        .expect("initialized subscriber successfully");
 
     let mut config_builder = config::Config::builder();
 

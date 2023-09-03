@@ -31,7 +31,7 @@ pub struct Network<P> {
     write: BytesMut,
     /// Maximum packet size
     max_incoming_size: usize,
-    /// Maximum connection buffer count. TODO: Change this to use bytes for deterministicness
+    /// Maximum connection buffer count. TODO: Change this to use bytes for determinism
     max_connection_buffer_len: usize,
     /// Keep alive timeout
     keepalive: Duration,

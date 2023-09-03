@@ -523,7 +523,7 @@ impl Router {
 
     /// Handles new incoming data on a topic
     fn handle_device_payload(&mut self, id: ConnectionId) {
-        // TODO: Retun errors and move error handling to the caller
+        // TODO: Return errors and move error handling to the caller
         let incoming = match self.ibufs.get_mut(id) {
             Some(v) => v,
             None => {
@@ -676,9 +676,9 @@ impl Router {
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
 
                         // in case of shared sub original_filter will be $share/group/topic
-                        // this is because we do want to treat is as diffrent subscription
+                        // this is because we do want to treat is as different subscription
                         // and create DataRequest, while using the same datalog of "topic"
-                        // NOTE: topic & $share/group/topic will have same filteridx!
+                        // NOTE: topic & $share/group/topic will have same filter idx!
                         self.prepare_filter(id, cursor, idx, f, group, subscription_id);
 
                         let code = match f.qos {
@@ -799,7 +799,7 @@ impl Router {
 
                     // NOTE: client can try to resend previously unacked pubrels
                     // on reconnection ( with clean session false )
-                    // we try to retrive publish assuming broker saved the previous state
+                    // we try to retrieve publish assuming broker saved the previous state
                     // successfully in graveyard.
                     let (publish, props) = match ackslog.pubcomp(pubcomp) {
                         Some(v) => v,
@@ -890,9 +890,9 @@ impl Router {
             }
         }
 
-        // Incase BytesMut represents 10 packets, publish error/diconnect event
+        // Incase BytesMut represents 10 packets, publish error/disconnect event
         // on say 5th packet should not block new data notifications for packets
-        // 1 - 4. Hence we use a flag instead of diconnecting immediately
+        // 1 - 4. Hence we use a flag instead of disconnecting immediately
         if disconnect {
             self.handle_disconnection(id, disconnect_reason);
         }
@@ -1394,7 +1394,7 @@ enum ConsumeStatus {
     FilterCaughtup,
     /// Some publishes on topic have been forwarded
     PartialRead,
-    /// Use to indicate we want to skip the datareqest
+    /// Use to indicate we want to skip the data request
     /// for shared subscriptions
     SkipRequest,
 }
@@ -1800,7 +1800,7 @@ fn extract_group(filter: &str) -> Option<(String, String)> {
 //     }
 
 //     #[test]
-//     fn test_graveyard_retreive_metrics_always() {
+//     fn test_graveyard_retrieve_metrics_always() {
 //         let (mut router, mut links) = new_router(1, false);
 //         let (tx, _) = links.pop_front().unwrap();
 //         let id = tx.connection_id;
@@ -2004,7 +2004,7 @@ fn extract_group(filter: &str) -> Option<(String, String)> {
 //         //     = router.run times * topics * subscribers per topic
 //         //     = 2 * 2 * 2 = 8
 //         //
-//         // we also call consume 2 times per subsriber, and one time it will call
+//         // we also call consume 2 times per subscriber, and one time it will call
 //         // forward_device_data again, but no data will actually be forwarded.
 //         // as 256 publishes at once, and router's config only reads 128 at a time, data needs to be
 //         // read from same log twice, and thus half of the times the data reading is not done

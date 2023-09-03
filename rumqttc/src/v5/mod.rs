@@ -231,7 +231,7 @@ impl MqttOptions {
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
     pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
-        assert!(duration.as_secs() >= 5, "Keep alives should be >= 5 secs");
+        assert!(duration.as_secs() >= 5, "Keep alive should be >= 5 secs");
 
         self.keep_alive = duration;
         self
@@ -289,7 +289,7 @@ impl MqttOptions {
         self.request_channel_capacity
     }
 
-    /// Enables throttling and sets outoing message rate to the specified 'rate'
+    /// Enables throttling and sets outgoing message rate to the specified 'rate'
     pub fn set_pending_throttle(&mut self, duration: Duration) -> &mut Self {
         self.pending_throttle = duration;
         self

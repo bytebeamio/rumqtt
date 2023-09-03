@@ -30,7 +30,7 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
-    #[error("Cannot recieve packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
+    #[error("Cannot receive packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
     OutgoingPacketTooLarge { pkt_size: usize, max: usize },
 }
 
@@ -198,8 +198,8 @@ impl MqttState {
         Ok(())
     }
 
-    /// Results in a publish notification in all the QoS cases. Replys with an ack
-    /// in case of QoS1 and Replys rec in case of QoS while also storing the message
+    /// Results in a publish notification in all the QoS cases. Replies with an ack
+    /// in case of QoS1 and Replies rec in case of QoS while also storing the message
     fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<(), StateError> {
         let qos = publish.qos;
 

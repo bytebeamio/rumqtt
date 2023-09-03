@@ -29,7 +29,7 @@ impl ConnAck {
     }
 
     fn len(&self) -> usize {
-        // sesssion present + code
+        // session present + code
 
         1 + 1
     }
