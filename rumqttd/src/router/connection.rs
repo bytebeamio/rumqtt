@@ -39,6 +39,8 @@ pub struct Connection {
 
 impl Connection {
     /// Create connection state to hold identifying information of connecting device
+    // TODO: use builder pattern or something else to fix this lint
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tenant_id: Option<String>,
         client_id: String,
