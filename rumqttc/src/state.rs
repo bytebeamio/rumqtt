@@ -582,7 +582,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(100, false)
+        MqttState::new(u16::MAX, false)
     }
 
     #[test]
