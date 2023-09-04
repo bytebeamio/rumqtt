@@ -1582,7 +1582,7 @@ fn forward_device_data(
             }
         });
 
-    let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
+    let (len, inflight) = outgoing.push_forwards(forwards, filter_idx);
 
     debug!(
         inflight_count = inflight,
