@@ -100,15 +100,16 @@ impl<'a> LinkBuilder<'a> {
     pub fn build(self) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
         // Connect to router
         // Local connections to the router shall have access to all subscriptions
-        let connection = Connection::new(
+        let mut connection = Connection::new(
             self.tenant_id,
             self.client_id.to_owned(),
             self.clean_session,
-            self.last_will,
-            self.last_will_properties,
             self.dynamic_filters,
-            self.topic_alias_max,
         );
+
+        connection
+            .last_will(self.last_will, self.last_will_properties)
+            .topic_alias_max(self.topic_alias_max);
         let incoming = Incoming::new(connection.client_id.to_owned());
         let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
         let outgoing_data_buffer = outgoing.buffer();
