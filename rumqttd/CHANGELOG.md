@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Will delay interval for MQTTv5 (#686)
 
 ### Changed
+- Non-consuming builder pattern for constructing Connection
 
 ### Deprecated
 
