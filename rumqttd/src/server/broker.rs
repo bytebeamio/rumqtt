@@ -36,6 +36,8 @@ use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
 use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
@@ -478,6 +480,15 @@ async fn remote<P: Protocol>(
         _ => unreachable!(),
     };
 
+    let assign_client_id = client_id.is_empty();
+    if assign_client_id {
+        client_id = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(10)
+            .map(char::from)
+            .collect();
+    }
+
     if let Some(tenant_id) = &tenant_id {
         // client_id is set to "tenant_id.client_id"
         // this is to make sure we are consistent,
@@ -507,6 +518,7 @@ async fn remote<P: Protocol>(
         network,
         connect_packet,
         dynamic_filters,
+        assign_client_id,
     )
     .await
     {

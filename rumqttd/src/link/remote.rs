@@ -7,8 +7,6 @@ use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::io;
@@ -68,6 +66,7 @@ impl<P: Protocol> RemoteLink<P> {
         mut network: Network<P>,
         connect_packet: Packet,
         dynamic_filters: bool,
+        assigned_client_id: bool,
     ) -> Result<RemoteLink<P>, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
             return Err(Error::NotConnectPacket(connect_packet));
@@ -105,8 +104,16 @@ impl<P: Protocol> RemoteLink<P> {
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 
-        if let Some(packet) = notification.into() {
-            network.write(packet).await?;
+        if let Some(mut packet) = notification.into() {
+            if let Packet::ConnAck(_ack, props) = &mut packet {
+                let mut new_props = props.clone().unwrap_or_default();
+
+                if assigned_client_id {
+                    new_props.assigned_client_identifier = Some(client_id.to_string());
+                }
+                *props = Some(new_props);
+                network.write(packet).await?;
+            }
         }
 
         Ok(RemoteLink {
@@ -211,22 +218,12 @@ where
         return Err(Error::ZeroKeepAlive);
     }
 
-    // Register this connection with the router. Router replys with ack which if ok will
-    // start the link. Router can sometimes reject the connection (ex max connection limit)
     let empty_client_id = connect.client_id.is_empty();
     let clean_session = connect.clean_session;
 
-    if empty_client_id {
-        if !clean_session {
-            // TODO(swanx): send connack with identifier rejected
-            return Err(Error::InvalidClientId);
-        }
-
-        connect.client_id = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(10)
-            .map(char::from)
-            .collect();
+    if empty_client_id && !clean_session {
+        // TODO(swanx): send connack with identifier rejected
+        return Err(Error::InvalidClientId);
     }
 
     // Ok((connect, props, lastwill, lastwill_props))
