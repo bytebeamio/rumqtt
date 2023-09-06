@@ -7,6 +7,8 @@ use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::io;
@@ -175,14 +177,14 @@ where
     // DOS attacks by filling total connections that the server can handle with idle open
     // connections which results in server rejecting new connections
     let connection_timeout_ms = config.connection_timeout_ms.into();
-    let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
+    let mut packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
         let packet = network.read().await?;
         Ok::<_, network::Error>(packet)
     })
     .await??;
 
     let (connect, _props, login) = match packet {
-        Packet::Connect(ref connect, ref props, _, _, ref login) => (connect, props, login),
+        Packet::Connect(ref mut connect, ref props, _, _, ref login) => (connect, props, login),
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
@@ -214,12 +216,17 @@ where
     let empty_client_id = connect.client_id.is_empty();
     let clean_session = connect.clean_session;
 
-    if cfg!(feature = "allow-duplicate-clientid") {
-        if !clean_session && empty_client_id {
+    if empty_client_id {
+        if !clean_session {
+            // TODO(swanx): send connack with identifier rejected
             return Err(Error::InvalidClientId);
         }
-    } else if empty_client_id {
-        return Err(Error::InvalidClientId);
+
+        connect.client_id = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(10)
+            .map(char::from)
+            .collect();
     }
 
     // Ok((connect, props, lastwill, lastwill_props))
