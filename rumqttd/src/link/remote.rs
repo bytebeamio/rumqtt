@@ -66,7 +66,7 @@ impl<P: Protocol> RemoteLink<P> {
         mut network: Network<P>,
         connect_packet: Packet,
         dynamic_filters: bool,
-        assigned_client_id: bool,
+        assigned_client_id: Option<String>,
     ) -> Result<RemoteLink<P>, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
             return Err(Error::NotConnectPacket(connect_packet));
@@ -74,7 +74,7 @@ impl<P: Protocol> RemoteLink<P> {
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let client_id = &connect.client_id;
+        let client_id = assigned_client_id.as_ref().unwrap_or(&connect.client_id);
         let clean_session = connect.clean_session;
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
@@ -107,10 +107,7 @@ impl<P: Protocol> RemoteLink<P> {
         if let Some(mut packet) = notification.into() {
             if let Packet::ConnAck(_ack, props) = &mut packet {
                 let mut new_props = props.clone().unwrap_or_default();
-
-                if assigned_client_id {
-                    new_props.assigned_client_identifier = Some(client_id.to_string());
-                }
+                new_props.assigned_client_identifier = assigned_client_id;
                 *props = Some(new_props);
                 network.write(packet).await?;
             }

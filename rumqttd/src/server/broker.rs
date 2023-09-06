@@ -480,13 +480,14 @@ async fn remote<P: Protocol>(
         _ => unreachable!(),
     };
 
-    let assign_client_id = client_id.is_empty();
-    if assign_client_id {
+    let mut assigned_client_id = None;
+    if client_id.is_empty() {
         client_id = thread_rng()
             .sample_iter(&Alphanumeric)
             .take(10)
             .map(char::from)
             .collect();
+        assigned_client_id = Some(client_id.clone());
     }
 
     if let Some(tenant_id) = &tenant_id {
@@ -518,7 +519,7 @@ async fn remote<P: Protocol>(
         network,
         connect_packet,
         dynamic_filters,
-        assign_client_id,
+        assigned_client_id,
     )
     .await
     {
