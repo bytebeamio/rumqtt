@@ -90,7 +90,7 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                 }
             });
 
-            root_cert_store.add_server_trust_anchors(trust_anchors);
+            root_cert_store.add_trust_anchors(trust_anchors);
 
             if root_cert_store.is_empty() {
                 return Err(Error::NoValidCertInChain);
@@ -127,7 +127,7 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
 
                 let certs = certs.into_iter().map(Certificate).collect();
 
-                config.with_single_cert(certs, PrivateKey(key))?
+                config.with_client_auth_cert(certs, PrivateKey(key))?
             } else {
                 config.with_no_client_auth()
             };
