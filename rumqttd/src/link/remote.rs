@@ -2,7 +2,7 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
-use crate::protocol::{Connect, Packet, Protocol};
+use crate::protocol::{ConnAck, Connect, ConnectReturnCode, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
@@ -219,7 +219,14 @@ where
     let clean_session = connect.clean_session;
 
     if empty_client_id && !clean_session {
-        // TODO(swanx): send connack with identifier rejected
+        let ack = ConnAck {
+            session_present: false,
+            code: ConnectReturnCode::ClientIdentifierNotValid,
+        };
+
+        let packet = Packet::ConnAck(ack, None);
+        network.write(packet).await?;
+
         return Err(Error::InvalidClientId);
     }
 
