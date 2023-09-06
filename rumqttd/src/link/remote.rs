@@ -181,14 +181,14 @@ where
     // DOS attacks by filling total connections that the server can handle with idle open
     // connections which results in server rejecting new connections
     let connection_timeout_ms = config.connection_timeout_ms.into();
-    let mut packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
+    let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
         let packet = network.read().await?;
         Ok::<_, network::Error>(packet)
     })
     .await??;
 
     let (connect, _props, login) = match packet {
-        Packet::Connect(ref mut connect, ref props, _, _, ref login) => (connect, props, login),
+        Packet::Connect(ref connect, ref props, _, _, ref login) => (connect, props, login),
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
