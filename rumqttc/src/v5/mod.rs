@@ -50,8 +50,9 @@ pub enum Request {
 }
 
 #[cfg(feature = "websocket")]
-type RequestModifierFn =
-    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>>>>;
+type RequestModifierFn = dyn Send
+    + Sync
+    + Fn(http::Request<()>) -> Pin<Box<dyn Send + Sync + Future<Output = http::Request<()>>>>;
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -201,8 +202,9 @@ impl MqttOptions {
     #[cfg(feature = "websocket")]
     pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
     where
-        F: Fn(http::Request<()>) -> O + 'static,
-        O: IntoFuture<Output = http::Request<()>>,
+        F: Send + Sync + Fn(http::Request<()>) -> O + 'static,
+        O: Send + Sync + IntoFuture<Output = http::Request<()>>,
+        <O as std::future::IntoFuture>::IntoFuture: Send + Sync,
     {
         let request_modifier = Arc::new(Box::new(request_modifier));
         self.request_modifier = Some(Arc::new(Box::new(move |request| {
