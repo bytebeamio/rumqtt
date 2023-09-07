@@ -211,7 +211,7 @@ pub async fn tls_connect<P: AsRef<Path>>(
         }
     });
 
-    root_cert_store.add_server_trust_anchors(trust_anchors);
+    root_cert_store.add_trust_anchors(trust_anchors);
 
     if root_cert_store.is_empty() {
         return Err(BridgeError::NoValidCertInChain);
@@ -247,7 +247,7 @@ pub async fn tls_connect<P: AsRef<Path>>(
         };
 
         let certs = read_certs.into_iter().map(Certificate).collect();
-        config.with_single_cert(certs, PrivateKey(read_key))?
+        config.with_client_auth_cert(certs, PrivateKey(read_key))?
     } else {
         config.with_no_client_auth()
     };
