@@ -315,14 +315,14 @@ pub(crate) async fn socket_connect(
         }
 
         #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        socket
-            .bind_device(
-                network_options
-                    .bind_device
-                    .as_ref()
-                    .map(|bind_device| bind_device.as_bytes()),
-            )
-            .unwrap();
+        {
+            if let Some(bind_device) = &network_options.bind_device {
+                // call the bind_device function only if the bind_device network option is defined
+                // If binding device is None or an empty string it removes the binding,
+                // which is causing PermissionDenied errors in AWS environment (lambda function).
+                socket.bind_device(Some(bind_device.as_bytes()))?;
+            }
+        }
 
         match socket.connect(addr).await {
             Ok(s) => return Ok(s),
