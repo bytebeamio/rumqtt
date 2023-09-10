@@ -66,7 +66,7 @@ impl<P: Protocol> RemoteLink<P> {
         tenant_id: Option<String>,
         mut network: Network<P>,
         connect_packet: Packet,
-        dynamic_filters: bool,
+        config: Arc<ConnectionSettings>,
     ) -> Result<RemoteLink<P>, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
             return Err(Error::NotConnectPacket(connect_packet));
@@ -98,15 +98,22 @@ impl<P: Protocol> RemoteLink<P> {
             .clean_session(clean_session)
             .last_will(lastwill)
             .last_will_properties(lastwill_props)
-            .dynamic_filters(dynamic_filters)
+            .dynamic_filters(config.dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
             .build()?;
 
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 
-        if let Some(packet) = notification.into() {
-            network.write(packet).await?;
+        if let Some(mut packet) = notification.into() {
+            if let Packet::ConnAck(_ack, props) = &mut packet {
+                let mut new_props = props.clone().unwrap_or_default();
+                // NOTE: shall we rename max_payload_size to max_packet_size
+                // and make it u32?
+                new_props.max_packet_size = Some(config.max_payload_size as u32);
+                *props = Some(new_props);
+                network.write(packet).await?;
+            }
         }
 
         Ok(RemoteLink {
