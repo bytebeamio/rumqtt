@@ -146,6 +146,7 @@ impl<P: Protocol> RemoteLink<P> {
 
                     for notif in self.notifications.drain(..) {
                         if let Some(packet) = notif.into() {
+                // TODO(swanandx): get packet size here and skip based on max size
                             packets.push_back(packet);
                         } else {
                             unscheduled = true;

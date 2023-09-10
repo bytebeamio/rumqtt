@@ -6,7 +6,7 @@ use super::*;
 
 use super::{property, PropertyType};
 
-fn len(disconnect: &Disconnect, properties: &Option<DisconnectProperties>) -> usize {
+pub fn len(disconnect: &Disconnect, properties: &Option<DisconnectProperties>) -> usize {
     if disconnect.reason_code == DisconnectReasonCode::NormalDisconnection && properties.is_none() {
         return 2; // Packet type + 0x00
     }

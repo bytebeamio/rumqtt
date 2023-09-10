@@ -1,7 +1,7 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-fn len(connack: &ConnAck, properties: &Option<ConnAckProperties>) -> usize {
+pub fn len(connack: &ConnAck, properties: &Option<ConnAckProperties>) -> usize {
     let mut len = 1  // session present
                 + 1; // code
 

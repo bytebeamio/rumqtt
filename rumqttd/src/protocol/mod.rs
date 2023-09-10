@@ -13,6 +13,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::Notification;
 
+use self::v5::{connack, disconnect, puback, pubcomp, publish, pubrec, pubrel, suback, unsuback};
+
 // TODO: Handle the cases when there are no properties using Inner struct, so
 // handling of properties can be made simplier internally
 
@@ -40,6 +42,24 @@ pub enum Packet {
     Disconnect(Disconnect, Option<DisconnectProperties>),
 }
 
+impl Packet {
+    pub fn length(&self) -> usize {
+        match self {
+            Packet::ConnAck(ack, props) => connack::len(ack, props),
+            Packet::Publish(publ, props) => publish::len(publ, props),
+            Packet::PubAck(ack, props) => puback::len(ack, props),
+            Packet::PingResp(_) => 2,
+            Packet::SubAck(ack, props) => suback::len(ack, props),
+            Packet::PubRec(rec, props) => pubrec::len(rec, props),
+            Packet::PubRel(rel, props) => pubrel::len(rel, props),
+            Packet::PubComp(comp, props) => pubcomp::len(comp, props),
+            Packet::UnsubAck(ack, props) => unsuback::len(ack, props),
+            Packet::Disconnect(disconn, props) => disconnect::len(disconn, props),
+            // Connect, PingReq, Subscribe, Unsubscribe
+            p => unreachable!("server must never send {p:?} packet"),
+        }
+    }
+}
 //--------------------------- Connect packet -------------------------------
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PingReq;

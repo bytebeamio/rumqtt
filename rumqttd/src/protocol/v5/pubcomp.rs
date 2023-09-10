@@ -1,7 +1,7 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-fn len(pubcomp: &PubComp, properties: &Option<PubCompProperties>) -> usize {
+pub fn len(pubcomp: &PubComp, properties: &Option<PubCompProperties>) -> usize {
     let mut len = 2 + 1; // pkid + reason
 
     // The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success)
