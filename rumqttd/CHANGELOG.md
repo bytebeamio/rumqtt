@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Will delay interval for MQTTv5 (#686)
 
 ### Changed
+- Non-consuming builder pattern for constructing Connection
 
 ### Deprecated
 
@@ -24,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish properties in QoS2 publish
 
 ### Security
+- Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
 
 ---
 
