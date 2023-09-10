@@ -57,6 +57,7 @@ pub struct RemoteLink<P> {
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
     pub(crate) will_delay_interval: u32,
+    max_packet_size: Option<u32>,
 }
 
 impl<P: Protocol> RemoteLink<P> {
@@ -76,6 +77,7 @@ impl<P: Protocol> RemoteLink<P> {
         let client_id = &connect.client_id;
         let clean_session = connect.clean_session;
 
+        let max_packet_size = props.as_ref().and_then(|p| p.max_packet_size);
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
         let session_expiry = props
             .as_ref()
@@ -115,6 +117,7 @@ impl<P: Protocol> RemoteLink<P> {
             link_rx,
             notifications: VecDeque::with_capacity(100),
             will_delay_interval,
+            max_packet_size,
         })
     }
 
@@ -145,9 +148,14 @@ impl<P: Protocol> RemoteLink<P> {
                     let mut unscheduled = false;
 
                     for notif in self.notifications.drain(..) {
-                        if let Some(packet) = notif.into() {
-                // TODO(swanandx): get packet size here and skip based on max size
-                            packets.push_back(packet);
+                        let packet: Option<Packet> = notif.into();
+
+                        if let Some(packet) = packet {
+                            // if max_packet_size is None or if packet size is <= max,
+                            // we keep the packet, else ignore it
+                            if !self.max_packet_size.is_some_and(|max| packet.length() > max as usize) {
+                                packets.push_back(packet);
+                            };
                         } else {
                             unscheduled = true;
                         }
