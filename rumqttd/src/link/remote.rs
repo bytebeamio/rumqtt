@@ -46,6 +46,8 @@ pub enum Error {
     TrySend(#[from] TrySendError<(ConnectionId, Event)>),
     #[error("Link error = {0}")]
     Link(#[from] LinkError),
+    #[error("Invalid payload format")]
+    PayloadFormatInvalid,
 }
 
 /// Orchestrates between Router and Network.
@@ -181,8 +183,10 @@ where
     })
     .await??;
 
-    let (connect, _props, login) = match packet {
-        Packet::Connect(ref connect, ref props, _, _, ref login) => (connect, props, login),
+    let (connect, _props, will, will_props, login) = match packet {
+        Packet::Connect(ref connect, ref props, ref will, ref will_props, ref login) => {
+            (connect, props, will, will_props, login)
+        }
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
@@ -220,6 +224,15 @@ where
         }
     } else if empty_client_id {
         return Err(Error::InvalidClientId);
+    }
+
+    if will_props.as_ref().and_then(|p| p.payload_format_indicator) == Some(0x01) {
+        // if we had will props, that means we MUST have a will msg as well
+        let will = will.as_ref().unwrap();
+        if std::str::from_utf8(&will.topic).is_err() || std::str::from_utf8(&will.message).is_err()
+        {
+            return Err(Error::PayloadFormatInvalid);
+        }
     }
 
     // Ok((connect, props, lastwill, lastwill_props))
