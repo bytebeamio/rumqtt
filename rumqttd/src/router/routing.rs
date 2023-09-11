@@ -555,6 +555,17 @@ impl Router {
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
+                    if properties.as_ref().and_then(|p| p.payload_format_indicator) == Some(0x01)
+                        && (std::str::from_utf8(&publish.topic).is_err()
+                            || std::str::from_utf8(&publish.payload).is_err())
+                    {
+                        // NOTE: Shall we send PubAck with PayloadFormatInvalid reason code
+                        // instead of disconnecting the message?
+                        disconnect = true;
+                        disconnect_reason = Some(DisconnectReasonCode::PayloadFormatInvalid);
+                        break;
+                    }
+
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
                     // set global force flush flag. Force flush is triggered when the
