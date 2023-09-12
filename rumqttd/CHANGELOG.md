@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Session expiry and clean start for MQTTv5 (#691)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttd 0.18.0] - 12-09-2023
+
+### Added
 - Will delay interval for MQTTv5 (#686)
 
 ### Changed
