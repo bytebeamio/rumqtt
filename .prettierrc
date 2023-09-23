@@ -3,5 +3,13 @@
     "semi": true,
     "singleQuote": false,
     "trailingComma": "none",
-    "plugins": ["prettier-plugin-sh"]
+    "plugins": ["prettier-plugin-sh"],
+    "overrides": [
+        {
+            "files": "*.{yml,yaml}",
+            "options": {
+                "singleQuote": true
+            }
+        }
+    ]
 }

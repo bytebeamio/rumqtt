@@ -4,9 +4,9 @@ on:
             - main
             - mqtt5-client
         paths:
-            - "**.rs"
-            - "Cargo.*"
-            - "*/Cargo.*"
+            - '**.rs'
+            - 'Cargo.*'
+            - '*/Cargo.*'
 
 name: Build and Test
 
@@ -47,7 +47,7 @@ jobs:
             - name: Check rumqttc and rumqttd
               run: cargo hack clippy --verbose --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
               env:
-                  RUSTFLAGS: "-D warnings"
+                  RUSTFLAGS: '-D warnings'
 
             - name: Check docs
               if: ${{ matrix.os != 'windows-latest' }}

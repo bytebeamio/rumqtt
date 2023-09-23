@@ -2,7 +2,7 @@ name: Releaser
 on:
     push:
         tags:
-            - "rumqttd-*"
+            - 'rumqttd-*'
 
 jobs:
     build-release:
