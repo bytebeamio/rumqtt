@@ -1394,7 +1394,7 @@ enum ConsumeStatus {
     FilterCaughtup,
     /// Some publishes on topic have been forwarded
     PartialRead,
-    /// Use to indicate we want to skip the data request
+    /// Use to indicate we want to skip the DataRequest
     /// for shared subscriptions
     SkipRequest,
 }
