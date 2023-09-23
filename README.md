@@ -127,7 +127,7 @@ cargo run --release --bin rumqttd -- -c rumqttd/rumqttd.toml -vvv
 Add `rumqttc` to your Rust project
 
 ```sh
-cargo add rumqttc --all-features
+cargo add rumqttc
 ```
 
 # Features

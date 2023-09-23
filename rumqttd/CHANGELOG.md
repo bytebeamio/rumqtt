@@ -9,9 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [rumqttd 0.18.0] - 12-09-2023
+
+### Added
+
 -   Will delay interval for MQTTv5 (#686)
 
 ### Changed
+
+-   Non-consuming builder pattern for constructing Connection
 
 ### Deprecated
 
@@ -26,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -   Publish properties in QoS2 publish
 
 ### Security
+
+-   Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
 
 ## [rumqttd 0.17.0] - 15-08-2023
 

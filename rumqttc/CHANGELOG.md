@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+-   Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
+
 ## [rumqttc 0.22.0] - 07-06-2023
 
 ### Added

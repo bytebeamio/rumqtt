@@ -41,10 +41,7 @@ impl Connection {
         tenant_id: Option<String>,
         client_id: String,
         clean: bool,
-        last_will: Option<LastWill>,
-        last_will_properties: Option<LastWillProperties>,
         dynamic_filters: bool,
-        topic_alias_max: u16,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
@@ -57,26 +54,37 @@ impl Connection {
             None => (client_id, None),
         };
 
-        // if topic_alias_max is 0, that means client doesn't want to use / support topic alias
-        let broker_topic_aliases = if topic_alias_max == 0 {
-            None
-        } else {
-            Some(BrokerAliases::new(topic_alias_max))
-        };
-
         Connection {
             client_id,
             tenant_prefix,
             dynamic_filters,
             clean,
             subscriptions: HashSet::default(),
-            last_will,
-            last_will_properties,
+            last_will: None,
+            last_will_properties: None,
             events: ConnectionEvents::default(),
             topic_aliases: HashMap::new(),
-            broker_topic_aliases,
+            broker_topic_aliases: None,
             subscription_ids: HashMap::new(),
         }
+    }
+
+    pub fn topic_alias_max(&mut self, max: u16) -> &mut Connection {
+        // if topic_alias_max is 0, that means client doesn't want to use / support topic alias
+        if max > 0 {
+            self.broker_topic_aliases = Some(BrokerAliases::new(max));
+        }
+        self
+    }
+
+    pub fn last_will(
+        &mut self,
+        will: Option<LastWill>,
+        props: Option<LastWillProperties>,
+    ) -> &mut Connection {
+        self.last_will = will;
+        self.last_will_properties = props;
+        self
     }
 }
 

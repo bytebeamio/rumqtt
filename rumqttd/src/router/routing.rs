@@ -1092,7 +1092,7 @@ impl Router {
         let tenant_prefix = tenant_id.map(|id| format!("/tenants/{id}/"));
 
         let Some((will, will_props)) = self.last_wills.remove(&client_id) else {
-            return
+            return;
         };
 
         let publish = Publish {
