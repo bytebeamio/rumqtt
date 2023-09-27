@@ -1229,17 +1229,17 @@ fn append_to_commitlog(
     publish.retain = false;
     let pkid = publish.pkid;
 
-    let filter_idxs = datalog.matches(topic);
+    let mut filter_idxs = datalog.matches(topic);
 
-    // Create a dynamic filter if dynamic_filters are enabled for this connection
-    let filter_idxs = match filter_idxs {
-        Some(v) => v,
-        None if connection.dynamic_filters => {
-            let (idx, _cursor) = datalog.next_native_offset(topic);
-            vec![idx]
+    if filter_idxs.is_empty() {
+        if !connection.dynamic_filters {
+            return Err(RouterError::NoMatchingFilters(topic.to_owned()));
         }
-        None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
-    };
+
+        // Create a dynamic filter if dynamic_filters are enabled for this connection
+        let (idx, _cursor) = datalog.next_native_offset(topic);
+        filter_idxs = vec![idx];
+    }
 
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
@@ -1302,10 +1302,9 @@ fn append_will_message(
 
     let filter_idxs = datalog.matches(topic);
 
-    let filter_idxs = match filter_idxs {
-        Some(v) => v,
-        None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
-    };
+    if filter_idxs.is_empty() {
+        return Err(RouterError::NoMatchingFilters(topic.to_owned()));
+    }
 
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
