@@ -1232,13 +1232,13 @@ fn append_to_commitlog(
     let mut filter_idxs = datalog.matches(topic);
 
     if filter_idxs.is_empty() {
-        if !connection.dynamic_filters {
-            return Err(RouterError::NoMatchingFilters(topic.to_owned()));
-        }
-
         // Create a dynamic filter if dynamic_filters are enabled for this connection
-        let (idx, _cursor) = datalog.next_native_offset(topic);
-        filter_idxs = vec![idx];
+        if connection.dynamic_filters {
+            let (idx, _cursor) = datalog.next_native_offset(topic);
+            filter_idxs = vec![idx];
+        } else {
+            warn!(topic, "no datalog found for topic, dropping message");
+        }
     }
 
     let mut o = (0, 0);
@@ -1303,7 +1303,7 @@ fn append_will_message(
     let filter_idxs = datalog.matches(topic);
 
     if filter_idxs.is_empty() {
-        return Err(RouterError::NoMatchingFilters(topic.to_owned()));
+        warn!(topic, "no datalog found for topic, dropping message")
     }
 
     let mut o = (0, 0);
