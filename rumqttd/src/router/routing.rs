@@ -43,8 +43,6 @@ pub enum RouterError {
     #[cfg(feature = "validate-tenant-prefix")]
     #[error("Bad Tenant")]
     BadTenant(String, String),
-    #[error("No matching filters to topic {0}")]
-    NoMatchingFilters(String),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
