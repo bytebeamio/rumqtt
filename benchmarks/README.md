@@ -1,3 +1,3 @@
-<head>
-  <link rel="import" href="results/benchmarks.html">
-</head>
+# Benchmarks
+
+See [`results/benchmarks.html`](./results/benchmarks.html)

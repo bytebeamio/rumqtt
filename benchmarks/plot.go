@@ -16,7 +16,7 @@ import (
 // Plots throughput configuration of multiple binaries in a file
 // Conditions:
 // One file should hold throughputs of multiple binaries for a given common configuration (PlotData.configuration)
-// - Each binary can output multiple thoughputs. E.g parser outputs read and write throughput on one binary
+// - Each binary can output multiple throughputs. E.g parser outputs read and write throughput on one binary
 // - Binary name is identified with PlotData.id. All the binary names form X axis
 
 func main() {
@@ -111,8 +111,8 @@ func plot(name string, file *os.File, plotsData []*PlotData) {
 		configuration = plotData.configuration
 
 		// If each binary produces multiple throughputs, like
-		// read and write throughtputs. Collect all read throughputs
-		// first and then colllect all write throughputs in an array
+		// read and write throughputs. Collect all read throughputs
+		// first and then collect all write throughputs in an array
 		for k, v := range plotData.throughputs {
 			throughputs[k] = append(throughputs[k], opts.BarData{Value: v})
 		}

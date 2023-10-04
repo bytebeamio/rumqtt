@@ -12,9 +12,9 @@ fn main() {
 
     builder
         .try_init()
-        .expect("initialized subscriber succesfully");
+        .expect("initialized subscriber successfully");
 
-    // As examples are compiled as seperate binary so this config is current path dependent. Run it
+    // As examples are compiled as separate binary so this config is current path dependent. Run it
     // from root of this crate
     let config = config::Config::builder()
         .add_source(config::File::with_name("rumqttd.toml"))

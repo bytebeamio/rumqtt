@@ -1,0 +1,8 @@
+{
+    "extends": "markdownlint/style/prettier",
+    "line-length": false,
+    "no-blanks-blockquote": false,
+    "no-duplicate-header": {
+        "allow_different_nesting": true
+    }
+}

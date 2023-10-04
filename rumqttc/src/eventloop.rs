@@ -184,7 +184,7 @@ impl EventLoop {
                 Ok(self.state.events.pop_front().unwrap())
             },
              // Handles pending and new requests.
-            // If available, prioritises pending requests from previous session.
+            // If available, prioritizes pending requests from previous session.
             // Else, pulls next request from user requests channel.
             // If conditions in the below branch are for flow control.
             // The branch is disabled if there's no pending messages and new user requests

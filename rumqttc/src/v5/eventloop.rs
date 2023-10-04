@@ -165,7 +165,7 @@ impl EventLoop {
         // instead of returning a None event, we try again.
         select! {
             // Handles pending and new requests.
-            // If available, prioritises pending requests from previous session.
+            // If available, prioritizes pending requests from previous session.
             // Else, pulls next request from user requests channel.
             // If conditions in the below branch are for flow control.
             // The branch is disabled if there's no pending messages and new user requests
@@ -269,7 +269,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     // Override default value if max_packet_size is set on `connect_properties`
     if let Some(connect_props) = &options.connect_properties {
         if let Some(max_size) = connect_props.max_packet_size {
-            let max_size = max_size.try_into().map_err(StateError::Coversion)?;
+            let max_size = max_size.try_into().map_err(StateError::Conversion)?;
             max_incoming_pkt_size = Some(max_size);
         }
     }

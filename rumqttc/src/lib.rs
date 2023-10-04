@@ -348,7 +348,7 @@ pub enum TlsConfiguration {
         password: String,
     },
     #[cfg(feature = "use-rustls")]
-    /// Injected rustls ClientConfig for TLS, to allow more customisation.
+    /// Injected rustls ClientConfig for TLS, to allow more customization
     Rustls(Arc<ClientConfig>),
     #[cfg(feature = "use-native-tls")]
     Native,
@@ -577,7 +577,7 @@ impl MqttOptions {
     pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
         assert!(
             duration.is_zero() || duration >= Duration::from_secs(1),
-            "Keep alives should be specified in seconds. Durations less than \
+            "Keep alive should be specified in seconds. Durations less than \
             a second are not allowed, except for Duration::ZERO."
         );
 
@@ -649,7 +649,7 @@ impl MqttOptions {
         self.request_channel_capacity
     }
 
-    /// Enables throttling and sets outoing message rate to the specified 'rate'
+    /// Enables throttling and sets outgoing message rate to the specified 'rate'
     pub fn set_pending_throttle(&mut self, duration: Duration) -> &mut Self {
         self.pending_throttle = duration;
         self

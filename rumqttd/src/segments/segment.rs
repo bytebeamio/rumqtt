@@ -55,7 +55,7 @@ where
     }
 
     #[inline]
-    /// Takes in the abosolute index to start reading from. Internally handles the conversion from
+    /// Takes in the absolute index to start reading from. Internally handles the conversion from
     /// relative offset to absolute offset and vice-versa.
     pub(crate) fn readv(
         &self,
@@ -63,7 +63,7 @@ where
         len: u64,
         out: &mut Vec<(T, Offset)>,
     ) -> io::Result<SegmentPosition> {
-        // This substraction can never overflow as checking of offset happens at
+        // This subtraction can never overflow as checking of offset happens at
         // `CommitLog::readv`.
         let idx = cursor.1 - self.absolute_offset;
 

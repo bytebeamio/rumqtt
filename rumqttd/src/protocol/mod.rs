@@ -14,7 +14,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crate::Notification;
 
 // TODO: Handle the cases when there are no properties using Inner struct, so
-// handling of properties can be made simplier internally
+// handling of properties can be made simpler internally
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
@@ -622,8 +622,8 @@ pub fn valid_filter(filter: &str) -> bool {
         return false;
     }
 
-    let hirerarchy = filter.split('/').collect::<Vec<&str>>();
-    if let Some((last, remaining)) = hirerarchy.split_last() {
+    let hierarchy = filter.split('/').collect::<Vec<&str>>();
+    if let Some((last, remaining)) = hierarchy.split_last() {
         for entry in remaining.iter() {
             // # is not allowed in filter except as a last entry
             // invalid: sport/tennis#/player
