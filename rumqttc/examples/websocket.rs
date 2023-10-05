@@ -11,11 +11,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
     // port parameter is ignored when scheme is websocket
-    let mut mqttoptions = MqttOptions::new(
-        "clientId-aSziq39Bp3",
-        "ws://broker.mqttdashboard.com:8000/mqtt",
-        8000,
-    );
+    let mut mqttoptions: MqttOptions = MqttOptions::new("clientId-1", "ws://localhost:9001", 9001);
     mqttoptions.set_transport(Transport::Ws);
     mqttoptions.set_keep_alive(Duration::from_secs(60));
 

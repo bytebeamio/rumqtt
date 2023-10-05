@@ -63,6 +63,9 @@ pub enum ConnectionError {
     #[cfg(feature = "proxy")]
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket Connect Subprotocol")]
+    WebsocketSubprotocol,
 }
 
 /// Eventloop with all the state of a connection
@@ -398,7 +401,14 @@ async fn network_connect(
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
-            let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            let (socket, response) =
+                async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+
+            response
+                .headers()
+                .get("Sec-WebSocket-Protocol")
+                .filter(|x| x == "mqtt")
+                .ok_or(Err(ConnectionError::WebsocketSubprotocol));
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -411,12 +421,18 @@ async fn network_connect(
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
-            let (socket, _) = async_tungstenite::tokio::client_async_tls_with_connector(
+            let (socket, response) = async_tungstenite::tokio::client_async_tls_with_connector(
                 request,
                 tcp_stream,
                 Some(connector),
             )
             .await?;
+
+            response
+                .headers()
+                .get("Sec-WebSocket-Protocol")
+                .filter(|x| x == "mqtt")
+                .ok_or(Err(ConnectionError::WebsocketSubprotocol));
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
