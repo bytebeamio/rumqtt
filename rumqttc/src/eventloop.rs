@@ -5,6 +5,7 @@ use crate::{MqttOptions, Outgoing};
 use crate::framed::N;
 use crate::mqttbytes::v4::*;
 use flume::{bounded, Receiver, Sender};
+use http::Response;
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
 use tokio::time::{self, Instant, Sleep};
@@ -64,8 +65,10 @@ pub enum ConnectionError {
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),
     #[cfg(feature = "websocket")]
-    #[error("Websocket Connect Subprotocol")]
-    WebsocketSubprotocol,
+    #[error("Websocket response does not contain subprotocol header")]
+    SubprotocolHeaderMissing,
+    #[error("Websocket subprotocol header: {0}")]
+    SubprotocolMqtt(String),
 }
 
 /// Eventloop with all the state of a connection
@@ -383,6 +386,26 @@ async fn network_connect(
         }
     };
 
+    #[cfg(feature = "websocket")]
+    fn validate_response_headers(
+        response: Response<Option<Vec<u8>>>,
+    ) -> Result<(), ConnectionError> {
+        let val = response
+            .headers()
+            .get("Sec-WebSocket-Protocol")
+            .ok_or(ConnectionError::SubprotocolHeaderMissing)?;
+
+        let sub_protocol = val
+            .to_str()
+            .map_err(|_| ConnectionError::SubprotocolHeaderMissing)?;
+
+        if sub_protocol != "mqtt" {
+            return Err(ConnectionError::SubprotocolMqtt(sub_protocol.to_owned()));
+        }
+
+        Ok(())
+    }
+
     let network = match options.transport() {
         Transport::Tcp => Network::new(tcp_stream, options.max_incoming_packet_size),
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
@@ -404,11 +427,7 @@ async fn network_connect(
             let (socket, response) =
                 async_tungstenite::tokio::client_async(request, tcp_stream).await?;
 
-            response
-                .headers()
-                .get("Sec-WebSocket-Protocol")
-                .filter(|x| x == "mqtt")
-                .ok_or(Err(ConnectionError::WebsocketSubprotocol));
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -428,11 +447,7 @@ async fn network_connect(
             )
             .await?;
 
-            response
-                .headers()
-                .get("Sec-WebSocket-Protocol")
-                .filter(|x| x == "mqtt")
-                .ok_or(Err(ConnectionError::WebsocketSubprotocol));
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
