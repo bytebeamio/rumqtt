@@ -1,3 +1,5 @@
+use http::Response;
+
 #[derive(Debug, thiserror::Error)]
 pub enum UrlError {
     #[error("Invalid protocol specified inside url.")]
@@ -6,6 +8,33 @@ pub enum UrlError {
     Host,
     #[error("Couldn't parse host url.")]
     Parse(#[from] http::uri::InvalidUri),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationError {
+    #[error("Websocket response does not contain subprotocol header")]
+    SubprotocolHeaderMissing,
+    #[error("Websocket subprotocol header: {0}")]
+    SubprotocolMqtt(String),
+}
+
+pub(crate) fn validate_response_headers(
+    response: Response<Option<Vec<u8>>>,
+) -> Result<(), ValidationError> {
+    let val = response
+        .headers()
+        .get("Sec-WebSocket-Protocol")
+        .ok_or(ValidationError::SubprotocolHeaderMissing)?;
+
+    let sub_protocol = val
+        .to_str()
+        .map_err(|_| ValidationError::SubprotocolHeaderMissing)?;
+
+    if sub_protocol != "mqtt" {
+        return Err(ValidationError::SubprotocolMqtt(sub_protocol.to_owned()));
+    }
+
+    Ok(())
 }
 
 pub(crate) fn split_url(url: &str) -> Result<(String, u16), UrlError> {

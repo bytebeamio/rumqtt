@@ -5,7 +5,6 @@ use crate::{MqttOptions, Outgoing};
 use crate::framed::N;
 use crate::mqttbytes::v4::*;
 use flume::{bounded, Receiver, Sender};
-use http::Response;
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
 use tokio::time::{self, Instant, Sleep};
@@ -24,7 +23,7 @@ use crate::tls;
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, UrlError},
+    crate::websockets::{split_url, validate_response_headers, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
@@ -65,10 +64,8 @@ pub enum ConnectionError {
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),
     #[cfg(feature = "websocket")]
-    #[error("Websocket response does not contain subprotocol header")]
-    SubprotocolHeaderMissing,
-    #[error("Websocket subprotocol header: {0}")]
-    SubprotocolMqtt(String),
+    #[error("Websocket response validation error: ")]
+    ResponseValidation(#[from] crate::websockets::ValidationError),
 }
 
 /// Eventloop with all the state of a connection
@@ -385,26 +382,6 @@ async fn network_connect(
             Box::new(tcp)
         }
     };
-
-    #[cfg(feature = "websocket")]
-    fn validate_response_headers(
-        response: Response<Option<Vec<u8>>>,
-    ) -> Result<(), ConnectionError> {
-        let val = response
-            .headers()
-            .get("Sec-WebSocket-Protocol")
-            .ok_or(ConnectionError::SubprotocolHeaderMissing)?;
-
-        let sub_protocol = val
-            .to_str()
-            .map_err(|_| ConnectionError::SubprotocolHeaderMissing)?;
-
-        if sub_protocol != "mqtt" {
-            return Err(ConnectionError::SubprotocolMqtt(sub_protocol.to_owned()));
-        }
-
-        Ok(())
-    }
 
     let network = match options.transport() {
         Transport::Tcp => Network::new(tcp_stream, options.max_incoming_packet_size),
