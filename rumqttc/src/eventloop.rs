@@ -23,7 +23,7 @@ use crate::tls;
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, UrlError},
+    crate::websockets::{split_url, validate_response_headers, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
@@ -63,6 +63,9 @@ pub enum ConnectionError {
     #[cfg(feature = "proxy")]
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket response validation error: ")]
+    ResponseValidation(#[from] crate::websockets::ValidationError),
 }
 
 /// Eventloop with all the state of a connection
@@ -398,7 +401,9 @@ async fn network_connect(
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
-            let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            let (socket, response) =
+                async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -411,12 +416,13 @@ async fn network_connect(
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
-            let (socket, _) = async_tungstenite::tokio::client_async_tls_with_connector(
+            let (socket, response) = async_tungstenite::tokio::client_async_tls_with_connector(
                 request,
                 tcp_stream,
                 Some(connector),
             )
             .await?;
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
