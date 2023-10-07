@@ -1,4 +1,4 @@
-use http::Response;
+use http::{header::ToStrError, Response};
 
 #[derive(Debug, thiserror::Error)]
 pub enum UrlError {
@@ -14,8 +14,10 @@ pub enum UrlError {
 pub enum ValidationError {
     #[error("Websocket response does not contain subprotocol header")]
     SubprotocolHeaderMissing,
-    #[error("Websocket subprotocol header: {0}")]
-    SubprotocolMqtt(String),
+    #[error("MQTT not in subprotocol header: {0}")]
+    SubprotocolMqttMissing(String),
+    #[error("Subprotocol header couldn't be converted into string representation")]
+    HeaderToStr(#[from] ToStrError),
 }
 
 pub(crate) fn validate_response_headers(
@@ -26,12 +28,12 @@ pub(crate) fn validate_response_headers(
         .get("Sec-WebSocket-Protocol")
         .ok_or(ValidationError::SubprotocolHeaderMissing)?;
 
-    let sub_protocol = val
-        .to_str()
-        .map_err(|_| ValidationError::SubprotocolHeaderMissing)?;
+    let sub_protocol = val.to_str()?;
 
-    if sub_protocol != "mqtt" {
-        return Err(ValidationError::SubprotocolMqtt(sub_protocol.to_owned()));
+    if !sub_protocol.contains("mqtt") {
+        return Err(ValidationError::SubprotocolMqttMissing(
+            sub_protocol.to_owned(),
+        ));
     }
 
     Ok(())

@@ -403,7 +403,6 @@ async fn network_connect(
 
             let (socket, response) =
                 async_tungstenite::tokio::client_async(request, tcp_stream).await?;
-
             validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
@@ -423,7 +422,6 @@ async fn network_connect(
                 Some(connector),
             )
             .await?;
-
             validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
