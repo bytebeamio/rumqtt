@@ -257,8 +257,7 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         })?;
 
         // Read the payload.
-        let mut payload = Vec::new();
-        payload.resize(num_bytes as usize, 0_u8);
+        let mut payload = vec![0; num_bytes as usize];
         stream.read_exact(&mut payload[..])?;
         // Read "\r\n".
         stream.read_exact(&mut [0_u8; 2])?;
@@ -341,15 +340,13 @@ pub(crate) fn decode(mut stream: impl BufRead) -> io::Result<Option<ServerOp>> {
         // <version line>\r\n[headers]\r\n\r\n[payload]\r\n`
 
         // Read the header payload.
-        let mut header_payload = Vec::new();
-        header_payload.resize(num_header_bytes as usize, 0_u8);
+        let mut header_payload = vec![0; num_header_bytes as usize];
         stream.read_exact(&mut header_payload[..])?;
 
         let headers = Headers::try_from(&*header_payload)?;
 
         // Read the payload.
-        let mut payload = Vec::new();
-        payload.resize(num_payload_bytes as usize, 0_u8);
+        let mut payload = vec![0; num_payload_bytes as usize];
         stream.read_exact(&mut payload[..])?;
         // Read "\r\n".
         stream.read_exact(&mut [0_u8; 2])?;
