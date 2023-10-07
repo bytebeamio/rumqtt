@@ -28,11 +28,17 @@ pub(crate) fn validate_response_headers(
         .get("Sec-WebSocket-Protocol")
         .ok_or(ValidationError::SubprotocolHeaderMissing)?;
 
-    let sub_protocol = val.to_str()?;
+    let subprotocols = val.to_str()?;
 
-    if !sub_protocol.contains("mqtt") {
+    // In Sec-WebSocket-Protocol header
+    // multiple subprotocols can be listed in a comma-delimited format
+    // e.g. Sec-WebSocket-Protocol: mqtt, chat
+    if !subprotocols
+        .split(',')
+        .any(|protocol| protocol.trim() == "mqtt")
+    {
         return Err(ValidationError::SubprotocolMqttMissing(
-            sub_protocol.to_owned(),
+            subprotocols.to_owned(),
         ));
     }
 
