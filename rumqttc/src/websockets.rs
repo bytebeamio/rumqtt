@@ -23,12 +23,11 @@ pub enum ValidationError {
 pub(crate) fn validate_response_headers(
     response: Response<Option<Vec<u8>>>,
 ) -> Result<(), ValidationError> {
-    let val = response
+    let subprotocols = response
         .headers()
         .get("Sec-WebSocket-Protocol")
-        .ok_or(ValidationError::SubprotocolHeaderMissing)?;
-
-    let subprotocols = val.to_str()?;
+        .ok_or(ValidationError::SubprotocolHeaderMissing)?
+        .to_str()?;
 
     // In Sec-WebSocket-Protocol header
     // multiple subprotocols can be listed in a comma-delimited format
