@@ -29,13 +29,9 @@ pub(crate) fn validate_response_headers(
         .ok_or(ValidationError::SubprotocolHeaderMissing)?
         .to_str()?;
 
-    // In Sec-WebSocket-Protocol header
-    // multiple subprotocols can be listed in a comma-delimited format
-    // e.g. Sec-WebSocket-Protocol: mqtt, chat
-    if !subprotocols
-        .split(',')
-        .any(|protocol| protocol.trim() == "mqtt")
-    {
+    // Server must respond with Sec-WebSocket-Protocol header value of "mqtt"
+    // https://http.dev/ws#sec-websocket-protocol
+    if subprotocols.trim() != "mqtt" {
         return Err(ValidationError::SubprotocolMqttMissing(
             subprotocols.to_owned(),
         ));
