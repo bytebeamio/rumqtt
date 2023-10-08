@@ -23,7 +23,7 @@ pub enum ValidationError {
 pub(crate) fn validate_response_headers(
     response: Response<Option<Vec<u8>>>,
 ) -> Result<(), ValidationError> {
-    let subprotocols = response
+    let subprotocol = response
         .headers()
         .get("Sec-WebSocket-Protocol")
         .ok_or(ValidationError::SubprotocolHeaderMissing)?
@@ -31,9 +31,9 @@ pub(crate) fn validate_response_headers(
 
     // Server must respond with Sec-WebSocket-Protocol header value of "mqtt"
     // https://http.dev/ws#sec-websocket-protocol
-    if subprotocols.trim() != "mqtt" {
+    if subprotocol.trim() != "mqtt" {
         return Err(ValidationError::SubprotocolMqttMissing(
-            subprotocols.to_owned(),
+            subprotocol.to_owned(),
         ));
     }
 
