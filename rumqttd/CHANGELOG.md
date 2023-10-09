@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+- Update tungstenite and dependencies to fix [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0065).
 
 ---
 
