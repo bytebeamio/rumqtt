@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
+- Removed dependency vulnerability, see [rustsec](https://rustsec.org/advisories/RUSTSEC-2023-0065). Update of `tungstenite` dependency.
 
 ---
 
