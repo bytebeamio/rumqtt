@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Log warning if websocket config is getting ignored
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
+- GitHub release binaries will have websockets feature enabled
 
 ### Deprecated
 
