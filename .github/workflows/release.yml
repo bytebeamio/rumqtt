@@ -37,7 +37,7 @@ jobs:
           echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
 
       - name: Build release binary
-        run: cross build --verbose --release ${{ env.TARGET_FLAGS }} -p rumqttd --features websockets
+        run: cross build --verbose --release ${{ env.TARGET_FLAGS }} -p rumqttd
 
       - name: rename
         # this assumes git tag is in format rumqttd-x.x.x

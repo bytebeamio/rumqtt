@@ -43,7 +43,6 @@ default = ["use-rustls"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websocket = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep:ws_stream_tungstenite"]
-websockets = ["websocket"]
 validate-tenant-prefix = []
 allow-duplicate-clientid = []
 
