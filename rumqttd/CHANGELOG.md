@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
-- GitHub release binaries will have websockets feature enabled
+- websocket feature is enabled by default
 
 ### Deprecated
 
