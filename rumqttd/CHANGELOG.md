@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - websocket feature is enabled by default
 
 ### Deprecated
+- "websockets" feature is removed in favour of "websocket"
 
 ### Removed
 
