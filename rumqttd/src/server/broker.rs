@@ -58,6 +58,8 @@ pub enum Error {
     Accept(String),
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
+    #[error("Invalid configuration")]
+    Config(String),
 }
 
 pub struct Broker {
@@ -153,6 +155,17 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
+        if self.config.v4.is_none()
+            && self.config.v5.is_none()
+            && (cfg!(not(feature = "websocket")) || self.config.ws.is_none())
+        {
+            return Err(Error::Config(
+                "Atleast one server config must be specified, \
+                consider adding either of [v4.x]/[v5.x] or [ws.x] (if enabled) in config file."
+                    .to_string(),
+            ));
+        }
+
         if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
