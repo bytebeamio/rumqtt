@@ -183,19 +183,21 @@ impl Broker {
         }
 
         // Spawn servers in a separate thread.
-        for (_, config) in self.config.v4.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
-            let mut server = Server::new(config, self.router_tx.clone(), V4);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        if let Some(v4_config) = &self.config.v4 {
+            for (_, config) in v4_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let mut server = Server::new(config, self.router_tx.clone(), V4);
+                server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
 
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Server error - V4");
-                    }
-                });
-            })?;
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Remote).await {
+                            error!(error=?e, "Server error - V4");
+                        }
+                    });
+                })?;
+            }
         }
 
         if let Some(v5_config) = &self.config.v5 {
