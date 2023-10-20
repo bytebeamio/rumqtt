@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
+- v4 config is optional, user can specify v4 and/or v5 config
 - websocket feature is enabled by default
 
 ### Deprecated

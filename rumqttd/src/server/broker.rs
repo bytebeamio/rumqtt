@@ -58,6 +58,8 @@ pub enum Error {
     Accept(String),
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
+    #[error("Invalid configuration")]
+    Config(String),
 }
 
 pub struct Broker {
@@ -153,6 +155,17 @@ impl Broker {
 
     #[tracing::instrument(skip(self))]
     pub fn start(&mut self) -> Result<(), Error> {
+        if self.config.v4.is_none()
+            && self.config.v5.is_none()
+            && (cfg!(not(feature = "websocket")) || self.config.ws.is_none())
+        {
+            return Err(Error::Config(
+                "Atleast one server config must be specified, \
+                consider adding either of [v4.x]/[v5.x] or [ws.x] (if enabled) in config file."
+                    .to_string(),
+            ));
+        }
+
         if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
@@ -183,19 +196,21 @@ impl Broker {
         }
 
         // Spawn servers in a separate thread.
-        for (_, config) in self.config.v4.clone() {
-            let server_thread = thread::Builder::new().name(config.name.clone());
-            let mut server = Server::new(config, self.router_tx.clone(), V4);
-            server_thread.spawn(move || {
-                let mut runtime = tokio::runtime::Builder::new_current_thread();
-                let runtime = runtime.enable_all().build().unwrap();
+        if let Some(v4_config) = &self.config.v4 {
+            for (_, config) in v4_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let mut server = Server::new(config, self.router_tx.clone(), V4);
+                server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
 
-                runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Server error - V4");
-                    }
-                });
-            })?;
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Remote).await {
+                            error!(error=?e, "Server error - V4");
+                        }
+                    });
+                })?;
+            }
         }
 
         if let Some(v5_config) = &self.config.v5 {
