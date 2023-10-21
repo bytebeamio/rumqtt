@@ -14,7 +14,7 @@ use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use tracing::{error, field, info, Instrument};
+use tracing::{error, field, info, warn, Instrument};
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
@@ -228,6 +228,11 @@ impl Broker {
                     });
                 })?;
             }
+        }
+
+        #[cfg(not(feature = "websocket"))]
+        if self.config.ws.is_some() {
+            warn!("websocket feature is disabled, [ws] config will be ignored.");
         }
 
         #[cfg(feature = "websocket")]

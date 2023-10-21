@@ -39,11 +39,10 @@ axum = "0.6.20"
 rand = "0.8.5"
 
 [features]
-default = ["use-rustls"]
+default = ["use-rustls", "websocket"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websocket = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep:ws_stream_tungstenite"]
-websockets = ["websocket"]
 validate-tenant-prefix = []
 allow-duplicate-clientid = []
 
