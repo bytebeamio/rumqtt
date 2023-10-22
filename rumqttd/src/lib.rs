@@ -40,7 +40,7 @@ pub use server::Broker;
 
 use self::router::shared_subs::Strategy;
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct Config {
     pub id: usize,
     pub router: RouterConfig,
@@ -54,7 +54,7 @@ pub struct Config {
     pub metrics: Option<HashMap<MetricType, MetricSettings>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PrometheusSetting {
     #[deprecated(note = "Use listen instead")]
     port: Option<u16>,
@@ -65,7 +65,7 @@ pub struct PrometheusSetting {
 
 // TODO: Change names without _ until config-rs issue is resolved
 // https://github.com/mehcode/config-rs/issues/369
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum TlsConfig {
     Rustls {
@@ -96,7 +96,7 @@ impl TlsConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerSettings {
     pub name: String,
     pub listen: SocketAddr,
@@ -105,7 +105,7 @@ pub struct ServerSettings {
     pub connections: ConnectionSettings,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct BridgeConfig {
     pub name: String,
     pub addr: String,
@@ -118,7 +118,7 @@ pub struct BridgeConfig {
     pub transport: Transport,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
     pub max_payload_size: usize,
@@ -128,7 +128,7 @@ pub struct ConnectionSettings {
     pub dynamic_filters: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ClusterSettings {
     /// Id with which this node connects to other nodes of the mesh
     pub node_id: NodeId,
@@ -138,7 +138,7 @@ pub struct ClusterSettings {
     pub seniors: Vec<(ConnectionId, String)>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct RouterConfig {
     pub max_connections: usize,
     pub max_outgoing_packet_count: u64,
@@ -151,7 +151,7 @@ pub struct RouterConfig {
     pub shared_subscriptions_strategy: Strategy,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct SegmentConfig {
     pub max_segment_size: usize,
     pub max_segment_count: usize,
@@ -172,7 +172,7 @@ impl ConsoleSettings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub enum Transport {
     #[serde(rename = "tcp")]
     #[default]
@@ -184,20 +184,20 @@ pub enum Transport {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ClientAuth {
     certs: PathBuf,
     key: PathBuf,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum MetricType {
     Meters,
     Alerts,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MetricSettings {
     push_interval: u64,
 }
