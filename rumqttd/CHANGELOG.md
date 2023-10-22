@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- Cleanup code of empty `connections.rs` and `derive(Serialize)`
 
 ### Deprecated
 
