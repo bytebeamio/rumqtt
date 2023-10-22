@@ -8,17 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Log warning if websocket config is getting ignored
 
 ### Changed
 - Cleanup code of empty `connections.rs` and `derive(Serialize)`
+- Console endpoint /config prints Router Config instead of returning console settings
+- v4 config is optional, user can specify v4 and/or v5 config
+- websocket feature is enabled by default
 
 ### Deprecated
+- "websockets" feature is removed in favour of "websocket"
 
 ### Removed
 
 ### Fixed
 
 ### Security
+- Update tungstenite and dependencies to fix [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0065).
 
 ---
 

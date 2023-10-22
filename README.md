@@ -125,7 +125,7 @@ for more information look at rumqttd's [README](https://github.com/bytebeamio/ru
 Add rumqttc to your project using
 
 ```
-cargo add rumqttc --all-features
+cargo add rumqttc
 ```
 
 <br/>
