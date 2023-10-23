@@ -76,7 +76,10 @@ fn main() {
     };
 
     let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
-    configs.console.set_filter_reload_handle(reload_handle);
+
+    if let Some(console_config) = configs.console.as_mut() {
+        console_config.set_filter_reload_handle(reload_handle)
+    }
 
     validate_config(&configs);
 

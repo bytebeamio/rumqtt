@@ -48,7 +48,7 @@ pub struct Config {
     pub v5: Option<HashMap<String, ServerSettings>>,
     pub ws: Option<HashMap<String, ServerSettings>>,
     pub cluster: Option<ClusterSettings>,
-    pub console: ConsoleSettings,
+    pub console: Option<ConsoleSettings>,
     pub bridge: Option<BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
     pub metrics: Option<HashMap<MetricType, MetricSettings>>,

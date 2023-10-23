@@ -166,6 +166,10 @@ impl Broker {
             ));
         }
 
+        // we don't know which servers (v4/v5/ws) user will spawn
+        // so we collect handles for all of the spawned servers
+        let mut server_thread_handles = Vec::new();
+
         if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
@@ -200,7 +204,7 @@ impl Broker {
             for (_, config) in v4_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
-                server_thread.spawn(move || {
+                let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
@@ -210,6 +214,7 @@ impl Broker {
                         }
                     });
                 })?;
+                server_thread_handles.push(handle)
             }
         }
 
@@ -217,7 +222,7 @@ impl Broker {
             for (_, config) in v5_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 let mut server = Server::new(config, self.router_tx.clone(), V5);
-                server_thread.spawn(move || {
+                let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
@@ -227,6 +232,7 @@ impl Broker {
                         }
                     });
                 })?;
+                server_thread_handles.push(handle)
             }
         }
 
@@ -241,7 +247,7 @@ impl Broker {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
-                server_thread.spawn(move || {
+                let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
@@ -251,6 +257,7 @@ impl Broker {
                         }
                     });
                 })?;
+                server_thread_handles.push(handle)
             }
         }
 
@@ -297,12 +304,26 @@ impl Broker {
             })?;
         }
 
-        let console_link = ConsoleLink::new(self.config.console.clone(), self.router_tx.clone());
+        if let Some(console) = self.config.console.clone() {
+            let console_link = ConsoleLink::new(console, self.router_tx.clone());
 
-        let console_link = Arc::new(console_link);
-        let mut runtime = tokio::runtime::Builder::new_current_thread();
-        let runtime = runtime.enable_all().build().unwrap();
-        runtime.block_on(console::start(console_link));
+            let console_link = Arc::new(console_link);
+            let console_thread = thread::Builder::new().name("Console".to_string());
+            console_thread.spawn(move || {
+                let mut runtime = tokio::runtime::Builder::new_current_thread();
+                let runtime = runtime.enable_all().build().unwrap();
+                runtime.block_on(console::start(console_link));
+            })?;
+        }
+
+        // in ideal case, where server doesn't crash, join() will never resolve
+        // we still try to join threads so that we don't return from function
+        // unless everything crashes.
+        server_thread_handles.into_iter().for_each(|handle| {
+            // join() might panic in case the thread panics
+            // we just ignore it
+            let _ = handle.join();
+        });
 
         Ok(())
     }
