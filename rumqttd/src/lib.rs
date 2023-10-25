@@ -184,6 +184,7 @@ pub enum Transport {
     },
 }
 
+#[cfg(feature = "use-rustls")]
 #[derive(Clone, Debug, Deserialize)]
 pub struct ClientAuth {
     certs: PathBuf,
