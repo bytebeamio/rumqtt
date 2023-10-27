@@ -1,6 +1,6 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, Event, EventLoop, Incoming, MqttOptions, Outgoing, QoS};
+use rumqttc::{self, AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -59,11 +59,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             Err(error) => {
                 println!("Error = {error:?}");
-                return Ok(());
-            }
-        }
-        if let Ok(Event::Outgoing(Outgoing::PubAck(puback))) = event {
-            if puback == 10 {
                 return Ok(());
             }
         }
