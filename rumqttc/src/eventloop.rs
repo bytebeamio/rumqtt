@@ -119,11 +119,12 @@ impl EventLoop {
         }
     }
 
-    fn clean(&mut self) {
+    /// Last session might contain packets which aren't acked. MQTT says these packets should be
+    /// republished in the next session. Move pending messages from state to eventloop.
+    pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        let pending = self.state.clean();
-        self.pending = pending.into_iter();
+        self.pending = self.state.clean().into_iter();
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -289,11 +290,6 @@ async fn connect(
     // make MQTT connection request (which internally awaits for ack)
     let packet = mqtt_connect(mqtt_options, &mut network).await?;
 
-    // Last session might contain packets which aren't acked. MQTT says these packets should be
-    // republished in the next session
-    // move pending messages from state to eventloop
-    // let pending = self.state.clean();
-    // self.pending = pending.into_iter();
     Ok((network, packet))
 }
 
