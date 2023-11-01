@@ -120,7 +120,10 @@ impl EventLoop {
     }
 
     /// Last session might contain packets which aren't acked. MQTT says these packets should be
-    /// republished in the next session. Move pending messages from state to eventloop.
+    /// republished in the next session. Move pending messages from state to eventloop, drops the
+    /// underlying network connection and clears the keepalive timeout if any.
+    /// 
+    /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
