@@ -4,9 +4,9 @@ use crate::{MqttOptions, Outgoing};
 
 use crate::framed::N;
 use crate::mqttbytes::v4::*;
-use flume::{bounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{self, Instant, Sleep};
 
 use std::io;
@@ -100,7 +100,7 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+        let (requests_tx, requests_rx) = channel(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = mqtt_options.inflight;
@@ -220,7 +220,7 @@ impl EventLoop {
             // outgoing requests (along with 1b).
             o = Self::next_request(
                 &mut self.pending,
-                &self.requests_rx,
+                &mut self.requests_rx,
                 self.mqtt_options.pending_throttle
             ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
                 Ok(request) => {
@@ -261,7 +261,7 @@ impl EventLoop {
 
     async fn next_request(
         pending: &mut IntoIter<Request>,
-        rx: &Receiver<Request>,
+        rx: &mut Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
         if pending.len() > 0 {
@@ -270,9 +270,9 @@ impl EventLoop {
             // advance the iterator but the future might be canceled before return
             Ok(pending.next().unwrap())
         } else {
-            match rx.recv_async().await {
-                Ok(r) => Ok(r),
-                Err(_) => Err(ConnectionError::RequestsDone),
+            match rx.recv().await {
+                Some(r) => Ok(r),
+                None => Err(ConnectionError::RequestsDone),
             }
         }
     }

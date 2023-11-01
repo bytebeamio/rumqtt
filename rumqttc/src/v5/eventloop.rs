@@ -4,8 +4,8 @@ use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Tra
 use crate::eventloop::socket_connect;
 use crate::framed::N;
 
-use flume::{bounded, Receiver, Sender};
 use tokio::select;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
 
 use std::convert::TryInto;
@@ -98,7 +98,7 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+        let (requests_tx, requests_rx) = channel(cap);
         let pending = Vec::new();
         let pending = pending.into_iter();
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
@@ -201,7 +201,7 @@ impl EventLoop {
             // outgoing requests (along with 1b).
             o = Self::next_request(
                 &mut self.pending,
-                &self.requests_rx,
+                &mut self.requests_rx,
                 self.options.pending_throttle
             ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
                 Ok(request) => {
@@ -233,7 +233,7 @@ impl EventLoop {
 
     async fn next_request(
         pending: &mut IntoIter<Request>,
-        rx: &Receiver<Request>,
+        rx: &mut Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
         if pending.len() > 0 {
@@ -242,9 +242,9 @@ impl EventLoop {
             // advance the iterator but the future might be canceled before return
             Ok(pending.next().unwrap())
         } else {
-            match rx.recv_async().await {
-                Ok(r) => Ok(r),
-                Err(_) => Err(ConnectionError::RequestsDone),
+            match rx.recv().await {
+                Some(r) => Ok(r),
+                None => Err(ConnectionError::RequestsDone),
             }
         }
     }

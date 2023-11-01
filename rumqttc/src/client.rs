@@ -6,9 +6,10 @@ use crate::mqttbytes::{v4::*, QoS};
 use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
-use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
+use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::mpsc::Sender;
 use tokio::time::timeout;
 
 /// Client Error
@@ -22,13 +23,17 @@ pub enum ClientError {
 
 impl From<SendError<Request>> for ClientError {
     fn from(e: SendError<Request>) -> Self {
-        Self::Request(e.into_inner())
+        Self::Request(e.0)
     }
 }
 
 impl From<TrySendError<Request>> for ClientError {
     fn from(e: TrySendError<Request>) -> Self {
-        Self::TryRequest(e.into_inner())
+        let req = match e {
+            TrySendError::Full(req) => req,
+            TrySendError::Closed(req) => req,
+        };
+        Self::TryRequest(req)
     }
 }
 
@@ -82,7 +87,7 @@ impl AsyncClient {
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.request_tx.send_async(publish).await?;
+        self.request_tx.send(publish).await?;
         Ok(())
     }
 
@@ -114,7 +119,7 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_tx.send_async(ack).await?;
+            self.request_tx.send(ack).await?;
         }
         Ok(())
     }
@@ -142,7 +147,7 @@ impl AsyncClient {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        self.request_tx.send_async(publish).await?;
+        self.request_tx.send(publish).await?;
         Ok(())
     }
 
@@ -150,7 +155,7 @@ impl AsyncClient {
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send(request).await?;
         Ok(())
     }
 
@@ -169,7 +174,7 @@ impl AsyncClient {
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send(request).await?;
         Ok(())
     }
 
@@ -188,7 +193,7 @@ impl AsyncClient {
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send(request).await?;
         Ok(())
     }
 
@@ -203,7 +208,7 @@ impl AsyncClient {
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect(Disconnect);
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send(request).await?;
         Ok(())
     }
 
@@ -274,7 +279,7 @@ impl Client {
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.client.request_tx.send(publish)?;
+        self.client.request_tx.blocking_send(publish)?;
         Ok(())
     }
 
@@ -298,7 +303,7 @@ impl Client {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.client.request_tx.send(ack)?;
+            self.client.request_tx.blocking_send(ack)?;
         }
         Ok(())
     }
@@ -313,7 +318,7 @@ impl Client {
     pub fn subscribe<S: Into<String>>(&mut self, topic: S, qos: QoS) -> Result<(), ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
         let request = Request::Subscribe(subscribe);
-        self.client.request_tx.send(request)?;
+        self.client.request_tx.blocking_send(request)?;
         Ok(())
     }
 
@@ -334,7 +339,7 @@ impl Client {
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
-        self.client.request_tx.send(request)?;
+        self.client.request_tx.blocking_send(request)?;
         Ok(())
     }
 
@@ -349,7 +354,7 @@ impl Client {
     pub fn unsubscribe<S: Into<String>>(&mut self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
-        self.client.request_tx.send(request)?;
+        self.client.request_tx.blocking_send(request)?;
         Ok(())
     }
 
@@ -362,7 +367,7 @@ impl Client {
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&mut self) -> Result<(), ClientError> {
         let request = Request::Disconnect(Disconnect);
-        self.client.request_tx.send(request)?;
+        self.client.request_tx.blocking_send(request)?;
         Ok(())
     }
 

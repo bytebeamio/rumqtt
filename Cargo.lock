@@ -1817,7 +1817,6 @@ dependencies = [
  "bincode",
  "bytes",
  "color-backtrace",
- "flume",
  "futures-util",
  "http",
  "log",
