@@ -5,10 +5,10 @@ use std::io;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::select;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{task, time};
 
 use bytes::BytesMut;
-use flume::{bounded, Receiver, Sender};
 use rumqttc::{Event, Incoming, Outgoing, Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -28,7 +28,7 @@ impl Broker {
         let (stream, _) = listener.accept().await.unwrap();
         let mut framed = Network::new(stream, 10 * 1024);
         let mut incoming = VecDeque::new();
-        let (outgoing_tx, outgoing_rx) = bounded(10);
+        let (outgoing_tx, outgoing_rx) = channel(10);
         framed.readb(&mut incoming).await.unwrap();
 
         match incoming.pop_front().unwrap() {
@@ -139,7 +139,7 @@ impl Broker {
                 }
 
                 let packet = Packet::Publish(publish);
-                tx.send_async(packet).await.unwrap();
+                tx.send(packet).await.unwrap();
                 time::sleep(Duration::from_secs(delay)).await;
             }
         });
@@ -148,7 +148,7 @@ impl Broker {
     /// Selects between outgoing and incoming packets
     pub async fn tick(&mut self) -> Event {
         select! {
-            request = self.outgoing_rx.recv_async() => {
+            request = self.outgoing_rx.recv() => {
                 let request = request.unwrap();
                 let outgoing = self.framed.write(request).await.unwrap();
                 Event::Outgoing(outgoing)
