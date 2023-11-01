@@ -247,57 +247,51 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    async fn handle_subscribe<S: Into<String>>(
+    async fn handle_subscribe(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         let request: Request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
     }
 
-    pub async fn subscribe_with_properties<S: Into<String>>(
+    pub async fn subscribe_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: SubscribeProperties,
     ) -> Result<(), ClientError> {
-        self.handle_subscribe(topic, qos, Some(properties)).await
+        self.handle_subscribe(filter, Some(properties)).await
     }
 
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.handle_subscribe(topic, qos, None).await
+    pub async fn subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        self.handle_subscribe(filter, None).await
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
-    fn handle_try_subscribe<S: Into<String>>(
+    fn handle_try_subscribe(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())
     }
 
-    pub fn try_subscribe_with_properties<S: Into<String>>(
+    pub fn try_subscribe_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: SubscribeProperties,
     ) -> Result<(), ClientError> {
-        self.handle_try_subscribe(topic, qos, Some(properties))
+        self.handle_try_subscribe(filter, Some(properties))
     }
 
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.handle_try_subscribe(topic, qos, None)
+    pub fn try_subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        self.handle_try_subscribe(filter, None)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
@@ -570,45 +564,41 @@ impl Client {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    fn handle_subscribe<S: Into<String>>(
+    fn handle_subscribe(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         let request = Request::Subscribe(subscribe);
         self.client.request_tx.send(request)?;
         Ok(())
     }
 
-    pub fn subscribe_with_properties<S: Into<String>>(
+    pub fn subscribe_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: SubscribeProperties,
     ) -> Result<(), ClientError> {
-        self.handle_subscribe(topic, qos, Some(properties))
+        self.handle_subscribe(filter, Some(properties))
     }
 
-    pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.handle_subscribe(topic, qos, None)
+    pub fn subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        self.handle_subscribe(filter, None)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub fn try_subscribe_with_properties<S: Into<String>>(
         &self,
-        topic: S,
-        qos: QoS,
+        filter: Filter,
         properties: SubscribeProperties,
     ) -> Result<(), ClientError> {
         self.client
-            .try_subscribe_with_properties(topic, qos, properties)
+            .try_subscribe_with_properties(filter, properties)
     }
 
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.client.try_subscribe(topic, qos)
+    pub fn try_subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        self.client.try_subscribe(filter)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`

@@ -1,4 +1,4 @@
-use rumqttc::v5::mqttbytes::v5::SubscribeProperties;
+use rumqttc::v5::mqttbytes::v5::{Filter, SubscribeProperties};
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
@@ -33,7 +33,13 @@ async fn requests(client: AsyncClient) {
     };
 
     client
-        .subscribe_with_properties("hello/world", QoS::AtMostOnce, props)
+        .subscribe_with_properties(
+            Filter::builder()
+                .path("hello/world")
+                .qos(Some(QoS::AtMostOnce))
+                .build(),
+            props,
+        )
         .await
         .unwrap();
 
@@ -43,7 +49,13 @@ async fn requests(client: AsyncClient) {
     };
 
     client
-        .subscribe_with_properties("hello/#", QoS::AtMostOnce, props)
+        .subscribe_with_properties(
+            Filter::builder()
+                .path("hello/#")
+                .qos(Some(QoS::AtMostOnce))
+                .build(),
+            props,
+        )
         .await
         .unwrap();
 
@@ -63,7 +75,15 @@ async fn requests(client: AsyncClient) {
 
     time::sleep(Duration::from_millis(500)).await;
     client.unsubscribe("hello/#").await.unwrap();
-    client.subscribe("hello/#", QoS::AtMostOnce).await.unwrap();
+    client
+        .subscribe(
+            Filter::builder()
+                .path("hello/#")
+                .qos(Some(QoS::AtMostOnce))
+                .build(),
+        )
+        .await
+        .unwrap();
     time::sleep(Duration::from_millis(500)).await;
 
     // we will receive two publishes

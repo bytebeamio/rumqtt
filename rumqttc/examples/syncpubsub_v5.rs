@@ -1,3 +1,4 @@
+use rumqttc::v5::mqttbytes::v5::FilterBuilder;
 use rumqttc::v5::mqttbytes::{v5::LastWill, QoS};
 use rumqttc::v5::{Client, ConnectionError, MqttOptions};
 use std::thread;
@@ -32,7 +33,11 @@ fn main() {
 }
 
 fn publish(client: Client) {
-    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
+    let filter = FilterBuilder::default()
+        .path("hello/+/world")
+        .qos(Some(QoS::AtMostOnce))
+        .build();
+    client.subscribe(filter).unwrap();
     for i in 0..10_usize {
         let payload = vec![1; i];
         let topic = format!("hello/{i}/world");
