@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
 
 ### Changed
 
