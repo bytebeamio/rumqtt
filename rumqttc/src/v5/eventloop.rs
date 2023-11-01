@@ -115,11 +115,15 @@ impl EventLoop {
         }
     }
 
-    fn clean(&mut self) {
+    /// Last session might contain packets which aren't acked. MQTT says these packets should be
+    /// republished in the next session. Move pending messages from state to eventloop, drops the
+    /// underlying network connection and clears the keepalive timeout if any.
+    ///
+    /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
+    pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        let pending = self.state.clean();
-        self.pending = pending.into_iter();
+        self.pending = self.state.clean().into_iter();
     }
 
     /// Yields Next notification or outgoing request and periodically pings
