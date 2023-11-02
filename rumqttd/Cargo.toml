@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.17.0"
+version = "0.18.0"
 publish = true
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
@@ -12,20 +12,20 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-tokio = { version = "1.32", features = ["rt", "time", "net", "io-util", "macros"]}
+tokio = { version = "1.33", features = ["rt", "time", "net", "io-util", "macros"]}
 serde = { version = "1.0.188", features = ["derive"] }
-serde_json = "1.0.105"
+serde_json = "1.0.107"
 bytes = { version = "1", features = ["serde"] }
 flume = { version = "0.11.0", default-features = false, features = ["async"]}
 slab = "0.4.9"
-thiserror = "1.0.47"
+thiserror = "1.0.49"
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 tokio-rustls = { version = "0.24", optional = true }
-rustls-webpki = { version = "0.101.4", optional = true }
+rustls-webpki = { version = "0.101.6", optional = true }
 tokio-native-tls = { version = "0.3", optional = true }
 rustls-pemfile = { version = "1", optional = true }
-async-tungstenite = { version = "0.22", default-features = false, features = ["tokio-runtime"], optional = true }
-ws_stream_tungstenite = { version= "0.10", default-features = false, features = ["tokio_io"], optional = true }
+async-tungstenite = { version = "0.23", default-features = false, features = ["tokio-runtime"], optional = true }
+ws_stream_tungstenite = { version= "0.11", default-features = false, features = ["tokio_io"], optional = true }
 x509-parser = {version= "0.15.1", optional = true}
 futures-util = { version = "0.3.28", optional = true}
 parking_lot = "0.12.1"
@@ -39,11 +39,10 @@ axum = "0.6.20"
 rand = "0.8.5"
 
 [features]
-default = ["use-rustls"]
+default = ["use-rustls", "websocket"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websocket = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep:ws_stream_tungstenite"]
-websockets = ["websocket"]
 validate-tenant-prefix = []
 allow-duplicate-clientid = []
 

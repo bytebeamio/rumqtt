@@ -23,7 +23,7 @@ use crate::tls;
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, UrlError},
+    crate::websockets::{split_url, validate_response_headers, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
@@ -63,6 +63,9 @@ pub enum ConnectionError {
     #[cfg(feature = "proxy")]
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket response validation error: ")]
+    ResponseValidation(#[from] crate::websockets::ValidationError),
 }
 
 /// Eventloop with all the state of a connection
@@ -116,11 +119,15 @@ impl EventLoop {
         }
     }
 
-    fn clean(&mut self) {
+    /// Last session might contain packets which aren't acked. MQTT says these packets should be
+    /// republished in the next session. Move pending messages from state to eventloop, drops the
+    /// underlying network connection and clears the keepalive timeout if any.
+    ///
+    /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
+    pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        let pending = self.state.clean();
-        self.pending = pending.into_iter();
+        self.pending = self.state.clean().into_iter();
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -286,11 +293,6 @@ async fn connect(
     // make MQTT connection request (which internally awaits for ack)
     let packet = mqtt_connect(mqtt_options, &mut network).await?;
 
-    // Last session might contain packets which aren't acked. MQTT says these packets should be
-    // republished in the next session
-    // move pending messages from state to eventloop
-    // let pending = self.state.clean();
-    // self.pending = pending.into_iter();
     Ok((network, packet))
 }
 
@@ -315,14 +317,14 @@ pub(crate) async fn socket_connect(
         }
 
         #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        socket
-            .bind_device(
-                network_options
-                    .bind_device
-                    .as_ref()
-                    .map(|bind_device| bind_device.as_bytes()),
-            )
-            .unwrap();
+        {
+            if let Some(bind_device) = &network_options.bind_device {
+                // call the bind_device function only if the bind_device network option is defined
+                // If binding device is None or an empty string it removes the binding,
+                // which is causing PermissionDenied errors in AWS environment (lambda function).
+                socket.bind_device(Some(bind_device.as_bytes()))?;
+            }
+        }
 
         match socket.connect(addr).await {
             Ok(s) => return Ok(s),
@@ -398,7 +400,9 @@ async fn network_connect(
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
-            let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            let (socket, response) =
+                async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }
@@ -411,12 +415,13 @@ async fn network_connect(
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
-            let (socket, _) = async_tungstenite::tokio::client_async_tls_with_connector(
+            let (socket, response) = async_tungstenite::tokio::client_async_tls_with_connector(
                 request,
                 tcp_stream,
                 Some(connector),
             )
             .await?;
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), options.max_incoming_packet_size)
         }

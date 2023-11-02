@@ -42,16 +42,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             Err(error) => {
                 println!("Error = {error:?}");
-                return Ok(());
+                break;
             }
-        }
-        if let Err(_err) = event {
-            // break loop on disconnection
-            break;
         }
     }
 
-    // create new broker connection
+    // create new broker connection but do not start a clean session
     let (client, mut eventloop) = create_conn();
 
     loop {

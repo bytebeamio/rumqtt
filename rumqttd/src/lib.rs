@@ -44,11 +44,11 @@ use self::router::shared_subs::Strategy;
 pub struct Config {
     pub id: usize,
     pub router: RouterConfig,
-    pub v4: HashMap<String, ServerSettings>,
+    pub v4: Option<HashMap<String, ServerSettings>>,
     pub v5: Option<HashMap<String, ServerSettings>>,
     pub ws: Option<HashMap<String, ServerSettings>>,
     pub cluster: Option<ClusterSettings>,
-    pub console: ConsoleSettings,
+    pub console: Option<ConsoleSettings>,
     pub bridge: Option<BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
     pub metrics: Option<HashMap<MetricType, MetricSettings>>,

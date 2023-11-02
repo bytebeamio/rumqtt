@@ -8,8 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added `bind_device` to `NetworkOptions` to enable `TCPSocket.bind_device()`
+- Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttc 0.23.0] - 10-10-2023
+
+### Added
+- Added `bind_device` to `NetworkOptions` to enable `TCPSocket.bind_device()`
 - Added `MqttOptions::set_request_modifier` for setting a handler for modifying a websocket request before sending it.
 
 ### Changed
@@ -20,9 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Allow keep alive values <= 5 seconds (#643)
+- Verify "mqtt" is present in websocket subprotocol header.
 
 ### Security
 - Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
+- Removed dependency vulnerability, see [rustsec](https://rustsec.org/advisories/RUSTSEC-2023-0065). Update of `tungstenite` dependency.
 
 ---
 
