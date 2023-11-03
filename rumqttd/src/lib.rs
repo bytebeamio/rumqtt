@@ -1,6 +1,6 @@
-use std::{collections::HashMap, path::Path};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -11,8 +11,8 @@ use tracing_subscriber::{
         Layer,
     },
     layer::Layered,
-    Registry,
     reload::Handle,
+    Registry,
 };
 
 pub use link::alerts;

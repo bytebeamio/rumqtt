@@ -14,9 +14,9 @@ use tokio_rustls::rustls::{
     RootCertStore, ServerConfig,
 };
 
+use std::iter;
 #[cfg(feature = "use-rustls")]
 use std::{io::BufReader, sync::Arc};
-use std::iter;
 
 use crate::link::network::N;
 use crate::TlsConfig;
@@ -108,7 +108,7 @@ impl TLSAcceptor {
             TlsConfig::RustlsWithECC {
                 capath,
                 ecc_certpath,
-                ecc_keypath
+                ecc_keypath,
             } => Self::rustls(capath, ecc_certpath, ecc_keypath, true),
             #[cfg(feature = "use-native-tls")]
             TlsConfig::NativeTls {
@@ -176,8 +176,6 @@ impl TLSAcceptor {
         Ok(TLSAcceptor::NativeTLS { acceptor })
     }
 
-
-
     #[cfg(feature = "use-rustls")]
     fn rustls(
         ca_path: &String,
@@ -200,12 +198,10 @@ impl TLSAcceptor {
             let key_file = File::open(key_path);
             let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
 
-            let keys =
-                match is_ecc {
-                    false => rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file)),
-                    true => rustls_pemfile::ec_private_keys(&mut BufReader::new(key_file))
-                };
-
+            let keys = match is_ecc {
+                false => rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file)),
+                true => rustls_pemfile::ec_private_keys(&mut BufReader::new(key_file)),
+            };
 
             let keys = keys.map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
 
