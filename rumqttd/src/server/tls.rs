@@ -16,6 +16,7 @@ use tokio_rustls::rustls::{
 
 #[cfg(feature = "use-rustls")]
 use std::{io::BufReader, sync::Arc};
+use std::iter;
 
 use crate::link::network::N;
 use crate::TlsConfig;
@@ -102,7 +103,13 @@ impl TLSAcceptor {
                 capath,
                 certpath,
                 keypath,
-            } => Self::rustls(capath, certpath, keypath),
+            } => Self::rustls(capath, certpath, keypath, false),
+            #[cfg(feature = "use-rustls")]
+            TlsConfig::RustlsWithECC {
+                capath,
+                ecc_certpath,
+                ecc_keypath
+            } => Self::rustls(capath, ecc_certpath, ecc_keypath, true),
             #[cfg(feature = "use-native-tls")]
             TlsConfig::NativeTls {
                 pkcs12path,
@@ -169,11 +176,14 @@ impl TLSAcceptor {
         Ok(TLSAcceptor::NativeTLS { acceptor })
     }
 
+
+
     #[cfg(feature = "use-rustls")]
     fn rustls(
         ca_path: &String,
         cert_path: &String,
         key_path: &String,
+        is_ecc: bool,
     ) -> Result<TLSAcceptor, Error> {
         let (certs, key) = {
             // Get certificates
@@ -189,7 +199,14 @@ impl TLSAcceptor {
             // Get private key
             let key_file = File::open(key_path);
             let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
-            let keys = rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file));
+
+            let keys =
+                match is_ecc {
+                    false => rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file)),
+                    true => rustls_pemfile::ec_private_keys(&mut BufReader::new(key_file))
+                };
+
+
             let keys = keys.map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
 
             // Get the first key

@@ -1,7 +1,7 @@
-use std::path::PathBuf;
 use std::{collections::HashMap, path::Path};
+use std::net::SocketAddr;
+use std::path::PathBuf;
 
-use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
     filter::EnvFilter,
@@ -10,11 +10,18 @@ use tracing_subscriber::{
         Layer,
     },
     layer::Layered,
-    reload::Handle,
     Registry,
+    reload::Handle,
 };
 
-use std::net::SocketAddr;
+pub use link::alerts;
+pub use link::local;
+pub use link::meters;
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+use segments::Storage;
+pub use server::Broker;
+
+use self::router::shared_subs::Strategy;
 
 mod link;
 pub mod protocol;
@@ -30,15 +37,6 @@ pub type Filter = String;
 pub type TopicId = usize;
 pub type Offset = (u64, u64);
 pub type Cursor = (u64, u64);
-
-pub use link::alerts;
-pub use link::local;
-pub use link::meters;
-
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
-pub use server::Broker;
-
-use self::router::shared_subs::Strategy;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -73,6 +71,11 @@ pub enum TlsConfig {
         certpath: String,
         keypath: String,
     },
+    RustlsWithECC {
+        capath: String,
+        ecc_certpath: String,
+        ecc_keypath: String,
+    },
     NativeTls {
         pkcs12path: String,
         pkcs12pass: String,
@@ -89,6 +92,13 @@ impl TlsConfig {
                 certpath,
                 keypath,
             } => [capath, certpath, keypath]
+                .iter()
+                .all(|v| Path::new(v).exists()),
+            TlsConfig::RustlsWithECC {
+                capath,
+                ecc_certpath,
+                ecc_keypath,
+            } => [capath, ecc_certpath, ecc_keypath]
                 .iter()
                 .all(|v| Path::new(v).exists()),
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
