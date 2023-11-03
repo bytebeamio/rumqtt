@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Log warning if websocket config is getting ignored
+- Add `ecc_certpath` and `ecc_keypath` options to config file to support EC keys with `rustls`
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
