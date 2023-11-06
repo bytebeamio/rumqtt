@@ -72,11 +72,6 @@ pub enum TlsConfig {
         certpath: String,
         keypath: String,
     },
-    RustlsWithECC {
-        capath: String,
-        ecc_certpath: String,
-        ecc_keypath: String,
-    },
     NativeTls {
         pkcs12path: String,
         pkcs12pass: String,
@@ -93,13 +88,6 @@ impl TlsConfig {
                 certpath,
                 keypath,
             } => [capath, certpath, keypath]
-                .iter()
-                .all(|v| Path::new(v).exists()),
-            TlsConfig::RustlsWithECC {
-                capath,
-                ecc_certpath,
-                ecc_keypath,
-            } => [capath, ecc_certpath, ecc_keypath]
                 .iter()
                 .all(|v| Path::new(v).exists()),
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),

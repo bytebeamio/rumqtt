@@ -102,13 +102,7 @@ impl TLSAcceptor {
                 capath,
                 certpath,
                 keypath,
-            } => Self::rustls(capath, certpath, keypath, false),
-            #[cfg(feature = "use-rustls")]
-            TlsConfig::RustlsWithECC {
-                capath,
-                ecc_certpath,
-                ecc_keypath,
-            } => Self::rustls(capath, ecc_certpath, ecc_keypath, true),
+            } => Self::rustls(capath, certpath, keypath),
             #[cfg(feature = "use-native-tls")]
             TlsConfig::NativeTls {
                 pkcs12path,
@@ -180,7 +174,6 @@ impl TLSAcceptor {
         ca_path: &String,
         cert_path: &String,
         key_path: &String,
-        is_ecc: bool,
     ) -> Result<TLSAcceptor, Error> {
         let (certs, key) = {
             // Get certificates
