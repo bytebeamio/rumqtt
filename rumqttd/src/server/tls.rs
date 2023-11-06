@@ -1,22 +1,21 @@
+#[cfg(feature = "use-rustls")]
+use std::{io::BufReader, sync::Arc};
 use std::fs::File;
-
 #[cfg(feature = "use-native-tls")]
 use std::io::Read;
+
+use rustls_pemfile::Item;
 use tokio::net::TcpStream;
 #[cfg(feature = "use-native-tls")]
 use tokio_native_tls::native_tls;
 #[cfg(feature = "use-native-tls")]
 use tokio_native_tls::native_tls::Error as NativeTlsError;
-
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{
-    server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
-    RootCertStore, ServerConfig,
+    Certificate, Error as RustlsError, PrivateKey, RootCertStore,
+    server::AllowAnyAuthenticatedClient, ServerConfig,
 };
-
-use std::iter;
-#[cfg(feature = "use-rustls")]
-use std::{io::BufReader, sync::Arc};
+use tracing::error;
 
 use crate::link::network::N;
 use crate::TlsConfig;
@@ -195,23 +194,10 @@ impl TLSAcceptor {
                 .collect();
 
             // Get private key
-            let key_file = File::open(key_path);
-            let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
+            let key = first_private_key_in_pemfile(key_path)
+                .map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
 
-            let keys = match is_ecc {
-                false => rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file)),
-                true => rustls_pemfile::ec_private_keys(&mut BufReader::new(key_file)),
-            };
-
-            let keys = keys.map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
-
-            // Get the first key
-            let key = match keys.first() {
-                Some(k) => k.clone(),
-                None => return Err(Error::InvalidServerKey(key_path.clone())),
-            };
-
-            (certs, PrivateKey(key))
+            (certs, key)
         };
 
         // client authentication with a CA. CA isn't required otherwise
@@ -238,5 +224,35 @@ impl TLSAcceptor {
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
         Ok(TLSAcceptor::Rustls { acceptor })
+    }
+}
+
+#[cfg(feature = "use-rustls")]
+/// Get the first private key in a PEM file
+fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKey, Error> {
+    // Get private key
+    let key_file = File::open(key_path);
+    let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
+
+    // Let's iterate over the keys with read_one/read_all
+    let rd = &mut BufReader::new(key_file);
+
+    loop {
+        match rustls_pemfile::read_one(rd) {
+            Ok(maybe_inner) => match maybe_inner {
+                None => {
+                    error!("No private key found in {:?}", key_path);
+                    return Err(Error::InvalidServerKey(key_path.clone()));
+                }
+                Some(Item::ECKey(key)) => return Ok(PrivateKey(key)),
+                Some(Item::RSAKey(key)) => return Ok(PrivateKey(key)),
+                Some(Item::PKCS8Key(key)) => return Ok(PrivateKey(key)),
+                Some(_) => {}
+            },
+            Err(err) => {
+                error!("Error reading key file: {:?}", err);
+                return Err(Error::InvalidServerKey(key_path.clone()));
+            }
+        }
     }
 }
