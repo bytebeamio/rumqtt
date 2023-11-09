@@ -175,6 +175,8 @@ impl TLSAcceptor {
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
+        use std::iter;
+
         let (certs, key) = {
             // Get certificates
             let cert_file = File::open(cert_path);
@@ -189,8 +191,16 @@ impl TLSAcceptor {
             // Get private key
             let key_file = File::open(key_path);
             let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
-            let keys = rustls_pemfile::rsa_private_keys(&mut BufReader::new(key_file));
-            let keys = keys.map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
+            let mut key_file_buf = BufReader::new(key_file);
+            let mut keys = Vec::<Vec<u8>>::new();
+            for item in iter::from_fn(|| rustls_pemfile::read_one(&mut key_file_buf).transpose()) {
+                match item.unwrap() {
+                    rustls_pemfile::Item::RSAKey(key) => keys.push(key),
+                    rustls_pemfile::Item::PKCS8Key(key) => keys.push(key),
+                    rustls_pemfile::Item::ECKey(key) => keys.push(key),
+                    _ => return Err(Error::InvalidServerKey(key_path.clone())),
+                }
+            }
 
             // Get the first key
             let key = match keys.first() {
