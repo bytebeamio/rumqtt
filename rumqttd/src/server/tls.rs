@@ -120,13 +120,13 @@ impl TLSAcceptor {
             #[cfg(feature = "use-rustls")]
             TLSAcceptor::Rustls { acceptor } => {
                 let stream = acceptor.accept(stream).await?;
-                let (_, session) = stream.get_ref();
-                let peer_certificates = session
-                    .peer_certificates()
-                    .ok_or(Error::NoPeerCertificate)?;
-                let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
+                // let (_, session) = stream.get_ref();
+                // let peer_certificates = session
+                //     .peer_certificates()
+                //     .ok_or(Error::NoPeerCertificate)?;
+                // let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
                 let network = Box::new(stream);
-                Ok((tenant_id, network))
+                Ok((None, network))
             }
             #[cfg(feature = "use-native-tls")]
             TLSAcceptor::NativeTLS { acceptor } => {
@@ -171,7 +171,7 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
-        ca_path: &String,
+        ca_path: &Option<String>,
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
@@ -211,26 +211,28 @@ impl TLSAcceptor {
             (certs, PrivateKey(key))
         };
 
-        // client authentication with a CA. CA isn't required otherwise
-        let server_config = {
-            let ca_file = File::open(ca_path);
-            let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
-            let ca_file = &mut BufReader::new(ca_file);
-            let ca_certs = rustls_pemfile::certs(ca_file)?;
-            let ca_cert = ca_certs
-                .first()
-                .map(|c| Certificate(c.to_owned()))
-                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
+        let mut builder = ServerConfig::builder().with_safe_defaults();
+        let server_config = match ca_path {
+            Some(ca_path) => {
+                let ca_file = File::open(ca_path);
+                let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
+                let ca_file = &mut BufReader::new(ca_file);
+                let ca_certs = rustls_pemfile::certs(ca_file)?;
+                let ca_cert = ca_certs
+                    .first()
+                    .map(|c| Certificate(c.to_owned()))
+                    .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
 
-            let mut store = RootCertStore::empty();
-            store
-                .add(&ca_cert)
-                .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
+                let mut store = RootCertStore::empty();
+                store
+                    .add(&ca_cert)
+                    .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
 
-            ServerConfig::builder()
-                .with_safe_defaults()
-                .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
-                .with_single_cert(certs, key)?
+                builder
+                    .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
+                    .with_single_cert(certs, key)?
+            }
+            None => builder.with_no_client_auth().with_single_cert(certs, key)?,
         };
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
