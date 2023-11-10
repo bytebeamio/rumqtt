@@ -61,7 +61,7 @@ pub enum Error {
 
 #[cfg(feature = "use-rustls")]
 /// Extract uid from certificate's subject organization field
-fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
+fn _extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
         x509_parser::parse_x509_certificate(der).map_err(|_| Error::CertificateParse)?;
     let tenant_id = match cert.subject().iter_organization().next() {
@@ -102,7 +102,7 @@ impl TLSAcceptor {
                 capath,
                 certpath,
                 keypath,
-            } => Self::rustls(capath, certpath, keypath),
+            } => Self::rustls(capath.as_ref(), certpath, keypath),
             #[cfg(feature = "use-native-tls")]
             TlsConfig::NativeTls {
                 pkcs12path,
@@ -171,12 +171,10 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
-        ca_path: &Option<String>,
+        ca_path: Option<&String>,
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
-        use std::iter;
-
         let (certs, key) = {
             // Get certificates
             let cert_file = File::open(cert_path);
