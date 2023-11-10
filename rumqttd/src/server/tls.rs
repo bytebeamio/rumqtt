@@ -192,26 +192,27 @@ impl TLSAcceptor {
             let key_file = File::open(key_path);
             let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
             let mut key_file_buf = BufReader::new(key_file);
-            let mut keys = Vec::<Vec<u8>>::new();
-            for item in iter::from_fn(|| rustls_pemfile::read_one(&mut key_file_buf).transpose()) {
-                match item.unwrap() {
-                    rustls_pemfile::Item::RSAKey(key) => keys.push(key),
-                    rustls_pemfile::Item::PKCS8Key(key) => keys.push(key),
-                    rustls_pemfile::Item::ECKey(key) => keys.push(key),
-                    _ => return Err(Error::InvalidServerKey(key_path.clone())),
+            let mut key: Option<Vec<u8>> = None;
+            while let Ok(item) = rustls_pemfile::read_one(&mut key_file_buf) {
+                if let Some(item) = item {
+                    match item {
+                        rustls_pemfile::Item::RSAKey(k) => key = Some(k),
+                        rustls_pemfile::Item::PKCS8Key(k) => key = Some(k),
+                        rustls_pemfile::Item::ECKey(k) => key = Some(k),
+                        _ => return Err(Error::InvalidServerKey(key_path.clone())),
+                    }
+
+                    break;
                 }
             }
 
-            // Get the first key
-            let key = match keys.first() {
-                Some(k) => k.clone(),
+            match key {
+                Some(k) => (certs, PrivateKey(k)),
                 None => return Err(Error::InvalidServerKey(key_path.clone())),
-            };
-
-            (certs, PrivateKey(key))
+            }
         };
 
-        let mut builder = ServerConfig::builder().with_safe_defaults();
+        let builder = ServerConfig::builder().with_safe_defaults();
         let server_config = match ca_path {
             Some(ca_path) => {
                 let ca_file = File::open(ca_path);
