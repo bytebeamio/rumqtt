@@ -198,7 +198,10 @@ impl TLSAcceptor {
                     match item {
                         rustls_pemfile::Item::RSAKey(k)
                         | rustls_pemfile::Item::PKCS8Key(k)
-                        | rustls_pemfile::Item::ECKey(k) => key = Some(k),
+                        | rustls_pemfile::Item::ECKey(k) => {
+                            key = Some(k);
+                            break;
+                        }
                         _ => continue,
                     }
                 }
