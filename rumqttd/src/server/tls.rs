@@ -196,13 +196,11 @@ impl TLSAcceptor {
             while let Ok(item) = rustls_pemfile::read_one(&mut key_file_buf) {
                 if let Some(item) = item {
                     match item {
-                        rustls_pemfile::Item::RSAKey(k) => key = Some(k),
-                        rustls_pemfile::Item::PKCS8Key(k) => key = Some(k),
-                        rustls_pemfile::Item::ECKey(k) => key = Some(k),
-                        _ => return Err(Error::InvalidServerKey(key_path.clone())),
+                        rustls_pemfile::Item::RSAKey(k)
+                        | rustls_pemfile::Item::PKCS8Key(k)
+                        | rustls_pemfile::Item::ECKey(k) => key = Some(k),
+                        _ => continue,
                     }
-
-                    break;
                 }
             }
 
