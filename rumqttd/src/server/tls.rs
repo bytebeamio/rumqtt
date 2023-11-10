@@ -194,8 +194,8 @@ impl TLSAcceptor {
             let mut key_file_buf = BufReader::new(key_file);
             let mut key: Option<Vec<u8>> = None;
             while let Ok(item) = rustls_pemfile::read_one(&mut key_file_buf) {
-                if let Some(item) = item {
-                    match item {
+                match item {
+                    Some(item) => match item {
                         rustls_pemfile::Item::RSAKey(k)
                         | rustls_pemfile::Item::PKCS8Key(k)
                         | rustls_pemfile::Item::ECKey(k) => {
@@ -203,7 +203,8 @@ impl TLSAcceptor {
                             break;
                         }
                         _ => continue,
-                    }
+                    },
+                    None => return Err(Error::InvalidServerKey(key_path.clone())),
                 }
             }
 
