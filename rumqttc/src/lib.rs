@@ -208,7 +208,10 @@ impl Request {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
     RSA(Vec<u8>),
+    #[deprecated]
     ECC(Vec<u8>),
+    EC(Vec<u8>),
+    PKCS(Vec<u8>),
 }
 
 impl From<Publish> for Request {

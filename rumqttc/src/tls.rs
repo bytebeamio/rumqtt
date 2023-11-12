@@ -110,9 +110,13 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                     Key::RSA(k) => rustls_pemfile::rsa_private_keys(&mut BufReader::new(
                         Cursor::new(k.clone()),
                     )),
-                    Key::ECC(k) => rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(
-                        Cursor::new(k.clone()),
-                    )),
+                    Key::EC(k) => {
+                        rustls_pemfile::ec_private_keys(&mut BufReader::new(Cursor::new(k.clone())))
+                    }
+                    #[allow(deprecated)]
+                    Key::ECC(k) | Key::PKCS(k) => rustls_pemfile::pkcs8_private_keys(
+                        &mut BufReader::new(Cursor::new(k.clone())),
+                    ),
                 };
                 let keys = match read_keys {
                     Ok(v) => v,
