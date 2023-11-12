@@ -54,6 +54,9 @@ pub enum Error {
     /// No valid certificate in chain
     #[error("No valid certificate in chain")]
     NoValidCertInChain,
+    /// No valid key found
+    #[error("No valid key")]
+    NoValidKey,
     #[cfg(feature = "use-native-tls")]
     #[error("Native TLS error {0}")]
     NativeTls(#[from] NativeTlsError),
@@ -106,31 +109,21 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                     rustls_pemfile::certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
                 // load appropriate Key as per the user request. The underlying signature algorithm
                 // of key generation determines the Signature Algorithm during the TLS Handskahe.
-                let read_keys = match &client.1 {
-                    Key::RSA(k) => rustls_pemfile::rsa_private_keys(&mut BufReader::new(
-                        Cursor::new(k.clone()),
-                    )),
-                    Key::EC(k) => {
-                        rustls_pemfile::ec_private_keys(&mut BufReader::new(Cursor::new(k.clone())))
-                    }
-                    #[allow(deprecated)]
-                    Key::ECC(k) | Key::PKCS(k) => rustls_pemfile::pkcs8_private_keys(
-                        &mut BufReader::new(Cursor::new(k.clone())),
-                    ),
-                };
-                let keys = match read_keys {
-                    Ok(v) => v,
-                    Err(_e) => return Err(Error::NoValidCertInChain),
-                };
 
-                // Get the first key. Error if it's not valid
-                let key = match keys.first() {
-                    Some(k) => k.clone(),
-                    None => return Err(Error::NoValidCertInChain),
+                let key = match &client.1 {
+                    Key::RSA(k) | Key::ECC(k) => {
+                        match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(k.clone())))
+                        {
+                            Ok(Some(rustls_pemfile::Item::RSAKey(key)))
+                            | Ok(Some(rustls_pemfile::Item::PKCS8Key(key)))
+                            | Ok(Some(rustls_pemfile::Item::ECKey(key))) => key,
+                            Ok(None) | Ok(Some(_)) => return Err(Error::NoValidKey),
+                            Err(err) => return Err(Error::Io(err)),
+                        }
+                    }
                 };
 
                 let certs = certs.into_iter().map(Certificate).collect();
-
                 config.with_client_auth_cert(certs, PrivateKey(key))?
             } else {
                 config.with_no_client_auth()
