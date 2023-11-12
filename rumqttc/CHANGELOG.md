@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
+- Add support for `SEC1` encoded TLS keys (specifically focusing on elliptic curve cryptography (ECC)). The `EC` and `PKCS` variants are added to the `Key` enum the `ECC` variant is deprecated because it was ambiguous.
 
 ### Changed
 - Synchronous client methods take `&self` instead of `&mut self` (#646)
