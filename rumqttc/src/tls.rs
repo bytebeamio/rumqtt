@@ -10,8 +10,6 @@ use tokio_rustls::rustls::{
 use tokio_rustls::TlsConnector as RustlsConnector;
 
 #[cfg(feature = "use-rustls")]
-use crate::Key;
-#[cfg(feature = "use-rustls")]
 use std::convert::TryFrom;
 #[cfg(feature = "use-rustls")]
 use std::io::{BufReader, Cursor};
@@ -110,17 +108,15 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                 // load appropriate Key as per the user request. The underlying signature algorithm
                 // of key generation determines the Signature Algorithm during the TLS Handskahe.
 
-                let key = match &client.1 {
-                    Key::RSA(k) | Key::ECC(k) => {
-                        match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(k.clone())))
-                        {
-                            Ok(Some(rustls_pemfile::Item::RSAKey(key)))
-                            | Ok(Some(rustls_pemfile::Item::PKCS8Key(key)))
-                            | Ok(Some(rustls_pemfile::Item::ECKey(key))) => key,
-                            Ok(None) | Ok(Some(_)) => return Err(Error::NoValidKey),
-                            Err(err) => return Err(Error::Io(err)),
-                        }
-                    }
+                // Create buffer for key file
+                let mut key_buffer = BufReader::new(Cursor::new(client.1.clone().to_inner()));
+                // We only read the first key in the key file
+                let key = match rustls_pemfile::read_one(&mut key_buffer) {
+                    Ok(Some(rustls_pemfile::Item::RSAKey(key)))
+                    | Ok(Some(rustls_pemfile::Item::PKCS8Key(key)))
+                    | Ok(Some(rustls_pemfile::Item::ECKey(key))) => key,
+                    Ok(None) | Ok(Some(_)) => return Err(Error::NoValidKey),
+                    Err(err) => return Err(Error::Io(err)),
                 };
 
                 let certs = certs.into_iter().map(Certificate).collect();
