@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Log warning if websocket config is getting ignored
+- Ability to use rustls without client certificates.
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
 - v4 config is optional, user can specify v4 and/or v5 config
 - websocket feature is enabled by default
 - console configuration is optional
+- rustls accepts all private key types available in [`rustls_pemfile`](https://docs.rs/rustls-pemfile/latest/rustls_pemfile/).
 
 ### Deprecated
 - "websockets" feature is removed in favour of "websocket"

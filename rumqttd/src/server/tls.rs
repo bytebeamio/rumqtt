@@ -59,9 +59,9 @@ pub enum Error {
     CertificateParse,
 }
 
-#[cfg(feature = "use-rustls")]
+#[cfg(all(feature = "use-rustls", feature = "validate-tenant-prefix"))]
 /// Extract uid from certificate's subject organization field
-fn _extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
+fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
         x509_parser::parse_x509_certificate(der).map_err(|_| Error::CertificateParse)?;
     let tenant_id = match cert.subject().iter_organization().next() {
@@ -117,14 +117,20 @@ impl TLSAcceptor {
 
     pub async fn accept(&self, stream: TcpStream) -> Result<(Option<String>, Box<dyn N>), Error> {
         match self {
-            #[cfg(feature = "use-rustls")]
+            #[cfg(all(feature = "use-rustls", not(feature = "validate-tenant-prefix")))]
             TLSAcceptor::Rustls { acceptor } => {
                 let stream = acceptor.accept(stream).await?;
-                // let (_, session) = stream.get_ref();
-                // let peer_certificates = session
-                //     .peer_certificates()
-                //     .ok_or(Error::NoPeerCertificate)?;
-                // let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
+                let network = Box::new(stream);
+                Ok((None, network))
+            }
+            #[cfg(all(feature = "use-rustls", feature = "validate-tenant-prefix"))]
+            TLSAcceptor::Rustls { acceptor } => {
+                let stream = acceptor.accept(stream).await?;
+                let (_, session) = stream.get_ref();
+                let peer_certificates = session
+                    .peer_certificates()
+                    .ok_or(Error::NoPeerCertificate)?;
+                let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
                 let network = Box::new(stream);
                 Ok((None, network))
             }
