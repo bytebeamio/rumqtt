@@ -132,7 +132,7 @@ impl TLSAcceptor {
                     .ok_or(Error::NoPeerCertificate)?;
                 let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
                 let network = Box::new(stream);
-                Ok((None, network))
+                Ok((tenant_id, network))
             }
             #[cfg(feature = "use-native-tls")]
             TLSAcceptor::NativeTLS { acceptor } => {
