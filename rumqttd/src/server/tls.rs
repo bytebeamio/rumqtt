@@ -234,14 +234,18 @@ fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKey, Error> 
     loop {
         match rustls_pemfile::read_one(rd) {
             Ok(maybe_inner) => match maybe_inner {
+                Some(item) => match item {
+                    // If we find a private key, return it
+                    Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key) => {
+                        return Ok(PrivateKey(key))
+                    }
+                    // Otherwise, continue
+                    _ => {}
+                },
                 None => {
                     error!("No private key found in {:?}", key_path);
                     return Err(Error::InvalidServerKey(key_path.clone()));
                 }
-                Some(Item::ECKey(key)) => return Ok(PrivateKey(key)),
-                Some(Item::RSAKey(key)) => return Ok(PrivateKey(key)),
-                Some(Item::PKCS8Key(key)) => return Ok(PrivateKey(key)),
-                Some(_) => {}
             },
             Err(err) => {
                 error!("Error reading key file: {:?}", err);
