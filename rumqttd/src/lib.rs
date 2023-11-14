@@ -82,7 +82,7 @@ impl TlsConfig {
     // Returns true only if all of the file paths inside `TlsConfig` actually exists on file system.
     // NOTE: This doesn't verify if certificate files are in required format or not.
     pub fn validate_paths(&self) -> bool {
-        let result = match self {
+        match self {
             TlsConfig::Rustls {
                 capath,
                 certpath,
@@ -91,9 +91,7 @@ impl TlsConfig {
                 .iter()
                 .all(|v| Path::new(v).exists()),
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
-        };
-        trace!("Validating TLS config paths with result: {:?}", result);
-        result
+        }
     }
 }
 

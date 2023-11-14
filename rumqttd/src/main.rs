@@ -2,6 +2,7 @@ use config::FileFormat;
 use rumqttd::Broker;
 
 use clap::Parser;
+use tracing::trace;
 
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
@@ -97,6 +98,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server v4.{name}.")
                 }
+                trace!("Validated certificate paths for server v4.{name}.");
             }
         }
     }
@@ -107,6 +109,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server v5.{name}.")
                 }
+                trace!("Validated certificate paths for server v5.{name}.");
             }
         }
     }
@@ -117,6 +120,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server ws.{name}.")
                 }
+                trace!("Validated certificate paths for server ws.{name}.");
             }
         }
     }
