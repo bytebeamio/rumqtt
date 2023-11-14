@@ -4,6 +4,7 @@ use std::fs::File;
 #[cfg(feature = "use-native-tls")]
 use std::io::Read;
 
+#[cfg(feature = "use-rustls")]
 use rustls_pemfile::Item;
 use tokio::net::TcpStream;
 #[cfg(feature = "use-native-tls")]
