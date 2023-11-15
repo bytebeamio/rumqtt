@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
-use tracing::{debug, trace};
 use tracing_subscriber::{
     filter::EnvFilter,
     fmt::{

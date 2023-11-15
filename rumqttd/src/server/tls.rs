@@ -1,8 +1,8 @@
-#[cfg(feature = "use-rustls")]
-use std::{io::BufReader, sync::Arc};
 use std::fs::File;
 #[cfg(feature = "use-native-tls")]
 use std::io::Read;
+#[cfg(feature = "use-rustls")]
+use std::{io::BufReader, sync::Arc};
 
 #[cfg(feature = "use-rustls")]
 use rustls_pemfile::Item;
@@ -13,8 +13,8 @@ use tokio_native_tls::native_tls;
 use tokio_native_tls::native_tls::Error as NativeTlsError;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{
-    Certificate, Error as RustlsError, PrivateKey, RootCertStore,
-    server::AllowAnyAuthenticatedClient, ServerConfig,
+    server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
+    RootCertStore, ServerConfig,
 };
 use tracing::error;
 
