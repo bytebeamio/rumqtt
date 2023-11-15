@@ -1,22 +1,20 @@
 use std::fs::File;
-#[cfg(feature = "use-native-tls")]
 use std::io::Read;
-#[cfg(feature = "use-rustls")]
-use std::{io::BufReader, sync::Arc};
+use tokio::net::TcpStream;
+
+#[cfg(feature = "use-native-tls")]
+use {tokio_native_tls::native_tls, tokio_native_tls::native_tls::Error as NativeTlsError};
 
 #[cfg(feature = "use-rustls")]
-use rustls_pemfile::Item;
-use tokio::net::TcpStream;
-#[cfg(feature = "use-native-tls")]
-use tokio_native_tls::native_tls;
-#[cfg(feature = "use-native-tls")]
-use tokio_native_tls::native_tls::Error as NativeTlsError;
-#[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls::{
-    server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
-    RootCertStore, ServerConfig,
+use {
+    rustls_pemfile::Item,
+    std::{io::BufReader, sync::Arc},
+    tokio_rustls::rustls::{
+        server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
+        RootCertStore, ServerConfig,
+    },
+    tracing::error,
 };
-use tracing::error;
 
 use crate::link::network::N;
 use crate::TlsConfig;
