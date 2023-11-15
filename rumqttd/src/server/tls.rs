@@ -188,8 +188,7 @@ impl TLSAcceptor {
                 .collect();
 
             // Get private key
-            let key = first_private_key_in_pemfile(key_path)
-                .map_err(|_| Error::InvalidServerKey(key_path.clone()))?;
+            let key = first_private_key_in_pemfile(key_path)?;
 
             (certs, key)
         };
@@ -228,29 +227,24 @@ fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKey, Error> 
     let key_file = File::open(key_path);
     let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
 
-    // Let's iterate over the keys with read_one/read_all
     let rd = &mut BufReader::new(key_file);
 
+    // keep reading Items one by one to find a Key, return error if none found.
     loop {
-        match rustls_pemfile::read_one(rd) {
-            Ok(maybe_inner) => match maybe_inner {
-                Some(item) => match item {
-                    // If we find a private key, return it
-                    Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key) => {
-                        return Ok(PrivateKey(key))
-                    }
-                    // Otherwise, continue
-                    _ => {}
-                },
-                None => {
-                    error!("No private key found in {:?}", key_path);
-                    return Err(Error::InvalidServerKey(key_path.clone()));
-                }
-            },
-            Err(err) => {
-                error!("Error reading key file: {:?}", err);
+        let item = rustls_pemfile::read_one(rd).map_err(|err| {
+            error!("Error reading key file: {:?}", err);
+            Error::InvalidServerKey(key_path.clone())
+        })?;
+
+        match item {
+            Some(Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key)) => {
+                return Ok(PrivateKey(key));
+            }
+            None => {
+                error!("No private key found in {:?}", key_path);
                 return Err(Error::InvalidServerKey(key_path.clone()));
             }
+            _ => {}
         }
     }
 }
