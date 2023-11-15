@@ -1,9 +1,11 @@
 use std::fs::File;
-use std::io::Read;
 use tokio::net::TcpStream;
 
 #[cfg(feature = "use-native-tls")]
-use {tokio_native_tls::native_tls, tokio_native_tls::native_tls::Error as NativeTlsError};
+use {
+    std::io::Read, tokio_native_tls::native_tls,
+    tokio_native_tls::native_tls::Error as NativeTlsError,
+};
 
 #[cfg(feature = "use-rustls")]
 use {
