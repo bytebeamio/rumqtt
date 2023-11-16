@@ -1,4 +1,6 @@
 #[cfg(feature = "use-rustls")]
+use rustls_pemfile::Item;
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::client::InvalidDnsNameError;
@@ -67,8 +69,6 @@ pub enum Error {
 
 #[cfg(feature = "use-rustls")]
 pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsConnector, Error> {
-    use rustls_pemfile::Item;
-
     let config = match tls_config {
         TlsConfiguration::Simple {
             ca,
