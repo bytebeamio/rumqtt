@@ -204,30 +204,6 @@ impl Request {
     }
 }
 
-/// Key type for TLS authentication
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Key {
-    /// RSA key in PKCS#1 encoding
-    RSA(Vec<u8>),
-    /// Eliptic curve key in SEC1 encoding
-    EC(Vec<u8>),
-    /// Key in PKCS#8 encoding
-    PKCS(Vec<u8>),
-    #[deprecated = "use PKCS or EC instead"]
-    /// Eliptic curve key in PKCS#8 encoding.
-    /// Deprecated: use PKCS or EC instead.
-    ECC(Vec<u8>),
-}
-
-impl Key {
-    pub fn to_inner(self) -> Vec<u8> {
-        #[allow(deprecated)]
-        match self {
-            Key::RSA(k) | Key::ECC(k) | Key::EC(k) | Key::PKCS(k) => k,
-        }
-    }
-}
-
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
         Request::Publish(publish)
@@ -283,7 +259,7 @@ impl Transport {
     #[cfg(feature = "use-rustls")]
     pub fn tls(
         ca: Vec<u8>,
-        client_auth: Option<(Vec<u8>, Key)>,
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
         alpn: Option<Vec<Vec<u8>>>,
     ) -> Self {
         let config = TlsConfiguration::Simple {
@@ -353,7 +329,7 @@ pub enum TlsConfiguration {
         /// alpn settings
         alpn: Option<Vec<Vec<u8>>>,
         /// tls client_authentication
-        client_auth: Option<(Vec<u8>, Key)>,
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
     },
     #[cfg(feature = "use-native-tls")]
     SimpleNative {

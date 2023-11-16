@@ -109,7 +109,7 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                 // of key generation determines the Signature Algorithm during the TLS Handskahe.
 
                 // Create buffer for key file
-                let mut key_buffer = BufReader::new(Cursor::new(client.1.clone().to_inner()));
+                let mut key_buffer = BufReader::new(Cursor::new(client.1.clone()));
                 // We only read the first key in the key file
                 let key = match rustls_pemfile::read_one(&mut key_buffer) {
                     Ok(Some(rustls_pemfile::Item::RSAKey(key)))
