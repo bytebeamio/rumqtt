@@ -50,11 +50,13 @@ pub enum Error {
     TLS(#[from] rustls::Error),
     #[cfg(feature = "use-rustls")]
     /// No valid certificate in chain
+    #[error("No valid CA certificate provided")]
+    NoValidCACert,
     #[error("No valid certificate in chain")]
     NoValidCertInChain,
     /// No valid key found
-    #[error("No valid key")]
-    NoValidKey,
+    #[error("No valid key in chain")]
+    NoValidKeyInChain,
     #[cfg(feature = "use-native-tls")]
     #[error("Native TLS error {0}")]
     NativeTls(#[from] NativeTlsError),
@@ -69,6 +71,8 @@ pub enum Error {
 
 #[cfg(feature = "use-rustls")]
 pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsConnector, Error> {
+    use rustls_pemfile::Item;
+
     let config = match tls_config {
         TlsConfiguration::Simple {
             ca,
@@ -94,7 +98,7 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
             root_cert_store.add_trust_anchors(trust_anchors);
 
             if root_cert_store.is_empty() {
-                return Err(Error::NoValidCertInChain);
+                return Err(Error::NoValidCACert);
             }
 
             let config = ClientConfig::builder()
@@ -103,20 +107,28 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
 
             // Add der encoded client cert and key
             let mut config = if let Some(client) = client_auth.as_ref() {
+
                 let certs =
                     rustls_pemfile::certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
-                // load appropriate Key as per the user request. The underlying signature algorithm
+                if certs.is_empty() {
+                    return Err(Error::NoValidCertInChain);
+                }
+                // Load appropriate Key as per the user request. The underlying signature algorithm
                 // of key generation determines the Signature Algorithm during the TLS Handskahe.
 
                 // Create buffer for key file
                 let mut key_buffer = BufReader::new(Cursor::new(client.1.clone()));
-                // We only read the first key in the key file
-                let key = match rustls_pemfile::read_one(&mut key_buffer) {
-                    Ok(Some(rustls_pemfile::Item::RSAKey(key)))
-                    | Ok(Some(rustls_pemfile::Item::PKCS8Key(key)))
-                    | Ok(Some(rustls_pemfile::Item::ECKey(key))) => key,
-                    Ok(None) | Ok(Some(_)) => return Err(Error::NoValidKey),
-                    Err(err) => return Err(Error::Io(err)),
+
+                // Read PEM items until we find a valid key.
+                let key = loop {
+                    let item = rustls_pemfile::read_one(&mut key_buffer)?;
+                    match item {
+                        Some(Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key)) => {
+                            break key;
+                        }
+                        None => return Err(Error::NoValidKeyInChain),
+                        _ => {}
+                    }
                 };
 
                 let certs = certs.into_iter().map(Certificate).collect();

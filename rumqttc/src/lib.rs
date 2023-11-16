@@ -293,7 +293,7 @@ impl Transport {
     #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     pub fn wss(
         ca: Vec<u8>,
-        client_auth: Option<(Vec<u8>, Key)>,
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
         alpn: Option<Vec<Vec<u8>>>,
     ) -> Self {
         let config = TlsConfiguration::Simple {
