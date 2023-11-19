@@ -1,7 +1,7 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path};
 
-use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
     filter::EnvFilter,
@@ -14,7 +14,14 @@ use tracing_subscriber::{
     Registry,
 };
 
-use std::net::SocketAddr;
+pub use link::alerts;
+pub use link::local;
+pub use link::meters;
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+use segments::Storage;
+pub use server::Broker;
+
+use self::router::shared_subs::Strategy;
 
 mod link;
 pub mod protocol;
@@ -30,15 +37,6 @@ pub type Filter = String;
 pub type TopicId = usize;
 pub type Offset = (u64, u64);
 pub type Cursor = (u64, u64);
-
-pub use link::alerts;
-pub use link::local;
-pub use link::meters;
-
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
-pub use server::Broker;
-
-use self::router::shared_subs::Strategy;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
