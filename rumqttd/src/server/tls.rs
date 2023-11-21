@@ -7,19 +7,18 @@ use {
     tokio_native_tls::native_tls::Error as NativeTlsError,
 };
 
+use crate::TlsConfig;
+#[cfg(feature = "verify-client-cert")]
+use tokio_rustls::rustls::{server::AllowAnyAuthenticatedClient, RootCertStore};
 #[cfg(feature = "use-rustls")]
 use {
     rustls_pemfile::Item,
     std::{io::BufReader, sync::Arc},
-    tokio_rustls::rustls::{
-        server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
-        RootCertStore, ServerConfig,
-    },
+    tokio_rustls::rustls::{Certificate, Error as RustlsError, PrivateKey, ServerConfig},
     tracing::error,
 };
 
 use crate::link::network::N;
-use crate::TlsConfig;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -100,10 +99,16 @@ impl TLSAcceptor {
         match config {
             #[cfg(feature = "use-rustls")]
             TlsConfig::Rustls {
+                #[cfg(feature = "verify-client-cert")]
                 capath,
                 certpath,
                 keypath,
-            } => Self::rustls(capath, certpath, keypath),
+            } => Self::rustls(
+                #[cfg(feature = "verify-client-cert")]
+                capath,
+                certpath,
+                keypath,
+            ),
             #[cfg(feature = "use-native-tls")]
             TlsConfig::NativeTls {
                 pkcs12path,
@@ -172,7 +177,7 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
-        ca_path: &String,
+        #[cfg(feature = "verify-client-cert")] ca_path: &String,
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
@@ -193,8 +198,10 @@ impl TLSAcceptor {
             (certs, key)
         };
 
+        let builder = ServerConfig::builder().with_safe_defaults();
         // client authentication with a CA. CA isn't required otherwise
-        let server_config = {
+        #[cfg(feature = "verify-client-cert")]
+        let builder = {
             let ca_file = File::open(ca_path);
             let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
             let ca_file = &mut BufReader::new(ca_file);
@@ -209,11 +216,12 @@ impl TLSAcceptor {
                 .add(&ca_cert)
                 .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
 
-            ServerConfig::builder()
-                .with_safe_defaults()
-                .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
-                .with_single_cert(certs, key)?
+            builder.with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
         };
+        #[cfg(not(feature = "verify-client-cert"))]
+        let builder = builder.with_no_client_auth();
+
+        let server_config = builder.with_single_cert(certs, key)?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
         Ok(TLSAcceptor::Rustls { acceptor })

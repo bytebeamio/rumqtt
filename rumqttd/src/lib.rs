@@ -67,6 +67,7 @@ pub struct PrometheusSetting {
 #[serde(untagged)]
 pub enum TlsConfig {
     Rustls {
+        #[cfg(feature = "verify-client-cert")]
         capath: String,
         certpath: String,
         keypath: String,
@@ -83,12 +84,18 @@ impl TlsConfig {
     pub fn validate_paths(&self) -> bool {
         match self {
             TlsConfig::Rustls {
+                #[cfg(feature = "verify-client-cert")]
                 capath,
                 certpath,
                 keypath,
-            } => [capath, certpath, keypath]
-                .iter()
-                .all(|v| Path::new(v).exists()),
+            } => [
+                #[cfg(feature = "verify-client-cert")]
+                capath,
+                certpath,
+                keypath,
+            ]
+            .iter()
+            .all(|v| Path::new(v).exists()),
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
         }
     }
