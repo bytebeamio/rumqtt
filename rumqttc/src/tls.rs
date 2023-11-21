@@ -1,4 +1,6 @@
 #[cfg(feature = "use-rustls")]
+use rustls_pemfile::Item;
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::client::InvalidDnsNameError;
@@ -9,8 +11,6 @@ use tokio_rustls::rustls::{
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::TlsConnector as RustlsConnector;
 
-#[cfg(feature = "use-rustls")]
-use crate::Key;
 #[cfg(feature = "use-rustls")]
 use std::convert::TryFrom;
 #[cfg(feature = "use-rustls")]
@@ -51,20 +51,21 @@ pub enum Error {
     #[error("TLS error: {0}")]
     TLS(#[from] rustls::Error),
     #[cfg(feature = "use-rustls")]
-    /// No valid certificate in chain
-    #[error("No valid certificate in chain")]
+    /// No valid CA cert found
+    #[error("No valid CA certificate provided")]
     NoValidCertInChain,
+    #[cfg(feature = "use-rustls")]
+    /// No valid client cert found
+    #[error("No valid certificate for client authentication in chain")]
+    NoValidClientCertInChain,
+    #[cfg(feature = "use-rustls")]
+    /// No valid key found
+    #[error("No valid key in chain")]
+    NoValidKeyInChain,
     #[cfg(feature = "use-native-tls")]
     #[error("Native TLS error {0}")]
     NativeTls(#[from] NativeTlsError),
 }
-
-// // The cert handling functions return unit right now, this is a shortcut
-// impl From<()> for Error {
-//     fn from(_: ()) -> Self {
-//         Error::NoValidCertInChain
-//     }
-// }
 
 #[cfg(feature = "use-rustls")]
 pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsConnector, Error> {
@@ -104,29 +105,26 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
             let mut config = if let Some(client) = client_auth.as_ref() {
                 let certs =
                     rustls_pemfile::certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
-                // load appropriate Key as per the user request. The underlying signature algorithm
-                // of key generation determines the Signature Algorithm during the TLS Handskahe.
-                let read_keys = match &client.1 {
-                    Key::RSA(k) => rustls_pemfile::rsa_private_keys(&mut BufReader::new(
-                        Cursor::new(k.clone()),
-                    )),
-                    Key::ECC(k) => rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(
-                        Cursor::new(k.clone()),
-                    )),
-                };
-                let keys = match read_keys {
-                    Ok(v) => v,
-                    Err(_e) => return Err(Error::NoValidCertInChain),
-                };
+                if certs.is_empty() {
+                    return Err(Error::NoValidClientCertInChain);
+                }
 
-                // Get the first key. Error if it's not valid
-                let key = match keys.first() {
-                    Some(k) => k.clone(),
-                    None => return Err(Error::NoValidCertInChain),
+                // Create buffer for key file
+                let mut key_buffer = BufReader::new(Cursor::new(client.1.clone()));
+
+                // Read PEM items until we find a valid key.
+                let key = loop {
+                    let item = rustls_pemfile::read_one(&mut key_buffer)?;
+                    match item {
+                        Some(Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key)) => {
+                            break key;
+                        }
+                        None => return Err(Error::NoValidKeyInChain),
+                        _ => {}
+                    }
                 };
 
                 let certs = certs.into_iter().map(Certificate).collect();
-
                 config.with_client_auth_cert(certs, PrivateKey(key))?
             } else {
                 config.with_no_client_auth()

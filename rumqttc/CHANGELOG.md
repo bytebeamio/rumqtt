@@ -9,9 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
+- Support for all variants of TLS key formats currently supported by Rustls: `PKCS#1`, `PKCS#8`, `RFC5915`. In practice we should now support all RSA keys and ECC keys in `DER` and `SEC1` encoding. Previously only `PKCS#1` and `PKCS#8` where supported.
+- TLS Error variants: `NoValidClientCertInChain`, `NoValidKeyInChain`.
 
 ### Changed
 - Synchronous client methods take `&self` instead of `&mut self` (#646)
+- Removed the `Key` enum: users do not need to specify the TLS key variant in the `TlsConfiguration` anymore, this is inferred automatically.
+To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initialization.
 
 ### Deprecated
 
