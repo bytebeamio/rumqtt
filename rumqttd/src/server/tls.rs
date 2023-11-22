@@ -59,7 +59,7 @@ pub enum Error {
     CertificateParse,
 }
 
-#[cfg(feature = "use-rustls")]
+#[cfg(feature = "verify-client-cert")]
 /// Extract uid from certificate's subject organization field
 fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
@@ -125,11 +125,18 @@ impl TLSAcceptor {
             #[cfg(feature = "use-rustls")]
             TLSAcceptor::Rustls { acceptor } => {
                 let stream = acceptor.accept(stream).await?;
-                let (_, session) = stream.get_ref();
-                let peer_certificates = session
-                    .peer_certificates()
-                    .ok_or(Error::NoPeerCertificate)?;
-                let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
+
+                #[cfg(feature = "verify-client-cert")]
+                let tenant_id = {
+                    let (_, session) = stream.get_ref();
+                    let peer_certificates = session
+                        .peer_certificates()
+                        .ok_or(Error::NoPeerCertificate)?;
+                    extract_tenant_id(&peer_certificates[0].0)?
+                };
+                #[cfg(not(feature = "verify-client-cert"))]
+                let tenant_id: Option<String> = None;
+
                 let network = Box::new(stream);
                 Ok((tenant_id, network))
             }
