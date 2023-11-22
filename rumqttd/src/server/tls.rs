@@ -99,13 +99,12 @@ impl TLSAcceptor {
         match config {
             #[cfg(feature = "use-rustls")]
             TlsConfig::Rustls {
-                #[cfg(feature = "verify-client-cert")]
-                capath,
+                capath: _capath,
                 certpath,
                 keypath,
             } => Self::rustls(
                 #[cfg(feature = "verify-client-cert")]
-                capath,
+                _capath,
                 certpath,
                 keypath,
             ),
@@ -177,10 +176,19 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
-        #[cfg(feature = "verify-client-cert")] ca_path: &String,
+        #[cfg(feature = "verify-client-cert")] ca_path: &Option<String>,
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
+        #[cfg(feature = "verify-client-cert")]
+        let Some(ca_path) = ca_path
+        else {
+            return Err(Error::CaFileNotFound(
+                "capath must be specified in config when verify-client-cert is enabled."
+                    .to_string(),
+            ));
+        };
+
         let (certs, key) = {
             // Get certificates
             let cert_file = File::open(cert_path);
@@ -199,6 +207,7 @@ impl TLSAcceptor {
         };
 
         let builder = ServerConfig::builder().with_safe_defaults();
+
         // client authentication with a CA. CA isn't required otherwise
         #[cfg(feature = "verify-client-cert")]
         let builder = {
@@ -218,6 +227,7 @@ impl TLSAcceptor {
 
             builder.with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
         };
+
         #[cfg(not(feature = "verify-client-cert"))]
         let builder = builder.with_no_client_auth();
 
