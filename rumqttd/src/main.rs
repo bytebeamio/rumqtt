@@ -76,19 +76,7 @@ fn main() {
         )),
     };
 
-    let config = config_builder.build().unwrap();
-    #[cfg(feature = "verify-client-cert")]
-    for protocol in ["v4", "v5", "ws"] {
-        if let Ok(servers) = config.get_table(protocol) {
-            for (name, config) in servers {
-                let server = config.into_table().unwrap();
-                if server.contains_key("tls") && !server.contains_key("tls.capth") {
-                    panic!("Missing capth in: \"{protocol}.{name}\"")
-                }
-            }
-        }
-    }
-    let mut configs: rumqttd::Config = config.try_deserialize().unwrap();
+    let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
 
     if let Some(console_config) = configs.console.as_mut() {
         console_config.set_filter_reload_handle(reload_handle)
