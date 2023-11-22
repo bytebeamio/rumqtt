@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.22.0"
+version = "0.23.0"
 publish = true
 description = "An efficient and robust mqtt client for your connected devices"
 keywords = ["mqtt", "iot", "coap", "http"]
@@ -24,8 +24,8 @@ proxy = ["dep:async-http-proxy"]
 
 [dependencies]
 futures-util = { version = "0.3", default_features = false, features = ["std"] }
-tokio = { version = "1.32", features = ["rt", "macros", "io-util", "net", "time"] }
-bytes = "1.4"
+tokio = { version = "1.33", features = ["rt", "macros", "io-util", "net", "time"] }
+bytes = "1.5"
 log = "0.4"
 flume = { version = "0.11", default-features = false, features = ["async"]}
 thiserror = "1"
@@ -33,12 +33,12 @@ thiserror = "1"
 # Optional
 # rustls
 tokio-rustls = { version = "0.24", optional = true }
-rustls-webpki = { version = "0.101.4", optional = true }
+rustls-webpki = { version = "0.101.6", optional = true }
 rustls-pemfile = { version = "1", optional = true }
 rustls-native-certs = { version = "0.6", optional = true }
 # websockets
-async-tungstenite = { version = "0.22", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
-ws_stream_tungstenite = { version= "0.10", default-features = false, features = ["tokio_io"], optional = true }
+async-tungstenite = { version = "0.23", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
+ws_stream_tungstenite = { version= "0.11", default-features = false, features = ["tokio_io"], optional = true }
 http = { version = "0.2", optional = true }
 # native-tls
 tokio-native-tls = { version = "0.3.1", optional = true }

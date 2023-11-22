@@ -24,7 +24,7 @@ use {std::path::Path, tokio::net::UnixStream};
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, UrlError},
+    crate::websockets::{split_url, validate_response_headers, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
@@ -62,6 +62,9 @@ pub enum ConnectionError {
     #[cfg(feature = "proxy")]
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket response validation error: ")]
+    ResponseValidation(#[from] crate::websockets::ValidationError),
 }
 
 /// Eventloop with all the state of a connection
@@ -112,11 +115,15 @@ impl EventLoop {
         }
     }
 
-    fn clean(&mut self) {
+    /// Last session might contain packets which aren't acked. MQTT says these packets should be
+    /// republished in the next session. Move pending messages from state to eventloop, drops the
+    /// underlying network connection and clears the keepalive timeout if any.
+    ///
+    /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
+    pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        let pending = self.state.clean();
-        self.pending = pending.into_iter();
+        self.pending = self.state.clean().into_iter();
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -336,7 +343,9 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 request = request_modifier(request).await;
             }
 
-            let (socket, _) = async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            let (socket, response) =
+                async_tungstenite::tokio::client_async(request, tcp_stream).await?;
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), max_incoming_pkt_size)
         }
@@ -353,12 +362,13 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
-            let (socket, _) = async_tungstenite::tokio::client_async_tls_with_connector(
+            let (socket, response) = async_tungstenite::tokio::client_async_tls_with_connector(
                 request,
                 tcp_stream,
                 Some(connector),
             )
             .await?;
+            validate_response_headers(response)?;
 
             Network::new(WsStream::new(socket), max_incoming_pkt_size)
         }

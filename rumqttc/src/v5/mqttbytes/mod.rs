@@ -109,7 +109,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
         // filter = a/b/c/d should not match topic = a/b/c
         let top = topics.next();
         match top {
-            Some(t) if t == "#" => return false,
+            Some("#") => return false,
             Some(_) if f == "+" => continue,
             Some(t) if f != t => return false,
             Some(_) => continue,
