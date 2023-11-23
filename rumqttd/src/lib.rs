@@ -67,7 +67,7 @@ pub struct PrometheusSetting {
 #[serde(untagged)]
 pub enum TlsConfig {
     Rustls {
-        capath: String,
+        capath: Option<String>,
         certpath: String,
         keypath: String,
     },
@@ -86,9 +86,11 @@ impl TlsConfig {
                 capath,
                 certpath,
                 keypath,
-            } => [capath, certpath, keypath]
-                .iter()
-                .all(|v| Path::new(v).exists()),
+            } => {
+                let ca = capath.is_none() || capath.as_ref().is_some_and(|v| Path::new(v).exists());
+
+                ca && [certpath, keypath].iter().all(|v| Path::new(v).exists())
+            }
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
         }
     }

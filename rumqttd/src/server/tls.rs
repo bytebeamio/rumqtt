@@ -7,19 +7,18 @@ use {
     tokio_native_tls::native_tls::Error as NativeTlsError,
 };
 
+use crate::TlsConfig;
+#[cfg(feature = "verify-client-cert")]
+use tokio_rustls::rustls::{server::AllowAnyAuthenticatedClient, RootCertStore};
 #[cfg(feature = "use-rustls")]
 use {
     rustls_pemfile::Item,
     std::{io::BufReader, sync::Arc},
-    tokio_rustls::rustls::{
-        server::AllowAnyAuthenticatedClient, Certificate, Error as RustlsError, PrivateKey,
-        RootCertStore, ServerConfig,
-    },
+    tokio_rustls::rustls::{Certificate, Error as RustlsError, PrivateKey, ServerConfig},
     tracing::error,
 };
 
 use crate::link::network::N;
-use crate::TlsConfig;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Acceptor error")]
@@ -60,7 +59,7 @@ pub enum Error {
     CertificateParse,
 }
 
-#[cfg(feature = "use-rustls")]
+#[cfg(feature = "verify-client-cert")]
 /// Extract uid from certificate's subject organization field
 fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
     let (_, cert) =
@@ -121,11 +120,18 @@ impl TLSAcceptor {
             #[cfg(feature = "use-rustls")]
             TLSAcceptor::Rustls { acceptor } => {
                 let stream = acceptor.accept(stream).await?;
-                let (_, session) = stream.get_ref();
-                let peer_certificates = session
-                    .peer_certificates()
-                    .ok_or(Error::NoPeerCertificate)?;
-                let tenant_id = extract_tenant_id(&peer_certificates[0].0)?;
+
+                #[cfg(feature = "verify-client-cert")]
+                let tenant_id = {
+                    let (_, session) = stream.get_ref();
+                    let peer_certificates = session
+                        .peer_certificates()
+                        .ok_or(Error::NoPeerCertificate)?;
+                    extract_tenant_id(&peer_certificates[0].0)?
+                };
+                #[cfg(not(feature = "verify-client-cert"))]
+                let tenant_id: Option<String> = None;
+
                 let network = Box::new(stream);
                 Ok((tenant_id, network))
             }
@@ -172,10 +178,24 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
-        ca_path: &String,
+        ca_path: &Option<String>,
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
+        #[cfg(feature = "verify-client-cert")]
+        let Some(ca_path) = ca_path
+        else {
+            return Err(Error::CaFileNotFound(
+                "capath must be specified in config when verify-client-cert is enabled."
+                    .to_string(),
+            ));
+        };
+
+        #[cfg(not(feature = "verify-client-cert"))]
+        if ca_path.is_some() {
+            tracing::warn!("verify-client-cert feature is disabled, CA cert will be ignored and no client authentication is done.");
+        }
+
         let (certs, key) = {
             // Get certificates
             let cert_file = File::open(cert_path);
@@ -193,8 +213,11 @@ impl TLSAcceptor {
             (certs, key)
         };
 
+        let builder = ServerConfig::builder().with_safe_defaults();
+
         // client authentication with a CA. CA isn't required otherwise
-        let server_config = {
+        #[cfg(feature = "verify-client-cert")]
+        let builder = {
             let ca_file = File::open(ca_path);
             let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
             let ca_file = &mut BufReader::new(ca_file);
@@ -209,11 +232,13 @@ impl TLSAcceptor {
                 .add(&ca_cert)
                 .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
 
-            ServerConfig::builder()
-                .with_safe_defaults()
-                .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
-                .with_single_cert(certs, key)?
+            builder.with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
         };
+
+        #[cfg(not(feature = "verify-client-cert"))]
+        let builder = builder.with_no_client_auth();
+
+        let server_config = builder.with_single_cert(certs, key)?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
         Ok(TLSAcceptor::Rustls { acceptor })
