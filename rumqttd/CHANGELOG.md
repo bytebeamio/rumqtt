@@ -9,16 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Log warning incase datalog for a topic doesn't exists so message being dropped.
+- Log warning if websocket config is getting ignored
+- Add support for ECC keys when configuring TLS in rumqttd 
 
 ### Changed
+- Console endpoint /config prints Router Config instead of returning console settings
+- v4 config is optional, user can specify v4 and/or v5 config
+- websocket feature is enabled by default
+- console configuration is optional
+- rustls client auth is featured gated behind "verify-client-cert" ( disabled by default ). 
 
 ### Deprecated
+- "websockets" feature is removed in favour of "websocket"
 
 ### Removed
 
 ### Fixed
 
 ### Security
+- Update tungstenite and dependencies to fix [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0065).
 
 ---
 

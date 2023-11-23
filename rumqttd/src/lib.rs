@@ -1,7 +1,7 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path};
 
-use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
     filter::EnvFilter,
@@ -14,7 +14,14 @@ use tracing_subscriber::{
     Registry,
 };
 
-use std::net::SocketAddr;
+pub use link::alerts;
+pub use link::local;
+pub use link::meters;
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+use segments::Storage;
+pub use server::Broker;
+
+use self::router::shared_subs::Strategy;
 
 mod link;
 pub mod protocol;
@@ -31,24 +38,15 @@ pub type TopicId = usize;
 pub type Offset = (u64, u64);
 pub type Cursor = (u64, u64);
 
-pub use link::alerts;
-pub use link::local;
-pub use link::meters;
-
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
-pub use server::Broker;
-
-use self::router::shared_subs::Strategy;
-
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub id: usize,
     pub router: RouterConfig,
-    pub v4: HashMap<String, ServerSettings>,
+    pub v4: Option<HashMap<String, ServerSettings>>,
     pub v5: Option<HashMap<String, ServerSettings>>,
     pub ws: Option<HashMap<String, ServerSettings>>,
     pub cluster: Option<ClusterSettings>,
-    pub console: ConsoleSettings,
+    pub console: Option<ConsoleSettings>,
     pub bridge: Option<BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
     pub metrics: Option<HashMap<MetricType, MetricSettings>>,
@@ -69,7 +67,7 @@ pub struct PrometheusSetting {
 #[serde(untagged)]
 pub enum TlsConfig {
     Rustls {
-        capath: String,
+        capath: Option<String>,
         certpath: String,
         keypath: String,
     },
@@ -88,9 +86,11 @@ impl TlsConfig {
                 capath,
                 certpath,
                 keypath,
-            } => [capath, certpath, keypath]
-                .iter()
-                .all(|v| Path::new(v).exists()),
+            } => {
+                let ca = capath.is_none() || capath.as_ref().is_some_and(|v| Path::new(v).exists());
+
+                ca && [certpath, keypath].iter().all(|v| Path::new(v).exists())
+            }
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
         }
     }

@@ -3,7 +3,7 @@ use crate::local::LinkBuilder;
 use crate::router::{Event, Print};
 use crate::{ConnectionId, ConsoleSettings};
 use axum::extract::{Path, State};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::Json;
 use axum::{routing::get, Router};
@@ -61,12 +61,18 @@ pub async fn start(console: Arc<ConsoleLink>) {
         .unwrap();
 }
 
-async fn root() -> impl IntoResponse {
-    Redirect::to("/config")
+async fn root(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    Json(console.config.clone())
 }
 
 async fn config(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
-    Json(console.config.clone())
+    let event = Event::PrintStatus(Print::Config);
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
 }
 
 async fn router(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {

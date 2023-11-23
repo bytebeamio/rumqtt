@@ -2,6 +2,7 @@ use config::FileFormat;
 use rumqttd::Broker;
 
 use clap::Parser;
+use tracing::trace;
 
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
@@ -76,7 +77,10 @@ fn main() {
     };
 
     let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
-    configs.console.set_filter_reload_handle(reload_handle);
+
+    if let Some(console_config) = configs.console.as_mut() {
+        console_config.set_filter_reload_handle(reload_handle)
+    }
 
     validate_config(&configs);
 
@@ -88,10 +92,13 @@ fn main() {
 
 // Do any extra validation that needs to be done before starting the broker here.
 fn validate_config(configs: &rumqttd::Config) {
-    for (name, server_setting) in &configs.v4 {
-        if let Some(tls_config) = &server_setting.tls {
-            if !tls_config.validate_paths() {
-                panic!("Certificate path not valid for server v4.{name}.")
+    if let Some(v4) = &configs.v4 {
+        for (name, server_setting) in v4 {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server v4.{name}.")
+                }
+                trace!("Validated certificate paths for server v4.{name}.");
             }
         }
     }
@@ -102,6 +109,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server v5.{name}.")
                 }
+                trace!("Validated certificate paths for server v5.{name}.");
             }
         }
     }
@@ -112,6 +120,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server ws.{name}.")
                 }
+                trace!("Validated certificate paths for server ws.{name}.");
             }
         }
     }
