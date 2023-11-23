@@ -99,15 +99,10 @@ impl TLSAcceptor {
         match config {
             #[cfg(feature = "use-rustls")]
             TlsConfig::Rustls {
-                capath: _capath,
+                capath,
                 certpath,
                 keypath,
-            } => Self::rustls(
-                #[cfg(feature = "verify-client-cert")]
-                _capath,
-                certpath,
-                keypath,
-            ),
+            } => Self::rustls(capath, certpath, keypath),
             #[cfg(feature = "use-native-tls")]
             TlsConfig::NativeTls {
                 pkcs12path,
@@ -183,7 +178,7 @@ impl TLSAcceptor {
 
     #[cfg(feature = "use-rustls")]
     fn rustls(
-        #[cfg(feature = "verify-client-cert")] ca_path: &Option<String>,
+        ca_path: &Option<String>,
         cert_path: &String,
         key_path: &String,
     ) -> Result<TLSAcceptor, Error> {
@@ -195,6 +190,11 @@ impl TLSAcceptor {
                     .to_string(),
             ));
         };
+
+        #[cfg(not(feature = "verify-client-cert"))]
+        if ca_path.is_some() {
+            tracing::warn!("verify-client-cert feature is disabled, CA cert will be ignored and no client authentication is done.");
+        }
 
         let (certs, key) = {
             // Get certificates
