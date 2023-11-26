@@ -150,13 +150,18 @@ pub async fn native_tls_connector(
     tls_config: &TlsConfiguration,
 ) -> Result<NativeTlsConnector, Error> {
     let connector = match tls_config {
-        TlsConfiguration::SimpleNative { ca, der, password } => {
+        TlsConfiguration::SimpleNative { ca, client_auth } => {
             let cert = native_tls::Certificate::from_pem(ca)?;
-            let identity = Identity::from_pkcs12(der, password)?;
-            native_tls::TlsConnector::builder()
-                .add_root_certificate(cert)
-                .identity(identity)
-                .build()?
+
+            let mut connector_builder = native_tls::TlsConnector::builder();
+            connector_builder.add_root_certificate(cert);
+
+            if let Some((der, password)) = client_auth {
+                let identity = Identity::from_pkcs12(der, password)?;
+                connector_builder.identity(identity);
+            }
+
+            connector_builder.build()?
         }
         TlsConfiguration::Native => native_tls::TlsConnector::new()?,
         #[allow(unreachable_patterns)]
