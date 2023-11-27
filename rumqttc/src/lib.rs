@@ -335,10 +335,9 @@ pub enum TlsConfiguration {
     SimpleNative {
         /// ca certificate
         ca: Vec<u8>,
-        /// pkcs12 binary der
-        der: Vec<u8>,
+        /// pkcs12 binary der and
         /// password for use with der
-        password: String,
+        client_auth: Option<(Vec<u8>, String)>,
     },
     #[cfg(feature = "use-rustls")]
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
