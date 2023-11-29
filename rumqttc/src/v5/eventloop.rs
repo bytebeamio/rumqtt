@@ -123,7 +123,14 @@ impl EventLoop {
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        self.pending = self.state.clean().into_iter();
+        let mut pending = self.state.clean();
+
+        // drain requests from channel which weren't yet received
+        // this helps in preventing data loss
+        let requests_in_channel = self.requests_rx.drain();
+        pending.extend(requests_in_channel);
+
+        self.pending = pending.into_iter();
     }
 
     /// Yields Next notification or outgoing request and periodically pings
