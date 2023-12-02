@@ -1,5 +1,4 @@
 use super::*;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Acknowledgement to subscribe
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,17 +33,17 @@ impl SubAck {
 
     pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<SubAck, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
-        bytes.advance(variable_header_index);
+        let mut bytes = &bytes[variable_header_index..];
 
         let pkid = read_u16(&mut bytes)?;
         let properties = SubAckProperties::read(&mut bytes)?;
 
-        if !bytes.has_remaining() {
+        if bytes.is_empty() {
             return Err(Error::MalformedPacket);
         }
 
         let mut return_codes = Vec::new();
-        while bytes.has_remaining() {
+        while !bytes.is_empty() {
             let return_code = read_u8(&mut bytes)?;
             return_codes.push(reason(return_code)?);
         }
@@ -59,11 +58,11 @@ impl SubAck {
     }
 
     pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
-        buffer.put_u8(0x90);
+        buffer.push(0x90);
         let remaining_len = self.len();
         let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
 
-        buffer.put_u16(self.pkid);
+        buffer.extend_from_slice(&self.pkid.to_be_bytes());
 
         if let Some(p) = &self.properties {
             p.write(buffer)?;
@@ -114,12 +113,12 @@ impl SubAckProperties {
         len
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Option<SubAckProperties>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Option<SubAckProperties>, Error> {
         let mut reason_string = None;
         let mut user_properties = Vec::new();
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
         if properties_len == 0 {
             return Ok(None);
         }
@@ -157,12 +156,12 @@ impl SubAckProperties {
         write_remaining_length(buffer, len)?;
 
         if let Some(reason) = &self.reason_string {
-            buffer.put_u8(PropertyType::ReasonString as u8);
+            buffer.push(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
@@ -211,12 +210,11 @@ fn code(value: SubscribeReasonCode) -> u8 {
 mod test {
     use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
     use super::*;
-    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn length_calculation() {
-        let mut dummy_bytes = BytesMut::new();
+        let mut dummy_bytes = Vec::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
         let suback_props = SubAckProperties {
