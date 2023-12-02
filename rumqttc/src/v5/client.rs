@@ -10,7 +10,6 @@ use super::mqttbytes::QoS;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use crate::valid_topic;
 
-use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
@@ -79,7 +78,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
@@ -102,7 +101,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.handle_publish(topic, qos, retain, payload, Some(properties))
             .await
@@ -117,7 +116,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.handle_publish(topic, qos, retain, payload, None).await
     }
@@ -133,7 +132,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
@@ -156,7 +155,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.handle_try_publish(topic, qos, retain, payload, Some(properties))
     }
@@ -170,7 +169,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.handle_try_publish(topic, qos, retain, payload, None)
     }
@@ -200,7 +199,7 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         retain: bool,
-        payload: Bytes,
+        payload: Vec<u8>,
         properties: Option<PublishProperties>,
     ) -> Result<(), ClientError>
     where
@@ -222,7 +221,7 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         retain: bool,
-        payload: Bytes,
+        payload: Vec<u8>,
         properties: PublishProperties,
     ) -> Result<(), ClientError>
     where
@@ -237,7 +236,7 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         retain: bool,
-        payload: Bytes,
+        payload: Vec<u8>,
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
@@ -481,7 +480,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
@@ -504,7 +503,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.handle_publish(topic, qos, retain, payload, Some(properties))
     }
@@ -518,7 +517,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.handle_publish(topic, qos, retain, payload, None)
     }
@@ -533,7 +532,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.client
             .try_publish_with_properties(topic, qos, retain, payload, properties)
@@ -548,7 +547,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        P: Into<Bytes>,
+        P: Into<Vec<u8>>,
     {
         self.client.try_publish(topic, qos, retain, payload)
     }
