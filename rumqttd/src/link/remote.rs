@@ -186,7 +186,7 @@ where
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
-    handle_auth(connect.client_id.clone(), config.clone(), login.as_ref())?;
+    handle_auth(config.clone(), login.as_ref(), connect.client_id.clone())?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
