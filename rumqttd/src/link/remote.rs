@@ -186,7 +186,7 @@ where
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
-    handle_auth(config.clone(), login.as_ref())?;
+    handle_auth(connect.client_id.clone(), config.clone(), login.as_ref())?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -211,7 +211,11 @@ where
     Ok(packet)
 }
 
-fn handle_auth(config: Arc<ConnectionSettings>, login: Option<&Login>) -> Result<(), Error> {
+fn handle_auth(
+    config: Arc<ConnectionSettings>,
+    login: Option<&Login>,
+    client_id: String,
+) -> Result<(), Error> {
     if config.static_auth.is_none() && config.dynamic_auth.is_none() {
         return Ok(());
     }
@@ -239,7 +243,7 @@ fn handle_auth(config: Arc<ConnectionSettings>, login: Option<&Login>) -> Result
     }
 
     if let Some(ref auth) = config.dynamic_auth {
-        if !auth("".to_owned(), u.to_owned(), p.to_owned()) {
+        if !auth(client_id, u.to_owned(), p.to_owned()) {
             return Err(Error::InvalidAuth);
         }
     }
