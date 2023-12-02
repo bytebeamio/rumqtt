@@ -45,7 +45,7 @@ next_connection_delay_ms = 1
     max_payload_size = 20480
     max_inflight_count = 100
     dynamic_filters = true
- #   auth = { user1 = "p@ssw0rd", user2 = "password" }
+ #   static_auth = { user1 = "p@ssw0rd", user2 = "password" }
  #      [v4.1.connections.auth]
  #      user1 = "p@ssw0rd"
  #      user2 = "password"
