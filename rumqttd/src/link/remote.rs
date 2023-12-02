@@ -243,10 +243,10 @@ fn handle_auth(
     }
 
     if let Some(ref auth) = config.dynamic_auth {
-        if !auth(client_id, u.to_owned(), p.to_owned()) {
-            return Err(Error::InvalidAuth);
+        if auth(client_id, u.to_owned(), p.to_owned()) {
+            return Ok(());
         }
     }
 
-    Ok(())
+    return Err(Error::InvalidAuth);
 }
