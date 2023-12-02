@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Log warning if websocket config is getting ignored
-- Add support for ECC keys when configuring TLS in rumqttd 
+- Add support for ECC keys when configuring TLS in rumqttd
+- External authorization
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - websocket feature is enabled by default
 - console configuration is optional
 - rustls client auth is featured gated behind "verify-client-cert" ( disabled by default ). 
+- auth in cofig is now `static_auth`
 
 ### Deprecated
 - "websockets" feature is removed in favour of "websocket"

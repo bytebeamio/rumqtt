@@ -2,7 +2,7 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
-use crate::protocol::{Connect, Packet, Protocol};
+use crate::protocol::{Connect, Login, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
@@ -186,22 +186,7 @@ where
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
-    // If authentication is configured in config file check for username and password
-    if let Some(auths) = &config.auth {
-        // if authentication is configured and connect packet doesn't have login details return
-        // an error
-        if let Some(login) = login {
-            let is_authenticated = auths
-                .iter()
-                .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
-
-            if !is_authenticated {
-                return Err(Error::InvalidAuth);
-            }
-        } else {
-            return Err(Error::InvalidAuth);
-        }
-    }
+    handle_auth(config.clone(), login.as_ref())?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -224,4 +209,40 @@ where
 
     // Ok((connect, props, lastwill, lastwill_props))
     Ok(packet)
+}
+
+fn handle_auth(config: Arc<ConnectionSettings>, login: Option<&Login>) -> Result<(), Error> {
+    if config.static_auth.is_none() && config.dynamic_auth.is_none() {
+        return Ok(());
+    }
+
+    if login.is_none() && (config.static_auth.is_some() || config.dynamic_auth.is_some()) {
+        return Err(Error::InvalidAuth);
+    }
+
+    let login = login.unwrap();
+    let u = login.username.as_str();
+    let p = login.password.as_str();
+
+    let mut static_auth_verified = false;
+    if let Some(ref pairs) = config.static_auth {
+        for (validu, validp) in pairs {
+            if u == validu && p == validp {
+                static_auth_verified = true;
+                break;
+            }
+        }
+    }
+
+    if static_auth_verified {
+        return Ok(());
+    }
+
+    if let Some(ref auth) = config.dynamic_auth {
+        if !auth("".to_owned(), u.to_owned(), p.to_owned()) {
+            return Err(Error::InvalidAuth);
+        }
+    }
+
+    Ok(())
 }
