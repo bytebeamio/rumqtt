@@ -1,4 +1,4 @@
-use std::slice::Iter;
+use std::{mem::size_of, slice::Iter};
 
 pub use self::{
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
@@ -384,7 +384,7 @@ fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
 }
 
 /// Reads a series of bytes with a length from a byte stream
-fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
+fn read_mqtt_bytes(stream: &mut &[u8]) -> Result<Vec<u8>, Error> {
     let len = read_u16(stream)? as usize;
 
     // Prevent attacks with wrong remaining length. This method is used in
@@ -395,31 +395,37 @@ fn read_mqtt_bytes(stream: &mut Bytes) -> Result<Bytes, Error> {
         return Err(Error::BoundaryCrossed(len));
     }
 
-    Ok(stream.split_to(len))
+    let (read_bytes, rest) = stream.split_at(len);
+
+    *stream = rest;
+
+    // TODO(swanx): remove this to_vec if possible
+    Ok(read_bytes.to_vec())
 }
 
 /// Reads a string from bytes stream
-fn read_mqtt_string(stream: &mut Bytes) -> Result<String, Error> {
+fn read_mqtt_string(stream: &mut &[u8]) -> Result<String, Error> {
     let s = read_mqtt_bytes(stream)?;
-    match String::from_utf8(s.to_vec()) {
+    match String::from_utf8(s) {
         Ok(v) => Ok(v),
         Err(_e) => Err(Error::TopicNotUtf8),
     }
 }
 
 /// Serializes bytes to stream (including length)
-fn write_mqtt_bytes(stream: &mut BytesMut, bytes: &[u8]) {
-    stream.put_u16(bytes.len() as u16);
+fn write_mqtt_bytes(stream: &mut Vec<u8>, bytes: &[u8]) {
+    let len = bytes.len() as u16;
+    stream.extend_from_slice(&len.to_be_bytes());
     stream.extend_from_slice(bytes);
 }
 
 /// Serializes a string to stream
-fn write_mqtt_string(stream: &mut BytesMut, string: &str) {
+fn write_mqtt_string(stream: &mut Vec<u8>, string: &str) {
     write_mqtt_bytes(stream, string.as_bytes());
 }
 
 /// Writes remaining length to stream and returns number of bytes for remaining length
-fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Error> {
+fn write_remaining_length(stream: &mut Vec<u8>, len: usize) -> Result<usize, Error> {
     if len > 268_435_455 {
         return Err(Error::PayloadTooLong);
     }
@@ -435,7 +441,7 @@ fn write_remaining_length(stream: &mut BytesMut, len: usize) -> Result<usize, Er
             byte |= 128;
         }
 
-        stream.put_u8(byte);
+        stream.push(byte);
         count += 1;
         done = x == 0;
     }
@@ -461,28 +467,41 @@ fn len_len(len: usize) -> usize {
 /// packet id or qos not being present. In cases where `read_mqtt_string` or
 /// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
 /// parse qos next, these pre checks will prevent `bytes` crashes
-fn read_u16(stream: &mut Bytes) -> Result<u16, Error> {
+fn read_u16(stream: &mut &[u8]) -> Result<u16, Error> {
     if stream.len() < 2 {
         return Err(Error::MalformedPacket);
     }
 
-    Ok(stream.get_u16())
+    let (u16_from_stream, rest) = stream.split_at(size_of::<u16>());
+    *stream = rest;
+
+    let u16_from_stream = u16::from_be_bytes(u16_from_stream.try_into().unwrap());
+
+    Ok(u16_from_stream)
 }
 
-fn read_u8(stream: &mut Bytes) -> Result<u8, Error> {
-    if stream.is_empty() {
+fn read_u8(stream: &mut &[u8]) -> Result<u8, Error> {
+    let Some((&u8_from_stream, rest)) = stream.split_first() else {
+        // stream was empty
         return Err(Error::MalformedPacket);
-    }
+    };
 
-    Ok(stream.get_u8())
+    *stream = rest;
+
+    Ok(u8_from_stream)
 }
 
-fn read_u32(stream: &mut Bytes) -> Result<u32, Error> {
+fn read_u32(stream: &mut &[u8]) -> Result<u32, Error> {
     if stream.len() < 4 {
         return Err(Error::MalformedPacket);
     }
 
-    Ok(stream.get_u32())
+    let (u32_from_stream, rest) = stream.split_at_mut(size_of::<u32>());
+    *stream = rest;
+
+    let u32_from_stream = u32::from_be_bytes(u32_from_stream.try_into().unwrap());
+
+    Ok(u32_from_stream)
 }
 
 mod test {
