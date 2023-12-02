@@ -7,7 +7,6 @@ use super::mqttbytes::{self, QoS};
 
 use super::{Event, Incoming, Outgoing, Request};
 
-use bytes::{Bytes, BytesMut};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::{io, time::Instant};
@@ -100,11 +99,11 @@ pub struct MqttState {
     /// Buffered incoming packets
     pub events: VecDeque<Event>,
     /// Write buffer
-    pub write: BytesMut,
+    pub write: Vec<u8>,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
     /// Map of alias_id->topic
-    topic_alises: HashMap<u16, Bytes>,
+    topic_alises: HashMap<u16, Vec<u8>>,
     /// `topic_alias_maximum` RECEIVED via connack packet
     pub broker_topic_alias_max: u16,
     /// The broker's `max_packet_size` received via connack
@@ -134,7 +133,7 @@ impl MqttState {
             collision: None,
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
-            write: BytesMut::with_capacity(10 * 1024),
+            write: Vec::with_capacity(10 * 1024),
             manual_acks,
             topic_alises: HashMap::new(),
             // Set via CONNACK
