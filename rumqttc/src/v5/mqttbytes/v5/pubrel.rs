@@ -1,5 +1,4 @@
 use super::*;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Return code in PubRel
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +60,7 @@ impl PubRel {
 
     pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<PubRel, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
-        bytes.advance(variable_header_index);
+        let mut bytes = &bytes[variable_header_index..];
         let pkid = read_u16(&mut bytes)?;
         if fixed_header.remaining_len == 2 {
             return Ok(PubRel {
@@ -92,16 +91,16 @@ impl PubRel {
 
     pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         let len = self.len();
-        buffer.put_u8(0x62);
+        buffer.push(0x62);
         let count = write_remaining_length(buffer, len)?;
-        buffer.put_u16(self.pkid);
+        buffer.extend_from_slice(&self.pkid.to_be_bytes());
 
         // If there are no properties during success, sending reason code is optional
         if self.reason == PubRelReason::Success && self.properties.is_none() {
             return Ok(4);
         }
 
-        buffer.put_u8(code(self.reason));
+        buffer.push(code(self.reason));
 
         if let Some(p) = &self.properties {
             p.write(buffer)?;
@@ -134,12 +133,12 @@ impl PubRelProperties {
         len
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Option<PubRelProperties>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Option<PubRelProperties>, Error> {
         let mut reason_string = None;
         let mut user_properties = Vec::new();
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
         if properties_len == 0 {
             return Ok(None);
         }
@@ -177,12 +176,12 @@ impl PubRelProperties {
         write_remaining_length(buffer, len)?;
 
         if let Some(reason) = &self.reason_string {
-            buffer.put_u8(PropertyType::ReasonString as u8);
+            buffer.push(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
@@ -213,12 +212,11 @@ fn code(reason: PubRelReason) -> u8 {
 mod test {
     use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
     use super::*;
-    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn length_calculation() {
-        let mut dummy_bytes = BytesMut::new();
+        let mut dummy_bytes = Vec::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
         let pubrel_props = PubRelProperties {
