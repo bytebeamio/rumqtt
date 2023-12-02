@@ -144,7 +144,7 @@ impl fmt::Debug for ConnectionSettings {
             .field("max_payload_size", &self.max_payload_size)
             .field("max_inflight_count", &self.max_inflight_count)
             .field("static_auth", &self.static_auth)
-            .field("dynamic_auth.is_some()", &self.dynamic_auth.is_some())
+            .field("dynamic_auth", &self.dynamic_auth.is_some())
             .field("dynamic_filters", &self.dynamic_filters)
             .finish()
     }
