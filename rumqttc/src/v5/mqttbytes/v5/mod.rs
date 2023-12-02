@@ -57,7 +57,7 @@ impl Packet {
 
         // Test with a stream with exactly the size to check border panics
         // TODO(swanx): verify indexes of drain!
-        let packet = stream.drain(..fixed_header.frame_length()).as_ref();
+        let packet = stream.drain(..fixed_header.frame_length());
         let packet_type = fixed_header.packet_type()?;
 
         if fixed_header.remaining_len == 0 {
@@ -69,6 +69,7 @@ impl Packet {
             };
         }
 
+        let packet = packet.as_slice();
         let packet = match packet_type {
             PacketType::Connect => {
                 let (connect, will, login) = Connect::read(fixed_header, packet)?;
@@ -496,7 +497,7 @@ fn read_u32(stream: &mut &[u8]) -> Result<u32, Error> {
         return Err(Error::MalformedPacket);
     }
 
-    let (u32_from_stream, rest) = stream.split_at_mut(size_of::<u32>());
+    let (u32_from_stream, rest) = stream.split_at(size_of::<u32>());
     *stream = rest;
 
     let u32_from_stream = u32::from_be_bytes(u32_from_stream.try_into().unwrap());
