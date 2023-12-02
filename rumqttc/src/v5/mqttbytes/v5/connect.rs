@@ -1,5 +1,4 @@
 use super::*;
-use bytes::{Buf, Bytes};
 
 /// Connection packet initiated by the client
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +19,8 @@ impl Connect {
         bytes: &[u8],
     ) -> Result<(Connect, Option<LastWill>, Option<Login>), Error> {
         let variable_header_index = fixed_header.fixed_header_len;
-        bytes.advance(variable_header_index);
+        // TODO(swanx): shall we use "mut bytes = &bytes" or "bytes = &mut &bytes"??
+        let mut bytes = &bytes[variable_header_index..];
 
         // Variable header
         let protocol_name = read_mqtt_string(&mut bytes)?;
@@ -91,11 +91,11 @@ impl Connect {
     ) -> Result<usize, Error> {
         let len = self.len(will, l);
 
-        buffer.put_u8(0b0001_0000);
+        buffer.push(0b0001_0000);
         let count = write_remaining_length(buffer, len)?;
         write_mqtt_string(buffer, "MQTT");
 
-        buffer.put_u8(0x05);
+        buffer.push(0x05);
         let flags_index = 1 + count + 2 + 4 + 1;
 
         let mut connect_flags = 0;
@@ -103,8 +103,8 @@ impl Connect {
             connect_flags |= 0x02;
         }
 
-        buffer.put_u8(connect_flags);
-        buffer.put_u16(self.keep_alive);
+        buffer.push(connect_flags);
+        buffer.extend_from_slice(&self.keep_alive.to_be_bytes());
 
         match &self.properties {
             Some(p) => p.write(buffer)?,
@@ -146,7 +146,7 @@ pub struct ConnectProperties {
     /// Method of authentication
     pub authentication_method: Option<String>,
     /// Authentication data
-    pub authentication_data: Option<Bytes>,
+    pub authentication_data: Option<Vec<u8>>,
 }
 
 impl ConnectProperties {
@@ -164,7 +164,7 @@ impl ConnectProperties {
         }
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Option<ConnectProperties>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Option<ConnectProperties>, Error> {
         let mut session_expiry_interval = None;
         let mut receive_maximum = None;
         let mut max_packet_size = None;
@@ -176,7 +176,7 @@ impl ConnectProperties {
         let mut authentication_data = None;
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
         if properties_len == 0 {
             return Ok(None);
         }
@@ -291,48 +291,48 @@ impl ConnectProperties {
         write_remaining_length(buffer, len)?;
 
         if let Some(session_expiry_interval) = self.session_expiry_interval {
-            buffer.put_u8(PropertyType::SessionExpiryInterval as u8);
-            buffer.put_u32(session_expiry_interval);
+            buffer.push(PropertyType::SessionExpiryInterval as u8);
+            buffer.extend_from_slice(&session_expiry_interval.to_be_bytes());
         }
 
         if let Some(receive_maximum) = self.receive_maximum {
-            buffer.put_u8(PropertyType::ReceiveMaximum as u8);
-            buffer.put_u16(receive_maximum);
+            buffer.push(PropertyType::ReceiveMaximum as u8);
+            buffer.extend_from_slice(&receive_maximum.to_be_bytes());
         }
 
         if let Some(max_packet_size) = self.max_packet_size {
-            buffer.put_u8(PropertyType::MaximumPacketSize as u8);
-            buffer.put_u32(max_packet_size);
+            buffer.push(PropertyType::MaximumPacketSize as u8);
+            buffer.extend_from_slice(&max_packet_size.to_be_bytes());
         }
 
         if let Some(topic_alias_max) = self.topic_alias_max {
-            buffer.put_u8(PropertyType::TopicAliasMaximum as u8);
-            buffer.put_u16(topic_alias_max);
+            buffer.push(PropertyType::TopicAliasMaximum as u8);
+            buffer.extend_from_slice(&topic_alias_max.to_be_bytes());
         }
 
         if let Some(request_response_info) = self.request_response_info {
-            buffer.put_u8(PropertyType::RequestResponseInformation as u8);
-            buffer.put_u8(request_response_info);
+            buffer.push(PropertyType::RequestResponseInformation as u8);
+            buffer.push(request_response_info);
         }
 
         if let Some(request_problem_info) = self.request_problem_info {
-            buffer.put_u8(PropertyType::RequestProblemInformation as u8);
-            buffer.put_u8(request_problem_info);
+            buffer.push(PropertyType::RequestProblemInformation as u8);
+            buffer.push(request_problem_info);
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
 
         if let Some(authentication_method) = &self.authentication_method {
-            buffer.put_u8(PropertyType::AuthenticationMethod as u8);
+            buffer.push(PropertyType::AuthenticationMethod as u8);
             write_mqtt_string(buffer, authentication_method);
         }
 
         if let Some(authentication_data) = &self.authentication_data {
-            buffer.put_u8(PropertyType::AuthenticationData as u8);
+            buffer.push(PropertyType::AuthenticationData as u8);
             write_mqtt_bytes(buffer, authentication_data);
         }
 
@@ -349,8 +349,8 @@ impl Default for ConnectProperties {
 /// LastWill that broker forwards on behalf of the client
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastWill {
-    pub topic: Bytes,
-    pub message: Bytes,
+    pub topic: Vec<u8>,
+    pub message: Vec<u8>,
     pub qos: QoS,
     pub retain: bool,
     pub properties: Option<LastWillProperties>,
@@ -364,10 +364,10 @@ impl LastWill {
         retain: bool,
         properties: Option<LastWillProperties>,
     ) -> LastWill {
-        let topic = Bytes::copy_from_slice(topic.into().as_bytes());
+        let topic = topic.into().into_bytes();
         LastWill {
             topic,
-            message: Bytes::from(payload.into()),
+            message: payload.into(),
             qos,
             retain,
             properties,
@@ -390,7 +390,7 @@ impl LastWill {
         len
     }
 
-    pub fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<LastWill>, Error> {
+    pub fn read(connect_flags: u8, bytes: &mut &[u8]) -> Result<Option<LastWill>, Error> {
         let o = match connect_flags & 0b100 {
             0 if (connect_flags & 0b0011_1000) != 0 => {
                 return Err(Error::IncorrectPacketFormat);
@@ -444,7 +444,7 @@ pub struct LastWillProperties {
     pub message_expiry_interval: Option<u32>,
     pub content_type: Option<String>,
     pub response_topic: Option<String>,
-    pub correlation_data: Option<Bytes>,
+    pub correlation_data: Option<Vec<u8>>,
     pub user_properties: Vec<(String, String)>,
 }
 
@@ -483,7 +483,7 @@ impl LastWillProperties {
         len
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Option<LastWillProperties>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Option<LastWillProperties>, Error> {
         let mut delay_interval = None;
         let mut payload_format_indicator = None;
         let mut message_expiry_interval = None;
@@ -493,7 +493,7 @@ impl LastWillProperties {
         let mut user_properties = Vec::new();
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
         if properties_len == 0 {
             return Ok(None);
         }
@@ -558,37 +558,37 @@ impl LastWillProperties {
         write_remaining_length(buffer, len)?;
 
         if let Some(delay_interval) = self.delay_interval {
-            buffer.put_u8(PropertyType::WillDelayInterval as u8);
-            buffer.put_u32(delay_interval);
+            buffer.push(PropertyType::WillDelayInterval as u8);
+            buffer.extend_from_slice(&delay_interval.to_be_bytes());
         }
 
         if let Some(payload_format_indicator) = self.payload_format_indicator {
-            buffer.put_u8(PropertyType::PayloadFormatIndicator as u8);
-            buffer.put_u8(payload_format_indicator);
+            buffer.push(PropertyType::PayloadFormatIndicator as u8);
+            buffer.push(payload_format_indicator);
         }
 
         if let Some(message_expiry_interval) = self.message_expiry_interval {
-            buffer.put_u8(PropertyType::MessageExpiryInterval as u8);
-            buffer.put_u32(message_expiry_interval);
+            buffer.push(PropertyType::MessageExpiryInterval as u8);
+            buffer.extend_from_slice(&message_expiry_interval.to_be_bytes());
         }
 
         if let Some(typ) = &self.content_type {
-            buffer.put_u8(PropertyType::ContentType as u8);
+            buffer.push(PropertyType::ContentType as u8);
             write_mqtt_string(buffer, typ);
         }
 
         if let Some(topic) = &self.response_topic {
-            buffer.put_u8(PropertyType::ResponseTopic as u8);
+            buffer.push(PropertyType::ResponseTopic as u8);
             write_mqtt_string(buffer, topic);
         }
 
         if let Some(data) = &self.correlation_data {
-            buffer.put_u8(PropertyType::CorrelationData as u8);
+            buffer.push(PropertyType::CorrelationData as u8);
             write_mqtt_bytes(buffer, data);
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
@@ -610,7 +610,7 @@ impl Login {
         }
     }
 
-    pub fn read(connect_flags: u8, bytes: &mut Bytes) -> Result<Option<Login>, Error> {
+    pub fn read(connect_flags: u8, bytes: &mut &[u8]) -> Result<Option<Login>, Error> {
         let username = match connect_flags & 0b1000_0000 {
             0 => String::new(),
             _ => read_mqtt_string(bytes)?,
@@ -662,12 +662,11 @@ impl Login {
 mod test {
     use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
     use super::*;
-    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn length_calculation() {
-        let mut dummy_bytes = BytesMut::new();
+        let mut dummy_bytes = Vec::new();
         let mut connect_props = ConnectProperties::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
