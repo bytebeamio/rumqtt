@@ -361,8 +361,8 @@ mod test {
         buffer.extend_from_slice(&packet_bytes[..]);
 
         let fixed_header = parse_fixed_header(buffer.iter()).unwrap();
-        let disconnect_bytes = buffer.drain(..fixed_header.frame_length()).as_slice();
-        let disconnect = Disconnect::read(fixed_header, disconnect_bytes).unwrap();
+        let disconnect_bytes = buffer.drain(..fixed_header.frame_length());
+        let disconnect = Disconnect::read(fixed_header, disconnect_bytes.as_slice()).unwrap();
 
         assert_eq!(disconnect, expected);
     }
@@ -419,8 +419,8 @@ mod test {
         buffer.extend_from_slice(&packet_bytes[..]);
 
         let fixed_header = parse_fixed_header(buffer.iter()).unwrap();
-        let disconnect_bytes = buffer.drain(..fixed_header.frame_length()).as_slice();
-        let disconnect = Disconnect::read(fixed_header, disconnect_bytes).unwrap();
+        let disconnect_bytes = buffer.drain(..fixed_header.frame_length());
+        let disconnect = Disconnect::read(fixed_header, disconnect_bytes.as_slice()).unwrap();
 
         assert_eq!(disconnect, expected);
     }
@@ -439,7 +439,6 @@ mod test {
 
     // use super::*;
     use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
-    // use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
