@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - websocket feature is enabled by default
 - console configuration is optional
 - rustls client auth is featured gated behind "verify-client-cert" ( disabled by default ). 
-- auth in cofig is now `static_auth`
+- `auth` in cofig is now `static_auth`
 
 ### Deprecated
 - "websockets" feature is removed in favour of "websocket"
