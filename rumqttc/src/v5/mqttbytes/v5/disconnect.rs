@@ -222,7 +222,7 @@ impl DisconnectProperties {
         Ok(Some(properties))
     }
 
-    fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let length = self.len();
         write_remaining_length(buffer, length)?;
 
@@ -292,7 +292,7 @@ impl Disconnect {
         1 + remaining_len_size + len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
+    pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<Self, Error> {
         let packet_type = fixed_header.byte1 >> 4;
         let flags = fixed_header.byte1 & 0b0000_1111;
 
@@ -320,7 +320,7 @@ impl Disconnect {
         Ok(disconnect)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         buffer.put_u8(0xE0);
 
         let length = self.len();

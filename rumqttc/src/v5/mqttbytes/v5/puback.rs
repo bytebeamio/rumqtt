@@ -62,7 +62,7 @@ impl PubAck {
         len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubAck, Error> {
+    pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<PubAck, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
         let pkid = read_u16(&mut bytes)?;
@@ -96,7 +96,7 @@ impl PubAck {
         Ok(puback)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         let len = self.len();
         buffer.put_u8(0x40);
 
@@ -178,7 +178,7 @@ impl PubAckProperties {
         }))
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 

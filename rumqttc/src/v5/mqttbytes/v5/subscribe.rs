@@ -51,7 +51,7 @@ impl Subscribe {
         len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Subscribe, Error> {
+    pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<Subscribe, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
 
@@ -71,7 +71,7 @@ impl Subscribe {
         }
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         // write packet type
         buffer.put_u8(0x82);
 
@@ -156,7 +156,7 @@ impl Filter {
         Ok(filters)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) {
+    pub fn write(&self, buffer: &mut Vec<u8>) {
         let mut options = 0;
         options |= self.qos as u8;
 
@@ -254,7 +254,7 @@ impl SubscribeProperties {
         }))
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 

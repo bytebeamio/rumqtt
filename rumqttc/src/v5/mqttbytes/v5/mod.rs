@@ -17,7 +17,6 @@ pub use self::{
 };
 
 use super::*;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 mod connack;
 mod connect;
@@ -53,11 +52,12 @@ pub enum Packet {
 
 impl Packet {
     /// Reads a stream of bytes and extracts next MQTT packet out of it
-    pub fn read(stream: &mut BytesMut, max_size: Option<usize>) -> Result<Packet, Error> {
+    pub fn read(stream: &mut Vec<u8>, max_size: Option<usize>) -> Result<Packet, Error> {
         let fixed_header = check(stream.iter(), max_size)?;
 
         // Test with a stream with exactly the size to check border panics
-        let packet = stream.split_to(fixed_header.frame_length());
+        // TODO(swanx): verify indexes of drain!
+        let packet = stream.drain(..fixed_header.frame_length()).as_ref();
         let packet_type = fixed_header.packet_type()?;
 
         if fixed_header.remaining_len == 0 {
@@ -69,7 +69,6 @@ impl Packet {
             };
         }
 
-        let packet = packet.freeze();
         let packet = match packet_type {
             PacketType::Connect => {
                 let (connect, will, login) = Connect::read(fixed_header, packet)?;
@@ -126,7 +125,7 @@ impl Packet {
         Ok(packet)
     }
 
-    pub fn write(&self, write: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, write: &mut Vec<u8>) -> Result<usize, Error> {
         match self {
             Self::Publish(publish) => publish.write(write),
             Self::Subscribe(subscription) => subscription.write(write),

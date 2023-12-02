@@ -42,7 +42,7 @@ impl Unsubscribe {
         len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe, Error> {
+    pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<Unsubscribe, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
 
@@ -63,7 +63,7 @@ impl Unsubscribe {
         Ok(unsubscribe)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         buffer.put_u8(0xA2);
 
         // write remaining length
@@ -134,7 +134,7 @@ impl UnsubscribeProperties {
         Ok(Some(UnsubscribeProperties { user_properties }))
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 

@@ -17,7 +17,7 @@ impl Connect {
     #[allow(clippy::type_complexity)]
     pub fn read(
         fixed_header: FixedHeader,
-        mut bytes: Bytes,
+        bytes: &[u8],
     ) -> Result<(Connect, Option<LastWill>, Option<Login>), Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
@@ -87,7 +87,7 @@ impl Connect {
         &self,
         will: &Option<LastWill>,
         l: &Option<Login>,
-        buffer: &mut BytesMut,
+        buffer: &mut Vec<u8>,
     ) -> Result<usize, Error> {
         let len = self.len(will, l);
 
@@ -286,7 +286,7 @@ impl ConnectProperties {
         len
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 
@@ -417,7 +417,7 @@ impl LastWill {
         Ok(o)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<u8, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<u8, Error> {
         let mut connect_flags = 0;
 
         connect_flags |= 0x04 | (self.qos as u8) << 3;
@@ -553,7 +553,7 @@ impl LastWillProperties {
         }))
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 
@@ -642,7 +642,7 @@ impl Login {
         len
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> u8 {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> u8 {
         let mut connect_flags = 0;
         if !self.username.is_empty() {
             connect_flags |= 0x80;

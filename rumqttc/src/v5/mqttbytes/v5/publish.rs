@@ -56,7 +56,7 @@ impl Publish {
         len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Error> {
+    pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<Publish, Error> {
         let qos_num = (fixed_header.byte1 & 0b0110) >> 1;
         let qos = qos(qos_num).ok_or(Error::InvalidQoS(qos_num))?;
         let dup = (fixed_header.byte1 & 0b1000) != 0;
@@ -90,7 +90,7 @@ impl Publish {
         Ok(publish)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         let len = self.len();
 
         let dup = self.dup as u8;
@@ -251,7 +251,7 @@ impl PublishProperties {
         }))
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 

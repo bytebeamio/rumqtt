@@ -59,7 +59,7 @@ impl PubRel {
         len
     }
 
-    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubRel, Error> {
+    pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<PubRel, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);
         let pkid = read_u16(&mut bytes)?;
@@ -90,7 +90,7 @@ impl PubRel {
         Ok(puback)
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         let len = self.len();
         buffer.put_u8(0x62);
         let count = write_remaining_length(buffer, len)?;
@@ -172,7 +172,7 @@ impl PubRelProperties {
         }))
     }
 
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+    pub fn write(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
         let len = self.len();
         write_remaining_length(buffer, len)?;
 
