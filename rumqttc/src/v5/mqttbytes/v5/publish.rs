@@ -1,5 +1,4 @@
 use super::*;
-use bytes::{Buf, Bytes};
 
 /// Publish packet
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -7,20 +6,20 @@ pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
     pub retain: bool,
-    pub topic: Bytes,
+    pub topic: Vec<u8>,
     pub pkid: u16,
-    pub payload: Bytes,
+    pub payload: Vec<u8>,
     pub properties: Option<PublishProperties>,
 }
 
 impl Publish {
-    pub fn new<T: Into<String>, P: Into<Bytes>>(
+    pub fn new<T: Into<String>, P: Into<Vec<u8>>>(
         topic: T,
         qos: QoS,
         payload: P,
         properties: Option<PublishProperties>,
     ) -> Self {
-        let topic = Bytes::copy_from_slice(topic.into().as_bytes());
+        let topic = topic.into().into_bytes();
         Self {
             qos,
             topic,
@@ -63,7 +62,7 @@ impl Publish {
         let retain = (fixed_header.byte1 & 0b0001) != 0;
 
         let variable_header_index = fixed_header.fixed_header_len;
-        bytes.advance(variable_header_index);
+        let mut bytes = &bytes[variable_header_index..];
         let topic = read_mqtt_bytes(&mut bytes)?;
 
         // Packet identifier exists where QoS > 0
@@ -83,7 +82,7 @@ impl Publish {
             qos,
             pkid,
             topic,
-            payload: bytes,
+            payload: bytes.to_vec(),
             properties,
         };
 
@@ -96,7 +95,7 @@ impl Publish {
         let dup = self.dup as u8;
         let qos = self.qos as u8;
         let retain = self.retain as u8;
-        buffer.put_u8(0b0011_0000 | retain | qos << 1 | dup << 3);
+        buffer.push(0b0011_0000 | retain | qos << 1 | dup << 3);
 
         let count = write_remaining_length(buffer, len)?;
         write_mqtt_bytes(buffer, &self.topic);
@@ -107,7 +106,7 @@ impl Publish {
                 return Err(Error::PacketIdZero);
             }
 
-            buffer.put_u16(pkid);
+            buffer.extend_from_slice(&pkid.to_be_bytes());
         }
 
         if let Some(p) = &self.properties {
@@ -128,7 +127,7 @@ pub struct PublishProperties {
     pub message_expiry_interval: Option<u32>,
     pub topic_alias: Option<u16>,
     pub response_topic: Option<String>,
-    pub correlation_data: Option<Bytes>,
+    pub correlation_data: Option<Vec<u8>>,
     pub user_properties: Vec<(String, String)>,
     pub subscription_identifiers: Vec<usize>,
     pub content_type: Option<String>,
@@ -173,7 +172,7 @@ impl PublishProperties {
         len
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Option<PublishProperties>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Option<PublishProperties>, Error> {
         let mut payload_format_indicator = None;
         let mut message_expiry_interval = None;
         let mut topic_alias = None;
@@ -184,7 +183,7 @@ impl PublishProperties {
         let mut content_type = None;
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
         if properties_len == 0 {
             return Ok(None);
         }
@@ -227,7 +226,7 @@ impl PublishProperties {
                 PropertyType::SubscriptionIdentifier => {
                     let (id_len, id) = length(bytes.iter())?;
                     cursor += 1 + id_len;
-                    bytes.advance(id_len);
+                    *bytes = &bytes[id_len..];
                     subscription_identifiers.push(id);
                 }
                 PropertyType::ContentType => {
@@ -256,43 +255,43 @@ impl PublishProperties {
         write_remaining_length(buffer, len)?;
 
         if let Some(payload_format_indicator) = self.payload_format_indicator {
-            buffer.put_u8(PropertyType::PayloadFormatIndicator as u8);
-            buffer.put_u8(payload_format_indicator);
+            buffer.push(PropertyType::PayloadFormatIndicator as u8);
+            buffer.push(payload_format_indicator);
         }
 
         if let Some(message_expiry_interval) = self.message_expiry_interval {
-            buffer.put_u8(PropertyType::MessageExpiryInterval as u8);
-            buffer.put_u32(message_expiry_interval);
+            buffer.push(PropertyType::MessageExpiryInterval as u8);
+            buffer.extend_from_slice(&message_expiry_interval.to_be_bytes());
         }
 
         if let Some(topic_alias) = self.topic_alias {
-            buffer.put_u8(PropertyType::TopicAlias as u8);
-            buffer.put_u16(topic_alias);
+            buffer.push(PropertyType::TopicAlias as u8);
+            buffer.extend_from_slice(&topic_alias.to_be_bytes());
         }
 
         if let Some(topic) = &self.response_topic {
-            buffer.put_u8(PropertyType::ResponseTopic as u8);
+            buffer.push(PropertyType::ResponseTopic as u8);
             write_mqtt_string(buffer, topic);
         }
 
         if let Some(data) = &self.correlation_data {
-            buffer.put_u8(PropertyType::CorrelationData as u8);
+            buffer.push(PropertyType::CorrelationData as u8);
             write_mqtt_bytes(buffer, data);
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
 
         for id in self.subscription_identifiers.iter() {
-            buffer.put_u8(PropertyType::SubscriptionIdentifier as u8);
+            buffer.push(PropertyType::SubscriptionIdentifier as u8);
             write_remaining_length(buffer, *id)?;
         }
 
         if let Some(typ) = &self.content_type {
-            buffer.put_u8(PropertyType::ContentType as u8);
+            buffer.push(PropertyType::ContentType as u8);
             write_mqtt_string(buffer, typ);
         }
 
@@ -304,12 +303,11 @@ impl PublishProperties {
 mod test {
     use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
     use super::*;
-    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn length_calculation() {
-        let mut dummy_bytes = BytesMut::new();
+        let mut dummy_bytes = Vec::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
         let publish_props = PublishProperties {
