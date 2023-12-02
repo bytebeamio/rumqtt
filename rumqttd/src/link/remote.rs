@@ -250,3 +250,117 @@ fn handle_auth(
 
     return Err(Error::InvalidAuth);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use crate::{protocol::Login, ConnectionSettings};
+
+    use super::handle_auth;
+
+    fn config() -> ConnectionSettings {
+        ConnectionSettings {
+            connection_timeout_ms: 0,
+            max_payload_size: 0,
+            max_inflight_count: 0,
+            static_auth: None,
+            dynamic_auth: None,
+            dynamic_filters: false,
+        }
+    }
+
+    fn login() -> Login {
+        Login {
+            username: "u".to_owned(),
+            password: "p".to_owned(),
+        }
+    }
+
+    #[test]
+    fn no_login_no_auth() {
+        let cfg = Arc::new(config());
+        let r = handle_auth(cfg, None, String::new());
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn some_login_no_auth() {
+        let cfg = Arc::new(config());
+        let login = login();
+        let r = handle_auth(cfg, Some(&login), String::new());
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn login_matches_static_auth() {
+        let login = login();
+        let mut map = HashMap::<String, String>::new();
+        map.insert(login.username.clone(), login.password.clone());
+
+        let mut cfg = config();
+        cfg.static_auth = Some(map);
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn login_fails_static_no_dynamic() {
+        let login = login();
+        let mut map = HashMap::<String, String>::new();
+        map.insert("wrong".to_owned(), "wrong".to_owned());
+
+        let mut cfg = config();
+        cfg.static_auth = Some(map);
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn login_fails_static_matches_dynamic() {
+        let login = login();
+
+        let mut map = HashMap::<String, String>::new();
+        map.insert("wrong".to_owned(), "wrong".to_owned());
+
+        let dynamic = |_: String, _: String, _: String| -> bool { true };
+
+        let mut cfg = config();
+        cfg.static_auth = Some(map);
+        cfg.dynamic_auth = Some(Arc::new(dynamic));
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn login_fails_static_fails_dynamic() {
+        let login = login();
+
+        let mut map = HashMap::<String, String>::new();
+        map.insert("wrong".to_owned(), "wrong".to_owned());
+
+        let dynamic = |_: String, _: String, _: String| -> bool { false };
+
+        let mut cfg = config();
+        cfg.static_auth = Some(map);
+        cfg.dynamic_auth = Some(Arc::new(dynamic));
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn dynamic_auth_clousre_or_fnptr_type_check_or_fail_compile() {
+        let closure = |_: String, _: String, _: String| -> bool { false };
+        fn fnptr(_: String, _: String, _: String) -> bool {
+            true
+        }
+
+        let mut cfg = config();
+        cfg.dynamic_auth = Some(Arc::new(closure));
+        cfg.dynamic_auth = Some(Arc::new(fnptr));
+    }
+}
