@@ -1,4 +1,3 @@
-use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::mqttbytes;
@@ -13,7 +12,7 @@ pub struct Network {
     /// Socket for IO
     socket: Box<dyn N>,
     /// Buffered reads
-    read: BytesMut,
+    read: Vec<u8>,
     /// Maximum packet size
     max_incoming_size: Option<usize>,
     /// Maximum readv count
@@ -25,7 +24,7 @@ impl Network {
         let socket = Box::new(socket) as Box<dyn N>;
         Network {
             socket,
-            read: BytesMut::with_capacity(10 * 1024),
+            read: Vec::with_capacity(10 * 1024),
             max_incoming_size,
             max_readb_count: 10,
         }
@@ -101,7 +100,7 @@ impl Network {
     }
 
     pub async fn connect(&mut self, connect: Connect, options: &MqttOptions) -> io::Result<usize> {
-        let mut write = BytesMut::new();
+        let mut write = Vec::new();
         let last_will = options.last_will();
         let login = options.credentials().map(|l| Login {
             username: l.0,
@@ -117,7 +116,7 @@ impl Network {
         Ok(len)
     }
 
-    pub async fn flush(&mut self, write: &mut BytesMut) -> io::Result<()> {
+    pub async fn flush(&mut self, write: &mut Vec<u8>) -> io::Result<()> {
         if write.is_empty() {
             return Ok(());
         }
