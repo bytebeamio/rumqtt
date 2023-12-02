@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 #[cfg(feature = "websocket")]
@@ -473,7 +472,7 @@ impl MqttOptions {
     }
 
     /// set authentication data on connection properties
-    pub fn set_authentication_data(&mut self, authentication_data: Option<Bytes>) -> &mut Self {
+    pub fn set_authentication_data(&mut self, authentication_data: Option<Vec<u8>>) -> &mut Self {
         if let Some(conn_props) = &mut self.connect_properties {
             conn_props.authentication_data = authentication_data;
             self
@@ -485,7 +484,7 @@ impl MqttOptions {
     }
 
     /// get authentication data from connection properties
-    pub fn authentication_data(&self) -> Option<Bytes> {
+    pub fn authentication_data(&self) -> Option<Vec<u8>> {
         if let Some(conn_props) = &self.connect_properties {
             conn_props.authentication_data.clone()
         } else {
