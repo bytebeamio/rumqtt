@@ -1,5 +1,4 @@
 use super::*;
-use bytes::{Buf, Bytes};
 
 /// Subscription packet
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -53,7 +52,7 @@ impl Subscribe {
 
     pub fn read(fixed_header: FixedHeader, bytes: &[u8]) -> Result<Subscribe, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
-        bytes.advance(variable_header_index);
+        let mut bytes = &bytes[variable_header_index..];
 
         let pkid = read_u16(&mut bytes)?;
         let properties = SubscribeProperties::read(&mut bytes)?;
@@ -73,14 +72,14 @@ impl Subscribe {
 
     pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
         // write packet type
-        buffer.put_u8(0x82);
+        buffer.push(0x82);
 
         // write remaining length
         let remaining_len = self.len();
         let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
 
         // write packet id
-        buffer.put_u16(self.pkid);
+        buffer.extend_from_slice(&self.pkid.to_be_bytes());
 
         if let Some(p) = &self.properties {
             p.write(buffer)?;
@@ -121,11 +120,11 @@ impl Filter {
         2 + self.path.len() + 1
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Vec<Filter>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Vec<Filter>, Error> {
         // variable header size = 2 (packet identifier)
         let mut filters = Vec::new();
 
-        while bytes.has_remaining() {
+        while !bytes.is_empty() {
             let path = read_mqtt_string(bytes)?;
             let options = read_u8(bytes)?;
             let requested_qos = options & 0b0000_0011;
@@ -175,7 +174,7 @@ impl Filter {
         };
 
         write_mqtt_string(buffer, self.path.as_str());
-        buffer.put_u8(options);
+        buffer.push(options);
     }
 }
 
@@ -213,12 +212,12 @@ impl SubscribeProperties {
         len
     }
 
-    pub fn read(bytes: &mut Bytes) -> Result<Option<SubscribeProperties>, Error> {
+    pub fn read(bytes: &mut &[u8]) -> Result<Option<SubscribeProperties>, Error> {
         let mut id = None;
         let mut user_properties = Vec::new();
 
         let (properties_len_len, properties_len) = length(bytes.iter())?;
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
 
         if properties_len == 0 {
             return Ok(None);
@@ -235,7 +234,7 @@ impl SubscribeProperties {
                     let (id_len, sub_id) = length(bytes.iter())?;
                     // TODO: Validate 1 +. Tests are working either way
                     cursor += 1 + id_len;
-                    bytes.advance(id_len);
+                    *bytes = &bytes[id_len..];
                     id = Some(sub_id)
                 }
                 PropertyType::UserProperty => {
@@ -259,12 +258,12 @@ impl SubscribeProperties {
         write_remaining_length(buffer, len)?;
 
         if let Some(id) = &self.id {
-            buffer.put_u8(PropertyType::SubscriptionIdentifier as u8);
+            buffer.push(PropertyType::SubscriptionIdentifier as u8);
             write_remaining_length(buffer, *id)?;
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
@@ -277,12 +276,11 @@ impl SubscribeProperties {
 mod test {
     use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
     use super::*;
-    use bytes::BytesMut;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn length_calculation() {
-        let mut dummy_bytes = BytesMut::new();
+        let mut dummy_bytes = Vec::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
         let subscribe_props = SubscribeProperties {
