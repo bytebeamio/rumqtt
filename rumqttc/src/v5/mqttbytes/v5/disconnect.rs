@@ -1,7 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 
-use bytes::{BufMut, Bytes, BytesMut};
-
 use super::*;
 
 use super::{property, PropertyType};
@@ -166,10 +164,10 @@ impl DisconnectProperties {
         length
     }
 
-    pub fn extract(bytes: &mut Bytes) -> Result<Option<Self>, Error> {
+    pub fn extract(bytes: &mut &[u8]) -> Result<Option<Self>, Error> {
         let (properties_len_len, properties_len) = length(bytes.iter())?;
 
-        bytes.advance(properties_len_len);
+        let bytes = &mut &bytes[properties_len_len..];
 
         if properties_len == 0 {
             return Ok(None);
@@ -227,23 +225,23 @@ impl DisconnectProperties {
         write_remaining_length(buffer, length)?;
 
         if let Some(session_expiry_interval) = self.session_expiry_interval {
-            buffer.put_u8(PropertyType::SessionExpiryInterval as u8);
-            buffer.put_u32(session_expiry_interval);
+            buffer.push(PropertyType::SessionExpiryInterval as u8);
+            buffer.extend_from_slice(&session_expiry_interval.to_be_bytes());
         }
 
         if let Some(reason) = &self.reason_string {
-            buffer.put_u8(PropertyType::ReasonString as u8);
+            buffer.push(PropertyType::ReasonString as u8);
             write_mqtt_string(buffer, reason);
         }
 
         for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
+            buffer.push(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
 
         if let Some(reference) = &self.server_reference {
-            buffer.put_u8(PropertyType::ServerReference as u8);
+            buffer.push(PropertyType::ServerReference as u8);
             write_mqtt_string(buffer, reference);
         }
 
@@ -296,7 +294,7 @@ impl Disconnect {
         let packet_type = fixed_header.byte1 >> 4;
         let flags = fixed_header.byte1 & 0b0000_1111;
 
-        bytes.advance(fixed_header.fixed_header_len);
+        let mut bytes = &bytes[fixed_header.fixed_header_len..];
 
         if packet_type != PacketType::Disconnect as u8 {
             return Err(Error::InvalidPacketType(packet_type));
@@ -321,18 +319,18 @@ impl Disconnect {
     }
 
     pub fn write(&self, buffer: &mut Vec<u8>) -> Result<usize, Error> {
-        buffer.put_u8(0xE0);
+        buffer.push(0xE0);
 
         let length = self.len();
 
         if length == 2 {
-            buffer.put_u8(0x00);
+            buffer.push(0x00);
             return Ok(length);
         }
 
         let len_len = write_remaining_length(buffer, length)?;
 
-        buffer.put_u8(self.reason_code as u8);
+        buffer.push(self.reason_code as u8);
 
         if let Some(properties) = &self.properties {
             properties.write(buffer)?;
@@ -346,7 +344,6 @@ impl Disconnect {
 
 #[cfg(test)]
 mod test {
-    use bytes::BytesMut;
 
     use super::parse_fixed_header;
 
@@ -354,7 +351,7 @@ mod test {
 
     #[test]
     fn disconnect1_parsing_works() {
-        let mut buffer = bytes::BytesMut::new();
+        let mut buffer = Vec::new();
         let packet_bytes = [
             0xE0, // Packet type
             0x00, // Remaining length
@@ -364,7 +361,7 @@ mod test {
         buffer.extend_from_slice(&packet_bytes[..]);
 
         let fixed_header = parse_fixed_header(buffer.iter()).unwrap();
-        let disconnect_bytes = buffer.split_to(fixed_header.frame_length()).freeze();
+        let disconnect_bytes = buffer.drain(..fixed_header.frame_length()).as_slice();
         let disconnect = Disconnect::read(fixed_header, disconnect_bytes).unwrap();
 
         assert_eq!(disconnect, expected);
@@ -372,7 +369,7 @@ mod test {
 
     #[test]
     fn disconnect1_encoding_works() {
-        let mut buffer = BytesMut::new();
+        let mut buffer = Vec::new();
         let disconnect = Disconnect::new(DisconnectReasonCode::NormalDisconnection);
         let expected = [
             0xE0, // Packet type
@@ -415,14 +412,14 @@ mod test {
 
     #[test]
     fn disconnect2_parsing_works() {
-        let mut buffer = bytes::BytesMut::new();
+        let mut buffer = Vec::new();
         let packet_bytes = sample_bytes2();
         let expected = sample2();
 
         buffer.extend_from_slice(&packet_bytes[..]);
 
         let fixed_header = parse_fixed_header(buffer.iter()).unwrap();
-        let disconnect_bytes = buffer.split_to(fixed_header.frame_length()).freeze();
+        let disconnect_bytes = buffer.drain(..fixed_header.frame_length()).as_slice();
         let disconnect = Disconnect::read(fixed_header, disconnect_bytes).unwrap();
 
         assert_eq!(disconnect, expected);
@@ -430,7 +427,7 @@ mod test {
 
     #[test]
     fn disconnect2_encoding_works() {
-        let mut buffer = BytesMut::new();
+        let mut buffer = Vec::new();
 
         let disconnect = sample2();
         let expected = sample_bytes2();
@@ -447,7 +444,7 @@ mod test {
 
     #[test]
     fn length_calculation() {
-        let mut dummy_bytes = BytesMut::new();
+        let mut dummy_bytes = Vec::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
         let disconn_props = DisconnectProperties {
