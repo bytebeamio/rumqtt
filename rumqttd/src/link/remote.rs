@@ -216,39 +216,38 @@ fn handle_auth(
     login: Option<&Login>,
     client_id: String,
 ) -> Result<(), Error> {
-    if config.static_auth.is_none() && config.dynamic_auth.is_none() {
+    if config.auth.is_none() && config.external_auth.is_none() {
         return Ok(());
     }
 
-    if login.is_none() && (config.static_auth.is_some() || config.dynamic_auth.is_some()) {
+    // if authentication is configured and connect packet doesn't have login details return
+    // an error
+    if login.is_none() {
         return Err(Error::InvalidAuth);
     }
 
     let login = login.unwrap();
-    let u = login.username.as_str();
-    let p = login.password.as_str();
+    let u = &login.username;
+    let p = &login.password;
 
-    let mut static_auth_verified = false;
-    if let Some(ref pairs) = config.static_auth {
-        for (validu, validp) in pairs {
-            if u == validu && p == validp {
-                static_auth_verified = true;
-                break;
-            }
-        }
-    }
-
-    if static_auth_verified {
-        return Ok(());
-    }
-
-    if let Some(ref auth) = config.dynamic_auth {
+    if let Some(ref auth) = config.external_auth {
         if auth(client_id, u.to_owned(), p.to_owned()) {
             return Ok(());
+        } else {
+            return Err(Error::InvalidAuth);
         }
     }
 
-    return Err(Error::InvalidAuth);
+    if let Some(ref pairs) = config.auth {
+        let static_auth_verified = pairs.iter().any(|(vuser, vpass)| (vuser, vpass) == (u, p));
+        if static_auth_verified {
+            return Ok(());
+        } else {
+            return Err(Error::InvalidAuth);
+        }
+    }
+
+    Err(Error::InvalidAuth)
 }
 
 #[cfg(test)]
@@ -264,8 +263,8 @@ mod tests {
             connection_timeout_ms: 0,
             max_payload_size: 0,
             max_inflight_count: 0,
-            static_auth: None,
-            dynamic_auth: None,
+            auth: None,
+            external_auth: None,
             dynamic_filters: false,
         }
     }
@@ -299,27 +298,27 @@ mod tests {
         map.insert(login.username.clone(), login.password.clone());
 
         let mut cfg = config();
-        cfg.static_auth = Some(map);
+        cfg.auth = Some(map);
 
         let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
         assert!(r.is_ok());
     }
 
     #[test]
-    fn login_fails_static_no_dynamic() {
+    fn login_fails_static_no_external() {
         let login = login();
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
 
         let mut cfg = config();
-        cfg.static_auth = Some(map);
+        cfg.auth = Some(map);
 
         let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
         assert!(r.is_err());
     }
 
     #[test]
-    fn login_fails_static_matches_dynamic() {
+    fn login_fails_static_matches_external() {
         let login = login();
 
         let mut map = HashMap::<String, String>::new();
@@ -328,15 +327,15 @@ mod tests {
         let dynamic = |_: String, _: String, _: String| -> bool { true };
 
         let mut cfg = config();
-        cfg.static_auth = Some(map);
-        cfg.dynamic_auth = Some(Arc::new(dynamic));
+        cfg.auth = Some(map);
+        cfg.external_auth = Some(Arc::new(dynamic));
 
         let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
         assert!(r.is_ok());
     }
 
     #[test]
-    fn login_fails_static_fails_dynamic() {
+    fn login_fails_static_fails_external() {
         let login = login();
 
         let mut map = HashMap::<String, String>::new();
@@ -345,22 +344,22 @@ mod tests {
         let dynamic = |_: String, _: String, _: String| -> bool { false };
 
         let mut cfg = config();
-        cfg.static_auth = Some(map);
-        cfg.dynamic_auth = Some(Arc::new(dynamic));
+        cfg.auth = Some(map);
+        cfg.external_auth = Some(Arc::new(dynamic));
 
         let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
         assert!(r.is_err());
     }
 
     #[test]
-    fn dynamic_auth_clousre_or_fnptr_type_check_or_fail_compile() {
+    fn external_auth_clousre_or_fnptr_type_check_or_fail_compile() {
         let closure = |_: String, _: String, _: String| -> bool { false };
         fn fnptr(_: String, _: String, _: String) -> bool {
             true
         }
 
         let mut cfg = config();
-        cfg.dynamic_auth = Some(Arc::new(closure));
-        cfg.dynamic_auth = Some(Arc::new(fnptr));
+        cfg.external_auth = Some(Arc::new(closure));
+        cfg.external_auth = Some(Arc::new(fnptr));
     }
 }

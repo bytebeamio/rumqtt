@@ -130,9 +130,9 @@ pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
     pub max_payload_size: usize,
     pub max_inflight_count: usize,
-    pub static_auth: Option<HashMap<String, String>>,
+    pub auth: Option<HashMap<String, String>>,
     #[serde(skip)]
-    pub dynamic_auth: Option<AuthHandler>,
+    pub external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
 }
@@ -143,8 +143,8 @@ impl fmt::Debug for ConnectionSettings {
             .field("connection_timeout_ms", &self.connection_timeout_ms)
             .field("max_payload_size", &self.max_payload_size)
             .field("max_inflight_count", &self.max_inflight_count)
-            .field("static_auth", &self.static_auth)
-            .field("dynamic_auth", &self.dynamic_auth.is_some())
+            .field("auth", &self.auth)
+            .field("external_auth", &self.external_auth.is_some())
             .field("dynamic_filters", &self.dynamic_filters)
             .finish()
     }
