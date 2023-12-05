@@ -2,7 +2,7 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
-use crate::protocol::{Connect, Packet, Protocol};
+use crate::protocol::{Connect, Login, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
@@ -186,22 +186,7 @@ where
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
-    // If authentication is configured in config file check for username and password
-    if let Some(auths) = &config.auth {
-        // if authentication is configured and connect packet doesn't have login details return
-        // an error
-        if let Some(login) = login {
-            let is_authenticated = auths
-                .iter()
-                .any(|(user, pass)| (user, pass) == (&login.username, &login.password));
-
-            if !is_authenticated {
-                return Err(Error::InvalidAuth);
-            }
-        } else {
-            return Err(Error::InvalidAuth);
-        }
-    }
+    handle_auth(config.clone(), login.as_ref(), &connect.client_id)?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -224,4 +209,163 @@ where
 
     // Ok((connect, props, lastwill, lastwill_props))
     Ok(packet)
+}
+
+fn handle_auth(
+    config: Arc<ConnectionSettings>,
+    login: Option<&Login>,
+    client_id: &str,
+) -> Result<(), Error> {
+    if config.auth.is_none() && config.external_auth.is_none() {
+        return Ok(());
+    }
+
+    // if authentication is configured and connect packet doesn't have login details
+    // return an error
+    let Some(login) = login else {
+        return Err(Error::InvalidAuth);
+    };
+
+    let username = &login.username;
+    let password = &login.password;
+
+    if let Some(auth) = &config.external_auth {
+        if !auth(
+            client_id.to_owned(),
+            username.to_owned(),
+            password.to_owned(),
+        ) {
+            return Err(Error::InvalidAuth);
+        }
+
+        return Ok(());
+    }
+
+    if let Some(pairs) = &config.auth {
+        let static_auth_verified = pairs
+            .iter()
+            .any(|(user, pass)| (user, pass) == (username, password));
+
+        if !static_auth_verified {
+            return Err(Error::InvalidAuth);
+        }
+
+        return Ok(());
+    }
+
+    Err(Error::InvalidAuth)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use crate::{protocol::Login, ConnectionSettings};
+
+    use super::handle_auth;
+
+    fn config() -> ConnectionSettings {
+        ConnectionSettings {
+            connection_timeout_ms: 0,
+            max_payload_size: 0,
+            max_inflight_count: 0,
+            auth: None,
+            external_auth: None,
+            dynamic_filters: false,
+        }
+    }
+
+    fn login() -> Login {
+        Login {
+            username: "u".to_owned(),
+            password: "p".to_owned(),
+        }
+    }
+
+    #[test]
+    fn no_login_no_auth() {
+        let cfg = Arc::new(config());
+        let r = handle_auth(cfg, None, "");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn some_login_no_auth() {
+        let cfg = Arc::new(config());
+        let login = login();
+        let r = handle_auth(cfg, Some(&login), "");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn login_matches_static_auth() {
+        let login = login();
+        let mut map = HashMap::<String, String>::new();
+        map.insert(login.username.clone(), login.password.clone());
+
+        let mut cfg = config();
+        cfg.auth = Some(map);
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn login_fails_static_no_external() {
+        let login = login();
+        let mut map = HashMap::<String, String>::new();
+        map.insert("wrong".to_owned(), "wrong".to_owned());
+
+        let mut cfg = config();
+        cfg.auth = Some(map);
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn login_fails_static_matches_external() {
+        let login = login();
+
+        let mut map = HashMap::<String, String>::new();
+        map.insert("wrong".to_owned(), "wrong".to_owned());
+
+        let dynamic = |_: String, _: String, _: String| -> bool { true };
+
+        let mut cfg = config();
+        cfg.auth = Some(map);
+        cfg.external_auth = Some(Arc::new(dynamic));
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn login_fails_static_fails_external() {
+        let login = login();
+
+        let mut map = HashMap::<String, String>::new();
+        map.insert("wrong".to_owned(), "wrong".to_owned());
+
+        let dynamic = |_: String, _: String, _: String| -> bool { false };
+
+        let mut cfg = config();
+        cfg.auth = Some(map);
+        cfg.external_auth = Some(Arc::new(dynamic));
+
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn external_auth_clousre_or_fnptr_type_check_or_fail_compile() {
+        let closure = |_: String, _: String, _: String| -> bool { false };
+        fn fnptr(_: String, _: String, _: String) -> bool {
+            true
+        }
+
+        let mut cfg = config();
+        cfg.external_auth = Some(Arc::new(closure));
+        cfg.external_auth = Some(Arc::new(fnptr));
+    }
 }

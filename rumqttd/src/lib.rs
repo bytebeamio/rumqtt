@@ -1,5 +1,7 @@
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
@@ -37,6 +39,11 @@ pub type Filter = String;
 pub type TopicId = usize;
 pub type Offset = (u64, u64);
 pub type Cursor = (u64, u64);
+
+pub type ClientId = String;
+pub type AuthUser = String;
+pub type AuthPass = String;
+pub type AuthHandler = Arc<dyn Fn(ClientId, AuthUser, AuthPass) -> bool + Send + Sync + 'static>;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -118,14 +125,29 @@ pub struct BridgeConfig {
     pub transport: Transport,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
     pub max_payload_size: usize,
     pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
+    #[serde(skip)]
+    pub external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
+}
+
+impl fmt::Debug for ConnectionSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectionSettings")
+            .field("connection_timeout_ms", &self.connection_timeout_ms)
+            .field("max_payload_size", &self.max_payload_size)
+            .field("max_inflight_count", &self.max_inflight_count)
+            .field("auth", &self.auth)
+            .field("external_auth", &self.external_auth.is_some())
+            .field("dynamic_filters", &self.dynamic_filters)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
