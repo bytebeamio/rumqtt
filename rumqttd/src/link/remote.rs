@@ -186,7 +186,7 @@ where
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
-    handle_auth(config.clone(), login.as_ref(), connect.client_id.clone())?;
+    handle_auth(config.clone(), login.as_ref(), &connect.client_id)?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -214,37 +214,43 @@ where
 fn handle_auth(
     config: Arc<ConnectionSettings>,
     login: Option<&Login>,
-    client_id: String,
+    client_id: &str,
 ) -> Result<(), Error> {
     if config.auth.is_none() && config.external_auth.is_none() {
         return Ok(());
     }
 
-    // if authentication is configured and connect packet doesn't have login details return
-    // an error
-    if login.is_none() {
+    // if authentication is configured and connect packet doesn't have login details
+    // return an error
+    let Some(login) = login else {
         return Err(Error::InvalidAuth);
-    }
+    };
 
-    let login = login.unwrap();
-    let u = &login.username;
-    let p = &login.password;
+    let username = &login.username;
+    let password = &login.password;
 
-    if let Some(ref auth) = config.external_auth {
-        if auth(client_id, u.to_owned(), p.to_owned()) {
-            return Ok(());
-        } else {
+    if let Some(auth) = &config.external_auth {
+        if !auth(
+            client_id.to_owned(),
+            username.to_owned(),
+            password.to_owned(),
+        ) {
             return Err(Error::InvalidAuth);
         }
+
+        return Ok(());
     }
 
-    if let Some(ref pairs) = config.auth {
-        let static_auth_verified = pairs.iter().any(|(vuser, vpass)| (vuser, vpass) == (u, p));
-        if static_auth_verified {
-            return Ok(());
-        } else {
+    if let Some(pairs) = &config.auth {
+        let static_auth_verified = pairs
+            .iter()
+            .any(|(user, pass)| (user, pass) == (username, password));
+
+        if !static_auth_verified {
             return Err(Error::InvalidAuth);
         }
+
+        return Ok(());
     }
 
     Err(Error::InvalidAuth)
@@ -279,7 +285,7 @@ mod tests {
     #[test]
     fn no_login_no_auth() {
         let cfg = Arc::new(config());
-        let r = handle_auth(cfg, None, String::new());
+        let r = handle_auth(cfg, None, "");
         assert!(r.is_ok());
     }
 
@@ -287,7 +293,7 @@ mod tests {
     fn some_login_no_auth() {
         let cfg = Arc::new(config());
         let login = login();
-        let r = handle_auth(cfg, Some(&login), String::new());
+        let r = handle_auth(cfg, Some(&login), "");
         assert!(r.is_ok());
     }
 
@@ -300,7 +306,7 @@ mod tests {
         let mut cfg = config();
         cfg.auth = Some(map);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
         assert!(r.is_ok());
     }
 
@@ -313,7 +319,7 @@ mod tests {
         let mut cfg = config();
         cfg.auth = Some(map);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
         assert!(r.is_err());
     }
 
@@ -330,7 +336,7 @@ mod tests {
         cfg.auth = Some(map);
         cfg.external_auth = Some(Arc::new(dynamic));
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
         assert!(r.is_ok());
     }
 
@@ -347,7 +353,7 @@ mod tests {
         cfg.auth = Some(map);
         cfg.external_auth = Some(Arc::new(dynamic));
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), String::new());
+        let r = handle_auth(Arc::new(cfg), Some(&login), "");
         assert!(r.is_err());
     }
 
