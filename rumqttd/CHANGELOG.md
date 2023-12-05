@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Log warning if websocket config is getting ignored
 - Add support for ECC keys when configuring TLS in rumqttd
-- External authorization
+- Support for external authentication with custom function
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
