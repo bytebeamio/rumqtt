@@ -2,7 +2,7 @@
 name = "benchmarks"
 version = "0.4.0"
 publish = false
-rust-version.workspace = true
+rust-version = "1.70.0"
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
