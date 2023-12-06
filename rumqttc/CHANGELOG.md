@@ -24,6 +24,7 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
 ### Removed
 
 ### Fixed
+- Lowered the MSRV to 1.64.0
 
 ### Security
 
