@@ -8,7 +8,6 @@ members = [
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.70.0"
 edition = "2021"
 repository = "https://github.com/bytebeamio/rumqtt"
 license = "Apache-2.0"

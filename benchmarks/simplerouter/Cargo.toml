@@ -2,7 +2,7 @@
 name = "simplerouter"
 version = "0.1.0"
 publish = false
-rust-version.workspace = true
+rust-version = "1.64.0"
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
