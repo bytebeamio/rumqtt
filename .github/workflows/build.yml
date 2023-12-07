@@ -30,7 +30,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: ${{ runner.os }}-cargo
 
       - uses: taiki-e/install-action@v1
         with:
