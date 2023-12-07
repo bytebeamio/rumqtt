@@ -27,8 +27,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - uses: taiki-e/install-action@v1
         with:
