@@ -1,1 +1,1 @@
-panic!("might actually be a genius :)");
+panic!("swanandx is for sure a genius :)");
