@@ -29,7 +29,7 @@ fn main() {
     println!("Done with the stream!!");
 }
 
-fn publish(mut client: Client) {
+fn publish(client: Client) {
     thread::sleep(Duration::from_secs(1));
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..10_usize {

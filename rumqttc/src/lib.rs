@@ -204,13 +204,6 @@ impl Request {
     }
 }
 
-/// Key type for TLS authentication
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Key {
-    RSA(Vec<u8>),
-    ECC(Vec<u8>),
-}
-
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
         Request::Publish(publish)
@@ -269,7 +262,7 @@ impl Transport {
     #[cfg(feature = "use-rustls")]
     pub fn tls(
         ca: Vec<u8>,
-        client_auth: Option<(Vec<u8>, Key)>,
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
         alpn: Option<Vec<Vec<u8>>>,
     ) -> Self {
         let config = TlsConfiguration::Simple {
@@ -303,7 +296,7 @@ impl Transport {
     #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     pub fn wss(
         ca: Vec<u8>,
-        client_auth: Option<(Vec<u8>, Key)>,
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
         alpn: Option<Vec<Vec<u8>>>,
     ) -> Self {
         let config = TlsConfiguration::Simple {
@@ -357,16 +350,15 @@ pub enum TlsConfiguration {
         /// alpn settings
         alpn: Option<Vec<Vec<u8>>>,
         /// tls client_authentication
-        client_auth: Option<(Vec<u8>, Key)>,
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
     },
     #[cfg(feature = "use-native-tls")]
     SimpleNative {
         /// ca certificate
         ca: Vec<u8>,
-        /// pkcs12 binary der
-        der: Vec<u8>,
+        /// pkcs12 binary der and
         /// password for use with der
-        password: String,
+        client_auth: Option<(Vec<u8>, String)>,
     },
     #[cfg(feature = "use-rustls")]
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
