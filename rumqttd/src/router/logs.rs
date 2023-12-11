@@ -122,26 +122,25 @@ impl DataLog {
             })
     }
 
-    // TODO: Currently returning a Option<Vec> instead of Option<&Vec> due to Rust borrow checker
+    // TODO: Currently returning a Vec instead of &Vec due to Rust borrow checker
     // limitation
-    pub fn matches(&mut self, topic: &str) -> Option<Vec<usize>> {
-        match &self.publish_filters.get(topic) {
-            Some(v) => Some(v.to_vec()),
-            None => {
-                let v: Vec<usize> = self
-                    .filter_indexes
-                    .iter()
-                    .filter(|(filter, _)| matches(topic, filter))
-                    .map(|(_, filter_idx)| *filter_idx)
-                    .collect();
-
-                if !v.is_empty() {
-                    self.publish_filters.insert(topic.to_owned(), v.clone());
-                }
-
-                Some(v)
-            }
+    pub fn matches(&mut self, topic: &str) -> Vec<usize> {
+        if let Some(v) = self.publish_filters.get(topic) {
+            return v.to_vec();
         }
+
+        let v: Vec<usize> = self
+            .filter_indexes
+            .iter()
+            .filter(|(filter, _)| matches(topic, filter))
+            .map(|(_, filter_idx)| *filter_idx)
+            .collect();
+
+        if !v.is_empty() {
+            self.publish_filters.insert(topic.to_owned(), v.clone());
+        }
+
+        v
     }
 
     pub fn next_native_offset(&mut self, filter: &str) -> (FilterIdx, Offset) {

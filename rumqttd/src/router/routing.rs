@@ -43,8 +43,6 @@ pub enum RouterError {
     #[cfg(feature = "validate-tenant-prefix")]
     #[error("Bad Tenant")]
     BadTenant(String, String),
-    #[error("No matching filters to topic {0}")]
-    NoMatchingFilters(String),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
@@ -1229,17 +1227,17 @@ fn append_to_commitlog(
     publish.retain = false;
     let pkid = publish.pkid;
 
-    let filter_idxs = datalog.matches(topic);
+    let mut filter_idxs = datalog.matches(topic);
 
-    // Create a dynamic filter if dynamic_filters are enabled for this connection
-    let filter_idxs = match filter_idxs {
-        Some(v) => v,
-        None if connection.dynamic_filters => {
+    if filter_idxs.is_empty() {
+        // Create a dynamic filter if dynamic_filters are enabled for this connection
+        if connection.dynamic_filters {
             let (idx, _cursor) = datalog.next_native_offset(topic);
-            vec![idx]
+            filter_idxs = vec![idx];
+        } else {
+            warn!(topic, "no datalog found for topic, dropping message");
         }
-        None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
-    };
+    }
 
     let mut o = (0, 0);
     for filter_idx in filter_idxs {
@@ -1302,10 +1300,9 @@ fn append_will_message(
 
     let filter_idxs = datalog.matches(topic);
 
-    let filter_idxs = match filter_idxs {
-        Some(v) => v,
-        None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
-    };
+    if filter_idxs.is_empty() {
+        warn!(topic, "no datalog found for topic, dropping message")
+    }
 
     let mut o = (0, 0);
     for filter_idx in filter_idxs {

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Log warning incase datalog for a topic doesn't exists so message being dropped.
 - Log warning if websocket config is getting ignored
 - Add support for ECC keys when configuring TLS in rumqttd
 - Support for external authentication with custom function
