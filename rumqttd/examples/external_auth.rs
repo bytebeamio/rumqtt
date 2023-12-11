@@ -24,6 +24,9 @@ fn main() {
     let server = config.v4.as_mut().and_then(|v4| v4.get_mut("1")).unwrap();
 
     // set the external_auth field in ConnectionSettings
+    // external_auth function / closure signature must be:
+    // Fn(ClientId, AuthUser, AuthPass) -> bool
+    // type for ClientId, AuthUser and AuthPass is String
     server.connections.external_auth = Some(Arc::new(auth));
 
     let mut broker = Broker::new(config);
@@ -31,7 +34,7 @@ fn main() {
     broker.start().unwrap();
 }
 
-fn auth(client_id: String, username: String, password: String) -> bool {
+fn auth(_client_id: String, _username: String, _password: String) -> bool {
     // users can fetch data from DB or tokens and use them!
     // do the verification and return true if verified, else false
     true
