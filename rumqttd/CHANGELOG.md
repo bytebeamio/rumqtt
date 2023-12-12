@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttd 0.19.0] - 12-12-2023
+
+### Added
 - Log warning if websocket config is getting ignored
 - Add support for ECC keys when configuring TLS in rumqttd
 - Support for external authentication with custom function
