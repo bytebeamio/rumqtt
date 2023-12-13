@@ -11,7 +11,7 @@ pub use self::{
     pubrec::{PubRec, PubRecProperties, PubRecReason},
     pubrel::{PubRel, PubRelProperties, PubRelReason},
     suback::{SubAck, SubAckProperties, SubscribeReasonCode},
-    subscribe::{Filter, Subscribe, SubscribeProperties},
+    subscribe::{Filter, Subscribe, SubscribeProperties, RetainForwardRule},
     unsuback::{UnsubAck, UnsubAckProperties, UnsubAckReason},
     unsubscribe::{Unsubscribe, UnsubscribeProperties},
 };
