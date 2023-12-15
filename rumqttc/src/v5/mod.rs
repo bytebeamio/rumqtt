@@ -101,7 +101,7 @@ pub struct MqttOptions {
     /// The server may set its own maximum inflight limit, the smaller of the two will be used.
     outgoing_inflight_upper_limit: Option<u16>,
     #[cfg(feature = "websocket")]
-    request_modifier: Option<Arc<Box<RequestModifierFn>>>,
+    request_modifier: Option<Arc<RequestModifierFn>>,
 }
 
 impl MqttOptions {
@@ -206,18 +206,18 @@ impl MqttOptions {
         O: IntoFuture<Output = http::Request<()>>,
         <O as IntoFuture>::IntoFuture: Send,
     {
-        let request_modifier = Arc::new(Box::new(request_modifier));
-        self.request_modifier = Some(Arc::new(Box::new(move |request| {
+        let request_modifier = Arc::new(request_modifier);
+        self.request_modifier = Some(Arc::new(move |request| {
             Box::pin({
                 let request_modifier = Arc::clone(&request_modifier);
                 async move { request_modifier(request).into_future().await }
             })
-        })));
+        }));
         self
     }
 
     #[cfg(feature = "websocket")]
-    pub fn request_modifier(&self) -> Option<Arc<Box<RequestModifierFn>>> {
+    pub fn request_modifier(&self) -> Option<Arc<RequestModifierFn>> {
         self.request_modifier.clone()
     }
 

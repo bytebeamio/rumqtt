@@ -25,7 +25,7 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
 
 ### Fixed
 - Lowered the MSRV to 1.64.0
-- Request modifier function should be Send and Sync
+- Request modifier function should be Send and Sync and removed unnecessary Box
 
 ### Security
 
