@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the `Key` enum: users do not need to specify the TLS key variant in the `TlsConfiguration` anymore, this is inferred automatically.
 To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initialization.
 - certificate for client authentication is now optional while using native-tls. `der` & `password` fields are replaced by `client_auth`.
+- Make v5 `RetainForwardRule` public, in order to allow setting it when constructing `Filter` values. 
 
 ### Deprecated
 
