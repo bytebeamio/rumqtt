@@ -50,9 +50,11 @@ pub enum Request {
 }
 
 #[cfg(feature = "websocket")]
-type RequestModifierFn = (dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>> + Send>>
-     + Send
-     + Sync);
+type RequestModifierFn = Arc<
+    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>> + Send>>
+        + Send
+        + Sync,
+>;
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -101,7 +103,7 @@ pub struct MqttOptions {
     /// The server may set its own maximum inflight limit, the smaller of the two will be used.
     outgoing_inflight_upper_limit: Option<u16>,
     #[cfg(feature = "websocket")]
-    request_modifier: Option<Arc<RequestModifierFn>>,
+    request_modifier: Option<RequestModifierFn>,
 }
 
 impl MqttOptions {
@@ -202,22 +204,20 @@ impl MqttOptions {
     #[cfg(feature = "websocket")]
     pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
     where
-        F: Fn(http::Request<()>) -> O + Sync + Send + 'static,
-        O: IntoFuture<Output = http::Request<()>>,
-        <O as IntoFuture>::IntoFuture: Send,
+        F: Fn(http::Request<()>) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = http::Request<()>> + 'static,
+        O::IntoFuture: Send,
     {
-        let request_modifier = Arc::new(request_modifier);
         self.request_modifier = Some(Arc::new(move |request| {
-            Box::pin({
-                let request_modifier = Arc::clone(&request_modifier);
-                async move { request_modifier(request).into_future().await }
-            })
+            let request_modifier = request_modifier(request).into_future();
+            Box::pin(request_modifier)
         }));
+
         self
     }
 
     #[cfg(feature = "websocket")]
-    pub fn request_modifier(&self) -> Option<Arc<RequestModifierFn>> {
+    pub fn request_modifier(&self) -> Option<RequestModifierFn> {
         self.request_modifier.clone()
     }
 
