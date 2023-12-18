@@ -2,8 +2,8 @@
     <img alt="rumqtt Logo" src="docs/rumqtt.png" width="60%" />
 </div>
 <div align="center">
-  <a href="https://github.com/bytebeamio/rumqtt/actions/workflows/build.yml">
-    <img alt="build status" src="https://github.com/bytebeamio/rumqtt/actions/workflows/build.yml/badge.svg">
+  <a href="https://github.com/bytebeamio/rumqtt/actions/workflows/main.yml">
+    <img alt="build status" src="https://github.com/bytebeamio/rumqtt/actions/workflows/main.yml/badge.svg">
   </a>
   <a href="https://discord.gg/mpkSqDg">
     <img alt="Discord chat" src="https://img.shields.io/discord/633193308033646605?style=flat">
