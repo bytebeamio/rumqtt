@@ -99,8 +99,10 @@
 extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
-#[cfg(feature = "use-rustls")]
+
+#[cfg(any(feature = "use-rustls", feature = "websocket"))]
 use std::sync::Arc;
+
 use std::time::Duration;
 
 mod client;
@@ -115,6 +117,19 @@ mod tls;
 
 #[cfg(feature = "websocket")]
 mod websockets;
+
+#[cfg(feature = "websocket")]
+use std::{
+    future::{Future, IntoFuture},
+    pin::Pin,
+};
+
+#[cfg(feature = "websocket")]
+type RequestModifierFn = Arc<
+    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>> + Send>>
+        + Send
+        + Sync,
+>;
 
 #[cfg(feature = "proxy")]
 mod proxy;
@@ -462,6 +477,8 @@ pub struct MqttOptions {
     #[cfg(feature = "proxy")]
     /// Proxy configuration.
     proxy: Option<Proxy>,
+    #[cfg(feature = "websocket")]
+    request_modifier: Option<RequestModifierFn>,
 }
 
 impl MqttOptions {
@@ -504,6 +521,8 @@ impl MqttOptions {
             manual_acks: false,
             #[cfg(feature = "proxy")]
             proxy: None,
+            #[cfg(feature = "websocket")]
+            request_modifier: None,
         }
     }
 
@@ -685,6 +704,26 @@ impl MqttOptions {
     #[cfg(feature = "proxy")]
     pub fn proxy(&self) -> Option<Proxy> {
         self.proxy.clone()
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
+    where
+        F: Fn(http::Request<()>) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = http::Request<()>> + 'static,
+        O::IntoFuture: Send,
+    {
+        self.request_modifier = Some(Arc::new(move |request| {
+            let request_modifier = request_modifier(request).into_future();
+            Box::pin(request_modifier)
+        }));
+
+        self
+    }
+
+    #[cfg(feature = "websocket")]
+    pub fn request_modifier(&self) -> Option<RequestModifierFn> {
+        self.request_modifier.clone()
     }
 }
 

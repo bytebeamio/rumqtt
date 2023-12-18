@@ -407,6 +407,10 @@ async fn network_connect(
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
+            if let Some(request_modifier) = options.request_modifier() {
+                request = request_modifier(request).await;
+            }
+
             let (socket, response) =
                 async_tungstenite::tokio::client_async(request, tcp_stream).await?;
             validate_response_headers(response)?;
@@ -419,6 +423,10 @@ async fn network_connect(
             request
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
+
+            if let Some(request_modifier) = options.request_modifier() {
+                request = request_modifier(request).await;
+            }
 
             let connector = tls::rustls_connector(&tls_config).await?;
 
