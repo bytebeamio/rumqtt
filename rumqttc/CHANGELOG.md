@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for all variants of TLS key formats currently supported by Rustls: `PKCS#1`, `PKCS#8`, `RFC5915`. In practice we should now support all RSA keys and ECC keys in `DER` and `SEC1` encoding. Previously only `PKCS#1` and `PKCS#8` where supported.
 - TLS Error variants: `NoValidClientCertInChain`, `NoValidKeyInChain`.
 - Drain `Request`s, which weren't received by eventloop, from channel and put them in pending while doing cleanup to prevent data loss.
+- websocket request modifier for v4 client
 
 ### Changed
 - Synchronous client methods take `&self` instead of `&mut self` (#646)
