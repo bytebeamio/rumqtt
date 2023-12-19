@@ -237,6 +237,41 @@ impl From<Unsubscribe> for Request {
     }
 }
 
+/// Message to be published
+pub struct Message {
+    pub topic: String,
+    pub qos: QoS,
+    pub payload: Vec<u8>,
+    pub retain: bool,
+}
+
+impl Message {
+    pub fn new<T>(topic: T, qos: QoS) -> Message
+    where
+        T: Into<String>,
+    {
+        Message {
+            topic: topic.into(),
+            qos,
+            payload: vec![],
+            retain: false,
+        }
+    }
+
+    pub fn payload<P>(&mut self, payload: P) -> &mut Self
+    where
+        P: Into<Vec<u8>>,
+    {
+        self.payload = payload.into();
+        self
+    }
+
+    pub fn retain(&mut self) -> &mut Self {
+        self.retain = true;
+        self
+    }
+}
+
 /// Transport methods. Defaults to TCP.
 #[derive(Clone)]
 pub enum Transport {
