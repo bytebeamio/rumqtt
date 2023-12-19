@@ -165,7 +165,7 @@ impl AsyncClient {
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
@@ -176,7 +176,7 @@ impl AsyncClient {
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
@@ -326,7 +326,7 @@ impl Client {
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
@@ -336,7 +336,7 @@ impl Client {
 
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
         self.client.try_subscribe_many(topics)
     }

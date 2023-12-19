@@ -5,12 +5,12 @@ use bytes::{Buf, Bytes};
 #[derive(Clone, PartialEq, Eq)]
 pub struct Subscribe {
     pub pkid: u16,
-    pub filters: Vec<SubscribeFilter>,
+    pub filters: Vec<Filter>,
 }
 
 impl Subscribe {
     pub fn new<S: Into<String>>(path: S, qos: QoS) -> Subscribe {
-        let filter = SubscribeFilter {
+        let filter = Filter {
             path: path.into(),
             qos,
         };
@@ -23,15 +23,15 @@ impl Subscribe {
 
     pub fn new_many<T>(topics: T) -> Subscribe
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
-        let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
+        let filters: Vec<Filter> = topics.into_iter().collect();
 
         Subscribe { pkid: 0, filters }
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
-        let filter = SubscribeFilter { path, qos };
+        let filter = Filter { path, qos };
 
         self.filters.push(filter);
         self
@@ -63,7 +63,7 @@ impl Subscribe {
             let options = read_u8(&mut bytes)?;
             let requested_qos = options & 0b0000_0011;
 
-            filters.push(SubscribeFilter {
+            filters.push(Filter {
                 path,
                 qos: qos(requested_qos)?,
             });
@@ -97,14 +97,14 @@ impl Subscribe {
 
 ///  Subscription filter
 #[derive(Clone, PartialEq, Eq)]
-pub struct SubscribeFilter {
+pub struct Filter {
     pub path: String,
     pub qos: QoS,
 }
 
-impl SubscribeFilter {
-    pub fn new(path: String, qos: QoS) -> SubscribeFilter {
-        SubscribeFilter { path, qos }
+impl Filter {
+    pub fn new(path: String, qos: QoS) -> Filter {
+        Filter { path, qos }
     }
 
     fn len(&self) -> usize {
@@ -138,7 +138,7 @@ impl fmt::Debug for Subscribe {
     }
 }
 
-impl fmt::Debug for SubscribeFilter {
+impl fmt::Debug for Filter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Filter = {}, Qos = {:?}", self.path, self.qos)
     }
@@ -190,9 +190,9 @@ mod test {
             Subscribe {
                 pkid: 260,
                 filters: vec![
-                    SubscribeFilter::new("a/+".to_owned(), QoS::AtMostOnce),
-                    SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
-                    SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce)
+                    Filter::new("a/+".to_owned(), QoS::AtMostOnce),
+                    Filter::new("#".to_owned(), QoS::AtLeastOnce),
+                    Filter::new("a/b/c".to_owned(), QoS::ExactlyOnce)
                 ],
             }
         );
@@ -203,9 +203,9 @@ mod test {
         let subscribe = Subscribe {
             pkid: 260,
             filters: vec![
-                SubscribeFilter::new("a/+".to_owned(), QoS::AtMostOnce),
-                SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
-                SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce),
+                Filter::new("a/+".to_owned(), QoS::AtMostOnce),
+                Filter::new("#".to_owned(), QoS::AtLeastOnce),
+                Filter::new("a/b/c".to_owned(), QoS::ExactlyOnce),
             ],
         };
 
