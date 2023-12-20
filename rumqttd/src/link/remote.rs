@@ -272,6 +272,7 @@ mod tests {
             auth: None,
             external_auth: None,
             dynamic_filters: false,
+            set_socket_opts: None,
         }
     }
 
