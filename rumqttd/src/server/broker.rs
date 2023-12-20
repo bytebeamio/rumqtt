@@ -391,7 +391,13 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         loop {
             // Await new network connection.
             let (stream, addr) = match listener.accept().await {
-                Ok((s, r)) => (s, r),
+                Ok((mut s, r)) => {
+                    if let Some(ref set_sockopt) = config.set_socket_opts {
+                        set_sockopt(&mut s);
+                    }
+
+                    (s, r)
+                }
                 Err(e) => {
                     error!(error=?e, "Unable to accept socket.");
                     continue;

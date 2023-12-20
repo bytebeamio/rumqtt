@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpStream;
 use tracing_subscriber::{
     filter::EnvFilter,
     fmt::{
@@ -44,6 +45,7 @@ pub type ClientId = String;
 pub type AuthUser = String;
 pub type AuthPass = String;
 pub type AuthHandler = Arc<dyn Fn(ClientId, AuthUser, AuthPass) -> bool + Send + Sync + 'static>;
+pub type SocketOptHandler = Arc<dyn Fn(&mut TcpStream) + Send + Sync + 'static>;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -135,6 +137,8 @@ pub struct ConnectionSettings {
     pub external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
+    #[serde(skip)]
+    pub set_socket_opts: Option<SocketOptHandler>,
 }
 
 impl fmt::Debug for ConnectionSettings {
@@ -146,6 +150,7 @@ impl fmt::Debug for ConnectionSettings {
             .field("auth", &self.auth)
             .field("external_auth", &self.external_auth.is_some())
             .field("dynamic_filters", &self.dynamic_filters)
+            .field("set_socket_opts", &self.set_socket_opts.is_some())
             .finish()
     }
 }
