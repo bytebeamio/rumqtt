@@ -119,6 +119,7 @@ impl<P: Protocol> RemoteLink<P> {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        println!("keep alive: {}", self.connect.keep_alive);
         self.network.set_keepalive(self.connect.keep_alive);
 
         // Note:

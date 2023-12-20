@@ -37,6 +37,7 @@ metrics-exporter-prometheus = "0.12.1"
 clap = { version = "4.4", features = ["derive"] }
 axum = "0.6.20"
 rand = "0.8.5"
+libc = "0.2"
 
 [features]
 default = ["use-rustls", "websocket"]

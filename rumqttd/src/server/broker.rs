@@ -13,6 +13,7 @@ use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, warn, Instrument};
 
@@ -30,7 +31,7 @@ use ws_stream_tungstenite::WsStream;
 use metrics::register_gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
-use std::{io, thread};
+use std::{io, mem, thread};
 
 use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
@@ -391,7 +392,48 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         loop {
             // Await new network connection.
             let (stream, addr) = match listener.accept().await {
-                Ok((s, r)) => (s, r),
+                Ok((s, r)) => {
+                    let fd = s.as_raw_fd();
+                    let optlen = mem::size_of::<i32>() as libc::socklen_t;
+                    let _ = unsafe {
+                        libc::setsockopt(
+                            fd,
+                            libc::SOL_SOCKET,
+                            libc::SO_KEEPALIVE,
+                            &1 as *const _ as *const libc::c_void,
+                            optlen,
+                        )
+                    };
+                    let _ = unsafe {
+                        libc::setsockopt(
+                            fd,
+                            libc::IPPROTO_TCP,
+                            libc::TCP_KEEPIDLE,
+                            &1 as *const _ as *const libc::c_void,
+                            optlen,
+                        )
+                    };
+                    let _ = unsafe {
+                        libc::setsockopt(
+                            fd,
+                            libc::IPPROTO_TCP,
+                            libc::TCP_KEEPCNT,
+                            &5 as *const _ as *const libc::c_void,
+                            optlen,
+                        )
+                    };
+                    let _ = unsafe {
+                        libc::setsockopt(
+                            fd,
+                            libc::IPPROTO_TCP,
+                            libc::TCP_KEEPINTVL,
+                            &1 as *const _ as *const libc::c_void,
+                            optlen,
+                        )
+                    };
+
+                    (s, r)
+                }
                 Err(e) => {
                     error!(error=?e, "Unable to accept socket.");
                     continue;
@@ -504,7 +546,7 @@ async fn remote<P: Protocol>(
 
     let dynamic_filters = config.dynamic_filters;
 
-    let connect_packet = match mqtt_connect(config, &mut network).await {
+    let connect_packet = match mqtt_connect(config.clone(), &mut network).await {
         Ok(p) => p,
         Err(e) => {
             error!(error=?e, "Error while handling MQTT connect packet");
@@ -600,6 +642,10 @@ async fn remote<P: Protocol>(
             true
         }
     };
+
+    if let Some(ref on_disconnect) = config.on_disconnect {
+        on_disconnect(client_id.clone());
+    }
 
     if publish_will {
         let message = Event::PublishWill((client_id, tenant_id));
