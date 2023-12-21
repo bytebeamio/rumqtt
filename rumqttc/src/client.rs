@@ -3,9 +3,8 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::{valid_topic, ConnectionError, Event, EventLoop, Message, MqttOptions, Request};
 
-use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
@@ -64,20 +63,10 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
-    pub async fn publish<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        V: Into<Vec<u8>>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
+    pub async fn publish(&self, message: Message) -> Result<(), ClientError> {
+        let topic = message.topic;
+        let mut publish = Publish::new(&topic, message.qos, message.payload);
+        publish.retain = message.retain;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -87,20 +76,10 @@ impl AsyncClient {
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
-    pub fn try_publish<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        V: Into<Vec<u8>>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
+    pub fn try_publish(&self, message: Message) -> Result<(), ClientError> {
+        let topic = message.topic;
+        let mut publish = Publish::new(&topic, message.qos, message.payload);
+        publish.retain = message.retain;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
@@ -125,24 +104,6 @@ impl AsyncClient {
         if let Some(ack) = ack {
             self.request_tx.try_send(ack)?;
         }
-        Ok(())
-    }
-
-    /// Sends a MQTT Publish to the `EventLoop`
-    pub async fn publish_bytes<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-    {
-        let mut publish = Publish::from_bytes(topic, qos, payload);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        self.request_tx.send_async(publish).await?;
         Ok(())
     }
 
@@ -256,20 +217,10 @@ impl Client {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
-    pub fn publish<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        V: Into<Vec<u8>>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload);
-        publish.retain = retain;
+    pub fn publish(&self, message: Message) -> Result<(), ClientError> {
+        let topic = message.topic;
+        let mut publish = Publish::new(&topic, message.qos, message.payload);
+        publish.retain = message.retain;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -278,18 +229,8 @@ impl Client {
         Ok(())
     }
 
-    pub fn try_publish<S, V>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        V: Into<Vec<u8>>,
-    {
-        self.client.try_publish(topic, qos, retain, payload)?;
+    pub fn try_publish(&self, message: Message) -> Result<(), ClientError> {
+        self.client.try_publish(message)?;
         Ok(())
     }
 
