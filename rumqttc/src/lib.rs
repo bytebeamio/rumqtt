@@ -241,6 +241,7 @@ impl From<Unsubscribe> for Request {
 pub struct Message {
     pub topic: String,
     pub qos: QoS,
+    // NOTE: shall we make this payload Bytes?
     pub payload: Vec<u8>,
     pub retain: bool,
 }
