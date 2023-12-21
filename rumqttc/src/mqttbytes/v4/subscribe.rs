@@ -98,8 +98,14 @@ pub struct Filter {
 }
 
 impl Filter {
-    pub fn new(path: String, qos: QoS) -> Filter {
-        Filter { path, qos }
+    pub fn new<S>(path: S, qos: QoS) -> Filter
+    where
+        S: Into<String>,
+    {
+        Filter {
+            path: path.into(),
+            qos,
+        }
     }
 
     fn len(&self) -> usize {
