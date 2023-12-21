@@ -238,6 +238,7 @@ impl From<Unsubscribe> for Request {
 }
 
 /// Message to be published
+#[derive(Clone, Debug)]
 pub struct Message {
     pub topic: String,
     pub qos: QoS,

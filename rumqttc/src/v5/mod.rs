@@ -61,6 +61,7 @@ type RequestModifierFn = Arc<
 // NOTE: This is same message as in v4 client
 // we can possibly unify them.
 /// Message to be published
+#[derive(Clone, Debug)]
 pub struct Message {
     pub topic: String,
     pub qos: QoS,
