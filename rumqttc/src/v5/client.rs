@@ -7,10 +7,9 @@ use super::mqttbytes::v5::{
     Unsubscribe, UnsubscribeProperties,
 };
 use super::mqttbytes::QoS;
-use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
+use super::{ConnectionError, Event, EventLoop, Message, MqttOptions, Request};
 use crate::valid_topic;
 
-use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
@@ -69,21 +68,14 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
-    async fn handle_publish<S, P>(
+    async fn handle_publish(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
-        publish.retain = retain;
+    ) -> Result<(), ClientError> {
+        let topic = message.topic;
+        let mut publish = Publish::new(&topic, message.qos, message.payload, properties);
+        publish.retain = message.retain;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -92,52 +84,27 @@ impl AsyncClient {
         Ok(())
     }
 
-    pub async fn publish_with_properties<S, P>(
+    pub async fn publish_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.handle_publish(topic, qos, retain, payload, Some(properties))
-            .await
+    ) -> Result<(), ClientError> {
+        self.handle_publish(message, Some(properties)).await
     }
 
-    pub async fn publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.handle_publish(topic, qos, retain, payload, None).await
+    pub async fn publish(&self, message: Message) -> Result<(), ClientError> {
+        self.handle_publish(message, None).await
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
-    fn handle_try_publish<S, P>(
+    fn handle_try_publish(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
-        publish.retain = retain;
+    ) -> Result<(), ClientError> {
+        let topic = message.topic;
+        let mut publish = Publish::new(&topic, message.qos, message.payload, properties);
+        publish.retain = message.retain;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
@@ -146,33 +113,16 @@ impl AsyncClient {
         Ok(())
     }
 
-    pub fn try_publish_with_properties<S, P>(
+    pub fn try_publish_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.handle_try_publish(topic, qos, retain, payload, Some(properties))
+    ) -> Result<(), ClientError> {
+        self.handle_try_publish(message, Some(properties))
     }
 
-    pub fn try_publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.handle_try_publish(topic, qos, retain, payload, None)
+    pub fn try_publish(&self, message: Message) -> Result<(), ClientError> {
+        self.handle_try_publish(message, None)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -192,58 +142,6 @@ impl AsyncClient {
             self.request_tx.try_send(ack)?;
         }
         Ok(())
-    }
-
-    /// Sends a MQTT Publish to the `EventLoop`
-    async fn handle_publish_bytes<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-        properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
-        publish.retain = retain;
-        let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
-        }
-        self.request_tx.send_async(publish).await?;
-        Ok(())
-    }
-
-    pub async fn publish_bytes_with_properties<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-        properties: PublishProperties,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-    {
-        self.handle_publish_bytes(topic, qos, retain, payload, Some(properties))
-            .await
-    }
-
-    pub async fn publish_bytes<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-    {
-        self.handle_publish_bytes(topic, qos, retain, payload, None)
-            .await
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -471,21 +369,14 @@ impl Client {
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
-    fn handle_publish<S, P>(
+    fn handle_publish(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
-        publish.retain = retain;
+    ) -> Result<(), ClientError> {
+        let topic = message.topic;
+        let mut publish = Publish::new(&topic, message.qos, message.payload, properties);
+        publish.retain = message.retain;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -494,63 +385,28 @@ impl Client {
         Ok(())
     }
 
-    pub fn publish_with_properties<S, P>(
+    pub fn publish_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.handle_publish(topic, qos, retain, payload, Some(properties))
+    ) -> Result<(), ClientError> {
+        self.handle_publish(message, Some(properties))
     }
 
-    pub fn publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.handle_publish(topic, qos, retain, payload, None)
+    pub fn publish(&self, message: Message) -> Result<(), ClientError> {
+        self.handle_publish(message, None)
     }
 
-    pub fn try_publish_with_properties<S, P>(
+    pub fn try_publish_with_properties(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
+        message: Message,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.client
-            .try_publish_with_properties(topic, qos, retain, payload, properties)
+    ) -> Result<(), ClientError> {
+        self.client.try_publish_with_properties(message, properties)
     }
 
-    pub fn try_publish<S, P>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: P,
-    ) -> Result<(), ClientError>
-    where
-        S: Into<String>,
-        P: Into<Bytes>,
-    {
-        self.client.try_publish(topic, qos, retain, payload)
+    pub fn try_publish(&self, message: Message) -> Result<(), ClientError> {
+        self.client.try_publish(message)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
