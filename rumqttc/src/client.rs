@@ -108,16 +108,16 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+    pub async fn subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        let subscribe = Subscribe::new(filter);
         let request = Request::Subscribe(subscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+    pub fn try_subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        let subscribe = Subscribe::new(filter);
         let request = Request::Subscribe(subscribe);
         self.request_tx.try_send(request)?;
         Ok(())
@@ -251,16 +251,16 @@ impl Client {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+    pub fn subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        let subscribe = Subscribe::new(filter);
         let request = Request::Subscribe(subscribe);
         self.client.request_tx.send(request)?;
         Ok(())
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.client.try_subscribe(topic, qos)?;
+    pub fn try_subscribe(&self, filter: Filter) -> Result<(), ClientError> {
+        self.client.try_subscribe(filter)?;
         Ok(())
     }
 

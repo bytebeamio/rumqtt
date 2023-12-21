@@ -9,12 +9,7 @@ pub struct Subscribe {
 }
 
 impl Subscribe {
-    pub fn new<S: Into<String>>(path: S, qos: QoS) -> Subscribe {
-        let filter = Filter {
-            path: path.into(),
-            qos,
-        };
-
+    pub fn new(filter: Filter) -> Subscribe {
         Subscribe {
             pkid: 0,
             filters: vec![filter],
