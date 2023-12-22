@@ -1,8 +1,6 @@
-use rumqttc::v5::mqttbytes::v5::Filter;
-use rumqttc::v5::mqttbytes::{v5::PublishProperties, QoS};
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, Message, MqttOptions};
+use rumqttc::v5::{AsyncClient, Filter, Message, MqttOptions, PublishProperties, QoS};
 use std::error::Error;
 use std::time::Duration;
 
