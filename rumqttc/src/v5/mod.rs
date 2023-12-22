@@ -65,7 +65,6 @@ type RequestModifierFn = Arc<
 pub struct Message {
     pub topic: String,
     pub qos: QoS,
-    // NOTE: shall we make this payload Bytes?
     pub payload: Vec<u8>,
     pub retain: bool,
 }
@@ -81,19 +80,6 @@ impl Message {
             payload: vec![],
             retain: false,
         }
-    }
-
-    pub fn payload<P>(&mut self, payload: P) -> &mut Self
-    where
-        P: Into<Vec<u8>>,
-    {
-        self.payload = payload.into();
-        self
-    }
-
-    pub fn retain(&mut self) -> &mut Self {
-        self.retain = true;
-        self
     }
 }
 

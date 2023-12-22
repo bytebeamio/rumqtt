@@ -121,21 +121,6 @@ impl Filter {
         2 + self.path.len() + 1
     }
 
-    pub fn nolocal(&mut self) -> &mut Self {
-        self.nolocal = true;
-        self
-    }
-
-    pub fn preserve_retain(&mut self) -> &mut Self {
-        self.preserve_retain = true;
-        self
-    }
-
-    pub fn retain_forward_rule(&mut self, rule: RetainForwardRule) -> &mut Self {
-        self.retain_forward_rule = rule;
-        self
-    }
-
     pub fn read(bytes: &mut Bytes) -> Result<Vec<Filter>, Error> {
         // variable header size = 2 (packet identifier)
         let mut filters = Vec::new();
