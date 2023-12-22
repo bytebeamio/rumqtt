@@ -17,7 +17,8 @@ mod state;
 use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
 
-use mqttbytes::v5::*;
+pub use mqttbytes::v5::*;
+pub use mqttbytes::*;
 
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter};
 pub use eventloop::{ConnectionError, Event, EventLoop};
@@ -28,8 +29,6 @@ pub use crate::tls::Error as TlsError;
 
 #[cfg(feature = "proxy")]
 pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
-
-use self::mqttbytes::QoS;
 
 pub type Incoming = Packet;
 
