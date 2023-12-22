@@ -1,7 +1,8 @@
+use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::{v5::PublishProperties, QoS};
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, MqttOptions};
+use rumqttc::v5::{AsyncClient, Message, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
@@ -27,45 +28,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(client: AsyncClient) {
-    client
-        .subscribe("hello/world", QoS::AtMostOnce)
-        .await
-        .unwrap();
+    let filter = Filter::new("hello/world", QoS::AtMostOnce);
+    client.subscribe(filter).await.unwrap();
 
-    client
-        .subscribe("bye/world", QoS::AtMostOnce)
-        .await
-        .unwrap();
+    let filter = Filter::new("bye/world", QoS::AtMostOnce);
+    client.subscribe(filter).await.unwrap();
 
     let props = PublishProperties {
         topic_alias: Some(28),
         ..Default::default()
     };
 
+    let message = Message {
+        topic: "hello/world".into(),
+        qos: QoS::AtMostOnce,
+        payload: vec![3; 3],
+        retain: false,
+    };
+
     client
-        .publish_with_properties(
-            "hello/world",
-            QoS::AtMostOnce,
-            false,
-            vec![3; 3],
-            props.clone(),
-        )
+        .publish_with_properties(message, props.clone())
         .await
         .unwrap();
 
     let mut other_props = props.clone();
     other_props.topic_alias = Some(51);
 
+    let message = Message {
+        topic: "bye/world".into(),
+        qos: QoS::AtMostOnce,
+        payload: vec![3; 3],
+        retain: false,
+    };
+
     client
-        .publish_with_properties(
-            "bye/world",
-            QoS::AtMostOnce,
-            false,
-            vec![3; 3],
-            other_props.clone(),
-        )
+        .publish_with_properties(message, other_props.clone())
         .await
         .unwrap();
+
+    // no need to specify topic as we are using topic alias
+    let mut message = Message::new("", QoS::AtMostOnce);
 
     for i in 1..=10 {
         // alternately choose the properties
@@ -75,9 +77,9 @@ async fn requests(client: AsyncClient) {
             props.clone()
         };
 
-        // no need to specify topic as we are using topic alias
+        message.payload = vec![1; i];
         client
-            .publish_with_properties("", QoS::AtMostOnce, false, vec![1; i], properties)
+            .publish_with_properties(message.clone(), properties)
             .await
             .unwrap();
 

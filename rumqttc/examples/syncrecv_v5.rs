@@ -1,5 +1,6 @@
+use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::{v5::LastWill, QoS};
-use rumqttc::v5::{Client, MqttOptions};
+use rumqttc::v5::{Client, Message, MqttOptions};
 use std::thread;
 use std::time::Duration;
 
@@ -29,13 +30,18 @@ fn main() {
 }
 
 fn publish(client: Client) {
-    client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
-    for i in 0..3 {
-        let payload = vec![1; i];
-        let topic = format!("hello/{i}/world");
-        let qos = QoS::AtLeastOnce;
+    let filter = Filter::new("hello/+/world", QoS::AtMostOnce);
+    client.subscribe(filter).unwrap();
 
-        client.publish(topic, qos, true, payload).unwrap();
+    for i in 0..3 {
+        let message = Message {
+            topic: format!("hello/{i}/world"),
+            qos: QoS::AtLeastOnce,
+            payload: vec![1; i],
+            retain: false,
+        };
+
+        client.publish(message).unwrap();
     }
 
     thread::sleep(Duration::from_secs(1));

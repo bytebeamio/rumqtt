@@ -1,7 +1,8 @@
+use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, MqttOptions};
+use rumqttc::v5::{AsyncClient, Message, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
@@ -34,16 +35,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(client: AsyncClient) {
-    client
-        .subscribe("hello/world", QoS::AtMostOnce)
-        .await
-        .unwrap();
+    let filter = Filter::new("hello/world", QoS::AtMostOnce);
+    client.subscribe(filter).await.unwrap();
 
+    let mut message = Message::new("hello/world", QoS::ExactlyOnce);
     for i in 1..=10 {
-        client
-            .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
-            .await
-            .unwrap();
+        message.payload = vec![1; i];
+        client.publish(message.clone()).await.unwrap();
 
         time::sleep(Duration::from_secs(1)).await;
     }

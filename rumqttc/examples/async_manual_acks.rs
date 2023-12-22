@@ -1,6 +1,6 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
+use rumqttc::{self, AsyncClient, Event, EventLoop, Filter, Incoming, Message, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -22,10 +22,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (client, mut eventloop) = create_conn();
 
     // subscribe example topic
-    client
-        .subscribe("hello/world", QoS::AtLeastOnce)
-        .await
-        .unwrap();
+    let subscription = Filter::new("hello/world", QoS::AtLeastOnce);
+
+    client.subscribe(subscription).await.unwrap();
 
     task::spawn(async move {
         // send some messages to example topic and disconnect
@@ -75,11 +74,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(client: AsyncClient) {
+    let mut message = Message::new("hello/world", QoS::AtLeastOnce);
+
     for i in 1..=10 {
-        client
-            .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
-            .await
-            .unwrap();
+        message.payload = vec![1; i];
+
+        client.publish(message.clone()).await.unwrap();
 
         time::sleep(Duration::from_secs(1)).await;
     }

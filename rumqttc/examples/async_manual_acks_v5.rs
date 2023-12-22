@@ -1,9 +1,9 @@
 #![allow(dead_code, unused_imports)]
-use rumqttc::v5::mqttbytes::v5::Packet;
+use rumqttc::v5::mqttbytes::v5::{Filter, Packet};
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
+use rumqttc::v5::{AsyncClient, Event, EventLoop, Message, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
@@ -26,10 +26,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (client, mut eventloop) = create_conn();
 
     // subscribe example topic
-    client
-        .subscribe("hello/world", QoS::AtLeastOnce)
-        .await
-        .unwrap();
+    let filter = Filter::new("hello/world", QoS::AtLeastOnce);
+    client.subscribe(filter).await.unwrap();
 
     task::spawn(async move {
         // send some messages to example topic and disconnect
@@ -75,11 +73,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(client: &AsyncClient) {
+    let mut message = Message::new("hello/world", QoS::AtLeastOnce);
+
     for i in 1..=10 {
-        client
-            .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
-            .await
-            .unwrap();
+        message.payload = vec![1; i];
+
+        client.publish(message.clone()).await.unwrap();
 
         time::sleep(Duration::from_secs(1)).await;
     }

@@ -1,5 +1,5 @@
 #[cfg(all(feature = "websocket", feature = "proxy"))]
-use rumqttc::{self, AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
+use rumqttc::{self, AsyncClient, Filter, Message, Proxy, ProxyAuth, ProxyType, QoS, Transport};
 #[cfg(all(feature = "websocket", feature = "proxy"))]
 use std::{error::Error, time::Duration};
 #[cfg(all(feature = "websocket", feature = "proxy"))]
@@ -50,16 +50,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(all(feature = "websocket", feature = "proxy"))]
 async fn requests(client: AsyncClient) {
-    client
-        .subscribe("hello/world", QoS::AtMostOnce)
-        .await
-        .unwrap();
+    let filter = Filter::new("hello/world", QoS::AtMostOnce);
+    client.subscribe(filter).await.unwrap();
 
+    let mut message = Message::new("hello/world", QoS::ExactlyOnce);
     for i in 1..=10 {
-        client
-            .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
-            .await
-            .unwrap();
+        message.payload = vec![1; i];
+        client.publish(message.clone()).await.unwrap();
 
         time::sleep(Duration::from_secs(1)).await;
     }

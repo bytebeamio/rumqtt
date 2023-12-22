@@ -1,8 +1,8 @@
-use rumqttc::v5::mqttbytes::v5::SubscribeProperties;
+use rumqttc::v5::mqttbytes::v5::{Filter, SubscribeProperties};
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, MqttOptions};
+use rumqttc::v5::{AsyncClient, Message, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
@@ -32,8 +32,9 @@ async fn requests(client: AsyncClient) {
         user_properties: vec![],
     };
 
+    let filter = Filter::new("hello/world", QoS::AtMostOnce);
     client
-        .subscribe_with_properties("hello/world", QoS::AtMostOnce, props)
+        .subscribe_with_properties(filter, props)
         .await
         .unwrap();
 
@@ -42,8 +43,9 @@ async fn requests(client: AsyncClient) {
         user_properties: vec![],
     };
 
+    let filter = Filter::new("hello/#", QoS::AtMostOnce);
     client
-        .subscribe_with_properties("hello/#", QoS::AtMostOnce, props)
+        .subscribe_with_properties(filter.clone(), props)
         .await
         .unwrap();
 
@@ -51,32 +53,19 @@ async fn requests(client: AsyncClient) {
     // we will receive two publishes
     // one due to hello/world and other due to hello/#
     // both will have respective subscription ids
-    client
-        .publish(
-            "hello/world",
-            QoS::AtMostOnce,
-            false,
-            "both having subscription IDs!",
-        )
-        .await
-        .unwrap();
+    let mut message = Message::new("hello/world", QoS::AtMostOnce);
+    message.payload = "both having subscription IDs!".into();
+    client.publish(message.clone()).await.unwrap();
 
     time::sleep(Duration::from_millis(500)).await;
     client.unsubscribe("hello/#").await.unwrap();
-    client.subscribe("hello/#", QoS::AtMostOnce).await.unwrap();
+    client.subscribe(filter).await.unwrap();
     time::sleep(Duration::from_millis(500)).await;
 
     // we will receive two publishes
     // but only one will have subscription ID
     // cuz we unsubscribed to hello/# and then
     // subscribed without properties!
-    client
-        .publish(
-            "hello/world",
-            QoS::AtMostOnce,
-            false,
-            "Only one with subscription ID!",
-        )
-        .await
-        .unwrap();
+    message.payload = "Only one with subscription ID!".into();
+    client.publish(message).await.unwrap();
 }
