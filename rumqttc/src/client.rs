@@ -92,9 +92,13 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.next_pkid();
-        publish.pkid = pkid;
 
+        let mut pkid = 0;
+        if qos != QoS::AtMostOnce {
+            pkid = self.next_pkid();
+        }
+
+        publish.pkid = pkid;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -118,9 +122,13 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.next_pkid();
-        publish.pkid = pkid;
 
+        let mut pkid = 0;
+        if qos != QoS::AtMostOnce {
+            pkid = self.next_pkid();
+        }
+
+        publish.pkid = pkid;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
@@ -161,7 +169,12 @@ impl AsyncClient {
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.next_pkid();
+
+        let mut pkid = 0;
+        if qos != QoS::AtMostOnce {
+            pkid = self.next_pkid();
+        }
+
         publish.pkid = pkid;
         let publish = Request::Publish(publish);
         self.request_tx.send_async(publish).await?;
@@ -324,7 +337,12 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let pkid = self.client.next_pkid();
+
+        let mut pkid = 0;
+        if qos != QoS::AtMostOnce {
+            pkid = self.client.next_pkid();
+        }
+
         publish.pkid = pkid;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
