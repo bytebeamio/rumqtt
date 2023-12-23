@@ -326,7 +326,7 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(&mut self, publish: Publish) -> Result<(), StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 return Err(StateError::ZeroPkid);
@@ -425,7 +425,7 @@ impl MqttState {
         Ok(())
     }
 
-    fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
+    fn outgoing_subscribe(&mut self, subscription: Subscribe) -> Result<(), StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
         }
@@ -445,7 +445,7 @@ impl MqttState {
         Ok(())
     }
 
-    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
+    fn outgoing_unsubscribe(&mut self, unsub: Unsubscribe) -> Result<(), StateError> {
         if unsub.pkid == 0 {
             return Err(StateError::ZeroPkid);
         }
