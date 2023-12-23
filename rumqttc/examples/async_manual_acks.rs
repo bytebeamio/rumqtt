@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
     // create mqtt connection with clean_session = false and manual_acks = true
-    let (mut client, mut eventloop) = create_conn();
+    let (client, mut eventloop) = create_conn();
 
     // subscribe example topic
     client
@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn requests(mut client: AsyncClient) {
+async fn requests(client: AsyncClient) {
     for i in 1..=10 {
         client
             .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])

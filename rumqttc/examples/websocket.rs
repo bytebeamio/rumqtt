@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 #[cfg(feature = "websocket")]
-async fn requests(mut client: AsyncClient) {
+async fn requests(client: AsyncClient) {
     client
         .subscribe("hello/world", QoS::AtMostOnce)
         .await
