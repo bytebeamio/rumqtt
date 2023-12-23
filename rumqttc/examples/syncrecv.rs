@@ -27,7 +27,7 @@ fn main() {
     }
 }
 
-fn publish(client: Client) {
+fn publish(mut client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..3 {
         let payload = vec![1; i];
