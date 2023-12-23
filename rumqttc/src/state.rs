@@ -15,6 +15,9 @@ pub enum StateError {
     /// Invalid state for a given operation
     #[error("Invalid state for a given operation")]
     InvalidState,
+    /// Received a packet with pkid 0
+    #[error("Pkid must be non-zero")]
+    ZeroPkid,
     /// Received a packet (ack) which isn't asked for
     #[error("Received unsolicited ack pkid: {0}")]
     Unsolicited(u16),
@@ -52,14 +55,10 @@ pub struct MqttState {
     last_incoming: Instant,
     /// Last outgoing packet time
     last_outgoing: Instant,
-    /// Packet id of the last outgoing packet
-    pub(crate) last_pkid: u16,
     /// Packet id of the last acked publish
     pub(crate) last_puback: u16,
     /// Number of outgoing inflight publishes
     pub(crate) inflight: u16,
-    /// Maximum number of allowed inflight
-    pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
     pub(crate) outgoing_pub: Vec<Option<Publish>>,
     /// Packet ids of released QoS 2 publishes
@@ -88,10 +87,8 @@ impl MqttState {
             collision_ping_count: 0,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
-            last_pkid: 0,
             last_puback: 0,
             inflight: 0,
-            max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
@@ -128,6 +125,7 @@ impl MqttState {
         }
 
         // remove packed ids of incoming qos2 publishes
+        // NOTE(swanx): why not just call self.incoming_pub.clear()??
         for id in self.incoming_pub.iter_mut() {
             id.take();
         }
@@ -331,7 +329,7 @@ impl MqttState {
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
-                publish.pkid = self.next_pkid();
+                return Err(StateError::ZeroPkid);
             }
 
             let pkid = publish.pkid;
@@ -432,8 +430,9 @@ impl MqttState {
             return Err(StateError::EmptySubscription);
         }
 
-        let pkid = self.next_pkid();
-        subscription.pkid = pkid;
+        if subscription.pkid == 0 {
+            return Err(StateError::ZeroPkid);
+        }
 
         debug!(
             "Subscribe. Topics = {:?}, Pkid = {:?}",
@@ -447,8 +446,9 @@ impl MqttState {
     }
 
     fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
-        let pkid = self.next_pkid();
-        unsub.pkid = pkid;
+        if unsub.pkid == 0 {
+            return Err(StateError::ZeroPkid);
+        }
 
         debug!(
             "Unsubscribe. Topics = {:?}, Pkid = {:?}",
@@ -491,38 +491,14 @@ impl MqttState {
         }
     }
 
-    fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {
-        let pubrel = match pubrel.pkid {
-            // consider PacketIdentifier(0) as uninitialized packets
-            0 => {
-                pubrel.pkid = self.next_pkid();
-                pubrel
-            }
-            _ => pubrel,
-        };
+    fn save_pubrel(&mut self, pubrel: PubRel) -> Result<PubRel, StateError> {
+        if pubrel.pkid == 0 {
+            return Err(StateError::ZeroPkid);
+        }
 
         self.outgoing_rel[pubrel.pkid as usize] = Some(pubrel.pkid);
         self.inflight += 1;
         Ok(pubrel)
-    }
-
-    /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
-    /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
-    ///
-    fn next_pkid(&mut self) -> u16 {
-        let next_pkid = self.last_pkid + 1;
-
-        // When next packet id is at the edge of inflight queue,
-        // set await flag. This instructs eventloop to stop
-        // processing requests until all the inflight publishes
-        // are acked
-        if next_pkid == self.max_inflight {
-            self.last_pkid = 0;
-            return next_pkid;
-        }
-
-        self.last_pkid = next_pkid;
-        next_pkid
     }
 }
 
@@ -558,23 +534,6 @@ mod test {
     }
 
     #[test]
-    fn next_pkid_increments_as_expected() {
-        let mut mqtt = build_mqttstate();
-
-        for i in 1..=100 {
-            let pkid = mqtt.next_pkid();
-
-            // loops between 0-99. % 100 == 0 implies border
-            let expected = i % 100;
-            if expected == 0 {
-                break;
-            }
-
-            assert_eq!(expected, pkid);
-        }
-    }
-
-    #[test]
     fn outgoing_max_packet_size_check() {
         let mut mqtt = MqttState::new(100, false, 200);
 
@@ -593,44 +552,45 @@ mod test {
         );
     }
 
-    #[test]
-    fn outgoing_publish_should_set_pkid_and_add_publish_to_queue() {
-        let mut mqtt = build_mqttstate();
-
-        // QoS0 Publish
-        let publish = build_outgoing_publish(QoS::AtMostOnce);
-
-        // QoS 0 publish shouldn't be saved in queue
-        mqtt.outgoing_publish(publish).unwrap();
-        assert_eq!(mqtt.last_pkid, 0);
-        assert_eq!(mqtt.inflight, 0);
-
-        // QoS1 Publish
-        let publish = build_outgoing_publish(QoS::AtLeastOnce);
-
-        // Packet id should be set and publish should be saved in queue
-        mqtt.outgoing_publish(publish.clone()).unwrap();
-        assert_eq!(mqtt.last_pkid, 1);
-        assert_eq!(mqtt.inflight, 1);
-
-        // Packet id should be incremented and publish should be saved in queue
-        mqtt.outgoing_publish(publish).unwrap();
-        assert_eq!(mqtt.last_pkid, 2);
-        assert_eq!(mqtt.inflight, 2);
-
-        // QoS1 Publish
-        let publish = build_outgoing_publish(QoS::ExactlyOnce);
-
-        // Packet id should be set and publish should be saved in queue
-        mqtt.outgoing_publish(publish.clone()).unwrap();
-        assert_eq!(mqtt.last_pkid, 3);
-        assert_eq!(mqtt.inflight, 3);
-
-        // Packet id should be incremented and publish should be saved in queue
-        mqtt.outgoing_publish(publish).unwrap();
-        assert_eq!(mqtt.last_pkid, 4);
-        assert_eq!(mqtt.inflight, 4);
-    }
+    // we don't increment pkid here, so this won't work!
+    // #[test]
+    // fn outgoing_publish_should_set_pkid_and_add_publish_to_queue() {
+    //     let mut mqtt = build_mqttstate();
+    //
+    //     // QoS0 Publish
+    //     let publish = build_outgoing_publish(QoS::AtMostOnce);
+    //
+    //     // QoS 0 publish shouldn't be saved in queue
+    //     mqtt.outgoing_publish(publish).unwrap();
+    //     assert_eq!(mqtt.last_pkid, 0);
+    //     assert_eq!(mqtt.inflight, 0);
+    //
+    //     // QoS1 Publish
+    //     let publish = build_outgoing_publish(QoS::AtLeastOnce);
+    //
+    //     // Packet id should be set and publish should be saved in queue
+    //     mqtt.outgoing_publish(publish.clone()).unwrap();
+    //     assert_eq!(mqtt.last_pkid, 1);
+    //     assert_eq!(mqtt.inflight, 1);
+    //
+    //     // Packet id should be incremented and publish should be saved in queue
+    //     mqtt.outgoing_publish(publish).unwrap();
+    //     assert_eq!(mqtt.last_pkid, 2);
+    //     assert_eq!(mqtt.inflight, 2);
+    //
+    //     // QoS1 Publish
+    //     let publish = build_outgoing_publish(QoS::ExactlyOnce);
+    //
+    //     // Packet id should be set and publish should be saved in queue
+    //     mqtt.outgoing_publish(publish.clone()).unwrap();
+    //     assert_eq!(mqtt.last_pkid, 3);
+    //     assert_eq!(mqtt.inflight, 3);
+    //
+    //     // Packet id should be incremented and publish should be saved in queue
+    //     mqtt.outgoing_publish(publish).unwrap();
+    //     assert_eq!(mqtt.last_pkid, 4);
+    //     assert_eq!(mqtt.inflight, 4);
+    // }
 
     #[test]
     fn incoming_publish_should_be_added_to_queue_correctly() {
