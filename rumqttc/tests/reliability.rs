@@ -7,7 +7,7 @@ mod broker;
 use broker::*;
 use rumqttc::*;
 
-async fn start_requests(count: u8, qos: QoS, delay: u64, client: AsyncClient) {
+async fn start_requests(count: u8, qos: QoS, delay: u64, mut client: AsyncClient) {
     for i in 1..=count {
         let topic = "hello/world".to_owned();
         let payload = vec![i, 1, 2, 3];
@@ -21,7 +21,7 @@ async fn start_requests_with_payload(
     count: u8,
     qos: QoS,
     delay: u64,
-    client: AsyncClient,
+    mut client: AsyncClient,
     payload: usize,
 ) {
     for i in 1..=count {
