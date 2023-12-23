@@ -560,7 +560,7 @@ mod test {
     #[test]
     fn next_pkid_increments_as_expected() {
         let (sender, _) = flume::unbounded();
-        let mut client = AsyncClient::from_senders(sender, 100);
+        let client = AsyncClient::from_senders(sender, 100);
 
         for i in 1..=100 {
             let pkid = client.next_pkid();
