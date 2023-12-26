@@ -23,7 +23,7 @@ pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
 use segments::Storage;
 pub use server::Broker;
 
-use self::router::shared_subs::Strategy;
+pub use self::router::shared_subs::Strategy;
 
 mod link;
 pub mod protocol;
