@@ -62,8 +62,10 @@ impl AsyncClient {
         (client, eventloop)
     }
 
-    /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
-    /// creating a test instance.
+    /// Create a new `AsyncClient` from a channel `Sender`.
+    ///
+    /// This is mostly useful for creating a test instance where you can
+    /// listen on the corresponding receiver.
     pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
         AsyncClient { request_tx }
     }
