@@ -13,7 +13,6 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::Duration;
-use std::vec::IntoIter;
 
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
@@ -79,7 +78,7 @@ pub struct EventLoop {
     /// Requests handle to send requests
     pub(crate) requests_tx: Sender<Request>,
     /// Pending packets from last session
-    pub pending: IntoIter<Request>,
+    pub pending: Vec<Request>,
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time
@@ -102,7 +101,6 @@ impl EventLoop {
     pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = Vec::new();
-        let pending = pending.into_iter();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
         let max_outgoing_packet_size = mqtt_options.max_outgoing_packet_size;
@@ -134,7 +132,7 @@ impl EventLoop {
         let requests_in_channel = self.requests_rx.drain();
         pending.extend(requests_in_channel);
 
-        self.pending = pending.into_iter();
+        self.pending.extend(pending.into_iter());
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -267,7 +265,7 @@ impl EventLoop {
     }
 
     async fn next_request(
-        pending: &mut IntoIter<Request>,
+        pending: &mut Vec<Request>,
         rx: &Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
