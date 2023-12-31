@@ -128,7 +128,8 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        // this helps in preventing data loss
+        // NOTE: While this helps in preventing data loss, it could
+        // lead to a growing pending list if not managed properly.
         let requests_in_channel = self.requests_rx.drain();
         self.pending.extend(requests_in_channel);
     }
