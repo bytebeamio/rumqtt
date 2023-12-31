@@ -125,14 +125,12 @@ impl EventLoop {
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        let mut pending = self.state.clean();
+        self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
         // this helps in preventing data loss
         let requests_in_channel = self.requests_rx.drain();
-        pending.extend(requests_in_channel);
-
-        self.pending.extend(pending.into_iter());
+        self.pending.extend(requests_in_channel);
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -227,7 +225,7 @@ impl EventLoop {
                 &mut self.pending,
                 &self.requests_rx,
                 self.mqtt_options.pending_throttle
-            ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
+            ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
