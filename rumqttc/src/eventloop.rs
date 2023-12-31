@@ -269,11 +269,11 @@ impl EventLoop {
         rx: &Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
-        if pending.len() > 0 {
+        if let Some(req) = pending.pop() {
             time::sleep(pending_throttle).await;
             // We must call .next() AFTER sleep() otherwise .next() would
             // advance the iterator but the future might be canceled before return
-            Ok(pending.next().unwrap())
+            Ok(req)
         } else {
             match rx.recv_async().await {
                 Ok(r) => Ok(r),
