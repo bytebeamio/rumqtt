@@ -122,15 +122,15 @@ impl EventLoop {
     /// republished in the next session. Move pending messages from state to eventloop, drops the
     /// underlying network connection and clears the keepalive timeout if any.
     ///
-    /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
+    /// > NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect.
+    /// > Also, while this helps prevent data loss, the pending list length should be managed properly.
+    /// > For this reason we recommend setting [`AsycClient`](crate::AsyncClient)'s channel capacity to `0`.
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        // NOTE: While this helps in preventing data loss, it could
-        // lead to a growing pending list if not managed properly.
         let requests_in_channel = self.requests_rx.drain();
         self.pending.extend(requests_in_channel);
     }
