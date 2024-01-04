@@ -9,11 +9,11 @@ use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
 use tokio::time::{self, Instant, Sleep};
 
+use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::Duration;
-use std::vec::IntoIter;
 
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
@@ -79,7 +79,7 @@ pub struct EventLoop {
     /// Requests handle to send requests
     pub(crate) requests_tx: Sender<Request>,
     /// Pending packets from last session
-    pub pending: IntoIter<Request>,
+    pub pending: VecDeque<Request>,
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time
@@ -101,8 +101,7 @@ impl EventLoop {
     /// access and update `options`, `state` and `requests`.
     pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
         let (requests_tx, requests_rx) = bounded(cap);
-        let pending = Vec::new();
-        let pending = pending.into_iter();
+        let pending = VecDeque::new();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
         let max_outgoing_packet_size = mqtt_options.max_outgoing_packet_size;
@@ -123,18 +122,17 @@ impl EventLoop {
     /// republished in the next session. Move pending messages from state to eventloop, drops the
     /// underlying network connection and clears the keepalive timeout if any.
     ///
-    /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
+    /// > NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect.
+    /// > Also, while this helps prevent data loss, the pending list length should be managed properly.
+    /// > For this reason we recommend setting [`AsycClient`](crate::AsyncClient)'s channel capacity to `0`.
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        let mut pending = self.state.clean();
+        self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        // this helps in preventing data loss
         let requests_in_channel = self.requests_rx.drain();
-        pending.extend(requests_in_channel);
-
-        self.pending = pending.into_iter();
+        self.pending.extend(requests_in_channel);
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -229,7 +227,7 @@ impl EventLoop {
                 &mut self.pending,
                 &self.requests_rx,
                 self.mqtt_options.pending_throttle
-            ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
+            ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
                     match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
@@ -267,15 +265,15 @@ impl EventLoop {
     }
 
     async fn next_request(
-        pending: &mut IntoIter<Request>,
+        pending: &mut VecDeque<Request>,
         rx: &Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
-        if pending.len() > 0 {
+        if !pending.is_empty() {
             time::sleep(pending_throttle).await;
-            // We must call .next() AFTER sleep() otherwise .next() would
-            // advance the iterator but the future might be canceled before return
-            Ok(pending.next().unwrap())
+            // We must call .pop_front() AFTER sleep() otherwise we would have
+            // advanced the iterator but the future might be canceled before return
+            Ok(pending.pop_front().unwrap())
         } else {
             match rx.recv_async().await {
                 Ok(r) => Ok(r),
