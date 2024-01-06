@@ -579,7 +579,7 @@ async fn remote<P: Protocol>(
         }
         // Any other error
         Err(e) => {
-            error!(error=?e, "disconencted");
+            error!(error=?e, "disconnected");
         }
     };
 
