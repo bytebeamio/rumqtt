@@ -572,9 +572,16 @@ async fn remote<P: Protocol>(
             send_disconnect = false;
         }
         // Any other error
-        Err(e) => {
-            error!(error=?e, "Disconnected!!");
-        }
+        Err(e) => match e {
+            remote::Error::Io(e) => {
+                if e.kind() == io::ErrorKind::ConnectionAborted {
+                    info!("Link disconnected");
+                } else {
+                    error!(error=?e, "Disconnected!!");
+                }
+            }
+            _ => error!(error=?e, "Disconnected!!"),
+        },
     };
 
     if send_disconnect {
