@@ -568,18 +568,18 @@ async fn remote<P: Protocol>(
         // No need to send a disconnect message when disconnection
         // originated internally in the router.
         Err(remote::Error::Link(e)) => {
-            error!(error=?e, client_id=client_id, "router-drop");
+            error!(error=?e, "router-drop");
             send_disconnect = false;
         }
         // Connection was closed by peer
         Err(remote::Error::Network(network::Error::Io(err)) | remote::Error::Io(err))
             if err.kind() == io::ErrorKind::ConnectionAborted =>
         {
-            info!(error=?err, client_id=client_id, "disconnected");
+            info!(error=?err, "disconnected");
         }
         // Any other error
         Err(e) => {
-            error!(error=?e, client_id=client_id, "disconencted");
+            error!(error=?e, "disconencted");
         }
     };
 

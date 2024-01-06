@@ -11,7 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
-- Client id added to disconnect logs.
 - Peer initiated disconnects logged as info rather than error.
 
 ### Deprecated
