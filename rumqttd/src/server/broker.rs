@@ -1,6 +1,6 @@
 use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
-use crate::link::network::{Network, N};
+use crate::link::network::{self, Network, N};
 use crate::link::remote::{self, mqtt_connect, RemoteLink};
 use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
@@ -580,6 +580,16 @@ async fn remote<P: Protocol>(
                     error!(error=?e, "Disconnected!!");
                 }
             }
+            remote::Error::Network(e) => match e {
+                network::Error::Io(e) => {
+                    if e.kind() == io::ErrorKind::ConnectionAborted {
+                        info!("Link disconnected");
+                    } else {
+                        error!(error=?e, "Disconnected!!");
+                    }
+                }
+                _ => error!(error=?e, "Disconnected!!"),
+            },
             _ => error!(error=?e, "Disconnected!!"),
         },
     };
