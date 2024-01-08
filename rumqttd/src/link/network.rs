@@ -55,7 +55,7 @@ impl<P: Protocol> Network<P> {
             write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
             max_connection_buffer_len,
-            keepalive: Duration::MAX,
+            keepalive: Duration::ZERO,
             protocol,
         }
     }
