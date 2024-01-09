@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TLS Error variants: `NoValidClientCertInChain`, `NoValidKeyInChain`.
 - Drain `Request`s, which weren't received by eventloop, from channel and put them in pending while doing cleanup to prevent data loss.
 - websocket request modifier for v4 client
+- Surfaced `AsyncClient`'s `from_senders` method to the `Client` as `from_sender`
 
 ### Changed
 - Synchronous client methods take `&self` instead of `&mut self` (#646)
