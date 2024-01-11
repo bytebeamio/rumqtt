@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - MQTT keep alive interval
+- record client id for remote link's span
 
 ### Security
 

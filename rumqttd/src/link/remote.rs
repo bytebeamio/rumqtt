@@ -186,6 +186,8 @@ where
         packet => return Err(Error::NotConnectPacket(packet)),
     };
 
+    Span::current().record("client_id", &connect.client_id);
+
     handle_auth(config.clone(), login.as_ref(), &connect.client_id)?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
