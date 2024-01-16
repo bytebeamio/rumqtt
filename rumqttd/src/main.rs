@@ -3,6 +3,8 @@ use rumqttd::Broker;
 
 use clap::Parser;
 use tracing::trace;
+use tracing_chrome::ChromeLayerBuilder;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
@@ -62,9 +64,13 @@ fn main() {
 
     let reload_handle = builder.reload_handle();
 
-    builder
-        .try_init()
-        .expect("initialized subscriber succesfully");
+    let subscriber = builder.finish();
+
+    let (chrome_layer, _guard) = ChromeLayerBuilder::new()
+        .include_args(true)
+        .include_locations(false)
+        .build();
+    subscriber.with(chrome_layer).init();
 
     let mut config_builder = config::Config::builder();
 
