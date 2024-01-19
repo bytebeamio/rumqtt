@@ -22,6 +22,7 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
 - certificate for client authentication is now optional while using native-tls. `der` & `password` fields are replaced by `client_auth`.
 - Make v5 `RetainForwardRule` public, in order to allow setting it when constructing `Filter` values.
 - Use `VecDeque` instead of `IntoIter` to fix unintentional drop of pending requests on `EventLoop::clean` (#780)
+- `StateError::IncommingPacketTooLarge` is now `StateError::IncomingPacketTooLarge`.
 
 ### Deprecated
 

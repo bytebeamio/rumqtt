@@ -45,7 +45,7 @@ pub enum StateError {
     #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
     OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
     #[error("Cannot receive packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
-    IncommingPacketTooLarge { pkt_size: usize, max: usize },
+    IncomingPacketTooLarge { pkt_size: usize, max: usize },
     #[error("Server sent disconnect with reason `{reason_string:?}` and code '{reason_code:?}' ")]
     ServerDisconnect {
         reason_code: DisconnectReasonCode,
