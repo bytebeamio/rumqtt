@@ -30,7 +30,7 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
-    #[error("Cannot recieve packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
+    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
     OutgoingPacketTooLarge { pkt_size: usize, max: usize },
 }
 

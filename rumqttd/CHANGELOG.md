@@ -8,14 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+- Public re-export `Strategy` for shared subscriptions
+- Peer initiated disconnects logged as info rather than error.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- MQTT keep alive interval
+- record client id for remote link's span
+
+### Security
+
+---
+
+## [rumqttd 0.19.0] - 12-12-2023
+
+### Added
 - Log warning if websocket config is getting ignored
-- Add support for ECC keys when configuring TLS in rumqttd 
+- Add support for ECC keys when configuring TLS in rumqttd
+- Support for external authentication with custom function
 
 ### Changed
 - Console endpoint /config prints Router Config instead of returning console settings
 - v4 config is optional, user can specify v4 and/or v5 config
 - websocket feature is enabled by default
 - console configuration is optional
+- rustls client auth is featured gated behind "verify-client-cert" ( disabled by default ).
 
 ### Deprecated
 - "websockets" feature is removed in favour of "websocket"

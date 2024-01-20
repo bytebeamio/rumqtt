@@ -1,6 +1,6 @@
 use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
-use crate::link::network::{Network, N};
+use crate::link::network::{self, Network, N};
 use crate::link::remote::{self, mqtt_connect, RemoteLink};
 use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
@@ -571,9 +571,15 @@ async fn remote<P: Protocol>(
             error!(error=?e, "router-drop");
             send_disconnect = false;
         }
+        // Connection was closed by peer
+        Err(remote::Error::Network(network::Error::Io(err)) | remote::Error::Io(err))
+            if err.kind() == io::ErrorKind::ConnectionAborted =>
+        {
+            info!(error=?err, "disconnected");
+        }
         // Any other error
         Err(e) => {
-            error!(error=?e, "Disconnected!!");
+            error!(error=?e, "disconnected");
         }
     };
 

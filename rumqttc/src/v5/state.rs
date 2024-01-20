@@ -39,13 +39,13 @@ pub enum StateError {
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
     #[error(
-        "Cannot use topic alias '{alias:?}'. It's greater than the brokers maximum of '{max:?}'."
+        "Cannot use topic alias '{alias:?}'. It's greater than the broker's maximum of '{max:?}'."
     )]
     InvalidAlias { alias: u16, max: u16 },
     #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
     OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
-    #[error("Cannot recieve packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
-    IncommingPacketTooLarge { pkt_size: usize, max: usize },
+    #[error("Cannot receive packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
+    IncomingPacketTooLarge { pkt_size: usize, max: usize },
     #[error("Server sent disconnect with reason `{reason_string:?}` and code '{reason_code:?}' ")]
     ServerDisconnect {
         reason_code: DisconnectReasonCode,
@@ -57,7 +57,7 @@ pub enum StateError {
     SubFail { reason: SubscribeReasonCode },
     #[error("Publish acknowledgement failed with reason '{reason:?}' ")]
     PubAckFail { reason: PubAckReason },
-    #[error("Publish recieve failed with reason '{reason:?}' ")]
+    #[error("Publish receive failed with reason '{reason:?}' ")]
     PubRecFail { reason: PubRecReason },
     #[error("Publish release failed with reason '{reason:?}' ")]
     PubRelFail { reason: PubRelReason },
