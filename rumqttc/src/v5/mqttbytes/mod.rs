@@ -39,15 +39,8 @@ pub fn has_wildcards(s: &str) -> bool {
 
 /// Checks if a topic is valid
 pub fn valid_topic(topic: &str) -> bool {
-    if topic.contains('+') {
-        return false;
-    }
-
-    if topic.contains('#') {
-        return false;
-    }
-
-    true
+    // topic can't contain wildcards
+    !topic.contains('+') && !topic.contains('#')
 }
 
 /// Checks if the filter is valid
