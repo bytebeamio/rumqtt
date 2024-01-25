@@ -525,7 +525,7 @@ async fn remote<P: Protocol>(
     if client_id.is_empty() {
         client_id = thread_rng()
             .sample_iter(&Alphanumeric)
-            .take(10)
+            .take(16)
             .map(char::from)
             .collect();
         assigned_client_id = Some(client_id.clone());
