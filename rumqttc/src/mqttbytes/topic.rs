@@ -6,7 +6,11 @@ pub fn has_wildcards(s: &str) -> bool {
 /// Checks if a topic is valid
 pub fn valid_topic(topic: &str) -> bool {
     // topic can't contain wildcards
-    !topic.contains('+') && !topic.contains('#')
+    if topic.contains('+') || topic.contains('#') {
+        return false;
+    }
+
+    true
 }
 
 /// Checks if the filter is valid
