@@ -2,7 +2,7 @@
 name = "benchmarks"
 version = "0.4.0"
 publish = false
-rust-version.workspace = true
+rust-version = "1.70.0"
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ authors.workspace = true
 bytes = "1"
 futures = { version = "0.3", features = ["compat"] }
 itoa = "1.0"
-pprof = { version = "0.12", features = ["flamegraph", "prost-codec"] }
+pprof = { version = "0.13", features = ["flamegraph", "prost-codec"] }
 pretty_env_logger = "0.5"
 rumqttc = { path = "../rumqttc" }
 rumqttd = { path = "../rumqttd" }

@@ -93,7 +93,7 @@ impl Network {
                 }
                 Err(mqttbytes::Error::PayloadSizeLimitExceeded { pkt_size, max }) => {
                     state.handle_protocol_error()?;
-                    return Err(StateError::IncommingPacketTooLarge { pkt_size, max });
+                    return Err(StateError::IncomingPacketTooLarge { pkt_size, max });
                 }
                 Err(e) => return Err(StateError::Deserialization(e)),
             };

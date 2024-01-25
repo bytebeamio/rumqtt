@@ -1,4 +1,6 @@
 #[cfg(feature = "use-rustls")]
+use rustls_pemfile::Item;
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::client::InvalidDnsNameError;
@@ -9,8 +11,6 @@ use tokio_rustls::rustls::{
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::TlsConnector as RustlsConnector;
 
-#[cfg(feature = "use-rustls")]
-use crate::Key;
 #[cfg(feature = "use-rustls")]
 use std::convert::TryFrom;
 #[cfg(feature = "use-rustls")]
@@ -51,20 +51,21 @@ pub enum Error {
     #[error("TLS error: {0}")]
     TLS(#[from] rustls::Error),
     #[cfg(feature = "use-rustls")]
-    /// No valid certificate in chain
-    #[error("No valid certificate in chain")]
+    /// No valid CA cert found
+    #[error("No valid CA certificate provided")]
     NoValidCertInChain,
+    #[cfg(feature = "use-rustls")]
+    /// No valid client cert found
+    #[error("No valid certificate for client authentication in chain")]
+    NoValidClientCertInChain,
+    #[cfg(feature = "use-rustls")]
+    /// No valid key found
+    #[error("No valid key in chain")]
+    NoValidKeyInChain,
     #[cfg(feature = "use-native-tls")]
     #[error("Native TLS error {0}")]
     NativeTls(#[from] NativeTlsError),
 }
-
-// // The cert handling functions return unit right now, this is a shortcut
-// impl From<()> for Error {
-//     fn from(_: ()) -> Self {
-//         Error::NoValidCertInChain
-//     }
-// }
 
 #[cfg(feature = "use-rustls")]
 pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsConnector, Error> {
@@ -90,7 +91,7 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                 }
             });
 
-            root_cert_store.add_server_trust_anchors(trust_anchors);
+            root_cert_store.add_trust_anchors(trust_anchors);
 
             if root_cert_store.is_empty() {
                 return Err(Error::NoValidCertInChain);
@@ -104,30 +105,27 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
             let mut config = if let Some(client) = client_auth.as_ref() {
                 let certs =
                     rustls_pemfile::certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
-                // load appropriate Key as per the user request. The underlying signature algorithm
-                // of key generation determines the Signature Algorithm during the TLS Handskahe.
-                let read_keys = match &client.1 {
-                    Key::RSA(k) => rustls_pemfile::rsa_private_keys(&mut BufReader::new(
-                        Cursor::new(k.clone()),
-                    )),
-                    Key::ECC(k) => rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(
-                        Cursor::new(k.clone()),
-                    )),
-                };
-                let keys = match read_keys {
-                    Ok(v) => v,
-                    Err(_e) => return Err(Error::NoValidCertInChain),
-                };
+                if certs.is_empty() {
+                    return Err(Error::NoValidClientCertInChain);
+                }
 
-                // Get the first key. Error if it's not valid
-                let key = match keys.first() {
-                    Some(k) => k.clone(),
-                    None => return Err(Error::NoValidCertInChain),
+                // Create buffer for key file
+                let mut key_buffer = BufReader::new(Cursor::new(client.1.clone()));
+
+                // Read PEM items until we find a valid key.
+                let key = loop {
+                    let item = rustls_pemfile::read_one(&mut key_buffer)?;
+                    match item {
+                        Some(Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key)) => {
+                            break key;
+                        }
+                        None => return Err(Error::NoValidKeyInChain),
+                        _ => {}
+                    }
                 };
 
                 let certs = certs.into_iter().map(Certificate).collect();
-
-                config.with_single_cert(certs, PrivateKey(key))?
+                config.with_client_auth_cert(certs, PrivateKey(key))?
             } else {
                 config.with_no_client_auth()
             };
@@ -152,13 +150,18 @@ pub async fn native_tls_connector(
     tls_config: &TlsConfiguration,
 ) -> Result<NativeTlsConnector, Error> {
     let connector = match tls_config {
-        TlsConfiguration::SimpleNative { ca, der, password } => {
+        TlsConfiguration::SimpleNative { ca, client_auth } => {
             let cert = native_tls::Certificate::from_pem(ca)?;
-            let identity = Identity::from_pkcs12(der, password)?;
-            native_tls::TlsConnector::builder()
-                .add_root_certificate(cert)
-                .identity(identity)
-                .build()?
+
+            let mut connector_builder = native_tls::TlsConnector::builder();
+            connector_builder.add_root_certificate(cert);
+
+            if let Some((der, password)) = client_auth {
+                let identity = Identity::from_pkcs12(der, password)?;
+                connector_builder.identity(identity);
+            }
+
+            connector_builder.build()?
         }
         TlsConfiguration::Native => native_tls::TlsConnector::new()?,
         #[allow(unreachable_patterns)]

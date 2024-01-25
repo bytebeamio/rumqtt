@@ -8,8 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added `bind_device` to `NetworkOptions` to enable `TCPSocket.bind_device()`
+- Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
+- Support for all variants of TLS key formats currently supported by Rustls: `PKCS#1`, `PKCS#8`, `RFC5915`. In practice we should now support all RSA keys and ECC keys in `DER` and `SEC1` encoding. Previously only `PKCS#1` and `PKCS#8` where supported.
+- TLS Error variants: `NoValidClientCertInChain`, `NoValidKeyInChain`.
+- Drain `Request`s, which weren't received by eventloop, from channel and put them in pending while doing cleanup to prevent data loss.
+- websocket request modifier for v4 client
+- Surfaced `AsyncClient`'s `from_senders` method to the `Client` as `from_sender`
 
+### Changed
+- Synchronous client methods take `&self` instead of `&mut self` (#646)
+- Removed the `Key` enum: users do not need to specify the TLS key variant in the `TlsConfiguration` anymore, this is inferred automatically.
+To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initialization.
+- certificate for client authentication is now optional while using native-tls. `der` & `password` fields are replaced by `client_auth`.
+- Make v5 `RetainForwardRule` public, in order to allow setting it when constructing `Filter` values.
+- Use `VecDeque` instead of `IntoIter` to fix unintentional drop of pending requests on `EventLoop::clean` (#780)
+- `StateError::IncommingPacketTooLarge` is now `StateError::IncomingPacketTooLarge`.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- Lowered the MSRV to 1.64.0
+- Request modifier function should be Send and Sync and removed unnecessary Box
+
+### Security
+
+---
+
+## [rumqttc 0.23.0] - 10-10-2023
+
+### Added
+- Added `bind_device` to `NetworkOptions` to enable `TCPSocket.bind_device()`
 - Added `MqttOptions::set_request_modifier` for setting a handler for modifying a websocket request before sending it.
 
 ### Changed
@@ -20,9 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Allow keep alive values <= 5 seconds (#643)
+- Verify "mqtt" is present in websocket subprotocol header.
 
 ### Security
 - Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
+- Removed dependency vulnerability, see [rustsec](https://rustsec.org/advisories/RUSTSEC-2023-0065). Update of `tungstenite` dependency.
 
 ---
 

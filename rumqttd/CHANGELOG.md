@@ -8,9 +8,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+- Public re-export `Strategy` for shared subscriptions
+- Peer initiated disconnects logged as info rather than error.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- MQTT keep alive interval
+- record client id for remote link's span
+
+### Security
+
+---
+
+## [rumqttd 0.19.0] - 12-12-2023
+
+### Added
+- Log warning if websocket config is getting ignored
+- Add support for ECC keys when configuring TLS in rumqttd
+- Support for external authentication with custom function
+
+### Changed
+- Console endpoint /config prints Router Config instead of returning console settings
+- v4 config is optional, user can specify v4 and/or v5 config
+- websocket feature is enabled by default
+- console configuration is optional
+- rustls client auth is featured gated behind "verify-client-cert" ( disabled by default ).
+
+### Deprecated
+- "websockets" feature is removed in favour of "websocket"
+
+### Removed
+
+### Fixed
+
+### Security
+- Update tungstenite and dependencies to fix [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0065).
+
+---
+
+## [rumqttd 0.18.0] - 12-09-2023
+
+### Added
 - Will delay interval for MQTTv5 (#686)
 
 ### Changed
+- Non-consuming builder pattern for constructing Connection
 
 ### Deprecated
 
