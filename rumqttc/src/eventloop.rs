@@ -23,9 +23,8 @@ use crate::tls;
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{validate_response_headers, UrlError},
-    async_tungstenite::tungstenite::client::IntoClientRequest,
-    ws_stream_tungstenite::WsStream,
+    crate::websockets::validate_response_headers,
+    async_tungstenite::tungstenite::client::IntoClientRequest, ws_stream_tungstenite::WsStream,
 };
 
 #[cfg(feature = "proxy")]
@@ -57,9 +56,6 @@ pub enum ConnectionError {
     NotConnAck(Packet),
     #[error("Requests done")]
     RequestsDone,
-    #[cfg(feature = "websocket")]
-    #[error("Invalid Url: {0}")]
-    InvalidUrl(#[from] UrlError),
     #[cfg(feature = "proxy")]
     #[error("Proxy Connect: {0}")]
     Proxy(#[from] ProxyError),

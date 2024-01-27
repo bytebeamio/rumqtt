@@ -752,47 +752,13 @@ impl MqttOptions {
     }
 }
 
-#[cfg(feature = "url")]
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
 
-    #[error("Missing client ID.")]
-    ClientId,
-
-    #[error("Invalid keep-alive value.")]
-    KeepAlive,
-
-    #[error("Invalid clean-session value.")]
-    CleanSession,
-
-    #[error("Invalid max-incoming-packet-size value.")]
-    MaxIncomingPacketSize,
-
-    #[error("Invalid max-outgoing-packet-size value.")]
-    MaxOutgoingPacketSize,
-
-    #[error("Invalid request-channel-capacity value.")]
-    RequestChannelCapacity,
-
-    #[error("Invalid max-request-batch value.")]
-    MaxRequestBatch,
-
-    #[error("Invalid pending-throttle value.")]
-    PendingThrottle,
-
-    #[error("Invalid inflight value.")]
-    Inflight,
-
     #[error("Can't parse port as u16")]
     Port,
-
-    #[error("Unknown option: {0}")]
-    Unknown(String),
-
-    #[error("Couldn't parse option from url: {0}")]
-    Parse(#[from] url::ParseError),
 }
 
 // Implement Debug manually because ClientConfig doesn't implement it, so derive(Debug) doesn't

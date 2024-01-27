@@ -124,10 +124,7 @@ impl MqttOptions {
     /// # use rumqttc::MqttOptions;
     /// let options = MqttOptions::new("", "localhost", 1883);
     /// ```
-    pub fn new<S: Into<String>, T: AsRef<String>>(
-        id: S,
-        host: T,
-    ) -> Result<MqttOptions, OptionError> {
+    pub fn new<S: Into<String>, T: AsRef<str>>(id: S, host: T) -> Result<MqttOptions, OptionError> {
         let id = id.into();
         if id.starts_with(' ') || id.is_empty() {
             panic!("Invalid client id");
@@ -208,6 +205,15 @@ impl MqttOptions {
     /// Broker address
     pub fn broker_address(&self) -> (String, u16) {
         (self.broker_addr.clone(), self.port)
+    }
+
+    pub fn addr_path(&self) -> String {
+        self.addr_path.clone()
+    }
+
+    pub fn set_port(&mut self, port: u16) -> &mut Self {
+        self.port = port;
+        self
     }
 
     pub fn set_last_will(&mut self, will: LastWill) -> &mut Self {
@@ -563,44 +569,8 @@ pub enum OptionError {
     #[error("Unsupported URL scheme.")]
     Scheme,
 
-    #[error("Missing client ID.")]
-    ClientId,
-
-    #[error("Invalid keep-alive value.")]
-    KeepAlive,
-
-    #[error("Invalid clean-start value.")]
-    CleanStart,
-
-    #[error("Invalid max-incoming-packet-size value.")]
-    MaxIncomingPacketSize,
-
-    #[error("Invalid max-outgoing-packet-size value.")]
-    MaxOutgoingPacketSize,
-
-    #[error("Invalid request-channel-capacity value.")]
-    RequestChannelCapacity,
-
-    #[error("Invalid max-request-batch value.")]
-    MaxRequestBatch,
-
-    #[error("Invalid pending-throttle value.")]
-    PendingThrottle,
-
-    #[error("Invalid inflight value.")]
-    Inflight,
-
-    #[error("Invalid conn-timeout value.")]
-    ConnTimeout,
-
     #[error("Can't parse port as u16")]
     Port,
-
-    #[error("Unknown option: {0}")]
-    Unknown(String),
-
-    #[error("Couldn't parse option from url: {0}")]
-    Parse(#[from] url::ParseError),
 }
 
 // Implement Debug manually because ClientConfig doesn't implement it, so derive(Debug) doesn't
