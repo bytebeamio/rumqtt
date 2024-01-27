@@ -13,7 +13,7 @@
 //! use std::time::Duration;
 //! use std::thread;
 //!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
+//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org").unwrap();
 //! mqttoptions.set_keep_alive(Duration::from_secs(5));
 //!
 //! let (mut client, mut connection) = Client::new(mqttoptions, 10);
@@ -40,7 +40,7 @@
 //!
 //! # #[tokio::main(worker_threads = 1)]
 //! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
+//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org").unwrap();
 //! mqttoptions.set_keep_alive(Duration::from_secs(5));
 //!
 //! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -491,13 +491,13 @@ impl MqttOptions {
     ///
     /// ```
     /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("123", "localhost", 1883);
+    /// let options = MqttOptions::new("123", "localhost").unwrap();
     /// ```
     /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
     /// for example, the following code would panic:
     /// ```should_panic
     /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
+    /// let options = MqttOptions::new("", "localhost").unwrap();
     /// ```
     pub fn new<S: Into<String>, T: AsRef<str>>(id: S, host: T) -> Result<MqttOptions, OptionError> {
         let id = id.into();

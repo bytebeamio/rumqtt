@@ -8,7 +8,7 @@ use std::error::Error;
 use std::time::Duration;
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost").unwrap();
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)

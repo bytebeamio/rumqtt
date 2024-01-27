@@ -77,7 +77,7 @@ async fn connection_should_timeout_on_time() {
     });
 
     time::sleep(Duration::from_secs(1)).await;
-    let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
+    let options = MqttOptions::new("dummy", "127.0.0.1:1880").unwrap();
     let mut eventloop = EventLoop::new(options, 5);
 
     let start = Instant::now();
@@ -96,19 +96,19 @@ async fn connection_should_timeout_on_time() {
 #[test]
 #[should_panic]
 fn test_invalid_keep_alive_value() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1885").unwrap();
     options.set_keep_alive(Duration::from_millis(10));
 }
 
 #[test]
 fn test_zero_keep_alive_values() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1885").unwrap();
     options.set_keep_alive(Duration::ZERO);
 }
 
 #[test]
 fn test_valid_keep_alive_values() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1885").unwrap();
     options.set_keep_alive(Duration::from_secs(1));
 }
 
@@ -116,7 +116,7 @@ fn test_valid_keep_alive_values() {
 async fn idle_connection_triggers_pings_on_time() {
     let keep_alive = 1;
 
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1885").unwrap();
     options.set_keep_alive(Duration::from_secs(keep_alive));
 
     // Create client eventloop and poll
@@ -151,7 +151,7 @@ async fn idle_connection_triggers_pings_on_time() {
 #[tokio::test]
 async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
     let keep_alive = 5;
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1886").unwrap();
 
     options.set_keep_alive(Duration::from_secs(keep_alive));
 
@@ -195,7 +195,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
 #[tokio::test]
 async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     let keep_alive = 5;
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:2000").unwrap();
 
     options.set_keep_alive(Duration::from_secs(keep_alive));
 
@@ -233,7 +233,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
 
 #[tokio::test]
 async fn detects_halfopen_connections_in_the_second_ping_request() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:2001").unwrap();
     options.set_keep_alive(Duration::from_secs(5));
 
     // A broker which consumes packets but doesn't reply
@@ -263,7 +263,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
 
 #[tokio::test]
 async fn requests_are_blocked_after_max_inflight_queue_size() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1887);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1887").unwrap();
     options.set_inflight(5);
     let inflight = options.inflight();
 
@@ -291,7 +291,7 @@ async fn requests_are_blocked_after_max_inflight_queue_size() {
 
 #[tokio::test]
 async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1888").unwrap();
     options.set_inflight(3);
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
@@ -330,7 +330,7 @@ async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
 #[ignore]
 #[tokio::test]
 async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1891);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:1891").unwrap();
     options.set_inflight(10);
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
@@ -446,7 +446,7 @@ async fn packet_id_collisions_are_detected_and_flow_control_is_applied() {
 //
 #[tokio::test]
 async fn next_poll_after_connect_failure_reconnects() {
-    let options = MqttOptions::new("dummy", "127.0.0.1", 3000);
+    let options = MqttOptions::new("dummy", "127.0.0.1:3000").unwrap();
 
     task::spawn(async move {
         let _broker = Broker::new(3000, 1).await;
@@ -473,7 +473,7 @@ async fn next_poll_after_connect_failure_reconnects() {
 
 #[tokio::test]
 async fn reconnection_resumes_from_the_previous_state() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3001);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:3001").unwrap();
     options.set_keep_alive(Duration::from_secs(5));
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
@@ -513,7 +513,7 @@ async fn reconnection_resumes_from_the_previous_state() {
 
 #[tokio::test]
 async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:3002").unwrap();
     options.set_keep_alive(Duration::from_secs(5));
 
     // start sending qos0 publishes. this makes sure that there is
@@ -546,7 +546,7 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
 
 #[tokio::test]
 async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let mut options = MqttOptions::new("dummy", "127.0.0.1:3004").unwrap();
     options.set_keep_alive(Duration::from_secs(5));
     let mut network_options = NetworkOptions::new();
     network_options.set_tcp_send_buffer_size(1024);

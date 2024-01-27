@@ -116,13 +116,13 @@ impl MqttOptions {
     ///
     /// ```
     /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("123", "localhost", 1883);
+    /// let options = MqttOptions::new("123", "localhost").unwrap();
     /// ```
     /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
     /// for example, the following code would panic:
     /// ```should_panic
     /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
+    /// let options = MqttOptions::new("", "localhost").unwrap();
     /// ```
     pub fn new<S: Into<String>, T: AsRef<str>>(id: S, host: T) -> Result<MqttOptions, OptionError> {
         let id = id.into();
