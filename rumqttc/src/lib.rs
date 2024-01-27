@@ -547,6 +547,11 @@ impl MqttOptions {
             addr_path = path;
         };
 
+        // ideally we should validate host as well
+        // i.e. to see if it is valid domain / ip addr
+        // but validating it manually is quite big task
+        // using dependency like url::Host doesn't support no_std
+        // we can use url once they support no_std!
         if let Some((rest, p)) = host.split_once(':') {
             host = rest;
             port = p.parse::<u16>().map_err(|_| OptionError::Port)?;
