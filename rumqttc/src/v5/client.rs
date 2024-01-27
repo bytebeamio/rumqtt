@@ -836,7 +836,7 @@ mod test {
     fn calling_iter_twice_on_connection_shouldnt_panic() {
         use std::time::Duration;
 
-        let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+        let mut mqttoptions = MqttOptions::new("test-1", "localhost").unwrap();
         let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false, None);
         mqttoptions
             .set_keep_alive(Duration::from_secs(5))

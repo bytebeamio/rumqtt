@@ -24,7 +24,7 @@ use {std::path::Path, tokio::net::UnixStream};
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, validate_response_headers, UrlError},
+    crate::websockets::{validate_response_headers, UrlError},
     async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
@@ -297,14 +297,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         return Ok(network);
     }
 
-    // For websockets domain and port are taken directly from `broker_addr` (which is a url).
-    let (domain, port) = match options.transport() {
-        #[cfg(feature = "websocket")]
-        Transport::Ws => split_url(&options.broker_addr)?,
-        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
-        Transport::Wss(_) => split_url(&options.broker_addr)?,
-        _ => options.broker_address(),
-    };
+    let (domain, port) = options.broker_address();
 
     let tcp_stream: Box<dyn N> = {
         #[cfg(feature = "proxy")]
@@ -341,7 +334,8 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         Transport::Unix => unreachable!(),
         #[cfg(feature = "websocket")]
         Transport::Ws => {
-            let mut request = options.broker_addr.as_str().into_client_request()?;
+            let path = options.addr_path();
+            let mut request = format!("ws://{domain}:{port}/{path}").into_client_request()?;
             request
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
@@ -358,7 +352,8 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
-            let mut request = options.broker_addr.as_str().into_client_request()?;
+            let path = options.addr_path();
+            let mut request = format!("wss://{domain}:{port}/{path}").into_client_request()?;
             request
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
