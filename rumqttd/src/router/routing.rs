@@ -15,7 +15,7 @@ use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
@@ -303,6 +303,11 @@ impl Router {
 
         // Retrieve previous connection state from graveyard
         let saved = self.graveyard.retrieve(&client_id);
+        let saved_metrics = self
+            .graveyard
+            .retrieve_metrics(&client_id)
+            .unwrap_or_default();
+
         let clean_session = connection.clean;
         let previous_session = saved.is_some();
         // for qos2 pending pubrels
@@ -310,15 +315,14 @@ impl Router {
         let tracker = if !clean_session {
             let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
             connection.subscriptions = saved.subscriptions;
-            connection.events = saved.metrics;
+            connection.events = saved_metrics;
             // for using in acklog
             pending_acks = saved.unacked_pubrels.clone();
             outgoing.unacked_pubrels = saved.unacked_pubrels;
             saved.tracker
         } else {
             // Only retrieve metrics in clean session
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.events = saved.metrics;
+            connection.events = saved_metrics;
             Tracker::new(client_id.clone())
         };
         let ackslog = AckLog::new();
@@ -483,7 +487,9 @@ impl Router {
         }
 
         // Save state for persistent sessions
-        if !connection.clean {
+        // In v5: whether to store session or not is determined
+        // by session expiry interval, not by clean start flag!
+        if !connection.clean || connection.expiry_interval > 0 {
             // Add inflight data requests back to tracker
             inflight_data_requests
                 .into_iter()
@@ -503,20 +509,23 @@ impl Router {
                 }
             }
 
+            let expiry_interval = match connection.expiry_interval {
+                // If the Session Expiry Interval is 0xFFFFFFFF (UINT_MAX)
+                // the Session does not expire.
+                u32::MAX => None,
+                exp => Some(Instant::now() + Duration::from_secs(exp as u64)),
+            };
+
             self.graveyard.save(
                 tracker,
                 connection.subscriptions,
-                connection.events,
                 outgoing.unacked_pubrels,
+                expiry_interval,
             );
+            self.graveyard.save_metrics(client_id, connection.events);
         } else {
             // Only save metrics in clean session
-            self.graveyard.save(
-                Tracker::new(client_id),
-                HashSet::new(),
-                connection.events,
-                VecDeque::new(),
-            );
+            self.graveyard.save_metrics(client_id, connection.events);
         }
         self.router_meters.total_connections -= 1;
     }
@@ -857,9 +866,28 @@ impl Router {
 
                     force_ack = true;
                 }
-                Packet::Disconnect(_, _) => {
+                Packet::Disconnect(_disconn, props) => {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
+
+                    let session_expiry = props.as_ref().and_then(|p| p.session_expiry_interval);
+
+                    // NOTE: shall session_expiry be passed as argument to handle disconnect?
+                    match session_expiry {
+                        Some(exp) if exp > 0 => {
+                            let connection = self.connections.get_mut(id).unwrap();
+                            // If the Session Expiry Interval in the CONNECT packet was zero,
+                            // then it is a Protocol Error to set a non-zero Session Expiry Interval
+                            // in the DISCONNECT packet sent by the Client
+                            if connection.expiry_interval == 0 {
+                                disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
+                            } else {
+                                connection.expiry_interval = exp;
+                            }
+                        }
+                        _ => {}
+                    }
+
                     disconnect = true;
                     // delete the last will message
                     self.last_wills.remove(&client_id);
@@ -1657,10 +1685,14 @@ fn print_status(router: &mut Router, metrics: Print) {
 
             let metrics = match metrics {
                 Some(v) => Some(v),
-                None => router
-                    .graveyard
-                    .retrieve(&id)
-                    .map(|v| (v.metrics, v.tracker)),
+                None => router.graveyard.retrieve_metrics(&id).map(|m| {
+                    let t = router
+                        .graveyard
+                        .retrieve(&id)
+                        .map(|v| v.tracker)
+                        .unwrap_or(Tracker::new(id));
+                    (m, t)
+                }),
             };
 
             println!("{metrics:#?}");

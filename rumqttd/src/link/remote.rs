@@ -77,23 +77,26 @@ impl<P: Protocol> RemoteLink<P> {
         let clean_session = connect.clean_session;
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
-        let session_expiry = props
-            .as_ref()
-            .and_then(|p| p.session_expiry_interval)
-            .unwrap_or(0);
 
         let delay_interval = lastwill_props
             .as_ref()
             .and_then(|f| f.delay_interval)
             .unwrap_or(0);
 
+        // If session expiry interval is absent, use 0 as default.
+        let session_expiry_interval = props
+            .as_ref()
+            .and_then(|p| p.session_expiry_interval)
+            .unwrap_or(0);
+
         // The Server delays publishing the Client’s Will Message until
         // the Will Delay Interval has passed or the Session ends, whichever happens first
-        let will_delay_interval = min(session_expiry, delay_interval);
+        let will_delay_interval = min(session_expiry_interval, delay_interval);
 
         let (link_tx, link_rx, notification) = LinkBuilder::new(client_id, router_tx)
             .tenant_id(tenant_id)
             .clean_session(clean_session)
+            .session_expiry_interval(session_expiry_interval)
             .last_will(lastwill)
             .last_will_properties(lastwill_props)
             .dynamic_filters(dynamic_filters)

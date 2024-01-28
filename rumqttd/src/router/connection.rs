@@ -19,6 +19,8 @@ pub struct Connection {
     pub dynamic_filters: bool,
     /// Clean session
     pub clean: bool,
+    /// Session Expiry Interval
+    pub expiry_interval: u32,
     /// Subscriptions
     pub subscriptions: HashSet<Filter>,
     /// Last will of this connection
@@ -37,6 +39,8 @@ pub struct Connection {
 
 impl Connection {
     /// Create connection state to hold identifying information of connecting device
+    // TODO: use builder pattern or something else to fix this lint
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tenant_id: Option<String>,
         client_id: String,
@@ -59,6 +63,7 @@ impl Connection {
             tenant_prefix,
             dynamic_filters,
             clean,
+            expiry_interval: 0,
             subscriptions: HashSet::default(),
             last_will: None,
             last_will_properties: None,
@@ -74,6 +79,11 @@ impl Connection {
         if max > 0 {
             self.broker_topic_aliases = Some(BrokerAliases::new(max));
         }
+        self
+    }
+
+    pub fn session_expiry(&mut self, interval: u32) -> &mut Connection {
+        self.expiry_interval = interval;
         self
     }
 
