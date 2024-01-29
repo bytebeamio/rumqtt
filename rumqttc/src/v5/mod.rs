@@ -163,7 +163,6 @@ impl MqttOptions {
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();
     /// # let client_config = ClientConfig::builder()
-    /// #    .with_safe_defaults()
     /// #    .with_root_certificates(root_cert_store)
     /// #    .with_no_client_auth();
     /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();

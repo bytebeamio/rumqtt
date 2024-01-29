@@ -148,7 +148,7 @@ pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls::{Certificate, ClientConfig, RootCertStore};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 #[cfg(feature = "proxy")]
 pub use proxy::{Proxy, ProxyAuth, ProxyType};
@@ -366,10 +366,9 @@ impl Default for TlsConfiguration {
     fn default() -> Self {
         let mut root_cert_store = RootCertStore::empty();
         for cert in load_native_certs().expect("could not load platform certs") {
-            root_cert_store.add(&Certificate(cert.0)).unwrap();
+            root_cert_store.add(cert).unwrap();
         }
         let tls_config = ClientConfig::builder()
-            .with_safe_defaults()
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
 
@@ -536,7 +535,6 @@ impl MqttOptions {
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();
     /// # let client_config = ClientConfig::builder()
-    /// #    .with_safe_defaults()
     /// #    .with_root_certificates(root_cert_store)
     /// #    .with_no_client_auth();
     /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
