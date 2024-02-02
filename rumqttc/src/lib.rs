@@ -624,32 +624,12 @@ impl MqttOptions {
     /// options.set_clean_session(false);
     /// ```
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
-        if self.client_id.is_empty() {
-            assert!(
-                clean_session,
-                "Cannot unset clean session when client id is empty"
-            );
-        }
+        assert!(
+            self.client_id.is_empty() && clean_session,
+            "Cannot unset clean session when client id is empty"
+        );
         self.clean_session = clean_session;
         self
-    }
-
-    /// Does the same thing as [`Self::set_clean_session`], however it returns an error
-    ///  if `clean_session = false` and `client_id` is a zero byte string.
-    ///
-    /// ```
-    /// # use rumqttc::{MqttOptions, OptionError};
-    /// let mut options = MqttOptions::new("", "localhost", 1883);
-    /// let error = options.try_set_clean_session(false).unwrap_err();
-    /// assert_eq!(error, OptionError::CleanSession);
-    /// ```
-    #[cfg(feature = "url")]
-    pub fn try_set_clean_session(&mut self, clean_session: bool) -> Result<&mut Self, OptionError> {
-        if self.client_id.is_empty() && !clean_session {
-            return Err(OptionError::CleanSession);
-        }
-        self.clean_session = clean_session;
-        Ok(self)
     }
 
     /// Clean session
