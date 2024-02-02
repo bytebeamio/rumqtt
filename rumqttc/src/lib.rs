@@ -614,9 +614,10 @@ impl MqttOptions {
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
     ///
-    /// NOTE: It panicks if the `client_id` is a zero byte string and `clean_session` is
-    /// not `true`.
-    ///
+    /// # Panic
+    /// 
+    /// Panics if `clean_session` is false when `client_id` is empty.
+    /// 
     /// ```should_panic
     /// # use rumqttc::MqttOptions;
     /// let mut options = MqttOptions::new("", "localhost", 1883);
