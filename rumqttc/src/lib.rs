@@ -625,7 +625,7 @@ impl MqttOptions {
     /// ```
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
         assert!(
-            self.client_id.is_empty() && clean_session,
+            !self.client_id.is_empty() || clean_session,
             "Cannot unset clean session when client id is empty"
         );
         self.clean_session = clean_session;
