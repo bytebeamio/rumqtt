@@ -491,25 +491,14 @@ impl MqttOptions {
     /// # use rumqttc::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost", 1883);
     /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id");
-        }
-
         MqttOptions {
             broker_addr: host.into(),
             port,
             transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
             clean_session: true,
-            client_id: id,
+            client_id: id.into(),
             credentials: None,
             max_incoming_packet_size: 10 * 1024,
             max_outgoing_packet_size: 10 * 1024,
@@ -624,9 +613,42 @@ impl MqttOptions {
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
+    ///
+    /// NOTE: It panicks if the `client_id` is a zero byte string and `clean_session` is
+    /// not `true`.
+    ///
+    /// ```should_panic
+    /// # use rumqttc::MqttOptions;
+    /// let mut options = MqttOptions::new("", "localhost", 1883);
+    /// options.set_clean_session(false);
+    /// ```
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
+        if self.client_id.is_empty() {
+            assert!(
+                clean_session,
+                "Cannot unset clean session when client id is empty"
+            );
+        }
         self.clean_session = clean_session;
         self
+    }
+
+    /// Does the same thing as [`Self::set_clean_session`], however it returns an error
+    ///  if `clean_session = false` and `client_id` is a zero byte string.
+    ///
+    /// ```
+    /// # use rumqttc::{MqttOptions, OptionError};
+    /// let mut options = MqttOptions::new("", "localhost", 1883);
+    /// let error = options.try_set_clean_session(false).unwrap_err();
+    /// assert_eq!(error, OptionError::CleanSession);
+    /// ```
+    #[cfg(feature = "url")]
+    pub fn try_set_clean_session(&mut self, clean_session: bool) -> Result<&mut Self, OptionError> {
+        if self.client_id.is_empty() && !clean_session {
+            return Err(OptionError::CleanSession);
+        }
+        self.clean_session = clean_session;
+        Ok(self)
     }
 
     /// Clean session
@@ -919,12 +941,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
-    }
-
-    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         let mut mqttoptions = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
@@ -1005,11 +1021,5 @@ mod test {
             err("mqtt://host:42?client_id=foo&inflight_num=foo"),
             OptionError::Inflight
         );
-    }
-
-    #[test]
-    #[should_panic]
-    fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
 }
