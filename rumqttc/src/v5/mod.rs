@@ -113,13 +113,13 @@ impl MqttOptions {
     /// - port: The port number on which broker must be listening for incoming connections
     ///
     /// ```
-    /// # use rumqttc::MqttOptions;
+    /// # use rumqttc::v5::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost", 1883);
     /// ```
     /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
     /// for example, the following code would panic:
     /// ```should_panic
-    /// # use rumqttc::MqttOptions;
+    /// # use rumqttc::v5::MqttOptions;
     /// let options = MqttOptions::new("", "localhost", 1883);
     /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
