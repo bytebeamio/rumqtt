@@ -615,9 +615,9 @@ impl MqttOptions {
     /// happens. Local queue state is also held to retransmit packets after reconnection.
     ///
     /// # Panic
-    /// 
+    ///
     /// Panics if `clean_session` is false when `client_id` is empty.
-    /// 
+    ///
     /// ```should_panic
     /// # use rumqttc::MqttOptions;
     /// let mut options = MqttOptions::new("", "localhost", 1883);
@@ -919,7 +919,6 @@ impl Debug for MqttOptions {
 
 #[cfg(test)]
 mod test {
-    #[allow(unused_imports)]
     use super::*;
 
     #[test]
@@ -1003,5 +1002,15 @@ mod test {
             err("mqtt://host:42?client_id=foo&inflight_num=foo"),
             OptionError::Inflight
         );
+    }
+
+    #[test]
+    fn accept_client_id_startswith_space() {
+        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
+    }
+
+    #[test]
+    fn accept_empty_client_id() {
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
 }
