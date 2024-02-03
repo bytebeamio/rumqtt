@@ -804,7 +804,7 @@ mod test {
     }
 
     #[test]
-    fn allow_no_client_id() {
+    fn allow_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
     }
 }
