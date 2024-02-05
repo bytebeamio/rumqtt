@@ -307,26 +307,26 @@ impl Router {
         // for qos2 pending pubrels
         let mut pending_acks = VecDeque::new();
 
-        let tracker = 'tracker: {
-            if !clean_session {
-                let Some(saved) = saved else {
-                    break 'tracker Tracker::new(client_id.clone());
-                };
+        let tracker = if !clean_session {
+            let saved_state = saved.and_then(|saved| {
                 connection.events = saved.metrics;
+                saved.session_state
+            });
 
-                let Some(session_state) = saved.session_state else {
-                    break 'tracker Tracker::new(client_id.clone());
-                };
-                connection.subscriptions = session_state.subscriptions;
-                // for using in acklog
-                pending_acks = session_state.unacked_pubrels.clone();
-                outgoing.unacked_pubrels = session_state.unacked_pubrels;
-                session_state.tracker
-            } else {
-                // Only retrieve metrics in clean session
-                connection.events = saved.map_or_else(ConnectionEvents::default, |s| s.metrics);
-                Tracker::new(client_id.clone())
-            }
+            saved_state.map_or_else(
+                || Tracker::new(client_id.clone()),
+                |session_state| {
+                    connection.subscriptions = session_state.subscriptions;
+                    // for using in acklog
+                    pending_acks = session_state.unacked_pubrels.clone();
+                    outgoing.unacked_pubrels = session_state.unacked_pubrels;
+                    session_state.tracker
+                },
+            )
+        } else {
+            // Only retrieve metrics in clean session
+            connection.events = saved.map_or_else(ConnectionEvents::default, |s| s.metrics);
+            Tracker::new(client_id.clone())
         };
 
         let ackslog = AckLog::new();
