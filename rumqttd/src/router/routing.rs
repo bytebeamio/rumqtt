@@ -308,11 +308,15 @@ impl Router {
         let mut pending_acks = VecDeque::new();
 
         let tracker = if !clean_session {
+            // if there was some saved state, restore the metrics
+            // and get the session's state if present
             let saved_state = saved.and_then(|saved| {
                 connection.events = saved.metrics;
                 saved.session_state
             });
 
+            // if session's state is present, restore that session
+            // otherwise, just start new one
             saved_state.map_or_else(
                 || Tracker::new(client_id.clone()),
                 |session_state| {
