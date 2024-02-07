@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports)]
 use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};

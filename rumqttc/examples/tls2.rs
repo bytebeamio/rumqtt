@@ -1,11 +1,10 @@
 //! Example of how to configure rumqttd to connect to a server using TLS and authentication.
 use std::error::Error;
 
-#[cfg(feature = "use-rustls")]
+use rumqttc::{AsyncClient, MqttOptions, TlsConfiguration, Transport};
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    use rumqttc::{self, AsyncClient, MqttOptions, TlsConfiguration, Transport};
-
     pretty_env_logger::init();
     color_backtrace::install();
 
@@ -43,9 +42,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
-}
-
-#[cfg(not(feature = "use-rustls"))]
-fn main() -> Result<(), Box<dyn Error>> {
-    panic!("Enable feature 'use-rustls'");
 }
