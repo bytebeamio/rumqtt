@@ -1,12 +1,8 @@
-#[cfg(all(feature = "websocket", feature = "proxy"))]
-use rumqttc::{self, AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
-#[cfg(all(feature = "websocket", feature = "proxy"))]
+use rumqttc::{AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
 use std::{error::Error, time::Duration};
-#[cfg(all(feature = "websocket", feature = "proxy"))]
 use tokio::{task, time};
 
-#[cfg(all(feature = "websocket", feature = "proxy"))]
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     use rumqttc::MqttOptions;
 
@@ -48,7 +44,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-#[cfg(all(feature = "websocket", feature = "proxy"))]
 async fn requests(client: AsyncClient) {
     client
         .subscribe("hello/world", QoS::AtMostOnce)
@@ -65,9 +60,4 @@ async fn requests(client: AsyncClient) {
     }
 
     time::sleep(Duration::from_secs(120)).await;
-}
-
-#[cfg(not(all(feature = "websocket", feature = "proxy")))]
-fn main() {
-    panic!("Enable websocket and proxy feature with `--features=websocket, proxy`");
 }
