@@ -4,7 +4,7 @@ use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     // color_backtrace::install();

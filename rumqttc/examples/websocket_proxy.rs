@@ -2,7 +2,7 @@ use rumqttc::{AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
 use std::{error::Error, time::Duration};
 use tokio::{task, time};
 
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     use rumqttc::MqttOptions;
 

@@ -16,7 +16,7 @@ fn create_conn() -> (AsyncClient, EventLoop) {
     AsyncClient::new(mqttoptions, 10)
 }
 
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     // todo!("fix this example with new way of spawning clients")
     pretty_env_logger::init();

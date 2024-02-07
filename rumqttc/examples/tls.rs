@@ -4,7 +4,7 @@ use std::error::Error;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, Transport};
 use tokio_rustls::rustls::ClientConfig;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
