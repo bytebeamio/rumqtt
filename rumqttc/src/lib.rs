@@ -38,7 +38,7 @@
 //! use std::time::Duration;
 //! use std::error::Error;
 //!
-//! # #[tokio::main(worker_threads = 1)]
+//! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
 //! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
 //! mqttoptions.set_keep_alive(Duration::from_secs(5));

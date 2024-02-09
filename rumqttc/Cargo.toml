@@ -54,7 +54,24 @@ color-backtrace = "0.6"
 matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.5"
-rustls = "0.21"
-rustls-native-certs = "0.6"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["full", "macros"] }
+
+[[example]]
+name = "tls"
+path = "examples/tls.rs"
+required-features = ["use-rustls"]
+
+[[example]]
+name = "tls2"
+path = "examples/tls2.rs"
+required-features = ["use-rustls"]
+
+[[example]]
+name = "websocket"
+path = "examples/websocket.rs"
+required-features = ["websocket"]
+
+[[example]]
+name = "websocket_proxy"
+path = "examples/websocket_proxy.rs"
+required-features = ["websocket", "proxy"]
