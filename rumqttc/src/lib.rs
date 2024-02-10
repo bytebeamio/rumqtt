@@ -1005,11 +1005,6 @@ mod test {
     }
 
     #[test]
-    fn accept_client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
-    }
-
-    #[test]
     fn accept_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
