@@ -244,11 +244,7 @@ fn handle_auth(
     }
 
     if let Some(pairs) = &config.auth {
-        let static_auth_verified = pairs
-            .iter()
-            .any(|(user, pass)| (user, pass) == (username, password));
-
-        if !static_auth_verified {
+        if !.get(username).is_some_and(|&pass| pass == password) {
             return Err(Error::InvalidAuth);
         }
 
