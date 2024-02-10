@@ -1008,4 +1008,11 @@ mod test {
     fn accept_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
     }
+
+    #[test]
+    fn set_clean_session_when_client_id_present() {
+        let mut options = MqttOptions::new("client_id", "127.0.0.1", 1883);
+        options.set_clean_session(false);
+        options.set_clean_session(true);
+    }
 }
