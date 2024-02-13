@@ -22,6 +22,7 @@ pub mod iobufs;
 mod logs;
 mod routing;
 mod scheduler;
+pub(crate) mod shared_subs;
 mod waiters;
 
 pub use alertlog::Alert;
@@ -53,7 +54,7 @@ pub enum Event {
     /// Data for native commitlog
     DeviceData,
     /// Disconnection request
-    Disconnect(Disconnection),
+    Disconnect,
     /// Shadow
     Shadow(ShadowRequest),
     /// Collect and send alerts to all alerts links
@@ -62,6 +63,8 @@ pub enum Event {
     SendMeters,
     /// Get metrics of a connection or all connections
     PrintStatus(Print),
+    /// Publish Will message
+    PublishWill((String, Option<String>)),
 }
 
 /// Notification from router to connection
@@ -109,7 +112,7 @@ impl From<Notification> for MaybePacket {
 
 #[derive(Debug, Clone)]
 pub struct Forward {
-    pub cursor: (u64, u64),
+    pub cursor: Option<(u64, u64)>,
     pub size: usize,
     pub publish: Publish,
     pub properties: Option<PublishProperties>,
@@ -191,6 +194,8 @@ pub struct DataRequest {
     pub read_count: usize,
     /// Maximum count of payload buffer per replica
     max_count: usize,
+    pub(crate) forward_retained: bool,
+    pub(crate) group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
 use crate::protocol::{
-    ConnAck, Filter, LastWill, Packet, Publish, QoS, RetainForwardRule, Subscribe,
+    Filter, LastWill, LastWillProperties, Packet, Publish, QoS, RetainForwardRule, Subscribe,
 };
 use crate::router::Ack;
 use crate::router::{
@@ -35,31 +35,81 @@ pub enum LinkError {
     Elapsed(#[from] tokio::time::error::Elapsed),
 }
 
-pub struct Link;
+// used to build LinkTx and LinkRx
+pub struct LinkBuilder<'a> {
+    tenant_id: Option<String>,
+    client_id: &'a str,
+    router_tx: Sender<(ConnectionId, Event)>,
+    // true by default
+    clean_session: bool,
+    last_will: Option<LastWill>,
+    last_will_properties: Option<LastWillProperties>,
+    // false by default
+    dynamic_filters: bool,
+    // default to 0, indicating to not use topic alias
+    topic_alias_max: u16,
+}
 
-impl Link {
-    #[allow(clippy::type_complexity)]
-    fn prepare(
-        tenant_id: Option<String>,
-        client_id: &str,
-        clean: bool,
-        last_will: Option<LastWill>,
-        dynamic_filters: bool,
-        topic_alias_max: u16,
-    ) -> (
-        Event,
-        Arc<Mutex<VecDeque<Packet>>>,
-        Arc<Mutex<VecDeque<Notification>>>,
-        Receiver<()>,
-    ) {
-        let connection = Connection::new(
-            tenant_id,
-            client_id.to_owned(),
-            clean,
-            last_will,
-            dynamic_filters,
-            topic_alias_max,
+impl<'a> LinkBuilder<'a> {
+    pub fn new(client_id: &'a str, router_tx: Sender<(ConnectionId, Event)>) -> Self {
+        LinkBuilder {
+            client_id,
+            router_tx,
+            tenant_id: None,
+            clean_session: true,
+            last_will: None,
+            last_will_properties: None,
+            dynamic_filters: false,
+            topic_alias_max: 0,
+        }
+    }
+
+    pub fn tenant_id(mut self, tenant_id: Option<String>) -> Self {
+        self.tenant_id = tenant_id;
+        self
+    }
+
+    pub fn last_will(mut self, last_will: Option<LastWill>) -> Self {
+        self.last_will = last_will;
+        self
+    }
+
+    pub fn last_will_properties(
+        mut self,
+        last_will_properties: Option<LastWillProperties>,
+    ) -> Self {
+        self.last_will_properties = last_will_properties;
+        self
+    }
+
+    pub fn topic_alias_max(mut self, max: u16) -> Self {
+        self.topic_alias_max = max;
+        self
+    }
+
+    pub fn clean_session(mut self, clean: bool) -> Self {
+        self.clean_session = clean;
+        self
+    }
+
+    pub fn dynamic_filters(mut self, dynamic_filters: bool) -> Self {
+        self.dynamic_filters = dynamic_filters;
+        self
+    }
+
+    pub fn build(self) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
+        // Connect to router
+        // Local connections to the router shall have access to all subscriptions
+        let mut connection = Connection::new(
+            self.tenant_id,
+            self.client_id.to_owned(),
+            self.clean_session,
+            self.dynamic_filters,
         );
+
+        connection
+            .last_will(self.last_will, self.last_will_properties)
+            .topic_alias_max(self.topic_alias_max);
         let incoming = Incoming::new(connection.client_id.to_owned());
         let (outgoing, link_rx) = Outgoing::new(connection.client_id.to_owned());
         let outgoing_data_buffer = outgoing.buffer();
@@ -71,34 +121,10 @@ impl Link {
             outgoing,
         };
 
-        (event, incoming_data_buffer, outgoing_data_buffer, link_rx)
-    }
-
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(
-        tenant_id: Option<String>,
-        client_id: &str,
-        router_tx: Sender<(ConnectionId, Event)>,
-        clean: bool,
-        last_will: Option<LastWill>,
-        dynamic_filters: bool,
-        topic_alias_max: Option<u16>,
-    ) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
-        // Connect to router
-        // Local connections to the router shall have access to all subscriptions
-
-        let (message, i, o, link_rx) = Link::prepare(
-            tenant_id,
-            client_id,
-            clean,
-            last_will,
-            dynamic_filters,
-            topic_alias_max.unwrap_or(0),
-        );
-        router_tx.send((0, message))?;
+        self.router_tx.send((0, event))?;
 
         link_rx.recv()?;
-        let notification = o.lock().pop_front().unwrap();
+        let notification = outgoing_data_buffer.lock().pop_front().unwrap();
 
         // Right now link identifies failure with dropped rx in router,
         // which is probably ok. We need this here to get id assigned by router
@@ -107,45 +133,9 @@ impl Link {
             _message => return Err(LinkError::NotConnectionAck),
         };
 
-        let tx = LinkTx::new(id, router_tx.clone(), i);
-        let rx = LinkRx::new(id, router_tx, link_rx, o);
+        let tx = LinkTx::new(id, self.router_tx.clone(), incoming_data_buffer);
+        let rx = LinkRx::new(id, self.router_tx, link_rx, outgoing_data_buffer);
         Ok((tx, rx, notification))
-    }
-
-    pub async fn init(
-        tenant_id: Option<String>,
-        client_id: &str,
-        router_tx: Sender<(ConnectionId, Event)>,
-        clean: bool,
-        last_will: Option<LastWill>,
-        dynamic_filters: bool,
-        topic_alias_max: Option<u16>,
-    ) -> Result<(LinkTx, LinkRx, ConnAck), LinkError> {
-        // Connect to router
-        // Local connections to the router shall have access to all subscriptions
-
-        let (message, i, o, link_rx) = Link::prepare(
-            tenant_id,
-            client_id,
-            clean,
-            last_will,
-            dynamic_filters,
-            topic_alias_max.unwrap_or(0),
-        );
-        router_tx.send_async((0, message)).await?;
-
-        link_rx.recv_async().await?;
-        let notification = o.lock().pop_front().unwrap();
-        // Right now link identifies failure with dropped rx in router,
-        // which is probably ok. We need this here to get id assigned by router
-        let (id, ack) = match notification {
-            Notification::DeviceAck(Ack::ConnAck(id, ack, _)) => (id, ack),
-            _message => return Err(LinkError::NotConnectionAck),
-        };
-
-        let tx = LinkTx::new(id, router_tx.clone(), i);
-        let rx = LinkRx::new(id, router_tx, link_rx, o);
-        Ok((tx, rx, ack))
     }
 }
 

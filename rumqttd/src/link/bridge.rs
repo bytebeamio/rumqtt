@@ -26,10 +26,8 @@ use tokio_rustls::{
 use tracing::*;
 
 use crate::{
-    link::{
-        local::{Link, LinkError},
-        network::Network,
-    },
+    link::{local::LinkError, network::Network},
+    local::LinkBuilder,
     protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
     router::Event,
     BridgeConfig, ConnectionId, Notification, Transport,
@@ -59,7 +57,9 @@ where
         "Starting bridge with subscription on filter \"{}\"",
         &config.sub_path,
     );
-    let (mut tx, mut rx, _ack) = Link::new(None, &config.name, router_tx, true, None, true, None)?;
+    let (mut tx, mut rx, _ack) = LinkBuilder::new(&config.name, router_tx)
+        .dynamic_filters(true)
+        .build()?;
 
     'outer: loop {
         let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
@@ -166,7 +166,7 @@ async fn network_connect<P: Protocol>(
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
-                100,
+                config.connections.max_inflight_count,
                 protocol,
             ))
         }
@@ -179,7 +179,7 @@ async fn network_connect<P: Protocol>(
             Ok(Network::new(
                 Box::new(socket),
                 config.connections.max_payload_size,
-                100,
+                config.connections.max_inflight_count,
                 protocol,
             ))
         }
@@ -211,7 +211,7 @@ pub async fn tls_connect<P: AsRef<Path>>(
         }
     });
 
-    root_cert_store.add_server_trust_anchors(trust_anchors);
+    root_cert_store.add_trust_anchors(trust_anchors);
 
     if root_cert_store.is_empty() {
         return Err(BridgeError::NoValidCertInChain);
@@ -247,7 +247,7 @@ pub async fn tls_connect<P: AsRef<Path>>(
         };
 
         let certs = read_certs.into_iter().map(Certificate).collect();
-        config.with_single_cert(certs, PrivateKey(read_key))?
+        config.with_client_auth_cert(certs, PrivateKey(read_key))?
     } else {
         config.with_no_client_auth()
     };

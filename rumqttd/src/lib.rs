@@ -1,7 +1,9 @@
+use std::fmt;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
-use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
     filter::EnvFilter,
@@ -14,7 +16,14 @@ use tracing_subscriber::{
     Registry,
 };
 
-use std::net::SocketAddr;
+pub use link::alerts;
+pub use link::local;
+pub use link::meters;
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+use segments::Storage;
+pub use server::Broker;
+
+pub use self::router::shared_subs::Strategy;
 
 mod link;
 pub mod protocol;
@@ -31,12 +40,10 @@ pub type TopicId = usize;
 pub type Offset = (u64, u64);
 pub type Cursor = (u64, u64);
 
-pub use link::alerts;
-pub use link::local;
-pub use link::meters;
-
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
-pub use server::Broker;
+pub type ClientId = String;
+pub type AuthUser = String;
+pub type AuthPass = String;
+pub type AuthHandler = Arc<dyn Fn(ClientId, AuthUser, AuthPass) -> bool + Send + Sync + 'static>;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -47,7 +54,7 @@ pub struct Config {
     pub v5: Option<HashMap<String, ServerSettings>>,
     pub ws: Option<HashMap<String, ServerSettings>>,
     pub cluster: Option<ClusterSettings>,
-    pub console: ConsoleSettings,
+    pub console: Option<ConsoleSettings>,
     pub bridge: Option<BridgeConfig>,
     pub prometheus: Option<PrometheusSetting>,
     pub metrics: Option<HashMap<MetricType, MetricSettings>>,
@@ -68,7 +75,7 @@ pub struct PrometheusSetting {
 #[serde(untagged)]
 pub enum TlsConfig {
     Rustls {
-        capath: String,
+        capath: Option<String>,
         certpath: String,
         keypath: String,
     },
@@ -87,9 +94,11 @@ impl TlsConfig {
                 capath,
                 certpath,
                 keypath,
-            } => [capath, certpath, keypath]
-                .iter()
-                .all(|v| Path::new(v).exists()),
+            } => {
+                let ca = capath.is_none() || capath.as_ref().is_some_and(|v| Path::new(v).exists());
+
+                ca && [certpath, keypath].iter().all(|v| Path::new(v).exists())
+            }
             TlsConfig::NativeTls { pkcs12path, .. } => Path::new(pkcs12path).exists(),
         }
     }
@@ -119,16 +128,29 @@ pub struct BridgeConfig {
     pub transport: Transport,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
-    pub throttle_delay_ms: u64,
     pub max_payload_size: usize,
-    pub max_inflight_count: u16,
-    pub max_inflight_size: usize,
+    pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
+    #[serde(skip)]
+    pub external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
+}
+
+impl fmt::Debug for ConnectionSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectionSettings")
+            .field("connection_timeout_ms", &self.connection_timeout_ms)
+            .field("max_payload_size", &self.max_payload_size)
+            .field("max_inflight_count", &self.max_inflight_count)
+            .field("auth", &self.auth)
+            .field("external_auth", &self.external_auth.is_some())
+            .field("dynamic_filters", &self.dynamic_filters)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,12 +165,21 @@ pub struct ClusterSettings {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RouterConfig {
-    pub instant_ack: bool,
+    pub max_connections: usize,
+    pub max_outgoing_packet_count: u64,
     pub max_segment_size: usize,
     pub max_segment_count: usize,
-    pub max_read_len: u64,
-    pub max_connections: usize,
+    pub custom_segment: Option<HashMap<String, SegmentConfig>>,
     pub initialized_filters: Option<Vec<Filter>>,
+    // defaults to Round Robin
+    #[serde(default)]
+    pub shared_subscriptions_strategy: Strategy,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SegmentConfig {
+    pub max_segment_size: usize,
+    pub max_segment_count: usize,
 }
 
 type ReloadHandle = Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;

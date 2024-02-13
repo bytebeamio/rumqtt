@@ -1,6 +1,6 @@
 use super::Ack;
 use slab::Slab;
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::protocol::{
     matches, ConnAck, ConnAckProperties, PingResp, PubAck, PubComp, PubRec, PubRel, Publish,
@@ -72,7 +72,7 @@ impl DataLog {
 
         if let Some(warmup_filters) = config.initialized_filters.clone() {
             for filter in warmup_filters {
-                let data = Data::new(&filter, config.max_segment_size, config.max_segment_count);
+                let data = Data::new(&filter, &config);
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map
@@ -151,11 +151,7 @@ impl DataLog {
         let (filter_idx, data) = match filter_indexes.get(filter) {
             Some(idx) => (*idx, self.native.get(*idx).unwrap()),
             None => {
-                let data = Data::new(
-                    filter,
-                    self.config.max_segment_size,
-                    self.config.max_segment_count,
-                );
+                let data = Data::new(filter, &self.config);
 
                 // Add commitlog to datalog and add datalog index to filter to
                 // datalog index map
@@ -198,12 +194,12 @@ impl DataLog {
         o.retain_mut(|(pubdata, _)| {
             // Keep data if no properties exists, which implies no message expiry!
             let Some(properties) = pubdata.properties.as_mut() else {
-                return true
+                return true;
             };
 
             // Keep data if there is no message_expiry_interval
             let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
-                return true
+                return true;
             };
 
             let time_spent = (now - pubdata.timestamp).as_secs() as u32;
@@ -273,22 +269,42 @@ impl DataLog {
         self.retained_publishes.remove(&topic);
     }
 
-    pub fn handle_retained_messages(
-        &mut self,
-        filter: &str,
-        notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
-    ) {
-        trace!(info = "retain-msg", filter = &filter);
+    pub fn read_retained_messages(&mut self, filter: &str) -> Vec<PubWithProp> {
+        trace!(info = "reading retain msg", filter = &filter);
+        let now = Instant::now();
 
-        let idx = self.filter_indexes.get(filter).unwrap();
+        // discard expired retained messages
+        self.retained_publishes.retain(|_, pubdata| {
+            // Keep data if no properties exists, which implies no message expiry!
+            let Some(properties) = pubdata.properties.as_mut() else {
+                return true;
+            };
 
-        let datalog = self.native.get_mut(*idx).unwrap();
+            // Keep data if there is no message_expiry_interval
+            let Some(message_expiry_interval) = properties.message_expiry_interval.as_mut() else {
+                return true;
+            };
 
-        for (topic, publish) in self.retained_publishes.iter_mut() {
-            if matches(topic, filter) {
-                datalog.append(publish.clone(), notifications);
+            let time_spent = (now - pubdata.timestamp).as_secs() as u32;
+
+            let is_valid = time_spent < *message_expiry_interval;
+
+            // ignore expired messages
+            if is_valid {
+                // set message_expiry_interval to (original value - time spent waiting in server)
+                // ref: https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901112
+                *message_expiry_interval -= time_spent;
             }
-        }
+
+            is_valid
+        });
+
+        // no need to include timestamp when returning
+        self.retained_publishes
+            .iter()
+            .filter(|(topic, _)| matches(topic, filter))
+            .map(|(_, p)| (p.publish.clone(), p.properties.clone()))
+            .collect()
     }
 }
 
@@ -303,7 +319,22 @@ impl<T> Data<T>
 where
     T: Storage + Clone,
 {
-    pub fn new(filter: &str, max_segment_size: usize, max_mem_segments: usize) -> Data<T> {
+    pub fn new(filter: &str, router_config: &RouterConfig) -> Data<T> {
+        let mut max_segment_size = router_config.max_segment_size;
+        let mut max_mem_segments = router_config.max_segment_count;
+
+        // Override segment config for selected filter
+        if let Some(config) = &router_config.custom_segment {
+            for (f, segment_config) in config {
+                if matches(filter, f) {
+                    info!("Overriding segment config for filter: {}", filter);
+                    max_segment_size = segment_config.max_segment_size;
+                    max_mem_segments = segment_config.max_segment_count;
+                }
+            }
+        }
+
+        // max_segment_size: usize, max_mem_segments: usize
         let log = CommitLog::new(max_segment_size, max_mem_segments).unwrap();
 
         let waiters = Waiters::with_capacity(10);
@@ -342,7 +373,7 @@ pub struct AckLog {
     // Committed acks per connection. First pkid, last pkid, data
     committed: VecDeque<Ack>,
     // Recorded qos 2 publishes
-    recorded: VecDeque<Publish>,
+    recorded: VecDeque<(Publish, Option<PublishProperties>)>,
 }
 
 impl AckLog {
@@ -369,11 +400,9 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    // TODO: Remove this allow once we support QoS::ExactlyOnce
-    #[allow(dead_code)]
-    pub fn pubrec(&mut self, publish: Publish, ack: PubRec) {
+    pub fn pubrec(&mut self, publish: Publish, props: Option<PublishProperties>, ack: PubRec) {
         let ack = Ack::PubRec(ack);
-        self.recorded.push_back(publish);
+        self.recorded.push_back((publish, props));
         self.committed.push_back(ack);
     }
 
@@ -382,7 +411,7 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
-    pub fn pubcomp(&mut self, ack: PubComp) -> Option<Publish> {
+    pub fn pubcomp(&mut self, ack: PubComp) -> Option<(Publish, Option<PublishProperties>)> {
         let ack = Ack::PubComp(ack);
         self.committed.push_back(ack);
         self.recorded.pop_front()
@@ -406,17 +435,19 @@ impl AckLog {
 #[cfg(test)]
 mod test {
     use super::DataLog;
+    use crate::router::shared_subs::Strategy;
     use crate::RouterConfig;
 
     #[test]
     fn publish_filters_updating_correctly_on_new_topic_subscription() {
         let config = RouterConfig {
-            instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
             max_segment_count: 10,
-            max_read_len: 1024,
+            max_outgoing_packet_count: 1024,
+            custom_segment: None,
             initialized_filters: None,
+            shared_subscriptions_strategy: Strategy::RoundRobin,
         };
         let mut data = DataLog::new(config).unwrap();
         data.next_native_offset("topic/a");
@@ -430,12 +461,13 @@ mod test {
     #[test]
     fn publish_filters_updating_correctly_on_new_publish() {
         let config = RouterConfig {
-            instant_ack: true,
             max_segment_size: 1024,
             max_connections: 10,
             max_segment_count: 10,
-            max_read_len: 1024,
+            max_outgoing_packet_count: 1024,
+            custom_segment: None,
             initialized_filters: None,
+            shared_subscriptions_strategy: Strategy::RoundRobin,
         };
         let mut data = DataLog::new(config).unwrap();
         data.next_native_offset("+/+");

@@ -2,6 +2,7 @@ use config::FileFormat;
 use rumqttd::Broker;
 
 use clap::Parser;
+use tracing::trace;
 
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
@@ -76,7 +77,10 @@ fn main() {
     };
 
     let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
-    configs.console.set_filter_reload_handle(reload_handle);
+
+    if let Some(console_config) = configs.console.as_mut() {
+        console_config.set_filter_reload_handle(reload_handle)
+    }
 
     validate_config(&configs);
 
@@ -94,6 +98,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server v4.{name}.")
                 }
+                trace!("Validated certificate paths for server v4.{name}.");
             }
         }
     }
@@ -104,6 +109,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server v5.{name}.")
                 }
+                trace!("Validated certificate paths for server v5.{name}.");
             }
         }
     }
@@ -114,6 +120,7 @@ fn validate_config(configs: &rumqttd::Config) {
                 if !tls_config.validate_paths() {
                     panic!("Certificate path not valid for server ws.{name}.")
                 }
+                trace!("Validated certificate paths for server ws.{name}.");
             }
         }
     }
@@ -130,12 +137,12 @@ fn validate_config(configs: &rumqttd::Config) {
 }
 
 fn banner() {
-    const B: &str = r#"                                              
+    const B: &str = r"                                              
          ___ _   _ __  __  ___ _____ _____ ___  
         | _ \ | | |  \/  |/ _ \_   _|_   _|   \ 
         |   / |_| | |\/| | (_) || |   | | | |) |
         |_|_\\___/|_|  |_|\__\_\|_|   |_| |___/ 
-    "#;
+    ";
 
     println!("{B}\n");
 }

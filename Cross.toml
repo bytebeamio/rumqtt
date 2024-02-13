@@ -1,8 +1,17 @@
-[target.x86_64-unknown-linux-musl]
-image = "clux/muslrust:stable"
+# N.B. The following dependencies are required for all targets to be built: 'qemu' and 'qemu-user-static'
 
-[target.x86_64-unknown-linux-gnu]
+[build]
 pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
     "apt-get update && apt-get install --assume-yes libssl-dev:$CROSS_DEB_ARCH"
 ]
+
+[target.x86_64-unknown-linux-musl]
+image.name = "alpine:edge"
+image.toolchain = ["x86_64-unknown-linux-musl"]
+pre-build = ["apk add --no-cache build-base openssl-dev"]
+
+[target.aarch64-unknown-linux-musl]
+image.name = "alpine:edge"
+image.toolchain = ["aarch64-unknown-linux-musl"]
+pre-build = ["apk add --no-cache build-base openssl-dev"]

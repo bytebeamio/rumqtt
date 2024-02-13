@@ -1,12 +1,12 @@
 use crate::protocol::{
-    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet,
-    PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRel, PubRelReason, Publish,
-    PublishProperties, QoS, SubAck, SubscribeReasonCode, UnsubAck, UnsubAckReason,
+    ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, LastWill,
+    LastWillProperties, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec,
+    PubRecReason, PubRel, PubRelReason, Publish, PublishProperties, QoS, SubAck,
+    SubscribeReasonCode, UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
-use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
-use crate::router::Forward;
+use crate::router::{ConnectionEvents, Forward};
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
@@ -19,11 +19,11 @@ use thiserror::Error;
 use tracing::{debug, error, info, trace, warn};
 
 use super::alertlog::{Alert, AlertLog};
-use super::connection::BrokerAliases;
 use super::graveyard::Graveyard;
 use super::iobufs::{Incoming, Outgoing};
 use super::logs::{AckLog, DataLog};
 use super::scheduler::{ScheduleReason, Scheduler};
+use super::shared_subs::SharedGroup;
 use super::{
     packetid, Connection, DataRequest, Event, FilterIdx, Meter, Notification, Print, RouterMeter,
     ShadowRequest, MAX_CHANNEL_CAPACITY, MAX_SCHEDULE_ITERATIONS,
@@ -44,8 +44,6 @@ pub enum RouterError {
     BadTenant(String, String),
     #[error("No matching filters to topic {0}")]
     NoMatchingFilters(String),
-    #[error("Unsupported QoS {0:?}")]
-    UnsupportedQoS(QoS),
     #[error("Invalid filter prefix {0}")]
     InvalidFilterPrefix(Filter),
     #[error("Invalid client_id {0}")]
@@ -54,6 +52,7 @@ pub enum RouterError {
     Disconnect(DisconnectReasonCode),
 }
 
+// TODO: set this to some appropriate value
 const TOPIC_ALIAS_MAX: u16 = 4096;
 
 pub struct Router {
@@ -99,6 +98,10 @@ pub struct Router {
     router_meters: RouterMeter,
     /// Buffer for cache exchange of incoming packets
     cache: Option<VecDeque<Packet>>,
+    /// Shared subscriptions map <group-name, group>
+    shared_subscriptions: HashMap<String, SharedGroup>,
+    /// Will messages per client_id
+    last_wills: HashMap<String, (LastWill, Option<LastWillProperties>)>,
 }
 
 impl Router {
@@ -138,6 +141,8 @@ impl Router {
             router_tx,
             router_meters: router_metrics,
             cache: Some(VecDeque::with_capacity(MAX_CHANNEL_CAPACITY)),
+            shared_subscriptions: HashMap::new(),
+            last_wills: HashMap::new(),
         }
     }
 
@@ -239,9 +244,7 @@ impl Router {
             Event::NewMeter(tx) => self.handle_new_meter(tx),
             Event::NewAlert(tx) => self.handle_new_alert(tx),
             Event::DeviceData => self.handle_device_payload(id),
-            Event::Disconnect(disconnect) => {
-                self.handle_disconnection(id, disconnect.execute_will, None)
-            }
+            Event::Disconnect => self.handle_disconnection(id, None),
             Event::Ready => self.scheduler.reschedule(id, ScheduleReason::Ready),
             Event::Shadow(request) => {
                 retrieve_shadow(&mut self.datalog, &mut self.obufs[id], request)
@@ -253,6 +256,11 @@ impl Router {
                 self.send_meters();
             }
             Event::PrintStatus(metrics) => print_status(self, metrics),
+            Event::PublishWill((client_id, _tenant_id)) => self.handle_last_will(
+                client_id,
+                #[cfg(feature = "validate-tenant-prefix")]
+                _tenant_id,
+            ),
         }
     }
 
@@ -260,7 +268,7 @@ impl Router {
         &mut self,
         mut connection: Connection,
         incoming: Incoming,
-        outgoing: Outgoing,
+        mut outgoing: Outgoing,
     ) {
         let client_id = outgoing.client_id.clone();
         if let Err(err) = validate_clientid(&client_id) {
@@ -281,7 +289,7 @@ impl Router {
                     "Duplicate client_id, dropping previous connection with connection_id: {}",
                     connection_id
                 );
-                self.handle_disconnection(*connection_id, true, None);
+                self.handle_disconnection(*connection_id, None);
             }
         }
 
@@ -295,18 +303,36 @@ impl Router {
         // Retrieve previous connection state from graveyard
         let saved = self.graveyard.retrieve(&client_id);
         let clean_session = connection.clean;
-        let previous_session = saved.is_some();
+        let previous_session = saved.as_ref().is_some_and(|s| s.session_state.is_some());
+        // for qos2 pending pubrels
+        let mut pending_acks = VecDeque::new();
+
         let tracker = if !clean_session {
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.subscriptions = saved.subscriptions;
-            connection.events = saved.metrics;
-            saved.tracker
+            // if there was some saved state, restore the metrics
+            // and get the session's state if present
+            let saved_state = saved.and_then(|saved| {
+                connection.events = saved.metrics;
+                saved.session_state
+            });
+
+            // if session's state is present, restore that session
+            // otherwise, just start new one
+            saved_state.map_or_else(
+                || Tracker::new(client_id.clone()),
+                |session_state| {
+                    connection.subscriptions = session_state.subscriptions;
+                    // for using in acklog
+                    pending_acks = session_state.unacked_pubrels.clone();
+                    outgoing.unacked_pubrels = session_state.unacked_pubrels;
+                    session_state.tracker
+                },
+            )
         } else {
             // Only retrieve metrics in clean session
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.events = saved.metrics;
+            connection.events = saved.map_or_else(ConnectionEvents::default, |s| s.metrics);
             Tracker::new(client_id.clone())
         };
+
         let ackslog = AckLog::new();
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -319,6 +345,13 @@ impl Router {
 
         if connection.events.events.len() > 10 {
             connection.events.events.pop_front();
+        }
+
+        if let Some(will) = connection.last_will.take() {
+            self.last_wills.insert(
+                client_id.clone(),
+                (will, connection.last_will_properties.take()),
+            );
         }
 
         let connection_id = self.connections.insert(connection);
@@ -343,13 +376,22 @@ impl Router {
         };
 
         let properties = ConnAckProperties {
-            // TODO: set this to some appropriate value
             topic_alias_max: Some(TOPIC_ALIAS_MAX),
             ..Default::default()
         };
 
         let ackslog = self.ackslog.get_mut(connection_id).unwrap();
         ackslog.connack(connection_id, ack, Some(properties));
+
+        pending_acks.into_iter().for_each(|pkid| {
+            // NOTE: will it be better if we store the whole PubRel
+            // instead of pkid in pending acks
+            let pubrel = PubRel {
+                pkid,
+                reason: PubRelReason::Success,
+            };
+            ackslog.pubrel(pubrel)
+        });
 
         self.scheduler
             .reschedule(connection_id, ScheduleReason::Init);
@@ -365,12 +407,7 @@ impl Router {
         let _alert_id = self.alerts.insert(tx);
     }
 
-    fn handle_disconnection(
-        &mut self,
-        id: ConnectionId,
-        execute_last_will: bool,
-        reason: Option<DisconnectReasonCode>,
-    ) {
+    fn handle_disconnection(&mut self, id: ConnectionId, reason: Option<DisconnectReasonCode>) {
         // Some clients can choose to send Disconnect packet before network disconnection.
         // This will lead to double Disconnect packets in router `events`
         let client_id = match &self.obufs.get(id) {
@@ -386,9 +423,9 @@ impl Router {
 
         // must handle last will before sending disconnect packet
         // as the disconnecting client might have subscribed to will topic.
-        if execute_last_will {
-            self.handle_last_will(id);
-        }
+        // if execute_last_will {
+        //     self.handle_last_will(id);
+        // }
 
         info!("Disconnecting connection");
 
@@ -429,6 +466,14 @@ impl Router {
         let inflight_data_requests = self.datalog.clean(id);
         let retransmissions = outgoing.retransmission_map();
 
+        // Remove connections from all groups and
+        // discard empty group ( group with no client )
+        // note: can we do this in better way?
+        self.shared_subscriptions.retain(|_, group| {
+            group.remove_client(&client_id);
+            !group.is_empty()
+        });
+
         // Remove this connection from subscriptions
         for filter in connection.subscriptions.iter() {
             if let Some(connections) = self.subscription_map.get_mut(filter) {
@@ -459,15 +504,28 @@ impl Router {
             for request in tracker.data_requests.iter_mut() {
                 if let Some(cursor) = retransmissions.get(&request.filter_idx) {
                     request.cursor = *cursor;
+                    // reset the group cursor
+                    if let Some(group_name) = &request.group {
+                        // TODO: Test this more
+                        self.shared_subscriptions
+                            .get_mut(group_name)
+                            .expect("group must exists")
+                            .cursor = *cursor;
+                    }
                 }
             }
 
-            self.graveyard
-                .save(tracker, connection.subscriptions, connection.events);
+            self.graveyard.save_state(
+                tracker,
+                connection.subscriptions,
+                connection.events,
+                outgoing.unacked_pubrels,
+            );
         } else {
+            tracker.pause(PauseReason::Busy);
+            let id = tracker.id.clone();
             // Only save metrics in clean session
-            self.graveyard
-                .save(Tracker::new(client_id), HashSet::new(), connection.events);
+            self.graveyard.save_metrics(id, connection.events);
         }
         self.router_meters.total_connections -= 1;
     }
@@ -494,13 +552,12 @@ impl Router {
         let mut new_data = false;
         let mut disconnect = false;
         let mut disconnect_reason: Option<DisconnectReasonCode> = None;
-        let mut execute_will = true;
 
         // info!("{:15.15}[I] {:20} count = {}", client_id, "packets", packets.len());
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(mut publish, properties) => {
+                Packet::Publish(publish, properties) => {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
@@ -533,18 +590,15 @@ impl Router {
                             force_ack = true;
                         }
                         QoS::ExactlyOnce => {
-                            error!("QoS::ExactlyOnce is not yet supported");
-                            disconnect = true;
-                            break;
-                            // let pubrec = PubRec {
-                            //     pkid,
-                            //     reason: PubRecReason::Success,
-                            // };
-                            //
-                            // let ackslog = self.ackslog.get_mut(id).unwrap();
-                            // ackslog.pubrec(publish, pubrec);
-                            // force_ack = true;
-                            // continue;
+                            let pubrec = PubRec {
+                                pkid,
+                                reason: PubRecReason::Success,
+                            };
+
+                            let ackslog = self.ackslog.get_mut(id).unwrap();
+                            ackslog.pubrec(publish, properties, pubrec);
+                            force_ack = true;
+                            continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing
@@ -552,11 +606,6 @@ impl Router {
                     };
 
                     self.router_meters.total_publishes += 1;
-
-                    // Ignore retained messages
-                    if publish.retain {
-                        publish.retain = false;
-                    }
 
                     // Try to append publish to commitlog
                     match append_to_commitlog(
@@ -596,12 +645,12 @@ impl Router {
                         );
                     };
                 }
-                Packet::Subscribe(subscribe, _) => {
+                Packet::Subscribe(mut subscribe, props) => {
                     let mut return_codes = Vec::new();
                     let pkid = subscribe.pkid;
                     // let len = s.len();
 
-                    for f in &subscribe.filters {
+                    for f in &mut subscribe.filters {
                         let span =
                             tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
@@ -616,15 +665,32 @@ impl Router {
                             break;
                         }
 
-                        let filter = &f.path;
-                        let qos = f.qos;
+                        let mut filter = f.path.clone();
+                        let mut group = None;
 
-                        let (idx, cursor) = self.datalog.next_native_offset(filter);
-                        self.prepare_filter(id, cursor, idx, filter.clone(), qos as u8);
-                        self.datalog
-                            .handle_retained_messages(filter, &mut self.notifications);
+                        if let Some((grp, filter_path)) = extract_group(&f.path) {
+                            group = Some(grp);
+                            filter = filter_path;
+                        };
 
-                        let code = match qos {
+                        let subscription_id = props.as_ref().and_then(|p| p.id);
+
+                        if subscription_id == Some(0) {
+                            error!("Subscription identifier can't be 0");
+                            disconnect = true;
+                            disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
+                            break;
+                        }
+
+                        let (idx, cursor) = self.datalog.next_native_offset(&filter);
+
+                        // in case of shared sub original_filter will be $share/group/topic
+                        // this is because we do want to treat is as diffrent subscription
+                        // and create DataRequest, while using the same datalog of "topic"
+                        // NOTE: topic & $share/group/topic will have same filteridx!
+                        self.prepare_filter(id, cursor, idx, f, group, subscription_id);
+
+                        let code = match f.qos {
                             QoS::AtMostOnce => SubscribeReasonCode::QoS0,
                             QoS::AtLeastOnce => SubscribeReasonCode::QoS1,
                             QoS::ExactlyOnce => SubscribeReasonCode::QoS2,
@@ -666,9 +732,20 @@ impl Router {
                                 continue;
                             }
 
+                            // Remove connections from all groups
+                            // discard empty group ( group with no client )
+                            // note: can we do this in better way?
+                            self.shared_subscriptions.retain(|_, group| {
+                                group.remove_client(&client_id);
+                                !group.is_empty()
+                            });
+
                             if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
                                 broker_aliases.remove_alias(filter);
                             }
+
+                            // remove the subscription id
+                            connection.subscription_ids.remove(filter);
 
                             let unsuback = UnsubAck {
                                 pkid,
@@ -715,6 +792,7 @@ impl Router {
                         reason: PubRelReason::Success,
                     };
 
+                    outgoing.register_pubrec(pubrel.pkid);
                     ackslog.pubrel(pubrel);
                     self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
@@ -728,7 +806,11 @@ impl Router {
                         reason: PubCompReason::Success,
                     };
 
-                    let publish = match ackslog.pubcomp(pubcomp) {
+                    // NOTE: client can try to resend previously unacked pubrels
+                    // on reconnection ( with clean session false )
+                    // we try to retrive publish assuming broker saved the previous state
+                    // successfully in graveyard.
+                    let (publish, props) = match ackslog.pubcomp(pubcomp) {
                         Some(v) => v,
                         None => {
                             disconnect = true;
@@ -740,7 +822,7 @@ impl Router {
                     match append_to_commitlog(
                         id,
                         publish,
-                        None,
+                        props,
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
@@ -761,8 +843,23 @@ impl Router {
                             break;
                         }
                     };
+                    self.scheduler.reschedule(id, ScheduleReason::IncomingAck);
                 }
-                Packet::PubComp(_pubcomp, _) => {}
+                Packet::PubComp(pubcomp, _) => {
+                    let span = tracing::info_span!("pubcomp", pkid = pubcomp.pkid);
+                    let _guard = span.enter();
+
+                    let outgoing = self.obufs.get_mut(id).unwrap();
+                    let pkid = pubcomp.pkid;
+                    if outgoing.register_pubcomp(pkid).is_none() {
+                        error!(
+                            pkid,
+                            "ack received for pkid {}, but the pkid didn't exists!", pkid
+                        );
+                        disconnect = true;
+                        break;
+                    }
+                }
                 Packet::PingReq(_) => {
                     let ackslog = self.ackslog.get_mut(id).unwrap();
                     ackslog.pingresp(PingResp);
@@ -773,11 +870,12 @@ impl Router {
                     let span = tracing::info_span!("disconnect");
                     let _guard = span.enter();
                     disconnect = true;
-                    execute_will = false;
+                    // delete the last will message
+                    self.last_wills.remove(&client_id);
                     break;
                 }
                 incoming => {
-                    warn!(packet=?incoming, "Packet not supported by router yet" );
+                    warn!(packet=?incoming, "Unexpected packet received, ignoring the packet." );
                 }
             }
         }
@@ -805,42 +903,78 @@ impl Router {
         // on say 5th packet should not block new data notifications for packets
         // 1 - 4. Hence we use a flag instead of diconnecting immediately
         if disconnect {
-            self.handle_disconnection(id, execute_will, disconnect_reason);
+            self.handle_disconnection(id, disconnect_reason);
         }
     }
 
     /// Apply filter and prepare this connection to receive subscription data
+    /// Handle retained messages as per subscription options!
     fn prepare_filter(
         &mut self,
         id: ConnectionId,
         cursor: Offset,
         filter_idx: FilterIdx,
-        filter: String,
-        qos: u8,
+        filter: &protocol::Filter,
+        group: Option<String>,
+        subscription_id: Option<usize>,
     ) {
+        let filter_path = &filter.path;
+
         // Add connection id to subscription list
-        match self.subscription_map.get_mut(&filter) {
+        match self.subscription_map.get_mut(filter_path) {
             Some(connections) => {
                 connections.insert(id);
             }
             None => {
                 let mut connections = HashSet::new();
                 connections.insert(id);
-                self.subscription_map.insert(filter.clone(), connections);
+                self.subscription_map
+                    .insert(filter_path.clone(), connections);
             }
         }
 
         // Prepare consumer to pull data in case of subscription
         let connection = self.connections.get_mut(id).unwrap();
 
-        if connection.subscriptions.insert(filter.clone()) {
+        // Add/Create shared group
+        if let Some(group_name) = &group {
+            let client_id = connection.client_id.clone();
+
+            let shared_group = self
+                .shared_subscriptions
+                .entry(group_name.to_string())
+                .or_insert(SharedGroup::new(
+                    cursor,
+                    self.config.shared_subscriptions_strategy.clone(),
+                ));
+
+            shared_group.add_client(client_id);
+        };
+
+        if let Some(subscription_id) = subscription_id {
+            connection
+                .subscription_ids
+                .insert(filter_path.clone(), subscription_id);
+        }
+
+        // check is group is None because retained messages aren't sent
+        // for shared subscriptions
+        // TODO: use retain forward rules
+        let forward_retained = group.is_none();
+
+        // call to `insert(_)` returns `true` if it didn't contain the filter_path already
+        // i.e. its a new subscription
+        if connection.subscriptions.insert(filter_path.clone()) {
             let request = DataRequest {
-                filter: filter.clone(),
+                filter: filter_path.clone(),
                 filter_idx,
-                qos,
+                qos: filter.qos as u8,
                 cursor,
                 read_count: 0,
                 max_count: 100,
+                // set true for new subscriptions
+                forward_retained,
+                group,
             };
 
             self.scheduler.track(id, request);
@@ -848,8 +982,12 @@ impl Router {
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
         }
 
+        // TODO: figure out how we can update existing DataRequest
+        // helpful in re-subscriptions and forwarding retained messages on
+        // every subscribe
+
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-        meter.register_subscription(filter);
+        meter.register_subscription(filter_path.clone());
     }
 
     /// When a connection is ready, it should sweep native data from 'datalog',
@@ -880,7 +1018,10 @@ impl Router {
         ack_device_data(ackslog, outgoing);
 
         let connection = &mut self.connections[id];
-        let broker_topic_aliases = &mut connection.broker_topic_aliases;
+
+        // Keep track of temporarily skipped DataRequest
+        // NOTE: VecDeque::new() doesn't allocate memory until elements are pushed
+        let mut skipped_requests: VecDeque<DataRequest> = VecDeque::new();
 
         // A new connection's tracker is always initialized with acks request.
         // A subscribe will register data request.
@@ -893,17 +1034,29 @@ impl Router {
                 // acks are completely caught up. Pending requests are registered
                 // in waiters and awaiting new notifications (device or replica data)
                 None => {
-                    self.scheduler.pause(id, PauseReason::Caughtup);
+                    if skipped_requests.is_empty() {
+                        // if no requests is in skip list, that means
+                        // we have nothing left to process, i.e. we caughtup
+                        self.scheduler.pause(id, PauseReason::Caughtup);
+                    }
+                    // add back the skipped requests!
+                    self.scheduler.trackv(id, skipped_requests);
                     return Some(());
                 }
             };
+
+            let shared_group = request
+                .group
+                .as_ref()
+                .and_then(|name| self.shared_subscriptions.get_mut(name));
 
             match forward_device_data(
                 &mut request,
                 datalog,
                 outgoing,
                 alertlog,
-                broker_topic_aliases,
+                connection,
+                shared_group,
             ) {
                 ConsumeStatus::BufferFull => {
                     requests.push_back(request);
@@ -927,22 +1080,30 @@ impl Router {
                 ConsumeStatus::PartialRead => {
                     requests.push_back(request);
                 }
+                ConsumeStatus::SkipRequest => {
+                    skipped_requests.push_back(request);
+                }
             }
         }
 
         // Add requests back to the tracker if there are any
+        requests.extend(skipped_requests);
         self.scheduler.trackv(id, requests);
         Some(())
     }
 
-    pub fn handle_last_will(&mut self, id: ConnectionId) {
-        let connection = self.connections.get_mut(id).unwrap();
-        let will = match connection.last_will.take() {
-            Some(v) => v,
-            None => return,
+    pub fn handle_last_will(
+        &mut self,
+        client_id: String,
+        #[cfg(feature = "validate-tenant-prefix")] tenant_id: Option<String>,
+    ) {
+        #[cfg(feature = "validate-tenant-prefix")]
+        let tenant_prefix = tenant_id.map(|id| format!("/tenants/{id}/"));
+
+        let Some((will, will_props)) = self.last_wills.remove(&client_id) else {
+            return;
         };
 
-        error!("Unexpected: last will not unset");
         let publish = Publish {
             dup: false,
             qos: will.qos,
@@ -952,14 +1113,23 @@ impl Router {
             payload: will.message,
         };
 
-        let properties = None;
-        match append_to_commitlog(
-            id,
+        let properties = will_props.map(|props| PublishProperties {
+            payload_format_indicator: props.payload_format_indicator,
+            message_expiry_interval: props.message_expiry_interval,
+            response_topic: props.response_topic,
+            correlation_data: props.correlation_data,
+            user_properties: props.user_properties,
+            content_type: props.content_type,
+            ..Default::default()
+        });
+
+        match append_will_message(
             publish,
             properties,
             &mut self.datalog,
             &mut self.notifications,
-            &mut self.connections,
+            #[cfg(feature = "validate-tenant-prefix")]
+            tenant_prefix,
         ) {
             Ok(_offset) => {
                 // Prepare all the consumers which are waiting for new data
@@ -1029,6 +1199,17 @@ fn append_to_commitlog(
         p.topic_alias.take()
     });
 
+    // TODO: broker should properly send the disconnect packet!
+    if properties
+        .as_ref()
+        .is_some_and(|p| !p.subscription_identifiers.is_empty())
+    {
+        error!("A PUBLISH packet sent from a Client to a Server MUST NOT contain a Subscription Identifier");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::MalformedPacket,
+        ));
+    }
+
     if let Some(alias) = topic_alias {
         validate_and_set_topic_alias(&mut publish, connection, alias)?;
     };
@@ -1049,10 +1230,11 @@ fn append_to_commitlog(
     if publish.payload.is_empty() {
         datalog.remove_from_retained_publishes(topic.to_owned());
     } else if publish.retain {
-        error!("Unexpected: retain field was not unset");
         datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
     }
 
+    // after recording retained message, we also send that message to existing subscribers
+    // as normal publish message. Therefore we are setting retain to false
     publish.retain = false;
     let pkid = publish.pkid;
 
@@ -1085,6 +1267,71 @@ fn append_to_commitlog(
     Ok(o)
 }
 
+fn append_will_message(
+    mut publish: Publish,
+    properties: Option<PublishProperties>,
+    datalog: &mut DataLog,
+    notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
+    #[cfg(feature = "validate-tenant-prefix")] tenant_prefix: Option<String>,
+) -> Result<Offset, RouterError> {
+    // TODO: broker should properly send the disconnect packet!
+    if properties
+        .as_ref()
+        .is_some_and(|p| !p.subscription_identifiers.is_empty())
+    {
+        error!("A PUBLISH packet sent from a Client to a Server MUST NOT contain a Subscription Identifier");
+        return Err(RouterError::Disconnect(
+            DisconnectReasonCode::MalformedPacket,
+        ));
+    }
+
+    let topic = std::str::from_utf8(&publish.topic)?;
+
+    // Ensure that only clients associated with a tenant can publish to tenant's topic
+    #[cfg(feature = "validate-tenant-prefix")]
+    if let Some(tenant_prefix) = tenant_prefix {
+        if !topic.starts_with(&tenant_prefix) {
+            return Err(RouterError::BadTenant(
+                tenant_prefix.to_owned(),
+                topic.to_owned(),
+            ));
+        }
+    }
+
+    if publish.payload.is_empty() {
+        datalog.remove_from_retained_publishes(topic.to_owned());
+    } else if publish.retain {
+        datalog.insert_to_retained_publishes(publish.clone(), properties.clone(), topic.to_owned());
+    }
+
+    // after recording retained message, we also send that message to existing subscribers
+    // as normal publish message. Therefore we are setting retain to false
+    publish.retain = false;
+    let pkid = publish.pkid;
+
+    let filter_idxs = datalog.matches(topic);
+
+    let filter_idxs = match filter_idxs {
+        Some(v) => v,
+        None => return Err(RouterError::NoMatchingFilters(topic.to_owned())),
+    };
+
+    let mut o = (0, 0);
+    for filter_idx in filter_idxs {
+        let datalog = datalog.native.get_mut(filter_idx).unwrap();
+        let publish_data = (publish.clone(), properties.clone());
+        let (offset, filter) = datalog.append(publish_data.into(), notifications);
+        debug!(
+            pkid,
+            "Appended to commitlog: {}[{}, {})", filter, offset.0, offset.1,
+        );
+
+        o = offset;
+    }
+
+    Ok(o)
+}
+
 fn validate_and_set_topic_alias(
     publish: &mut Publish,
     connection: &mut Connection,
@@ -1100,11 +1347,9 @@ fn validate_and_set_topic_alias(
     if publish.topic.is_empty() {
         // if publish topic is empty, publisher must have set a valid alias
         let Some(alias_topic) = connection.topic_aliases.get(&alias) else {
-                error!("Empty topic name with invalid alias");
-                return Err(RouterError::Disconnect(
-                    DisconnectReasonCode::ProtocolError,
-                ));
-            };
+            error!("Empty topic name with invalid alias");
+            return Err(RouterError::Disconnect(DisconnectReasonCode::ProtocolError));
+        };
         // set the publish topic before further processing
         publish.topic = alias_topic.to_owned().into();
     } else {
@@ -1158,6 +1403,9 @@ enum ConsumeStatus {
     FilterCaughtup,
     /// Some publishes on topic have been forwarded
     PartialRead,
+    /// Use to indicate we want to skip the datareqest
+    /// for shared subscriptions
+    SkipRequest,
 }
 
 /// Sweep datalog from offset in DataRequest and updates DataRequest
@@ -1168,13 +1416,20 @@ enum ConsumeStatus {
 /// 3. `inflight_full`: whether the inflight requests were completely filled
 fn forward_device_data(
     request: &mut DataRequest,
-    datalog: &DataLog,
+    datalog: &mut DataLog,
     outgoing: &mut Outgoing,
     alertlog: &mut AlertLog,
-    broker_topic_aliases: &mut Option<BrokerAliases>,
+    connection: &mut Connection,
+    shared_group: Option<&mut SharedGroup>,
 ) -> ConsumeStatus {
     let span = tracing::info_span!("outgoing_publish", client_id = outgoing.client_id);
     let _guard = span.enter();
+
+    if let Some(ref shared_group) = shared_group {
+        // update the request cursor to use shared cursor
+        request.cursor = shared_group.cursor;
+    }
+
     trace!(
         "Reading from datalog: {}[{}, {}]",
         request.filter,
@@ -1182,7 +1437,8 @@ fn forward_device_data(
         request.cursor.1
     );
 
-    let inflight_slots = if request.qos == 1 {
+    let mut inflight_slots = if request.qos != 0 {
+        // for qos 1 & 2
         let len = outgoing.free_slots();
         if len == 0 {
             trace!("Aborting read from datalog: inflight capacity reached");
@@ -1191,10 +1447,35 @@ fn forward_device_data(
 
         len as u64
     } else {
-        datalog.config.max_read_len
+        datalog.config.max_outgoing_packet_count
     };
 
-    let (next, publishes) =
+    if shared_group
+        .as_ref()
+        .is_some_and(|g| g.strategy == Strategy::RoundRobin)
+    {
+        // only read one message in case of round robin
+        // so that messages get equally distributed!
+        inflight_slots = 1;
+    }
+
+    let mut publishes = Vec::new();
+
+    if request.forward_retained {
+        // NOTE: ideally we want to limit the number of read messages
+        // and skip the messages previously read while reading next time.
+        // but for now, we just try to read all messages and drop the excess ones
+        let mut retained_publishes = datalog.read_retained_messages(&request.filter);
+        retained_publishes.truncate(inflight_slots as usize);
+
+        publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
+        inflight_slots -= publishes.len() as u64;
+
+        // we only want to forward retained messages once
+        request.forward_retained = false;
+    }
+
+    let (next, publishes_from_datalog) =
         match datalog.native_readv(request.filter_idx, request.cursor, inflight_slots) {
             Ok(v) => v,
             Err(e) => {
@@ -1203,10 +1484,28 @@ fn forward_device_data(
             }
         };
 
+    publishes.extend(
+        publishes_from_datalog
+            .into_iter()
+            .map(|(p, offset)| (p, Some(offset))),
+    );
+
     let (start, next, caughtup) = match next {
         Position::Next { start, end } => (start, end, false),
         Position::Done { start, end } => (start, end, true),
     };
+
+    if let Some(ref shared_group) = shared_group {
+        let skip_current_client = Some(&outgoing.client_id) != shared_group.current_client();
+
+        if skip_current_client {
+            return if caughtup {
+                ConsumeStatus::FilterCaughtup
+            } else {
+                ConsumeStatus::SkipRequest
+            };
+        }
+    }
 
     if start != request.cursor {
         let error = format!(
@@ -1242,6 +1541,7 @@ fn forward_device_data(
         return ConsumeStatus::FilterCaughtup;
     }
 
+    let broker_topic_aliases = &mut connection.broker_topic_aliases;
     let mut topic_alias = broker_topic_aliases
         .as_ref()
         .and_then(|aliases| aliases.get_alias(&request.filter));
@@ -1254,6 +1554,8 @@ fn forward_device_data(
             .as_mut()
             .and_then(|broker_aliases| broker_aliases.set_new_alias(&request.filter))
     }
+
+    let subscription_id = connection.subscription_ids.get(&request.filter);
 
     // Fill and notify device data
     let forwards = publishes
@@ -1271,6 +1573,13 @@ fn forward_device_data(
             // We want to clear topic if we are using an existing alias
             if topic_alias_already_exists {
                 publish.topic.clear()
+            }
+
+            if let Some(&subscription_id) = subscription_id {
+                // create new props if not already exists
+                let mut props = properties.unwrap_or_default();
+                props.subscription_identifiers.push(subscription_id);
+                properties = Some(props);
             }
 
             Forward {
@@ -1301,6 +1610,14 @@ fn forward_device_data(
     }
 
     outgoing.handle.try_send(()).ok();
+
+    // update the state of shared subscription
+    if let Some(share) = shared_group {
+        share.update_next_client();
+        // update the shared cursor
+        share.cursor = request.cursor;
+    }
+
     if caughtup {
         ConsumeStatus::FilterCaughtup
     } else {
@@ -1349,10 +1666,14 @@ fn print_status(router: &mut Router, metrics: Print) {
 
             let metrics = match metrics {
                 Some(v) => Some(v),
-                None => router
-                    .graveyard
-                    .retrieve(&id)
-                    .map(|v| (v.metrics, v.tracker)),
+                None => router.graveyard.retrieve(&id).map(|v| {
+                    (
+                        v.metrics,
+                        v.session_state
+                            .map(|s| s.tracker)
+                            .unwrap_or(Tracker::new(id)),
+                    )
+                }),
             };
 
             println!("{metrics:#?}");
@@ -1412,11 +1733,7 @@ fn validate_subscription(
         }
     }
 
-    if filter.qos == QoS::ExactlyOnce {
-        return Err(RouterError::UnsupportedQoS(filter.qos));
-    }
-
-    if filter.path.starts_with('$') {
+    if filter.path.starts_with('$') && !filter.path.starts_with("$share") {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
     }
 
@@ -1433,6 +1750,12 @@ fn validate_clientid(client_id: &str) -> Result<(), RouterError> {
     Ok(())
 }
 
+fn extract_group(filter: &str) -> Option<(String, String)> {
+    filter.strip_prefix("$share/").and_then(|s| {
+        s.split_once('/')
+            .map(|(group, path)| (group.to_string(), path.to_string()))
+    })
+}
 // #[cfg(test)]
 // #[allow(non_snake_case)]
 // mod test {

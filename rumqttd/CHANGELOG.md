@@ -8,11 +8,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Support for Websocket connections (#633)
 - Support for using v3.1.1 & v5 protocol on the same port using `tcp` config (#641)
+
+### Changed
+- Public re-export `Strategy` for shared subscriptions
+- Peer initiated disconnects logged as info rather than error.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- MQTT keep alive interval
+- record client id for remote link's span
+- session present flag in connack
+
+### Security
+
+---
+
+## [rumqttd 0.19.0] - 12-12-2023
+
+### Added
+- Log warning if websocket config is getting ignored
+- Add support for ECC keys when configuring TLS in rumqttd
+- Support for external authentication with custom function
+
+### Changed
+- Console endpoint /config prints Router Config instead of returning console settings
+- v4 config is optional, user can specify v4 and/or v5 config
+- websocket feature is enabled by default
+- console configuration is optional
+- rustls client auth is featured gated behind "verify-client-cert" ( disabled by default ).
+
+### Deprecated
+- "websockets" feature is removed in favour of "websocket"
+
+### Removed
+
+### Fixed
+
+### Security
+- Update tungstenite and dependencies to fix [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0065).
+
+---
+
+## [rumqttd 0.18.0] - 12-09-2023
+
+### Added
+- Will delay interval for MQTTv5 (#686)
+
+### Changed
+- Non-consuming builder pattern for constructing Connection
+
+### Deprecated
+
+### Removed
+- Link and its implementation which were deprecated.
+
+### Fixed
+- Will Messages
+- Retained Messages
+- Publish properties in QoS2 publish
+
+### Security
+- Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)
+
+---
+
+## [rumqttd 0.17.0] - 15-08-2023
+
+### Added
+- Subscription IDs in v5 publish packets (#632)
+- Shared Subscriptions with configurable strategies (#668)
+- Bump dependencies to latest (#666)
+
 ### Changed
 
 ### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+---
+
+## [rumqttd 0.16.0] - 24-07-2023
+
+### Added
+- QoS2 support (#604)
+- Support for Websocket connections (#633)
+- LinkBuilder for constructing LinkRx/LinkTx (#659)
+- Ability to configure segment size individually (#602)
+
+### Changed
+
+### Deprecated
+- Link and its implementation, use LinkBuilder instead
 
 ### Removed
 
@@ -39,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MQTTv5: Read the Unsubscribe package in match arms (#625)
 
 ### Security
+
+---
 
 ## [rumqttd 0.14.0] - 31-03-2023
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::{
     scheduler::{PauseReason, Tracker},
@@ -23,20 +23,37 @@ impl Graveyard {
     }
 
     /// Save connection tracker
-    pub fn save(
+    pub fn save_state(
         &mut self,
         mut tracker: Tracker,
         subscriptions: HashSet<String>,
         metrics: ConnectionEvents,
+        unacked_pubrels: VecDeque<u16>,
     ) {
         tracker.pause(PauseReason::Busy);
         let id = tracker.id.clone();
 
+        let session_state = SessionState {
+            tracker,
+            subscriptions,
+            unacked_pubrels,
+        };
+
         self.connections.insert(
             id,
             SavedState {
-                tracker,
-                subscriptions,
+                session_state: Some(session_state),
+                metrics,
+            },
+        );
+    }
+
+    /// Save only metrics for connection
+    pub fn save_metrics(&mut self, id: String, metrics: ConnectionEvents) {
+        self.connections.insert(
+            id,
+            SavedState {
+                session_state: None,
                 metrics,
             },
         );
@@ -45,17 +62,14 @@ impl Graveyard {
 
 #[derive(Debug)]
 pub struct SavedState {
-    pub tracker: Tracker,
-    pub subscriptions: HashSet<String>,
+    pub session_state: Option<SessionState>,
     pub metrics: ConnectionEvents,
 }
 
-impl SavedState {
-    pub fn new(client_id: String) -> SavedState {
-        SavedState {
-            tracker: Tracker::new(client_id),
-            subscriptions: HashSet::new(),
-            metrics: ConnectionEvents::default(),
-        }
-    }
+#[derive(Debug)]
+pub struct SessionState {
+    pub tracker: Tracker,
+    pub subscriptions: HashSet<String>,
+    // used for pubrel in qos2
+    pub unacked_pubrels: VecDeque<u16>,
 }
