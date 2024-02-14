@@ -198,9 +198,9 @@ pub async fn tls_connect<P: AsRef<Path>>(
 ) -> Result<Box<dyn N>, BridgeError> {
     let mut root_cert_store = RootCertStore::empty();
 
-    let ca_certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?)))
-        .collect::<Result<Vec<_>, _>>()?;
-    root_cert_store.add_parsable_certificates(ca_certs);
+    for cert in rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?))) {
+        root_cert_store.add(cert?)?;
+    }
 
     if root_cert_store.is_empty() {
         return Err(BridgeError::NoValidCertInChain);
@@ -213,35 +213,24 @@ pub async fn tls_connect<P: AsRef<Path>>(
         key: key_path,
     }) = client_auth_opt
     {
-        let read_certs =
-            rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))
-                .collect::<Result<Vec<_>, _>>()?;
+        let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let read_key = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
+        let key = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
             key_path,
         )?)))? {
-            Some(rustls_pemfile::Item::Pkcs1Key(_)) => rustls_pemfile::rsa_private_keys(
-                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
-            )
-            .next()
-            .ok_or(BridgeError::NoValidCertInChain)??
-            .into(),
-            Some(rustls_pemfile::Item::Pkcs8Key(_)) => rustls_pemfile::pkcs8_private_keys(
-                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
-            )
-            .next()
-            .ok_or(BridgeError::NoValidCertInChain)??
-            .into(),
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => key.into(),
+            Some(rustls_pemfile::Item::Pkcs8Key(key)) => key.into(),
             None | Some(_) => return Err(BridgeError::NoValidCertInChain),
         };
 
-        config.with_client_auth_cert(read_certs, read_key)?
+        config.with_client_auth_cert(certs, key)?
     } else {
         config.with_no_client_auth()
     };
 
     let connector = TlsConnector::from(Arc::new(config));
-    let domain = ServerName::try_from(host).unwrap().to_owned();
+    let domain = ServerName::try_from(host)?.to_owned();
     Ok(Box::new(connector.connect(domain, tcp).await?))
 }
 

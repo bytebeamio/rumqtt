@@ -218,11 +218,9 @@ impl TLSAcceptor {
             let ca_file = File::open(ca_path);
             let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
             let ca_file = &mut BufReader::new(ca_file);
-            let ca_certs = rustls_pemfile::certs(ca_file).collect::<Result<Vec<_>, _>>()?;
-            let ca_cert = ca_certs
-                .into_iter()
+            let ca_cert = rustls_pemfile::certs(ca_file)
                 .next()
-                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))??;
 
             let mut store = RootCertStore::empty();
             store
@@ -230,8 +228,8 @@ impl TLSAcceptor {
                 .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
 
             // This will only return an error if no trust anchors are provided or invalid CRLs are
-            // provided. We always provide a trust anchor, and don't provide any CRLs, so it should
-            // never return an error and it is safe to unwrap.
+            // provided. We always provide a trust anchor, and don't provide any CRLs, so it is safe
+            // to unwrap.
             let verifier = WebPkiClientVerifier::builder(Arc::new(store))
                 .build()
                 .unwrap();
