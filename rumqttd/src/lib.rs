@@ -1,6 +1,7 @@
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
@@ -43,7 +44,11 @@ pub type Cursor = (u64, u64);
 pub type ClientId = String;
 pub type AuthUser = String;
 pub type AuthPass = String;
-pub type AuthHandler = Arc<dyn Fn(ClientId, AuthUser, AuthPass) -> bool + Send + Sync + 'static>;
+pub type AuthHandler = Arc<
+    dyn Fn(ClientId, AuthUser, AuthPass) -> Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+        + Send
+        + Sync, // + 'static,
+>;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {

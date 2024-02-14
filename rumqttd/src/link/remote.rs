@@ -188,7 +188,7 @@ where
 
     Span::current().record("client_id", &connect.client_id);
 
-    handle_auth(config.clone(), login.as_ref(), &connect.client_id)?;
+    handle_auth(config.clone(), login.as_ref(), &connect.client_id).await?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -213,7 +213,7 @@ where
     Ok(packet)
 }
 
-fn handle_auth(
+async fn handle_auth(
     config: Arc<ConnectionSettings>,
     login: Option<&Login>,
     client_id: &str,
@@ -236,7 +236,9 @@ fn handle_auth(
             client_id.to_owned(),
             username.to_owned(),
             password.to_owned(),
-        ) {
+        )
+        .await
+        {
             return Err(Error::InvalidAuth);
         }
 
