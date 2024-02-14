@@ -125,10 +125,7 @@ impl ServerSettings {
         O: IntoFuture<Output = bool> + 'static,
         O::IntoFuture: Send,
     {
-        self.connections.external_auth = Some(Arc::new(move |client_id, username, password| {
-            let auth = auth_fn(client_id, username, password).into_future();
-            Box::pin(auth)
-        }));
+        self.connections.set_auth_handler(auth_fn)
     }
 }
 
@@ -155,6 +152,20 @@ pub struct ConnectionSettings {
     external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
+}
+
+impl ConnectionSettings {
+    pub fn set_auth_handler<F, O>(&mut self, auth_fn: F)
+    where
+        F: Fn(ClientId, AuthUser, AuthPass) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = bool> + 'static,
+        O::IntoFuture: Send,
+    {
+        self.external_auth = Some(Arc::new(move |client_id, username, password| {
+            let auth = auth_fn(client_id, username, password).into_future();
+            Box::pin(auth)
+        }));
+    }
 }
 
 impl fmt::Debug for ConnectionSettings {
