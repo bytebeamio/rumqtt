@@ -15,12 +15,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Use rustls-native-certs to load root certificates from the operating system.
     let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
-    for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs") {
-        root_cert_store.add(&tokio_rustls::rustls::Certificate(cert.0))?;
-    }
+    root_cert_store.add_parsable_certificates(
+        rustls_native_certs::load_native_certs().expect("could not load platform certs"),
+    );
 
     let client_config = ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_cert_store)
         .with_no_client_auth();
 
