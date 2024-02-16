@@ -27,7 +27,7 @@ use async_tungstenite::tungstenite::http::HeaderValue;
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
-use metrics::register_gauge;
+use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
 use std::{io, thread};
@@ -282,9 +282,9 @@ impl Broker {
                 let builder = PrometheusBuilder::new().with_http_listener(addr);
                 builder.install().unwrap();
 
-                let total_publishes = register_gauge!("metrics.router.total_publishes");
-                let total_connections = register_gauge!("metrics.router.total_connections");
-                let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+                let total_publishes = gauge!("metrics.router.total_publishes");
+                let total_connections = gauge!("metrics.router.total_connections");
+                let failed_publishes = gauge!("metrics.router.failed_publishes");
                 loop {
                     if let Ok(metrics) = meter_link.recv() {
                         for m in metrics {
