@@ -2,6 +2,7 @@ use config::FileFormat;
 use rumqttd::Broker;
 
 use clap::Parser;
+use tracing::trace;
 
 static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 
@@ -76,7 +77,12 @@ fn main() {
     };
 
     let mut configs: rumqttd::Config = config_builder.build().unwrap().try_deserialize().unwrap();
-    configs.console.set_filter_reload_handle(reload_handle);
+
+    if let Some(console_config) = configs.console.as_mut() {
+        console_config.set_filter_reload_handle(reload_handle)
+    }
+
+    validate_config(&configs);
 
     // println!("{:#?}", configs);
 
@@ -84,13 +90,49 @@ fn main() {
     broker.start().unwrap();
 }
 
+// Do any extra validation that needs to be done before starting the broker here.
+fn validate_config(configs: &rumqttd::Config) {
+    if let Some(v4) = &configs.v4 {
+        for (name, server_setting) in v4 {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server v4.{name}.")
+                }
+                trace!("Validated certificate paths for server v4.{name}.");
+            }
+        }
+    }
+
+    if let Some(v5) = &configs.v5 {
+        for (name, server_setting) in v5 {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server v5.{name}.")
+                }
+                trace!("Validated certificate paths for server v5.{name}.");
+            }
+        }
+    }
+
+    if let Some(ws) = &configs.ws {
+        for (name, server_setting) in ws {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server ws.{name}.")
+                }
+                trace!("Validated certificate paths for server ws.{name}.");
+            }
+        }
+    }
+}
+
 fn banner() {
-    const B: &str = r#"                                              
+    const B: &str = r"                                              
          ___ _   _ __  __  ___ _____ _____ ___  
         | _ \ | | |  \/  |/ _ \_   _|_   _|   \ 
         |   / |_| | |\/| | (_) || |   | | | |) |
         |_|_\\___/|_|  |_|\__\_\|_|   |_| |___/ 
-    "#;
+    ";
 
     println!("{B}\n");
 }

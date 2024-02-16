@@ -59,7 +59,9 @@ pub struct Outgoing {
     /// Handle which is given to router to allow router to communicate with this connection
     pub(crate) handle: Sender<()>,
     /// The buffer to keep track of inflight packets.
-    inflight_buffer: VecDeque<(u16, FilterIdx, Cursor)>,
+    inflight_buffer: VecDeque<(u16, FilterIdx, Option<Cursor>)>,
+    /// PubRels waiting for PubComp
+    pub(crate) unacked_pubrels: VecDeque<u16>,
     /// Last packet id
     last_pkid: u16,
     /// Metrics of outgoing messages of this connection
@@ -72,6 +74,7 @@ impl Outgoing {
         let (handle, rx) = flume::bounded(MAX_CHANNEL_CAPACITY);
         let data_buffer = VecDeque::with_capacity(MAX_CHANNEL_CAPACITY);
         let inflight_buffer = VecDeque::with_capacity(MAX_INFLIGHT);
+        let unacked_pubrels = VecDeque::with_capacity(MAX_INFLIGHT);
 
         // Ensure that there won't be any new allocations
         assert!(MAX_INFLIGHT <= inflight_buffer.capacity());
@@ -81,6 +84,7 @@ impl Outgoing {
             client_id,
             data_buffer: Arc::new(Mutex::new(data_buffer)),
             inflight_buffer,
+            unacked_pubrels,
             handle,
             last_pkid: 0,
             meter: Default::default(),
@@ -175,13 +179,38 @@ impl Outgoing {
         Some(())
     }
 
+    pub fn register_pubrec(&mut self, pkid: u16) {
+        // NOTE: we can return true of false
+        // to indicate whether this is duplicate or not
+        self.unacked_pubrels.push_back(pkid);
+    }
+
+    // OASIS standards don't specify anything about ordering of PubComp
+    // https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901240
+    // But we don't support out of order / unsolicited pubcomps
+    // to be consistent with the behaviour with other acks
+    pub fn register_pubcomp(&mut self, pkid: u16) -> Option<()> {
+        let Some(id) = self.unacked_pubrels.pop_front() else {
+            return None;
+        };
+
+        // out of order acks
+        if pkid != id {
+            error!(pkid, id, "out of order ack.");
+            return None;
+        }
+
+        Some(())
+    }
+
     // Here we are assuming that the first unique filter_idx we find while iterating will have the
     // least corresponding cursor because of the way we insert into the inflight_buffer
     pub fn retransmission_map(&self) -> HashMap<FilterIdx, Cursor> {
         let mut o = HashMap::new();
         for (_, filter_idx, cursor) in self.inflight_buffer.iter() {
-            if !o.contains_key(filter_idx) {
-                o.insert(*filter_idx, *cursor);
+            // if cursor in None, it means it was a retained publish
+            if !o.contains_key(filter_idx) && cursor.is_some() {
+                o.insert(*filter_idx, cursor.unwrap());
             }
         }
 
@@ -204,17 +233,17 @@ mod test {
         result.insert(3, (1, 0));
 
         let buf = vec![
-            (1, 0, (0, 8)),
-            (1, 0, (0, 10)),
-            (1, 1, (0, 1)),
-            (3, 1, (0, 4)),
-            (2, 2, (1, 1)),
-            (1, 2, (2, 6)),
-            (1, 2, (2, 1)),
-            (1, 3, (1, 0)),
-            (1, 3, (1, 1)),
-            (1, 3, (1, 3)),
-            (1, 3, (1, 3)),
+            (1, 0, Some((0, 8))),
+            (1, 0, Some((0, 10))),
+            (1, 1, Some((0, 1))),
+            (3, 1, Some((0, 4))),
+            (2, 2, Some((1, 1))),
+            (1, 2, Some((2, 6))),
+            (1, 2, Some((2, 1))),
+            (1, 3, Some((1, 0))),
+            (1, 3, Some((1, 1))),
+            (1, 3, Some((1, 3))),
+            (1, 3, Some((1, 3))),
         ];
 
         outgoing.inflight_buffer.extend(buf);

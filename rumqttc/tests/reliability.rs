@@ -93,9 +93,28 @@ async fn connection_should_timeout_on_time() {
 // All keep alive tests here
 //
 
+#[test]
+#[should_panic]
+fn test_invalid_keep_alive_value() {
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    options.set_keep_alive(Duration::from_millis(10));
+}
+
+#[test]
+fn test_zero_keep_alive_values() {
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    options.set_keep_alive(Duration::ZERO);
+}
+
+#[test]
+fn test_valid_keep_alive_values() {
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
+    options.set_keep_alive(Duration::from_secs(1));
+}
+
 #[tokio::test]
 async fn idle_connection_triggers_pings_on_time() {
-    let keep_alive = 5;
+    let keep_alive = 1;
 
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
     options.set_keep_alive(Duration::from_secs(keep_alive));

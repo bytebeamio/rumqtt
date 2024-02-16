@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports)]
 use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
@@ -12,12 +11,12 @@ fn create_conn() -> (AsyncClient, EventLoop) {
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
-        .set_clean_session(false);
+        .set_clean_start(false);
 
     AsyncClient::new(mqttoptions, 10)
 }
 
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     // todo!("fix this example with new way of spawning clients")
     pretty_env_logger::init();
@@ -59,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         if let Event::Incoming(packet) = event {
             let publish = match packet {
-                Packet::Publish(publish, _) => publish,
+                Packet::Publish(publish) => publish,
                 _ => continue,
             };
             // this time we will ack incoming publishes.

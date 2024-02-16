@@ -1,5 +1,8 @@
 use bytes::BytesMut;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    time::timeout,
+};
 
 use std::{
     collections::VecDeque,
@@ -52,7 +55,7 @@ impl<P: Protocol> Network<P> {
             write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
             max_connection_buffer_len,
-            keepalive: Duration::from_secs(0),
+            keepalive: Duration::ZERO,
             protocol,
         }
     }
@@ -100,7 +103,7 @@ impl<P: Protocol> Network<P> {
 
             // read more packets until a frame can be created. This function
             // blocks until a frame can be created. Use this in a select! branch
-            self.read_bytes(required).await?;
+            timeout(self.keepalive, self.read_bytes(required)).await??;
         }
     }
 
@@ -142,5 +145,5 @@ impl<P: Protocol> Network<P> {
     }
 }
 
-pub trait N: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
-impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
+pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Unpin + Send {}

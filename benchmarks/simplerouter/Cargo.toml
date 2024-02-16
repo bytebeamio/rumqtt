@@ -1,12 +1,16 @@
 [package]
 name = "simplerouter"
 version = "0.1.0"
-edition = "2021"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+publish = false
+rust-version = "1.64.0"
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [dependencies]
 bytes = "1"
 log = "0.4"
-pretty_env_logger = "0.4"
+pretty_env_logger = "0.5"
 thiserror = "1"
 tokio = { version = "1", features = ["net", "sync", "rt-multi-thread", "io-util", "macros"] }

@@ -1,6 +1,6 @@
 use tokio::{task, time};
 
-use rumqttc::{self, AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
+use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ fn create_conn() -> (AsyncClient, EventLoop) {
     AsyncClient::new(mqttoptions, 10)
 }
 
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
@@ -42,16 +42,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             Err(error) => {
                 println!("Error = {error:?}");
-                return Ok(());
+                break;
             }
-        }
-        if let Err(_err) = event {
-            // break loop on disconnection
-            break;
         }
     }
 
-    // create new broker connection
+    // create new broker connection but do not start a clean session
     let (client, mut eventloop) = create_conn();
 
     loop {

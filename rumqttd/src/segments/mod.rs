@@ -18,42 +18,36 @@ pub trait Storage {
     fn size(&self) -> usize;
 }
 
-/// There are 3 limits which are enforced:
-/// - limit on size of each segment created by this log in bytes (this will not be enforced on
-///   logs which are already existing in the directory provided for disk persistence)
+/// There are 2 limits which are enforced:
+/// - limit on size of each segment created by this log in bytes
 /// - limit on number of segments in memory
-/// - limit on number of segments stored in disk
 ///
-/// When the active_segment if filled up, we move it to memory segments and empty it for new logs.
-/// When limit on number of memory segments is reached, we move a single segment from memory onto
-/// the disk. When limit on number of elements on disk is also reached, we move a single segment
-/// from memory onto the disk.
+/// When the active_segment is filled up, we move it to memory segments and empty it for new logs.
+/// When the limit on the number of memory segments is reached, we remove the oldest segment from
+/// memory segments.
 ///
-/// This shifting of segments happens everytime the limit on size of segment exceeds the limit.
-/// Note that the size of segment might go beyond the limit if the single last log was put at the
-/// offset which is within the limit but logs size was large enough to be beyond the limit. Only
-/// when another log is appended will we flush the active segment onto memory segments.
+/// This shifting of segments happens everytime the limit on the size of a segment exceeds the
+/// limit. Note that the size of a segment might go beyond the limit if the single last log was put
+/// at the offset which is within the limit but the logs size was large enough to be beyond the
+/// limit. Only when another log is appended will we flush the active segment onto memory segments.
 ///
 /// ### Invariants
 /// - The active segment should have index `tail`.
-/// - Segment throughout should be contiguous in their indices, even if it means that some files on
-///   disk are invalid.
+/// - Segments throughout should be contiguous in their indices.
 /// - The total size in bytes for each segment in memory should not increase beyond the
 ///   max_segment_size by more than the overflowing bytes of the last packet.
 ///
 /// ### Seperation of implementation
-///    - `index` & `segment` - everything directly related to files, no bounds check except when bounds
-///      exceed file's existing size
+///    - `index` & `segment` - everything directly related to files, no bounds check except when
+///      bounds exceed file's existing size.
 ///    - `chunk` - abstraction to deal with index and segment combined. Basically we only need
-///      stuff from segment file, and thus hides away the index file under abstraction.
-///    - `segment` - abstracts away the disk and memory segments for ease of access.
-///    - 'disk_handle' - hold onto the things needed when dealing with disk, for example the
-///      hashing struct, path, files with invalid names etc.
+///      stuff from segment file, and thus we hide away the index file under this abstraction.
+///    - `segment` - abstracts away the memory segments for ease of access.
 pub struct CommitLog<T> {
     /// The index at which segments start.
     head: u64,
     /// The index at which the current active segment is, and also marks the last valid segment as
-    /// well as last segment in memory.
+    /// well as the last segment in memory.
     tail: u64,
     /// Maximum size of any segment in memory in bytes.
     max_segment_size: usize,
@@ -67,23 +61,15 @@ impl<T> CommitLog<T>
 where
     T: Storage + Clone,
 {
-    /// Create a new `CommitLog` with the given contraints. If `None` if passed in for `disk`
-    /// parameter, no disk persistence is provided. If `max_mem_segments` is 0, then only the
-    /// active segment is maintained.
-    ///
-    /// `disk` is an optional argument, which is an 2-tuple whose first element is the path of the
-    /// directory you want to keep logs in and second argument is the maximum number of segments
-    /// allowed to be stored on the disk.
-    ///
-    /// If disk is opened and the limit on disk size is reached, the head file will be deleted from
-    /// filesystem as well.
+    /// Create a new `CommitLog` with the given contraints. If `max_mem_segments` is 0, then only
+    /// the active segment is maintained.
     pub fn new(max_segment_size: usize, max_mem_segments: usize) -> io::Result<Self> {
         if max_segment_size < 1024 {
             panic!("given max_segment_size {max_segment_size} bytes < 1KB");
         }
 
         if max_mem_segments < 1 {
-            panic!("atleast 1 segment needs to exist in memory else what's the point of log");
+            panic!("at least 1 segment needs to exist in memory else what's the point of log");
         }
 
         let mut segments = VecDeque::with_capacity(max_mem_segments);
@@ -160,17 +146,17 @@ where
 
     fn apply_retention(&mut self) {
         if self.active_segment().size() >= self.max_segment_size as u64 {
-            // Read absolute_offset before applying memory retention, incase there is only 1
-            // segment allowed
+            // Read absolute_offset before applying memory retention, in case there is only 1
+            // segment allowed.
             let absolute_offset = self.active_segment().next_offset();
-            // If active segment is full and segments are full, apply retention policy
+            // If active segment is full and segments are full, apply retention policy.
             if self.memory_segments_count() >= self.max_mem_segments {
                 self.segments.pop_front();
                 self.head += 1;
             }
 
-            // Pushing a new segment into segments and updating tail automatically changes active
-            // segment to new empty one.
+            // Pushing a new segment into segments and updating the tail automatically changes
+            // the active segment to a new empty one.
             self.segments
                 .push_back(Segment::with_offset(absolute_offset));
             self.tail += 1;
@@ -182,7 +168,7 @@ where
         self.active_segment().last()
     }
 
-    /// Read `len` Ts at once. More efficient that reading 1 at a time. Returns
+    /// Read `len` Ts at once. More efficient than reading 1 at a time. Returns
     /// the next offset to read data from. The Position::start returned need not
     /// be a valid index if the start given is not valid either.
     pub fn readv(
@@ -221,7 +207,7 @@ where
         }
 
         while cursor.0 < self.tail {
-            // `Segment::readv` handles conversion from absolute index to relative
+            // `Segment::readv` handles the conversion from absolute index to relative
             // index and it returns the absolute offset.
             // absolute cursor not to be confused with absolute offset
             match curr_segment.readv(cursor, len, out)? {
@@ -235,10 +221,10 @@ where
                 // no offset returned -> we reached end
                 // if len unfulfilled -> try next segment with remaining length
                 SegmentPosition::Done(next_offset) => {
-                    // this condition is needed in case cursor.1 > 0 (when user provies cursor.1
+                    // This condition is needed in case cursor.1 > 0 (when the user provies cursor.1
                     // beyond segment's last offset which can happen due to next readv offset
                     // being off by 1 before jumping to next segment or while manually reading
-                    // from a particular cursor). In such case, no. of read data points is
+                    // from a particular cursor). In such case, the no. of read data points is
                     // 0 and hence we don't decrement len.
                     if next_offset >= cursor.1 {
                         len -= next_offset - cursor.1;
@@ -260,9 +246,9 @@ where
             return Ok(Position::Done { start, end: cursor });
         }
 
-        // we need to read seperately from active segment because if `None` returned for active
-        // segment's `readv` then we should return `None` as well as not possible to read further,
-        // whereas for older segments we simply jump onto the new one to read more.
+        // We need to read seperately from active segment because if `None` is returned for active
+        // segment's `readv`, then we should return `None` as well as it is not possible to read
+        // further, whereas for older segments we simply jump on to the new one to read more.
 
         match curr_segment.readv(cursor, len, out)? {
             SegmentPosition::Next(v) => {
