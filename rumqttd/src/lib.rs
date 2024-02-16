@@ -1,6 +1,8 @@
 use std::fmt;
+use std::future::IntoFuture;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
@@ -43,7 +45,11 @@ pub type Cursor = (u64, u64);
 pub type ClientId = String;
 pub type AuthUser = String;
 pub type AuthPass = String;
-pub type AuthHandler = Arc<dyn Fn(ClientId, AuthUser, AuthPass) -> bool + Send + Sync + 'static>;
+pub type AuthHandler = Arc<
+    dyn Fn(ClientId, AuthUser, AuthPass) -> Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+        + Send
+        + Sync,
+>;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -112,6 +118,17 @@ pub struct ServerSettings {
     pub connections: ConnectionSettings,
 }
 
+impl ServerSettings {
+    pub fn set_auth_handler<F, O>(&mut self, auth_fn: F)
+    where
+        F: Fn(ClientId, AuthUser, AuthPass) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = bool> + 'static,
+        O::IntoFuture: Send,
+    {
+        self.connections.set_auth_handler(auth_fn)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeConfig {
     pub name: String,
@@ -132,9 +149,23 @@ pub struct ConnectionSettings {
     pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
     #[serde(skip)]
-    pub external_auth: Option<AuthHandler>,
+    external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
+}
+
+impl ConnectionSettings {
+    pub fn set_auth_handler<F, O>(&mut self, auth_fn: F)
+    where
+        F: Fn(ClientId, AuthUser, AuthPass) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = bool> + 'static,
+        O::IntoFuture: Send,
+    {
+        self.external_auth = Some(Arc::new(move |client_id, username, password| {
+            let auth = auth_fn(client_id, username, password).into_future();
+            Box::pin(auth)
+        }));
+    }
 }
 
 impl fmt::Debug for ConnectionSettings {

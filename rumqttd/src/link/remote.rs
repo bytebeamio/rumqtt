@@ -188,7 +188,7 @@ where
 
     Span::current().record("client_id", &connect.client_id);
 
-    handle_auth(config.clone(), login.as_ref(), &connect.client_id)?;
+    handle_auth(config.clone(), login.as_ref(), &connect.client_id).await?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -213,7 +213,7 @@ where
     Ok(packet)
 }
 
-fn handle_auth(
+async fn handle_auth(
     config: Arc<ConnectionSettings>,
     login: Option<&Login>,
     client_id: &str,
@@ -236,7 +236,9 @@ fn handle_auth(
             client_id.to_owned(),
             username.to_owned(),
             password.to_owned(),
-        ) {
+        )
+        .await
+        {
             return Err(Error::InvalidAuth);
         }
 
@@ -284,23 +286,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn no_login_no_auth() {
+    #[tokio::test]
+    async fn no_login_no_auth() {
         let cfg = Arc::new(config());
-        let r = handle_auth(cfg, None, "");
+        let r = handle_auth(cfg, None, "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn some_login_no_auth() {
+    #[tokio::test]
+    async fn some_login_no_auth() {
         let cfg = Arc::new(config());
         let login = login();
-        let r = handle_auth(cfg, Some(&login), "");
+        let r = handle_auth(cfg, Some(&login), "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn login_matches_static_auth() {
+    #[tokio::test]
+    async fn login_matches_static_auth() {
         let login = login();
         let mut map = HashMap::<String, String>::new();
         map.insert(login.username.clone(), login.password.clone());
@@ -308,12 +310,12 @@ mod tests {
         let mut cfg = config();
         cfg.auth = Some(map);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn login_fails_static_no_external() {
+    #[tokio::test]
+    async fn login_fails_static_no_external() {
         let login = login();
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
@@ -321,53 +323,53 @@ mod tests {
         let mut cfg = config();
         cfg.auth = Some(map);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_err());
     }
 
-    #[test]
-    fn login_fails_static_matches_external() {
+    #[tokio::test]
+    async fn login_fails_static_matches_external() {
         let login = login();
 
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
 
-        let dynamic = |_: String, _: String, _: String| -> bool { true };
+        let dynamic = |_: String, _: String, _: String| async { true };
 
         let mut cfg = config();
         cfg.auth = Some(map);
-        cfg.external_auth = Some(Arc::new(dynamic));
+        cfg.set_auth_handler(dynamic);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn login_fails_static_fails_external() {
+    #[tokio::test]
+    async fn login_fails_static_fails_external() {
         let login = login();
 
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
 
-        let dynamic = |_: String, _: String, _: String| -> bool { false };
+        let dynamic = |_: String, _: String, _: String| async { false };
 
         let mut cfg = config();
         cfg.auth = Some(map);
-        cfg.external_auth = Some(Arc::new(dynamic));
+        cfg.set_auth_handler(dynamic);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_err());
     }
 
-    #[test]
-    fn external_auth_clousre_or_fnptr_type_check_or_fail_compile() {
-        let closure = |_: String, _: String, _: String| -> bool { false };
-        fn fnptr(_: String, _: String, _: String) -> bool {
+    #[tokio::test]
+    async fn external_auth_clousre_or_fnptr_type_check_or_fail_compile() {
+        let closure = |_: String, _: String, _: String| async { false };
+        async fn fnptr(_: String, _: String, _: String) -> bool {
             true
         }
 
         let mut cfg = config();
-        cfg.external_auth = Some(Arc::new(closure));
-        cfg.external_auth = Some(Arc::new(fnptr));
+        cfg.set_auth_handler(closure);
+        cfg.set_auth_handler(fnptr);
     }
 }
