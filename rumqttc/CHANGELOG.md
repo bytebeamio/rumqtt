@@ -12,12 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for all variants of TLS key formats currently supported by Rustls: `PKCS#1`, `PKCS#8`, `RFC5915`. In practice we should now support all RSA keys and ECC keys in `DER` and `SEC1` encoding. Previously only `PKCS#1` and `PKCS#8` where supported.
 - TLS Error variants: `NoValidClientCertInChain`, `NoValidKeyInChain`.
 - Drain `Request`s, which weren't received by eventloop, from channel and put them in pending while doing cleanup to prevent data loss.
+- websocket request modifier for v4 client
+- Surfaced `AsyncClient`'s `from_senders` method to the `Client` as `from_sender`
 
 ### Changed
+- `MqttOptions::new` now accepts empty client id.
+- `MqttOptions::set_clean_session` now panics if client ID is empty and `clean_session` flag is set to false.
 - Synchronous client methods take `&self` instead of `&mut self` (#646)
 - Removed the `Key` enum: users do not need to specify the TLS key variant in the `TlsConfiguration` anymore, this is inferred automatically.
 To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initialization.
 - certificate for client authentication is now optional while using native-tls. `der` & `password` fields are replaced by `client_auth`.
+- Make v5 `RetainForwardRule` public, in order to allow setting it when constructing `Filter` values.
+- Use `VecDeque` instead of `IntoIter` to fix unintentional drop of pending requests on `EventLoop::clean` (#780)
+- `StateError::IncommingPacketTooLarge` is now `StateError::IncomingPacketTooLarge`.
+- Update `tokio-rustls` to `0.25.0`, `rustls-native-certs` to `0.7.0`, `rustls-webpki` to `0.102.1`,
+  `rusttls-pemfile` to `2.0.0`, `async-tungstenite` to `0.24.0`, `ws_stream_tungstenite` to `0.12.0`
+  and `http` to `1.0.0`. This is a breaking change as types from some of these crates are part of
+  the public API.
 
 ### Deprecated
 
@@ -25,6 +36,7 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
 
 ### Fixed
 - Lowered the MSRV to 1.64.0
+- Request modifier function should be Send and Sync and removed unnecessary Box
 
 ### Security
 

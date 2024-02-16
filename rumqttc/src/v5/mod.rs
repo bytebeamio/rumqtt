@@ -50,8 +50,11 @@ pub enum Request {
 }
 
 #[cfg(feature = "websocket")]
-type RequestModifierFn =
-    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>>>>;
+type RequestModifierFn = Arc<
+    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>> + Send>>
+        + Send
+        + Sync,
+>;
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -100,7 +103,7 @@ pub struct MqttOptions {
     /// The server may set its own maximum inflight limit, the smaller of the two will be used.
     outgoing_inflight_upper_limit: Option<u16>,
     #[cfg(feature = "websocket")]
-    request_modifier: Option<Arc<Box<RequestModifierFn>>>,
+    request_modifier: Option<RequestModifierFn>,
 }
 
 impl MqttOptions {
@@ -110,28 +113,17 @@ impl MqttOptions {
     /// - port: The port number on which broker must be listening for incoming connections
     ///
     /// ```
-    /// # use rumqttc::MqttOptions;
+    /// # use rumqttc::v5::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost", 1883);
     /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id");
-        }
-
         MqttOptions {
             broker_addr: host.into(),
             port,
             transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
             clean_start: true,
-            client_id: id,
+            client_id: id.into(),
             credentials: None,
             request_channel_capacity: 10,
             max_request_batch: 0,
@@ -171,7 +163,6 @@ impl MqttOptions {
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();
     /// # let client_config = ClientConfig::builder()
-    /// #    .with_safe_defaults()
     /// #    .with_root_certificates(root_cert_store)
     /// #    .with_no_client_auth();
     /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
@@ -201,21 +192,20 @@ impl MqttOptions {
     #[cfg(feature = "websocket")]
     pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
     where
-        F: Fn(http::Request<()>) -> O + 'static,
-        O: IntoFuture<Output = http::Request<()>>,
+        F: Fn(http::Request<()>) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = http::Request<()>> + 'static,
+        O::IntoFuture: Send,
     {
-        let request_modifier = Arc::new(Box::new(request_modifier));
-        self.request_modifier = Some(Arc::new(Box::new(move |request| {
-            Box::pin({
-                let request_modifier = Arc::clone(&request_modifier);
-                async move { request_modifier(request).into_future().await }
-            })
-        })));
+        self.request_modifier = Some(Arc::new(move |request| {
+            let request_modifier = request_modifier(request).into_future();
+            Box::pin(request_modifier)
+        }));
+
         self
     }
 
     #[cfg(feature = "websocket")]
-    pub fn request_modifier(&self) -> Option<Arc<Box<RequestModifierFn>>> {
+    pub fn request_modifier(&self) -> Option<RequestModifierFn> {
         self.request_modifier.clone()
     }
 
@@ -729,12 +719,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_start(true);
-    }
-
-    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         use crate::{TlsConfiguration, Transport};
@@ -819,8 +803,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
-    fn no_client_id() {
+    fn allow_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
     }
 }

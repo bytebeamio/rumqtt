@@ -10,6 +10,9 @@ on:
 
 name: Build and Test
 
+env:
+  RUSTFLAGS: "-D warnings"
+
 jobs:
   test:
     name: Build and test on ${{ matrix.os }} with ${{ matrix.features }}
@@ -29,6 +32,8 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-cargo
 
       - uses: taiki-e/install-action@v1
         with:
@@ -46,8 +51,6 @@ jobs:
 
       - name: Check rumqttc and rumqttd
         run: cargo hack clippy --verbose --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
-        env:
-          RUSTFLAGS: "-D warnings"
 
       - name: Check docs
         if: ${{ matrix.os != 'windows-latest' }}

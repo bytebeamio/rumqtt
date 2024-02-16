@@ -1,6 +1,6 @@
 use crate::link::alerts::{self};
 use crate::link::console::ConsoleLink;
-use crate::link::network::{Network, N};
+use crate::link::network::{self, Network, N};
 use crate::link::remote::{self, mqtt_connect, RemoteLink};
 use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
@@ -27,7 +27,7 @@ use async_tungstenite::tungstenite::http::HeaderValue;
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
-use metrics::register_gauge;
+use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
 use std::{io, thread};
@@ -282,9 +282,9 @@ impl Broker {
                 let builder = PrometheusBuilder::new().with_http_listener(addr);
                 builder.install().unwrap();
 
-                let total_publishes = register_gauge!("metrics.router.total_publishes");
-                let total_connections = register_gauge!("metrics.router.total_connections");
-                let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+                let total_publishes = gauge!("metrics.router.total_publishes");
+                let total_connections = gauge!("metrics.router.total_connections");
+                let failed_publishes = gauge!("metrics.router.failed_publishes");
                 loop {
                     if let Ok(metrics) = meter_link.recv() {
                         for m in metrics {
@@ -571,9 +571,15 @@ async fn remote<P: Protocol>(
             error!(error=?e, "router-drop");
             send_disconnect = false;
         }
+        // Connection was closed by peer
+        Err(remote::Error::Network(network::Error::Io(err)) | remote::Error::Io(err))
+            if err.kind() == io::ErrorKind::ConnectionAborted =>
+        {
+            info!(error=?err, "disconnected");
+        }
         // Any other error
         Err(e) => {
-            error!(error=?e, "Disconnected!!");
+            error!(error=?e, "disconnected");
         }
     };
 

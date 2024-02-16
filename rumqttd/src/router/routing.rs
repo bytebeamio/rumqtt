@@ -5,9 +5,8 @@ use crate::protocol::{
     SubscribeReasonCode, UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
-use crate::router::graveyard::SavedState;
 use crate::router::scheduler::{PauseReason, Tracker};
-use crate::router::Forward;
+use crate::router::{ConnectionEvents, Forward};
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
@@ -304,23 +303,36 @@ impl Router {
         // Retrieve previous connection state from graveyard
         let saved = self.graveyard.retrieve(&client_id);
         let clean_session = connection.clean;
-        let previous_session = saved.is_some();
+        let previous_session = saved.as_ref().is_some_and(|s| s.session_state.is_some());
         // for qos2 pending pubrels
         let mut pending_acks = VecDeque::new();
+
         let tracker = if !clean_session {
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.subscriptions = saved.subscriptions;
-            connection.events = saved.metrics;
-            // for using in acklog
-            pending_acks = saved.unacked_pubrels.clone();
-            outgoing.unacked_pubrels = saved.unacked_pubrels;
-            saved.tracker
+            // if there was some saved state, restore the metrics
+            // and get the session's state if present
+            let saved_state = saved.and_then(|saved| {
+                connection.events = saved.metrics;
+                saved.session_state
+            });
+
+            // if session's state is present, restore that session
+            // otherwise, just start new one
+            saved_state.map_or_else(
+                || Tracker::new(client_id.clone()),
+                |session_state| {
+                    connection.subscriptions = session_state.subscriptions;
+                    // for using in acklog
+                    pending_acks = session_state.unacked_pubrels.clone();
+                    outgoing.unacked_pubrels = session_state.unacked_pubrels;
+                    session_state.tracker
+                },
+            )
         } else {
             // Only retrieve metrics in clean session
-            let saved = saved.map_or(SavedState::new(client_id.clone()), |s| s);
-            connection.events = saved.metrics;
+            connection.events = saved.map_or_else(ConnectionEvents::default, |s| s.metrics);
             Tracker::new(client_id.clone())
         };
+
         let ackslog = AckLog::new();
 
         let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -503,20 +515,17 @@ impl Router {
                 }
             }
 
-            self.graveyard.save(
+            self.graveyard.save_state(
                 tracker,
                 connection.subscriptions,
                 connection.events,
                 outgoing.unacked_pubrels,
             );
         } else {
+            tracker.pause(PauseReason::Busy);
+            let id = tracker.id.clone();
             // Only save metrics in clean session
-            self.graveyard.save(
-                Tracker::new(client_id),
-                HashSet::new(),
-                connection.events,
-                VecDeque::new(),
-            );
+            self.graveyard.save_metrics(id, connection.events);
         }
         self.router_meters.total_connections -= 1;
     }
@@ -1657,10 +1666,14 @@ fn print_status(router: &mut Router, metrics: Print) {
 
             let metrics = match metrics {
                 Some(v) => Some(v),
-                None => router
-                    .graveyard
-                    .retrieve(&id)
-                    .map(|v| (v.metrics, v.tracker)),
+                None => router.graveyard.retrieve(&id).map(|v| {
+                    (
+                        v.metrics,
+                        v.session_state
+                            .map(|s| s.tracker)
+                            .unwrap_or(Tracker::new(id)),
+                    )
+                }),
             };
 
             println!("{metrics:#?}");
