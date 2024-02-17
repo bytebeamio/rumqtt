@@ -7,15 +7,20 @@ on:
       - '**.rs'
       - 'Cargo.*'
       - '*/Cargo.*'
+      - '.github/workflows/*'
 
 name: Build and Test
 
 env:
   RUSTFLAGS: "-D warnings"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
-    name: Build and test on ${{ matrix.os }} with ${{ matrix.features }}
+    name: Build and test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,9 +40,9 @@ jobs:
         with:
           shared-key: ${{ runner.os }}-cargo
 
-      - uses: taiki-e/install-action@v1
+      - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-hack
+          tool: cargo-hack,cargo-llvm-cov,nextest
 
       # - name: Check benchmarks
       #   uses: actions-rs/cargo@v1
@@ -57,4 +62,44 @@ jobs:
         run: cargo hack doc --verbose --no-deps --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
 
       - name: Test rumqttc and rumqttd
-        run: cargo hack test --verbose --each-feature --optional-deps url -p rumqttc -p rumqttd
+        run: |
+            # each of them produces their own llvm-cov-target profraw data
+            cargo hack --each-feature --optional-deps url llvm-cov -p rumqttc -p rumqttd --no-report nextest
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: target/llvm-cov-target/
+
+  upload-coverage:
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: get coverage files
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: target/llvm-cov-target/
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # combines the llvm-cov-target/*.profraw data
+      - name: Create coverage report
+        run: cargo llvm-cov report --html
+
+      - name: Install Smokeshow
+        run: pipx install smokeshow
+
+      - name: Upload code coverage to smokeshow
+        run: smokeshow upload target/llvm-cov/html/
+        env:
+          SMOKESHOW_GITHUB_STATUS_DESCRIPTION: 'Code Coverage: {coverage-percentage}'
+          SMOKESHOW_GITHUB_COVERAGE_THRESHOLD: 50
+          SMOKESHOW_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SMOKESHOW_GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
