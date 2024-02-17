@@ -8,6 +8,9 @@ on:
       - 'Cargo.*'
       - '*/Cargo.*'
       - '.github/workflows/*'
+  push:
+    branches:
+      - main
 
 name: Build and Test
 
