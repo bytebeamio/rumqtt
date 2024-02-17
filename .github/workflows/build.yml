@@ -30,7 +30,7 @@ jobs:
           - macOS-latest
           - windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -63,43 +63,25 @@ jobs:
 
       - name: Test rumqttc and rumqttd
         run: |
-            # each of them produces their own llvm-cov-target profraw data
             cargo hack --each-feature --optional-deps url llvm-cov -p rumqttc -p rumqttd --no-report nextest
 
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: target/llvm-cov-target/
+      - name: Combine coverage
+        run: cargo llvm-cov report --lcov --output-path coverage.lcov
 
-  upload-coverage:
-    runs-on: ubuntu-latest
+      - name: Upload Coverage Report
+        uses: coverallsapp/github-action@v2.2.3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./coverage.lcov
+          parallel: true
+          flag-name: run-${{ matrix.os }}-cargo
+
+  finish-coverage:
     needs: [test]
-
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: get coverage files
-        uses: actions/download-artifact@v4
+      - name: Finish Coverage Report
+        uses: coverallsapp/github-action@v2.2.3
         with:
-          name: coverage
-          path: target/llvm-cov-target/
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-
-      # combines the llvm-cov-target/*.profraw data
-      - name: Create coverage report
-        run: cargo llvm-cov report --html
-
-      - name: Install Smokeshow
-        run: pipx install smokeshow
-
-      - name: Upload code coverage to smokeshow
-        run: smokeshow upload target/llvm-cov/html/
-        env:
-          SMOKESHOW_GITHUB_STATUS_DESCRIPTION: 'Code Coverage: {coverage-percentage}'
-          SMOKESHOW_GITHUB_COVERAGE_THRESHOLD: 50
-          SMOKESHOW_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SMOKESHOW_GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          parallel-finished: true
