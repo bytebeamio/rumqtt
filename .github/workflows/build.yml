@@ -64,6 +64,9 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: cargo hack doc --verbose --no-deps --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
 
+      - name: Doctests
+        run: cargo hack --each-feature --optional-deps url test --doc -p rumqttc -p rumqttd
+
       - name: Test rumqttc and rumqttd
         run: |
             cargo hack --each-feature --optional-deps url llvm-cov -p rumqttc -p rumqttd --no-report nextest
