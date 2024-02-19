@@ -4,6 +4,7 @@ use crate::link::network::{self, Network, N};
 use crate::link::remote::{self, mqtt_connect, RemoteLink};
 use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
+use crate::protocol::dynamic::Dynamic;
 use crate::protocol::v4::V4;
 use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
@@ -199,7 +200,30 @@ impl Broker {
             })?;
         }
 
-        // Spawn servers in a separate thread.
+        // spawn servers in a separate thread
+        if let Some(tcp_config) = &self.config.tcp {
+            for (_, config) in tcp_config.clone() {
+                let server_thread = thread::Builder::new().name(config.name.clone());
+                let supported_protocol = config.supported_protocol.clone();
+                let mut server = Server::new(
+                    config,
+                    self.router_tx.clone(),
+                    Dynamic::new(supported_protocol),
+                );
+                let handle = server_thread.spawn(move || {
+                    let mut runtime = tokio::runtime::Builder::new_current_thread();
+                    let runtime = runtime.enable_all().build().unwrap();
+
+                    runtime.block_on(async {
+                        if let Err(e) = server.start(LinkType::Remote).await {
+                            error!(error=?e, "Server error - TCP dynamic protocol");
+                        }
+                    });
+                })?;
+                server_thread_handles.push(handle)
+            }
+        }
+
         if let Some(v4_config) = &self.config.v4 {
             for (_, config) in v4_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
@@ -246,7 +270,12 @@ impl Broker {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
-                let mut server = Server::new(config, self.router_tx.clone(), V4);
+                let supported_protocol = config.supported_protocol.clone();
+                let mut server = Server::new(
+                    config,
+                    self.router_tx.clone(),
+                    Dynamic::new(supported_protocol),
+                );
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();

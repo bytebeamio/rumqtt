@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Support for using v3.1.1 & v5 protocol on the same port using `tcp` config (#641)
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions

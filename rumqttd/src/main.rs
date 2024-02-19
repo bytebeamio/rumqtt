@@ -124,6 +124,16 @@ fn validate_config(configs: &rumqttd::Config) {
             }
         }
     }
+
+    if let Some(tcp) = &configs.tcp {
+        for (name, server_setting) in tcp {
+            if let Some(tls_config) = &server_setting.tls {
+                if !tls_config.validate_paths() {
+                    panic!("Certificate path not valid for server tcp.{name}.")
+                }
+            }
+        }
+    }
 }
 
 fn banner() {
