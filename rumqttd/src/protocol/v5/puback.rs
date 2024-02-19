@@ -1,7 +1,7 @@
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-fn len(puback: &PubAck, properties: &Option<PubAckProperties>) -> usize {
+pub fn len(puback: &PubAck, properties: &Option<PubAckProperties>) -> usize {
     let mut len = 2 + 1; // pkid + reason
 
     // If there are no properties, sending reason code is optional

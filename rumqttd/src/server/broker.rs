@@ -502,9 +502,7 @@ async fn remote<P: Protocol>(
         protocol,
     );
 
-    let dynamic_filters = config.dynamic_filters;
-
-    let connect_packet = match mqtt_connect(config, &mut network).await {
+    let connect_packet = match mqtt_connect(config.clone(), &mut network).await {
         Ok(p) => p,
         Err(e) => {
             error!(error=?e, "Error while handling MQTT connect packet");
@@ -547,7 +545,7 @@ async fn remote<P: Protocol>(
         tenant_id.clone(),
         network,
         connect_packet,
-        dynamic_filters,
+        config,
     )
     .await
     {
