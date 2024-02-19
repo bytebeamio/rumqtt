@@ -77,10 +77,16 @@ impl<P: Protocol> RemoteLink<P> {
         let clean_session = connect.clean_session;
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
+
         let session_expiry = props
             .as_ref()
             .and_then(|p| p.session_expiry_interval)
             .unwrap_or(0);
+
+        let max_inflight = props
+            .as_ref()
+            .and_then(|p| p.receive_maximum)
+            .unwrap_or(100);
 
         let delay_interval = lastwill_props
             .as_ref()
@@ -98,13 +104,22 @@ impl<P: Protocol> RemoteLink<P> {
             .last_will_properties(lastwill_props)
             .dynamic_filters(dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
+            .max_inflight(max_inflight as usize)
             .build()?;
 
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 
-        if let Some(packet) = notification.into() {
-            network.write(packet).await?;
+        if let Some(mut packet) = notification.into() {
+            if let Packet::ConnAck(_ack, _props) = &mut packet {
+                // NOTE: config.max_inflight_count is for all packets
+                // receive_max is only for limiting Publish with qos > 0.
+                //
+                // let mut new_props = props.clone().unwrap_or_default();
+                // new_props.receive_max = Some(config.max_inflight_count as u16);
+                // *props = Some(new_props);
+                network.write(packet).await?;
+            }
         }
 
         Ok(RemoteLink {
