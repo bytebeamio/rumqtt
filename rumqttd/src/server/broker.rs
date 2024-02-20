@@ -38,7 +38,6 @@ use crate::link::local::{self, LinkRx, LinkTx};
 use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
 
-
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
