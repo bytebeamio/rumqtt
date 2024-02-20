@@ -7,15 +7,23 @@ on:
       - '**.rs'
       - 'Cargo.*'
       - '*/Cargo.*'
+      - '.github/workflows/*'
+  push:
+    branches:
+      - main
 
-name: Build and Test
+name: CI
 
 env:
   RUSTFLAGS: "-D warnings"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
-    name: Build and test on ${{ matrix.os }} with ${{ matrix.features }}
+    name: Build and test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,7 +33,7 @@ jobs:
           - macOS-latest
           - windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -35,9 +43,9 @@ jobs:
         with:
           shared-key: ${{ runner.os }}-cargo
 
-      - uses: taiki-e/install-action@v1
+      - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-hack
+          tool: cargo-hack,cargo-llvm-cov,nextest
 
       # - name: Check benchmarks
       #   uses: actions-rs/cargo@v1
@@ -56,5 +64,30 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: cargo hack doc --verbose --no-deps --each-feature --no-dev-deps --optional-deps url -p rumqttc -p rumqttd
 
+      - name: Doctests
+        run: cargo hack --each-feature --optional-deps url test --doc -p rumqttc -p rumqttd
+
       - name: Test rumqttc and rumqttd
-        run: cargo hack test --verbose --each-feature --optional-deps url -p rumqttc -p rumqttd
+        run: |
+            cargo hack --each-feature --optional-deps url llvm-cov -p rumqttc -p rumqttd --no-report nextest
+
+      - name: Combine coverage
+        run: cargo llvm-cov report --lcov --output-path coverage.lcov
+
+      - name: Upload Coverage Report
+        uses: coverallsapp/github-action@v2.2.3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./coverage.lcov
+          parallel: true
+          flag-name: run-${{ matrix.os }}-cargo
+
+  finish-coverage:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Finish Coverage Report
+        uses: coverallsapp/github-action@v2.2.3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          parallel-finished: true
