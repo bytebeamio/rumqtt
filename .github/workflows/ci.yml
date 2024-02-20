@@ -16,6 +16,7 @@ name: CI
 
 env:
   RUSTFLAGS: "-D warnings"
+  CARGO_INCREMENTAL: 0
 
 defaults:
   run:
