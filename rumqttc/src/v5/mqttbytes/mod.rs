@@ -39,11 +39,8 @@ pub fn has_wildcards(s: &str) -> bool {
 
 /// Checks if a topic is valid
 pub fn valid_topic(topic: &str) -> bool {
-    if topic.contains('+') {
-        return false;
-    }
-
-    if topic.contains('#') {
+    // topic can't contain wildcards
+    if topic.contains('+') || topic.contains('#') {
         return false;
     }
 
@@ -58,30 +55,37 @@ pub fn valid_filter(filter: &str) -> bool {
         return false;
     }
 
-    let hirerarchy = filter.split('/').collect::<Vec<&str>>();
-    if let Some((last, remaining)) = hirerarchy.split_last() {
-        for entry in remaining.iter() {
-            // # is not allowed in filter except as a last entry
-            // invalid: sport/tennis#/player
-            // invalid: sport/tennis/#/ranking
-            if entry.contains('#') {
-                return false;
-            }
+    // rev() is used so we can easily get the last entry
+    let mut hirerarchy = filter.split('/').rev();
 
-            // + must occupy an entire level of the filter
-            // invalid: sport+
-            if entry.len() > 1 && entry.contains('+') {
-                return false;
-            }
+    // split will never return an empty iterator
+    // even if the pattern isn't matched, the original string will be there
+    // so it is safe to just unwrap here!
+    let last = hirerarchy.next().unwrap();
+
+    // only single '#" or '+' is allowed in last entry
+    // invalid: sport/tennis#
+    // invalid: sport/++
+    if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+        return false;
+    }
+
+    // remaining entries
+    for entry in hirerarchy {
+        // # is not allowed in filter except as a last entry
+        // invalid: sport/tennis#/player
+        // invalid: sport/tennis/#/ranking
+        if entry.contains('#') {
+            return false;
         }
 
-        // only single '#" or '+' is allowed in last entry
-        // invalid: sport/tennis#
-        // invalid: sport/++
-        if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+        // + must occupy an entire level of the filter
+        // invalid: sport+
+        if entry.len() > 1 && entry.contains('+') {
             return false;
         }
     }
+
     true
 }
 

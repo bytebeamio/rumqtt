@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Surfaced `AsyncClient`'s `from_senders` method to the `Client` as `from_sender`
 
 ### Changed
+- `MqttOptions::new` now accepts empty client id.
+- `MqttOptions::set_clean_session` now panics if client ID is empty and `clean_session` flag is set to false.
 - Synchronous client methods take `&self` instead of `&mut self` (#646)
 - Removed the `Key` enum: users do not need to specify the TLS key variant in the `TlsConfiguration` anymore, this is inferred automatically.
 To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initialization.
@@ -23,6 +25,10 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
 - Make v5 `RetainForwardRule` public, in order to allow setting it when constructing `Filter` values.
 - Use `VecDeque` instead of `IntoIter` to fix unintentional drop of pending requests on `EventLoop::clean` (#780)
 - `StateError::IncommingPacketTooLarge` is now `StateError::IncomingPacketTooLarge`.
+- Update `tokio-rustls` to `0.25.0`, `rustls-native-certs` to `0.7.0`, `rustls-webpki` to `0.102.1`,
+  `rusttls-pemfile` to `2.0.0`, `async-tungstenite` to `0.24.0`, `ws_stream_tungstenite` to `0.12.0`
+  and `http` to `1.0.0`. This is a breaking change as types from some of these crates are part of
+  the public API.
 
 ### Deprecated
 

@@ -113,28 +113,17 @@ impl MqttOptions {
     /// - port: The port number on which broker must be listening for incoming connections
     ///
     /// ```
-    /// # use rumqttc::MqttOptions;
+    /// # use rumqttc::v5::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost", 1883);
     /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id");
-        }
-
         MqttOptions {
             broker_addr: host.into(),
             port,
             transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
             clean_start: true,
-            client_id: id,
+            client_id: id.into(),
             credentials: None,
             request_channel_capacity: 10,
             max_request_batch: 0,
@@ -174,7 +163,6 @@ impl MqttOptions {
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();
     /// # let client_config = ClientConfig::builder()
-    /// #    .with_safe_defaults()
     /// #    .with_root_certificates(root_cert_store)
     /// #    .with_no_client_auth();
     /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
@@ -731,12 +719,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_start(true);
-    }
-
-    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         use crate::{TlsConfiguration, Transport};
@@ -821,8 +803,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
-    fn no_client_id() {
+    fn allow_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
     }
 }
