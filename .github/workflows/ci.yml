@@ -16,6 +16,7 @@ name: CI
 
 env:
   RUSTFLAGS: "-D warnings"
+  CARGO_INCREMENTAL: 0
 
 defaults:
   run:
@@ -42,11 +43,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ runner.os }}-cargo
-
-      - name: Disable incremental compilation
-        # Disable incremental compilation to save diskspace (the CI doesn't recompile modified files)
-        # https://github.com/apache/arrow-datafusion/issues/6676
-        run: echo "CARGO_INCREMENTAL=0" >> $GITHUB_ENV
 
       - uses: taiki-e/install-action@v2
         with:
