@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, warn, Instrument};
+use uuid::Uuid;
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
@@ -36,8 +37,8 @@ use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
 use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
@@ -523,11 +524,7 @@ async fn remote<P: Protocol>(
 
     let mut assigned_client_id = None;
     if client_id.is_empty() {
-        client_id = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
+        client_id = Uuid::new_v4().simple().to_string();
         assigned_client_id = Some(client_id.clone());
     }
 
