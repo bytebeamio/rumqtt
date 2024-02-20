@@ -31,17 +31,13 @@ jobs:
       - name: Use Cross
         shell: bash
         run: |
-          cargo install cross
+          cargo install cross --git https://github.com/cross-rs/cross
           echo "CARGO=cross" >> $GITHUB_ENV
           echo "TARGET_FLAGS=--target ${{ matrix.target }}" >> $GITHUB_ENV
           echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
 
       - name: Build release binary
         run: cross build --verbose --release ${{ env.TARGET_FLAGS }} -p rumqttd
-
-      - name: Strip release binary (linux)
-        if: matrix.build == 'linux-gnu' || matrix.build == 'linux-musl'
-        run: strip "${{ env.TARGET_DIR }}/release/rumqttd"
 
       - name: rename
         # this assumes git tag is in format rumqttd-x.x.x

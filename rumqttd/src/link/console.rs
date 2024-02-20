@@ -1,14 +1,15 @@
-use crate::link::local::{Link, LinkRx};
+use crate::link::local::LinkRx;
+use crate::local::LinkBuilder;
 use crate::router::{Event, Print};
 use crate::{ConnectionId, ConsoleSettings};
 use axum::extract::{Path, State};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::Json;
 use axum::{routing::get, Router};
 use flume::Sender;
-use std::net::TcpListener;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tracing::info;
 
 #[derive(Debug)]
@@ -23,7 +24,10 @@ impl ConsoleLink {
     /// Requires the corresponding Router to be running to complete
     pub fn new(config: ConsoleSettings, router_tx: Sender<(ConnectionId, Event)>) -> ConsoleLink {
         let tx = router_tx.clone();
-        let (link_tx, link_rx, _ack) = Link::new(None, "console", tx, true, None, true).unwrap();
+        let (link_tx, link_rx, _ack) = LinkBuilder::new("console", tx)
+            .dynamic_filters(true)
+            .build()
+            .unwrap();
         let connection_id = link_tx.connection_id;
         ConsoleLink {
             config,
@@ -36,7 +40,9 @@ impl ConsoleLink {
 
 #[tracing::instrument]
 pub async fn start(console: Arc<ConsoleLink>) {
-    let listener = TcpListener::bind(console.config.listen.clone()).unwrap();
+    let listener = TcpListener::bind(console.config.listen.clone())
+        .await
+        .unwrap();
 
     let app = Router::new()
         .route("/", get(root))
@@ -50,19 +56,21 @@ pub async fn start(console: Arc<ConsoleLink>) {
         .route("/logs", post(logs))
         .with_state(console);
 
-    axum::Server::from_tcp(listener)
-        .unwrap()
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
-async fn root() -> impl IntoResponse {
-    Redirect::to("/config")
+async fn root(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    Json(console.config.clone())
 }
 
 async fn config(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
-    Json(console.config.clone())
+    let event = Event::PrintStatus(Print::Config);
+    let message = (console.connection_id, event);
+    if console.router_tx.send(message).is_err() {
+        return Response::builder().status(404).body("".to_owned()).unwrap();
+    }
+
+    Response::new("OK".to_owned())
 }
 
 async fn router(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {

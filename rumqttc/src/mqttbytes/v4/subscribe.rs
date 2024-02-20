@@ -42,6 +42,13 @@ impl Subscribe {
         2 + self.filters.iter().fold(0, |s, t| s + t.len())
     }
 
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
+
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {
         let variable_header_index = fixed_header.fixed_header_len;
         bytes.advance(variable_header_index);

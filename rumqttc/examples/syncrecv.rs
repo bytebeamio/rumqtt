@@ -1,4 +1,4 @@
-use rumqttc::{self, Client, LastWill, MqttOptions, QoS};
+use rumqttc::{Client, LastWill, MqttOptions, QoS};
 use std::thread;
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ fn main() {
     }
 }
 
-fn publish(mut client: Client) {
+fn publish(client: Client) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..3 {
         let payload = vec![1; i];

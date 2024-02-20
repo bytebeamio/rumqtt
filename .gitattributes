@@ -1,0 +1,39 @@
+*                 text=auto eol=lf
+
+# Source code
+*.go              -text diff=golang
+*.html            text diff=html
+*.js              text
+*.json            text
+*.rs              text diff=rust
+*.sh              text eol=lf
+*.txt             text
+
+# Docker
+Dockerfile        text
+Dockerfile.*      text
+
+# Documentation
+*.md              text diff=markdown
+LICENSE           text
+
+# Configs
+.editorconfig     text
+.gitattributes    text
+go.mod            text
+go.sum            text
+*.lock            text -diff
+package.json      text
+package-lock.json text -diff
+*.toml            text diff=toml
+*.yaml            text
+*.yml             text
+
+# Graphics
+*.png             binary
+
+# RC files
+*.*rc             text
+
+# Ignore files
+*.*ignore         text

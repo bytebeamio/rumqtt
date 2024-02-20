@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     protocol::{
-        ConnAck, Packet, PingResp, PubAck, PubAckProperties, PubComp, PubCompProperties, PubRec,
-        PubRecProperties, PubRel, PubRelProperties, Publish, PublishProperties, SubAck,
-        SubAckProperties, UnsubAck,
+        ConnAck, ConnAckProperties, Disconnect, DisconnectProperties, Packet, PingResp, PubAck,
+        PubAckProperties, PubComp, PubCompProperties, PubRec, PubRecProperties, PubRel,
+        PubRelProperties, Publish, PublishProperties, SubAck, SubAckProperties, UnsubAck,
     },
     ConnectionId, Filter, RouterId, Topic,
 };
@@ -22,6 +22,7 @@ pub mod iobufs;
 mod logs;
 mod routing;
 mod scheduler;
+pub(crate) mod shared_subs;
 mod waiters;
 
 pub use alertlog::Alert;
@@ -53,7 +54,7 @@ pub enum Event {
     /// Data for native commitlog
     DeviceData,
     /// Disconnection request
-    Disconnect(Disconnection),
+    Disconnect,
     /// Shadow
     Shadow(ShadowRequest),
     /// Collect and send alerts to all alerts links
@@ -62,6 +63,8 @@ pub enum Event {
     SendMeters,
     /// Get metrics of a connection or all connections
     PrintStatus(Print),
+    /// Publish Will message
+    PublishWill((String, Option<String>)),
 }
 
 /// Notification from router to connection
@@ -69,8 +72,6 @@ pub enum Event {
 pub enum Notification {
     /// Data reply
     Forward(Forward),
-    /// Data reply
-    ForwardWithProperties(Forward, PublishProperties),
     /// Acks reply for connection data
     DeviceAck(Ack),
     /// Data reply
@@ -87,6 +88,7 @@ pub enum Notification {
     /// Shadow
     Shadow(ShadowReply),
     Unschedule,
+    Disconnect(Disconnect, Option<DisconnectProperties>),
 }
 
 type MaybePacket = Option<Packet>;
@@ -95,9 +97,10 @@ type MaybePacket = Option<Packet>;
 impl From<Notification> for MaybePacket {
     fn from(notification: Notification) -> Self {
         let packet: Packet = match notification {
-            Notification::Forward(forward) => Packet::Publish(forward.publish, None),
+            Notification::Forward(forward) => Packet::Publish(forward.publish, forward.properties),
             Notification::DeviceAck(ack) => ack.into(),
             Notification::Unschedule => return None,
+            Notification::Disconnect(disconnect, props) => Packet::Disconnect(disconnect, props),
             v => {
                 tracing::error!("Unexpected notification here, it cannot be converted into Packet, Notification: {:?}", v);
                 return None;
@@ -109,15 +112,19 @@ impl From<Notification> for MaybePacket {
 
 #[derive(Debug, Clone)]
 pub struct Forward {
-    pub cursor: (u64, u64),
+    pub cursor: Option<(u64, u64)>,
     pub size: usize,
     pub publish: Publish,
+    pub properties: Option<PublishProperties>,
 }
 
 #[derive(Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
 pub enum Ack {
-    ConnAck(ConnectionId, ConnAck),
+    ConnAck(ConnectionId, ConnAck, Option<ConnAckProperties>),
+    // NOTE: using Option may be a better choice than new variant
+    // ConnAckWithProperties(ConnectionId, ConnAck, ConnAckProperties),
+    // TODO: merge the other variants as well using the same pattern
     PubAck(PubAck),
     PubAckWithProperties(PubAck, PubAckProperties),
     SubAck(SubAck),
@@ -135,7 +142,7 @@ pub enum Ack {
 impl From<Ack> for Packet {
     fn from(value: Ack) -> Self {
         match value {
-            Ack::ConnAck(_id, connack) => Packet::ConnAck(connack, None),
+            Ack::ConnAck(_id, connack, props) => Packet::ConnAck(connack, props),
             Ack::PubAck(puback) => Packet::PubAck(puback, None),
             Ack::PubAckWithProperties(puback, prop) => Packet::PubAck(puback, Some(prop)),
             Ack::SubAck(suback) => Packet::SubAck(suback, None),
@@ -187,6 +194,8 @@ pub struct DataRequest {
     pub read_count: usize,
     /// Maximum count of payload buffer per replica
     max_count: usize,
+    pub(crate) forward_retained: bool,
+    pub(crate) group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

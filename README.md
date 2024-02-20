@@ -2,8 +2,8 @@
     <img alt="rumqtt Logo" src="docs/rumqtt.png" width="60%" />
 </div>
 <div align="center">
-  <a href="https://github.com/bytebeamio/rumqtt/actions/workflows/build.yml">
-    <img alt="build status" src="https://github.com/bytebeamio/rumqtt/actions/workflows/build.yml/badge.svg">
+  <a href="https://github.com/bytebeamio/rumqtt/actions/workflows/main.yml">
+    <img alt="build status" src="https://github.com/bytebeamio/rumqtt/actions/workflows/main.yml/badge.svg">
   </a>
   <a href="https://discord.gg/mpkSqDg">
     <img alt="Discord chat" src="https://img.shields.io/discord/633193308033646605?style=flat">
@@ -28,6 +28,7 @@ rumqtt is an opensource set of libraries written in rust-lang to implement the M
         * [Run using docker](#run-using-docker)
         * [Prebuild binaries](#prebuilt-binaries)
         * [Install using cargo](#install-using-cargo)
+        * [Install using AUR](#install-using-aur)
         * [Compile from source](#compile-from-source)
     * [rumqttc](#rumqttc)
 * [Features](#features)
@@ -48,14 +49,14 @@ rumqttd can be used with docker by pulling the image from docker hub as follows:
 docker pull bytebeamio/rumqttd
 ```
 
-To use the rumqttd docker image with the included `rumqttd.toml` while exposing the necessary ports for clients to interact with the broker, use the following command:
+To run rumqttd docker image you can simply run:
 ```bash
-docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd -c rumqttd.toml
+docker run -p 1883:1883 -p 1884:1884 -it bytebeamio/rumqttd
 ```
 
-One can also mount the local directory containing configs as a volume and use the appropriate config file as follows:
+Or you can run `rumqttd` with the custom config file by mounting the file and passing it as argument:
 ```bash
-docker run -v /path/to/configs:/configs -p 1883:1883 -it bytebeamio/rumqttd -c /configs/config.toml
+docker run -p 1883:1883 -p 1884:1884 -v /absolute/path/to/rumqttd.toml:/rumqttd.toml -it rumqttd -c /rumqttd.toml
 ```
 
 <br/>
@@ -88,6 +89,18 @@ Note: Make sure to you correct rumqttd.toml file for a specific version of rumqt
 
 <br/>
 
+### Install using AUR
+
+```
+paru -S rumqttd-bin
+```
+
+replace `paru` with whatever AUR helper you are using.
+
+Note: Configuration is found in `/etc/rumqtt/config.toml` and systemd service name `rumqtt.service`
+
+<br/>
+
 ### Compile from source
 
 Clone the repo using git clone.
@@ -112,7 +125,7 @@ for more information look at rumqttd's [README](https://github.com/bytebeamio/ru
 Add rumqttc to your project using
 
 ```
-cargo add rumqttc --all-features
+cargo add rumqttc
 ```
 
 <br/>
@@ -126,18 +139,18 @@ for more information look at rumqttc's [README](https://github.com/bytebeamio/ru
 
 - [x] MQTT 3.1.1
 - [x] QoS 0 and 1
-- [x] Retained messages
 - [x] Connection via TLS
-- [x] Last will
 - [x] Retransmission after reconnect
-- [ ] QoS 2
+- [x] Last will
+- [x] Retained messages
+- [x] QoS 2
 - [ ] MQTT 5
 
 
 # <a id="rumqttc-1"></a> rumqttc
 
 - [x] MQTT 3.1.1
-- [ ] MQTT 5
+- [x] MQTT 5
 
 # Community
 

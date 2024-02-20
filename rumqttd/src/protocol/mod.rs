@@ -2,8 +2,6 @@
 
 pub mod v4;
 pub mod v5;
-#[cfg(feature = "websockets")]
-pub mod ws;
 
 use std::{io, str::Utf8Error, string::FromUtf8Error};
 
@@ -146,7 +144,7 @@ pub struct ConnAck {
     pub code: ConnectReturnCode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConnAckProperties {
     pub session_expiry_interval: Option<u32>,
     pub receive_max: Option<u16>,
@@ -246,7 +244,7 @@ impl Publish {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PublishProperties {
     pub payload_format_indicator: Option<u8>,
     pub message_expiry_interval: Option<u32>,
@@ -676,7 +674,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
         // filter = a/b/c/d should not match topic = a/b/c
         let top = topics.next();
         match top {
-            Some(t) if t == "#" => return false,
+            Some("#") => return false,
             Some(_) if f == "+" => continue,
             Some(t) if f != t => return false,
             Some(_) => continue,

@@ -1,75 +1,124 @@
 use super::*;
 use bytes::{Buf, Bytes};
 
-pub fn len(subscribe: &Subscribe, properties: &Option<SubscribeProperties>) -> usize {
-    let mut len = 2 + subscribe.filters.iter().fold(0, |s, t| s + filter::len(t));
-
-    if let Some(p) = properties {
-        let properties_len = properties::len(p);
-        let properties_len_len = len_len(properties_len);
-        len += properties_len_len + properties_len;
-    } else {
-        // just 1 byte representing 0 len
-        len += 1;
-    }
-
-    len
+/// Subscription packet
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Subscribe {
+    pub pkid: u16,
+    pub filters: Vec<Filter>,
+    pub properties: Option<SubscribeProperties>,
 }
 
-pub fn read(
-    fixed_header: FixedHeader,
-    mut bytes: Bytes,
-) -> Result<(Subscribe, Option<SubscribeProperties>), Error> {
-    let variable_header_index = fixed_header.fixed_header_len;
-    bytes.advance(variable_header_index);
+impl Subscribe {
+    pub fn new(filter: Filter, properties: Option<SubscribeProperties>) -> Self {
+        Self {
+            filters: vec![filter],
+            properties,
+            ..Default::default()
+        }
+    }
 
-    let pkid = read_u16(&mut bytes)?;
-    let properties = properties::read(&mut bytes)?;
+    pub fn new_many<F>(filters: F, properties: Option<SubscribeProperties>) -> Self
+    where
+        F: IntoIterator<Item = Filter>,
+    {
+        Self {
+            filters: filters.into_iter().collect(),
+            properties,
+            ..Default::default()
+        }
+    }
 
-    // variable header size = 2 (packet identifier)
-    let filters = filter::read(&mut bytes)?;
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
 
-    match filters.len() {
-        0 => Err(Error::EmptySubscription),
-        _ => Ok((Subscribe { pkid, filters }, properties)),
+        1 + remaining_len_size + len
+    }
+
+    fn len(&self) -> usize {
+        let mut len = 2 + self.filters.iter().fold(0, |s, t| s + t.len());
+
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
+        }
+
+        len
+    }
+
+    pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Subscribe, Error> {
+        let variable_header_index = fixed_header.fixed_header_len;
+        bytes.advance(variable_header_index);
+
+        let pkid = read_u16(&mut bytes)?;
+        let properties = SubscribeProperties::read(&mut bytes)?;
+
+        // variable header size = 2 (packet identifier)
+        let filters = Filter::read(&mut bytes)?;
+
+        match filters.len() {
+            0 => Err(Error::EmptySubscription),
+            _ => Ok(Subscribe {
+                pkid,
+                filters,
+                properties,
+            }),
+        }
+    }
+
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {
+        // write packet type
+        buffer.put_u8(0x82);
+
+        // write remaining length
+        let remaining_len = self.len();
+        let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
+
+        // write packet id
+        buffer.put_u16(self.pkid);
+
+        if let Some(p) = &self.properties {
+            p.write(buffer)?;
+        } else {
+            write_remaining_length(buffer, 0)?;
+        }
+
+        // write filters
+        for f in self.filters.iter() {
+            f.write(buffer);
+        }
+
+        Ok(1 + remaining_len_bytes + remaining_len)
     }
 }
 
-pub fn write(
-    subscribe: &Subscribe,
-    properties: &Option<SubscribeProperties>,
-    buffer: &mut BytesMut,
-) -> Result<usize, Error> {
-    // write packet type
-    buffer.put_u8(0x82);
-
-    // write remaining length
-    let remaining_len = len(subscribe, properties);
-    let remaining_len_bytes = write_remaining_length(buffer, remaining_len)?;
-
-    // write packet id
-    buffer.put_u16(subscribe.pkid);
-
-    if let Some(p) = properties {
-        properties::write(p, buffer)?;
-    } else {
-        write_remaining_length(buffer, 0)?;
-    }
-
-    // write filters
-    for f in subscribe.filters.iter() {
-        filter::write(f, buffer);
-    }
-
-    Ok(1 + remaining_len_bytes + remaining_len)
+///  Subscription filter
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Filter {
+    pub path: String,
+    pub qos: QoS,
+    pub nolocal: bool,
+    pub preserve_retain: bool,
+    pub retain_forward_rule: RetainForwardRule,
 }
 
-mod filter {
-    use super::*;
+impl Filter {
+    pub fn new<T: Into<String>>(topic: T, qos: QoS) -> Self {
+        Self {
+            path: topic.into(),
+            qos,
+            ..Default::default()
+        }
+    }
 
-    pub fn len(filter: &Filter) -> usize {
+    fn len(&self) -> usize {
         // filter len + filter + options
-        2 + filter.path.len() + 1
+        2 + self.path.len() + 1
     }
 
     pub fn read(bytes: &mut Bytes) -> Result<Vec<Filter>, Error> {
@@ -107,40 +156,57 @@ mod filter {
         Ok(filters)
     }
 
-    pub fn write(filter: &Filter, buffer: &mut BytesMut) {
+    pub fn write(&self, buffer: &mut BytesMut) {
         let mut options = 0;
-        options |= filter.qos as u8;
+        options |= self.qos as u8;
 
-        if filter.nolocal {
+        if self.nolocal {
             options |= 0b0000_0100;
         }
 
-        if filter.preserve_retain {
+        if self.preserve_retain {
             options |= 0b0000_1000;
         }
 
-        options |= match filter.retain_forward_rule {
+        options |= match self.retain_forward_rule {
             RetainForwardRule::OnEverySubscribe => 0b0000_0000,
             RetainForwardRule::OnNewSubscribe => 0b0001_0000,
             RetainForwardRule::Never => 0b0010_0000,
         };
 
-        write_mqtt_string(buffer, filter.path.as_str());
+        write_mqtt_string(buffer, self.path.as_str());
         buffer.put_u8(options);
     }
 }
 
-mod properties {
-    use super::*;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetainForwardRule {
+    OnEverySubscribe,
+    OnNewSubscribe,
+    Never,
+}
 
-    pub fn len(properties: &SubscribeProperties) -> usize {
+impl Default for RetainForwardRule {
+    fn default() -> Self {
+        Self::OnEverySubscribe
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscribeProperties {
+    pub id: Option<usize>,
+    pub user_properties: Vec<(String, String)>,
+}
+
+impl SubscribeProperties {
+    fn len(&self) -> usize {
         let mut len = 0;
 
-        if let Some(id) = &properties.id {
+        if let Some(id) = &self.id {
             len += 1 + len_len(*id);
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             len += 1 + 2 + key.len() + 2 + value.len();
         }
 
@@ -188,21 +254,52 @@ mod properties {
         }))
     }
 
-    pub fn write(properties: &SubscribeProperties, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = len(properties);
+    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
+        let len = self.len();
         write_remaining_length(buffer, len)?;
 
-        if let Some(id) = &properties.id {
+        if let Some(id) = &self.id {
             buffer.put_u8(PropertyType::SubscriptionIdentifier as u8);
             write_remaining_length(buffer, *id)?;
         }
 
-        for (key, value) in properties.user_properties.iter() {
+        for (key, value) in self.user_properties.iter() {
             buffer.put_u8(PropertyType::UserProperty as u8);
             write_mqtt_string(buffer, key);
             write_mqtt_string(buffer, value);
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
+    use super::*;
+    use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn length_calculation() {
+        let mut dummy_bytes = BytesMut::new();
+        // Use user_properties to pad the size to exceed ~128 bytes to make the
+        // remaining_length field in the packet be 2 bytes long.
+        let subscribe_props = SubscribeProperties {
+            id: None,
+            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
+        };
+
+        let subscribe_pkt = Subscribe::new(
+            Filter::new("hello/world", QoS::AtMostOnce),
+            Some(subscribe_props),
+        );
+
+        let size_from_size = subscribe_pkt.size();
+        let size_from_write = subscribe_pkt.write(&mut dummy_bytes).unwrap();
+        let size_from_bytes = dummy_bytes.len();
+
+        assert_eq!(size_from_write, size_from_bytes);
+        assert_eq!(size_from_size, size_from_bytes);
     }
 }
