@@ -16,6 +16,9 @@ use tokio::{
 };
 
 #[cfg(feature = "use-rustls")]
+use rustls_pemfile::Item;
+
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::{
     rustls::{
         pki_types::{InvalidDnsNameError, ServerName},
@@ -23,6 +26,7 @@ use tokio_rustls::{
     },
     TlsConnector,
 };
+
 use tracing::*;
 
 use crate::{
@@ -189,6 +193,7 @@ async fn network_connect<P: Protocol>(
         }
     }
 }
+
 #[cfg(feature = "use-rustls")]
 pub async fn tls_connect<P: AsRef<Path>>(
     host: &str,
@@ -216,12 +221,14 @@ pub async fn tls_connect<P: AsRef<Path>>(
         let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let key = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
-            key_path,
-        )?)))? {
-            Some(rustls_pemfile::Item::Pkcs1Key(key)) => key.into(),
-            Some(rustls_pemfile::Item::Pkcs8Key(key)) => key.into(),
-            None | Some(_) => return Err(BridgeError::NoValidCertInChain),
+        let key = loop {
+            match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(key_path)?)))? {
+                Some(Item::Pkcs1Key(key)) => break key.into(),
+                Some(Item::Pkcs8Key(key)) => break key.into(),
+                Some(Item::Sec1Key(key)) => break key.into(),
+                None => return Err(BridgeError::NoValidCertInChain),
+                _ => {}
+            };
         };
 
         config.with_client_auth_cert(certs, key)?
