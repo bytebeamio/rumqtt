@@ -5,6 +5,9 @@
   <a href="https://github.com/bytebeamio/rumqtt/actions/workflows/main.yml">
     <img alt="build status" src="https://github.com/bytebeamio/rumqtt/actions/workflows/main.yml/badge.svg">
   </a>
+  <a href='https://coveralls.io/github/bytebeamio/rumqtt?branch=main'>
+    <img src='https://coveralls.io/repos/github/bytebeamio/rumqtt/badge.svg?branch=main' alt='Coverage Status' />
+  </a>
   <a href="https://discord.gg/mpkSqDg">
     <img alt="Discord chat" src="https://img.shields.io/discord/633193308033646605?style=flat">
   </a>
