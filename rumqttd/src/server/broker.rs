@@ -523,7 +523,8 @@ async fn remote<P: Protocol>(
 
     let mut assigned_client_id = None;
     if client_id.is_empty() {
-        client_id = Uuid::new_v4().simple().to_string();
+        let uuid = Uuid::new_v4().simple();
+        client_id = format!("rumqtt-{uuid}");
         assigned_client_id = Some(client_id.clone());
     }
 
