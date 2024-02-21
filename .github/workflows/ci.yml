@@ -36,15 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
-
-      - name: Set Rust caching env vars only on non-release runs
-        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -52,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ runner.os }}-cargo
+          cache-all-crates: true
 
       - uses: taiki-e/install-action@v2
         with:
