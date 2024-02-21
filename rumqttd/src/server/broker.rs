@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, warn, Instrument};
+use uuid::Uuid;
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
@@ -36,6 +37,7 @@ use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
 use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
@@ -519,6 +521,13 @@ async fn remote<P: Protocol>(
         _ => unreachable!(),
     };
 
+    let mut assigned_client_id = None;
+    if client_id.is_empty() {
+        let uuid = Uuid::new_v4().simple();
+        client_id = format!("rumqtt-{uuid}");
+        assigned_client_id = Some(client_id.clone());
+    }
+
     if let Some(tenant_id) = &tenant_id {
         // client_id is set to "tenant_id.client_id"
         // this is to make sure we are consistent,
@@ -548,6 +557,7 @@ async fn remote<P: Protocol>(
         network,
         connect_packet,
         dynamic_filters,
+        assigned_client_id,
     )
     .await
     {

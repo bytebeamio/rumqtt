@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Assign random identifier to clients connecting with empty client id.
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
