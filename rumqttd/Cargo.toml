@@ -37,6 +37,7 @@ metrics-exporter-prometheus = "0.13.1"
 clap = { version = "4.4", features = ["derive"] }
 axum = "0.7.4"
 rand = "0.8.5"
+uuid = { version = "1.7.0", features = ["v4", "fast-rng"] }
 
 [features]
 default = ["use-rustls", "websocket"]
