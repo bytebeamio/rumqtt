@@ -155,6 +155,9 @@ pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
+pub type Pkid = u16;
+pub type PkidPromise = tokio::sync::oneshot::Receiver<Pkid>;
+
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outgoing {
