@@ -84,7 +84,12 @@ impl AsyncClient {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        publish.place_pkid_tx(pkid_tx);
+        // Fulfill instantly for QoS 0
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
 
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
@@ -111,7 +116,11 @@ impl AsyncClient {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        publish.place_pkid_tx(pkid_tx);
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
 
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
@@ -155,7 +164,11 @@ impl AsyncClient {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        publish.place_pkid_tx(pkid_tx);
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
 
         let publish = Request::Publish(publish);
         self.request_tx.send_async(publish).await?;
@@ -348,7 +361,11 @@ impl Client {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        publish.place_pkid_tx(pkid_tx);
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
 
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
