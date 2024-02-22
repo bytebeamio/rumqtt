@@ -204,6 +204,7 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 10,
                 payload: Bytes::from(&payload[..]),
+                pkid_tx: None,
             }
         );
     }
@@ -240,6 +241,7 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 0,
                 payload: Bytes::from(&[0x01, 0x02][..]),
+                pkid_tx: None,
             }
         );
     }
@@ -253,6 +255,7 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 10,
             payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
+            pkid_tx: None,
         };
 
         let mut buf = BytesMut::new();
@@ -287,6 +290,7 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 0,
             payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
+            pkid_tx: None,
         };
 
         let mut buf = BytesMut::new();

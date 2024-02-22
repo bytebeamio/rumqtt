@@ -887,6 +887,7 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 1,
                     payload: "".into(),
+                    pkid_tx: None,
                 }),
                 Some(Publish {
                     dup: false,
@@ -895,6 +896,7 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 2,
                     payload: "".into(),
+                    pkid_tx: None,
                 }),
                 Some(Publish {
                     dup: false,
@@ -903,6 +905,7 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 3,
                     payload: "".into(),
+                    pkid_tx: None,
                 }),
                 None,
                 None,
@@ -913,6 +916,7 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 6,
                     payload: "".into(),
+                    pkid_tx: None,
                 }),
             ]
         }

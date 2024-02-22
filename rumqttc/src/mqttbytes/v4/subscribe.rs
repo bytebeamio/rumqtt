@@ -229,6 +229,7 @@ mod test {
                     SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
                     SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce)
                 ],
+                pkid_tx: None,
             }
         );
     }
@@ -242,6 +243,7 @@ mod test {
                 SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
                 SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce),
             ],
+            pkid_tx: None,
         };
 
         let mut buf = BytesMut::new();
