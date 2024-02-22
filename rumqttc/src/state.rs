@@ -309,12 +309,19 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<Option<Packet>, StateError> {
+        // NOTE: pkid promise need not be fulfilled for QoS 0,
+        // user should know this but still handled in Client.
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
             }
 
             let pkid = publish.pkid;
+            // Fulfill the pkid promise
+            if let Some(pkid_tx) = publish.pkid_tx.take() {
+                _ = pkid_tx.send(pkid);
+            }
+
             if self
                 .outgoing_pub
                 .get(publish.pkid as usize)
@@ -416,6 +423,10 @@ impl MqttState {
 
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
+        // Fulfill the pkid promise
+        if let Some(pkid_tx) = subscription.pkid_tx.take() {
+            _ = pkid_tx.send(pkid);
+        }
 
         debug!(
             "Subscribe. Topics = {:?}, Pkid = {:?}",
@@ -434,6 +445,11 @@ impl MqttState {
     ) -> Result<Option<Packet>, StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
+
+        // Fulfill the pkid promise
+        if let Some(pkid_tx) = unsub.pkid_tx.take() {
+            _ = pkid_tx.send(pkid);
+        }
 
         debug!(
             "Unsubscribe. Topics = {:?}, Pkid = {:?}",
