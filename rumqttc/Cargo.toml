@@ -24,7 +24,7 @@ proxy = ["dep:async-http-proxy"]
 
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
-tokio = { version = "1.36", features = ["rt", "macros", "io-util", "net", "time"] }
+tokio = { version = "1.36", features = ["rt", "macros", "io-util", "net", "time", "sync"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1.5"
 log = "0.4"
