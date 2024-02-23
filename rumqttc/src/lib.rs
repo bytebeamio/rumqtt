@@ -145,6 +145,7 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
+use tokio::sync::oneshot;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
@@ -156,7 +157,28 @@ pub use proxy::{Proxy, ProxyAuth, ProxyType};
 pub type Incoming = Packet;
 
 pub type Pkid = u16;
-pub type PkidPromise = tokio::sync::oneshot::Receiver<Pkid>;
+
+/// A token through which the user can access the assigned packet id of an associated request, once it
+/// is processed by the [`EventLoop`].
+pub struct PkidPromise {
+    inner: oneshot::Receiver<Pkid>,
+}
+
+impl PkidPromise {
+    pub fn new(inner: oneshot::Receiver<Pkid>) -> Self {
+        Self { inner }
+    }
+
+    /// Wait for the pkid to resolve by blocking the current thread
+    pub fn wait(self) -> Option<Pkid> {
+        self.inner.blocking_recv().ok()
+    }
+
+    /// Await pkid resolution without blocking the current thread
+    pub async fn wait_async(self) -> Option<Pkid> {
+        self.inner.await.ok()
+    }
+}
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]

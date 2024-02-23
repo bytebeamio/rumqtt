@@ -42,7 +42,8 @@ async fn requests(client: AsyncClient) {
         client
             .subscribe("hello/world", QoS::AtMostOnce)
             .await
-            .unwrap(),
+            .unwrap()
+            .wait_async(),
     );
 
     let mut queue = DelayQueue::new();
@@ -57,7 +58,7 @@ async fn requests(client: AsyncClient) {
                     client
                         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i.into_inner()])
                         .await
-                        .unwrap(),
+                        .unwrap().wait_async(),
                 );
             }
             Some(Ok(Ok(pkid))) = joins.join_next() => {
