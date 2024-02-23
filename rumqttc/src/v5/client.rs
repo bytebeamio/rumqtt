@@ -100,7 +100,7 @@ impl AsyncClient {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub async fn publish_with_properties<S, P>(
@@ -163,7 +163,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_publish_with_properties<S, P>(
@@ -243,7 +243,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub async fn publish_bytes_with_properties<S>(
@@ -295,7 +295,7 @@ impl AsyncClient {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub async fn subscribe_with_properties<S: Into<String>>(
@@ -334,7 +334,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_subscribe_with_properties<S: Into<String>>(
@@ -376,7 +376,7 @@ impl AsyncClient {
         }
 
         self.request_tx.send_async(request).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub async fn subscribe_many_with_properties<T>(
@@ -418,7 +418,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_subscribe_many_with_properties<T>(
@@ -452,7 +452,7 @@ impl AsyncClient {
 
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.send_async(request).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub async fn unsubscribe_with_properties<S: Into<String>>(
@@ -480,7 +480,7 @@ impl AsyncClient {
 
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.try_send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
@@ -591,7 +591,7 @@ impl Client {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn publish_with_properties<S, P>(
@@ -688,7 +688,7 @@ impl Client {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn subscribe_with_properties<S: Into<String>>(
@@ -748,7 +748,7 @@ impl Client {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn subscribe_many_with_properties<T>(
@@ -801,7 +801,7 @@ impl Client {
 
         let request = Request::Unsubscribe(unsubscribe);
         self.client.request_tx.send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn unsubscribe_with_properties<S: Into<String>>(

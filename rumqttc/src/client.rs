@@ -96,7 +96,7 @@ impl AsyncClient {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
@@ -127,7 +127,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -172,7 +172,7 @@ impl AsyncClient {
 
         let publish = Request::Publish(publish);
         self.request_tx.send_async(publish).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -192,7 +192,7 @@ impl AsyncClient {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
@@ -212,7 +212,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
@@ -232,7 +232,7 @@ impl AsyncClient {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
@@ -252,7 +252,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
@@ -264,7 +264,7 @@ impl AsyncClient {
 
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.send_async(request).await?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
@@ -276,7 +276,7 @@ impl AsyncClient {
 
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.try_send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
@@ -372,7 +372,7 @@ impl Client {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_publish<S, V>(
@@ -422,7 +422,7 @@ impl Client {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -451,7 +451,7 @@ impl Client {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
@@ -470,7 +470,7 @@ impl Client {
 
         let request = Request::Unsubscribe(unsubscribe);
         self.client.request_tx.send(request)?;
-        Ok(pkid_rx)
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
