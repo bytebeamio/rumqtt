@@ -1,7 +1,9 @@
 use tokio::{
     task::{self, JoinSet},
-    time,
+    select
 };
+use tokio_util::time::DelayQueue;
+use futures_util::stream::StreamExt;
 
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::error::Error;
@@ -12,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     // color_backtrace::install();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "broker.emqx.io", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -43,19 +45,25 @@ async fn requests(client: AsyncClient) {
             .unwrap(),
     );
 
+    let mut queue = DelayQueue::new();
     for i in 1..=10 {
-        joins.spawn(
-            client
-                .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i])
-                .await
-                .unwrap(),
-        );
-
-        time::sleep(Duration::from_secs(1)).await;
+        queue.insert(i as usize, Duration::from_secs(i));
     }
 
-    // TODO: maybe rewrite to showcase in-between resolutions?
-    while let Some(Ok(Ok(pkid))) = joins.join_next().await {
-        println!("Pkid: {:?}", pkid);
+    loop {
+        select!{
+            Some(i) = queue.next() => {
+                joins.spawn(
+                    client
+                        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; i.into_inner()])
+                        .await
+                        .unwrap(),
+                );
+            }
+            Some(Ok(Ok(pkid))) = joins.join_next() => {
+                println!("Pkid: {:?}", pkid);
+            }
+            else => break,
+        }
     }
 }
