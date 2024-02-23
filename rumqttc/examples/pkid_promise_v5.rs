@@ -5,7 +5,7 @@ use tokio::{
 };
 use tokio_util::time::DelayQueue;
 
-use rumqttc::{AsyncClient, MqttOptions, QoS};
+use rumqttc::v5::{mqttbytes::QoS, AsyncClient, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
