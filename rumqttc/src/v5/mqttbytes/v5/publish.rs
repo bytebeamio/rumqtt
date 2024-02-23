@@ -1,8 +1,11 @@
-use super::*;
 use bytes::{Buf, Bytes};
+use tokio::sync::oneshot::Sender;
+
+use super::*;
+use crate::Pkid;
 
 /// Publish packet
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Default)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
@@ -11,7 +14,38 @@ pub struct Publish {
     pub pkid: u16,
     pub payload: Bytes,
     pub properties: Option<PublishProperties>,
+    pub pkid_tx: Option<Sender<Pkid>>,
 }
+
+// TODO: figure out if this is even required
+impl Clone for Publish {
+    fn clone(&self) -> Self {
+        Self {
+            dup: self.dup,
+            qos: self.qos,
+            retain: self.retain,
+            topic: self.topic.clone(),
+            payload: self.payload.clone(),
+            pkid: self.pkid,
+            properties: self.properties.clone(),
+            pkid_tx: None,
+        }
+    }
+}
+
+impl PartialEq for Publish {
+    fn eq(&self, other: &Self) -> bool {
+        self.dup == other.dup
+            && self.qos == other.qos
+            && self.retain == other.retain
+            && self.topic == other.topic
+            && self.payload == other.payload
+            && self.pkid == other.pkid
+            && self.properties == other.properties
+    }
+}
+
+impl Eq for Publish {}
 
 impl Publish {
     pub fn new<T: Into<String>, P: Into<Bytes>>(
@@ -85,6 +119,7 @@ impl Publish {
             topic,
             payload: bytes,
             properties,
+            pkid_tx: None,
         };
 
         Ok(publish)
@@ -119,6 +154,10 @@ impl Publish {
         buffer.extend_from_slice(&self.payload);
 
         Ok(1 + count + len)
+    }
+
+    pub fn place_pkid_tx(&mut self, pkid_tx: Sender<Pkid>) {
+        self.pkid_tx = Some(pkid_tx)
     }
 }
 

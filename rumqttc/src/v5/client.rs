@@ -8,7 +8,7 @@ use super::mqttbytes::v5::{
 };
 use super::mqttbytes::{valid_filter, QoS};
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::valid_topic;
+use crate::{valid_topic, PkidPromise};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -78,7 +78,7 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -86,12 +86,21 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
+
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub async fn publish_with_properties<S, P>(
@@ -101,7 +110,7 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -116,7 +125,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -132,7 +141,7 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -140,12 +149,21 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
+
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn try_publish_with_properties<S, P>(
@@ -155,7 +173,7 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -169,7 +187,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -204,19 +222,28 @@ impl AsyncClient {
         retain: bool,
         payload: Bytes,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
+
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub async fn publish_bytes_with_properties<S>(
@@ -226,7 +253,7 @@ impl AsyncClient {
         retain: bool,
         payload: Bytes,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
     {
@@ -240,7 +267,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
     {
@@ -254,16 +281,21 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
-        let subscribe = Subscribe::new(filter, properties);
+        let mut subscribe = Subscribe::new(filter, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        subscribe.place_pkid_tx(pkid_tx);
+
         let request: Request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub async fn subscribe_with_properties<S: Into<String>>(
@@ -271,11 +303,15 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_subscribe(topic, qos, Some(properties)).await
     }
 
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub async fn subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_subscribe(topic, qos, None).await
     }
 
@@ -285,16 +321,20 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
-        let subscribe = Subscribe::new(filter, properties);
+        let mut subscribe = Subscribe::new(filter, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        subscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn try_subscribe_with_properties<S: Into<String>>(
@@ -302,11 +342,15 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_try_subscribe(topic, qos, Some(properties))
     }
 
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn try_subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_try_subscribe(topic, qos, None)
     }
 
@@ -315,34 +359,38 @@ impl AsyncClient {
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
+        let mut subscribe = Subscribe::new_many(topics_iter, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        subscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
 
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub async fn subscribe_many_with_properties<T>(
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, Some(properties)).await
     }
 
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -354,33 +402,37 @@ impl AsyncClient {
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
+        let mut subscribe = Subscribe::new_many(topics_iter, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        subscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn try_subscribe_many_with_properties<T>(
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         self.handle_try_subscribe_many(topics, Some(properties))
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -392,22 +444,26 @@ impl AsyncClient {
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
-    ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+    ) -> Result<PkidPromise, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        unsubscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub async fn unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_unsubscribe(topic, Some(properties)).await
     }
 
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         self.handle_unsubscribe(topic, None).await
     }
 
@@ -416,22 +472,26 @@ impl AsyncClient {
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
-    ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+    ) -> Result<PkidPromise, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        unsubscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_try_unsubscribe(topic, Some(properties))
     }
 
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         self.handle_try_unsubscribe(topic, None)
     }
 
@@ -509,7 +569,7 @@ impl Client {
         retain: bool,
         payload: P,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -517,12 +577,21 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+        } else {
+            publish.place_pkid_tx(pkid_tx);
+        }
+
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn publish_with_properties<S, P>(
@@ -532,7 +601,7 @@ impl Client {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -546,7 +615,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -561,7 +630,7 @@ impl Client {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -576,7 +645,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -606,16 +675,20 @@ impl Client {
         topic: S,
         qos: QoS,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
-        let subscribe = Subscribe::new(filter, properties);
+        let mut subscribe = Subscribe::new(filter, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        subscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn subscribe_with_properties<S: Into<String>>(
@@ -623,11 +696,15 @@ impl Client {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_subscribe(topic, qos, Some(properties))
     }
 
-    pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_subscribe(topic, qos, None)
     }
 
@@ -637,12 +714,16 @@ impl Client {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.client
             .try_subscribe_with_properties(topic, qos, properties)
     }
 
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn try_subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         self.client.try_subscribe(topic, qos)
     }
 
@@ -651,33 +732,37 @@ impl Client {
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
+        let mut subscribe = Subscribe::new_many(topics_iter, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        subscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn subscribe_many_with_properties<T>(
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, Some(properties))
     }
 
-    pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -688,7 +773,7 @@ impl Client {
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -696,7 +781,7 @@ impl Client {
             .try_subscribe_many_with_properties(topics, properties)
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -708,22 +793,26 @@ impl Client {
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
-    ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+    ) -> Result<PkidPromise, ClientError> {
+        let mut unsubscribe = Unsubscribe::new(topic, properties);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        unsubscribe.place_pkid_tx(pkid_tx);
+
         let request = Request::Unsubscribe(unsubscribe);
         self.client.request_tx.send(request)?;
-        Ok(())
+        Ok(pkid_rx)
     }
 
     pub fn unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.handle_unsubscribe(topic, Some(properties))
     }
 
-    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         self.handle_unsubscribe(topic, None)
     }
 
@@ -732,12 +821,12 @@ impl Client {
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<PkidPromise, ClientError> {
         self.client
             .try_unsubscribe_with_properties(topic, properties)
     }
 
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         self.client.try_unsubscribe(topic)
     }
 
