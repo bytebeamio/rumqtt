@@ -164,19 +164,32 @@ pub struct PkidPromise {
     inner: oneshot::Receiver<Pkid>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum PkidError {
+    #[error("Eventloop dropped Sender: {0}")]
+    Recv(#[from] oneshot::error::RecvError),
+}
+
 impl PkidPromise {
     pub fn new(inner: oneshot::Receiver<Pkid>) -> Self {
         Self { inner }
     }
 
     /// Wait for the pkid to resolve by blocking the current thread
-    pub fn wait(self) -> Option<Pkid> {
-        self.inner.blocking_recv().ok()
+    /// 
+    /// # Panics
+    /// Panics if called in an async context
+    pub fn wait(self) -> Result<Pkid, PkidError> {
+        let pkid = self.inner.blocking_recv()?;
+
+        Ok(pkid)
     }
 
     /// Await pkid resolution without blocking the current thread
-    pub async fn wait_async(self) -> Option<Pkid> {
-        self.inner.await.ok()
+    pub async fn wait_async(self) -> Result<Pkid, PkidError> {
+        let pkid = self.inner.await?;
+
+        Ok(pkid)
     }
 }
 
