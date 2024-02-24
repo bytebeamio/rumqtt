@@ -61,7 +61,7 @@ async fn requests(client: AsyncClient) {
                         .unwrap().wait_async(),
                 );
             }
-            Some(Ok(Some(pkid))) = joins.join_next() => {
+            Some(Ok(Ok(pkid))) = joins.join_next() => {
                 println!("Pkid: {:?}", pkid);
             }
             else => break,
