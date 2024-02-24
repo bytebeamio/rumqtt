@@ -83,13 +83,14 @@ impl AsyncClient {
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
         // Fulfill instantly for QoS 0
-        if qos == QoS::AtMostOnce {
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
@@ -114,13 +115,15 @@ impl AsyncClient {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        if qos == QoS::AtMostOnce {
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
@@ -162,13 +165,15 @@ impl AsyncClient {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        if qos == QoS::AtMostOnce {
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         self.request_tx.send_async(publish).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -179,12 +184,11 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
     ) -> Result<PkidPromise, ClientError> {
-        let mut subscribe = Subscribe::new(topic.into(), qos);
+        let subscribe = Subscribe::new(topic.into(), qos);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -195,12 +199,11 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
     ) -> Result<PkidPromise, ClientError> {
-        let mut subscribe = Subscribe::new(topic.into(), qos);
+        let subscribe = Subscribe::new(topic.into(), qos);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -210,12 +213,11 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -225,36 +227,33 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
-        let mut unsubscribe = Unsubscribe::new(topic.into());
+        let unsubscribe = Unsubscribe::new(topic.into());
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        unsubscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Unsubscribe(unsubscribe);
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
     pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
-        let mut unsubscribe = Unsubscribe::new(topic.into());
+        let unsubscribe = Unsubscribe::new(topic.into());
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        unsubscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Unsubscribe(unsubscribe);
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -341,13 +340,15 @@ impl Client {
         publish.retain = retain;
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        if qos == QoS::AtMostOnce {
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
@@ -391,12 +392,11 @@ impl Client {
         topic: S,
         qos: QoS,
     ) -> Result<PkidPromise, ClientError> {
-        let mut subscribe = Subscribe::new(topic.into(), qos);
+        let subscribe = Subscribe::new(topic.into(), qos);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -415,12 +415,11 @@ impl Client {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -434,12 +433,11 @@ impl Client {
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
     pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
-        let mut unsubscribe = Unsubscribe::new(topic.into());
+        let unsubscribe = Unsubscribe::new(topic.into());
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        unsubscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Unsubscribe(unsubscribe);
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }

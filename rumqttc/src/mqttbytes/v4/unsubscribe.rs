@@ -1,42 +1,18 @@
-use bytes::{Buf, Bytes};
-use tokio::sync::oneshot::Sender;
-
 use super::*;
-use crate::Pkid;
+use bytes::{Buf, Bytes};
 
 /// Unsubscribe packet
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Unsubscribe {
     pub pkid: u16,
     pub topics: Vec<String>,
-    pub pkid_tx: Option<Sender<Pkid>>,
 }
-
-// TODO: figure out if this is even required
-impl Clone for Unsubscribe {
-    fn clone(&self) -> Self {
-        Self {
-            pkid: self.pkid,
-            topics: self.topics.clone(),
-            pkid_tx: None,
-        }
-    }
-}
-
-impl PartialEq for Unsubscribe {
-    fn eq(&self, other: &Self) -> bool {
-        self.pkid == other.pkid && self.topics == other.topics
-    }
-}
-
-impl Eq for Unsubscribe {}
 
 impl Unsubscribe {
     pub fn new<S: Into<String>>(topic: S) -> Unsubscribe {
         Unsubscribe {
             pkid: 0,
             topics: vec![topic.into()],
-            pkid_tx: None,
         }
     }
 
@@ -66,11 +42,7 @@ impl Unsubscribe {
             topics.push(topic_filter);
         }
 
-        let unsubscribe = Unsubscribe {
-            pkid,
-            topics,
-            pkid_tx: None,
-        };
+        let unsubscribe = Unsubscribe { pkid, topics };
         Ok(unsubscribe)
     }
 
@@ -85,9 +57,5 @@ impl Unsubscribe {
             write_mqtt_string(payload, topic.as_str());
         }
         Ok(1 + remaining_len_bytes + remaining_len)
-    }
-
-    pub fn place_pkid_tx(&mut self, pkid_tx: Sender<Pkid>) {
-        self.pkid_tx = Some(pkid_tx)
     }
 }

@@ -209,35 +209,76 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Request {
-    Publish(Publish),
+    Publish(Option<oneshot::Sender<Pkid>>, Publish),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
     PubRel(PubRel),
     PingReq(PingReq),
     PingResp(PingResp),
-    Subscribe(Subscribe),
+    Subscribe(Option<oneshot::Sender<Pkid>>, Subscribe),
     SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
+    Unsubscribe(Option<oneshot::Sender<Pkid>>, Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
 }
 
+impl Clone for Request {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Publish(_, p) => Self::Publish(None, p.clone()),
+            Self::PubAck(p) => Self::PubAck(p.clone()),
+            Self::PubRec(p) => Self::PubRec(p.clone()),
+            Self::PubRel(p) => Self::PubRel(p.clone()),
+            Self::PubComp(p) => Self::PubComp(p.clone()),
+            Self::Subscribe(_, p) => Self::Subscribe(None, p.clone()),
+            Self::SubAck(p) => Self::SubAck(p.clone()),
+            Self::PingReq(p) => Self::PingReq(p.clone()),
+            Self::PingResp(p) => Self::PingResp(p.clone()),
+            Self::Disconnect(p) => Self::Disconnect(p.clone()),
+            Self::Unsubscribe(_, p) => Self::Unsubscribe(None, p.clone()),
+            Self::UnsubAck(p) => Self::UnsubAck(p.clone()),
+        }
+    }
+}
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Publish(_, p1), Self::Publish(_, p2)) => p1 == p2,
+            (Self::PubAck(p1), Self::PubAck(p2)) => p1 == p2,
+            (Self::PubRec(p1), Self::PubRec(p2)) => p1 == p2,
+            (Self::PubRel(p1), Self::PubRel(p2)) => p1 == p2,
+            (Self::PubComp(p1), Self::PubComp(p2)) => p1 == p2,
+            (Self::Subscribe(_, p1), Self::Subscribe(_, p2)) => p1 == p2,
+            (Self::SubAck(p1), Self::SubAck(p2)) => p1 == p2,
+            (Self::PingReq(p1), Self::PingReq(p2)) => p1 == p2,
+            (Self::PingResp(p1), Self::PingResp(p2)) => p1 == p2,
+            (Self::Unsubscribe(_, p1), Self::Unsubscribe(_, p2)) => p1 == p2,
+            (Self::UnsubAck(p1), Self::UnsubAck(p2)) => p1 == p2,
+            (Self::Disconnect(p1), Self::Disconnect(p2)) => p1 == p2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Request {}
+
 impl Request {
     fn size(&self) -> usize {
         match &self {
-            Request::Publish(publish) => publish.size(),
+            Request::Publish(_, publish) => publish.size(),
             Request::PubAck(puback) => puback.size(),
             Request::PubRec(pubrec) => pubrec.size(),
             Request::PubComp(pubcomp) => pubcomp.size(),
             Request::PubRel(pubrel) => pubrel.size(),
             Request::PingReq(pingreq) => pingreq.size(),
             Request::PingResp(pingresp) => pingresp.size(),
-            Request::Subscribe(subscribe) => subscribe.size(),
+            Request::Subscribe(_, subscribe) => subscribe.size(),
             Request::SubAck(suback) => suback.size(),
-            Request::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Request::Unsubscribe(_, unsubscribe) => unsubscribe.size(),
             Request::UnsubAck(unsuback) => unsuback.size(),
             Request::Disconnect(disconn) => disconn.size(),
         }
@@ -246,19 +287,19 @@ impl Request {
 
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
-        Request::Publish(publish)
+        Request::Publish(None, publish)
     }
 }
 
 impl From<Subscribe> for Request {
     fn from(subscribe: Subscribe) -> Request {
-        Request::Subscribe(subscribe)
+        Request::Subscribe(None, subscribe)
     }
 }
 
 impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
-        Request::Unsubscribe(unsubscribe)
+        Request::Unsubscribe(None, unsubscribe)
     }
 }
 

@@ -1,39 +1,13 @@
-use bytes::{Buf, Bytes};
-use tokio::sync::oneshot::Sender;
-
 use super::*;
-use crate::Pkid;
+use bytes::{Buf, Bytes};
 
 /// Subscription packet
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<Filter>,
     pub properties: Option<SubscribeProperties>,
-    pub pkid_tx: Option<Sender<Pkid>>,
 }
-
-// TODO: figure out if this is even required
-impl Clone for Subscribe {
-    fn clone(&self) -> Self {
-        Self {
-            pkid: self.pkid,
-            filters: self.filters.clone(),
-            properties: self.properties.clone(),
-            pkid_tx: None,
-        }
-    }
-}
-
-impl PartialEq for Subscribe {
-    fn eq(&self, other: &Self) -> bool {
-        self.pkid == other.pkid
-            && self.filters == other.filters
-            && self.properties == other.properties
-    }
-}
-
-impl Eq for Subscribe {}
 
 impl Subscribe {
     pub fn new(filter: Filter, properties: Option<SubscribeProperties>) -> Self {
@@ -93,7 +67,6 @@ impl Subscribe {
                 pkid,
                 filters,
                 properties,
-                pkid_tx: None,
             }),
         }
     }
@@ -121,10 +94,6 @@ impl Subscribe {
         }
 
         Ok(1 + remaining_len_bytes + remaining_len)
-    }
-
-    pub fn place_pkid_tx(&mut self, pkid_tx: Sender<Pkid>) {
-        self.pkid_tx = Some(pkid_tx)
     }
 }
 
