@@ -1,10 +1,8 @@
-use bytes::{Buf, Bytes};
-use tokio::sync::oneshot::Sender;
-
 use super::*;
-use crate::Pkid;
+use bytes::{Buf, Bytes};
 
 /// Publish packet
+#[derive(Clone, Eq, PartialEq)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,
@@ -12,36 +10,7 @@ pub struct Publish {
     pub topic: String,
     pub pkid: u16,
     pub payload: Bytes,
-    pub pkid_tx: Option<Sender<Pkid>>,
 }
-
-// TODO: figure out if this is even required
-impl Clone for Publish {
-    fn clone(&self) -> Self {
-        Self {
-            dup: self.dup,
-            qos: self.qos,
-            retain: self.retain,
-            topic: self.topic.clone(),
-            payload: self.payload.clone(),
-            pkid: self.pkid,
-            pkid_tx: None,
-        }
-    }
-}
-
-impl PartialEq for Publish {
-    fn eq(&self, other: &Self) -> bool {
-        self.dup == other.dup
-            && self.qos == other.qos
-            && self.retain == other.retain
-            && self.topic == other.topic
-            && self.payload == other.payload
-            && self.pkid == other.pkid
-    }
-}
-
-impl Eq for Publish {}
 
 impl Publish {
     pub fn new<S: Into<String>, P: Into<Vec<u8>>>(topic: S, qos: QoS, payload: P) -> Publish {
@@ -52,7 +21,6 @@ impl Publish {
             pkid: 0,
             topic: topic.into(),
             payload: Bytes::from(payload.into()),
-            pkid_tx: None,
         }
     }
 
@@ -64,7 +32,6 @@ impl Publish {
             pkid: 0,
             topic: topic.into(),
             payload,
-            pkid_tx: None,
         }
     }
 
@@ -110,7 +77,6 @@ impl Publish {
             pkid,
             topic,
             payload: bytes,
-            pkid_tx: None,
         };
 
         Ok(publish)
@@ -139,10 +105,6 @@ impl Publish {
         buffer.extend_from_slice(&self.payload);
 
         Ok(1 + count + len)
-    }
-
-    pub fn place_pkid_tx(&mut self, pkid_tx: Sender<Pkid>) {
-        self.pkid_tx = Some(pkid_tx)
     }
 }
 
@@ -203,7 +165,6 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 10,
                 payload: Bytes::from(&payload[..]),
-                pkid_tx: None,
             }
         );
     }
@@ -240,7 +201,6 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 0,
                 payload: Bytes::from(&[0x01, 0x02][..]),
-                pkid_tx: None,
             }
         );
     }
@@ -254,7 +214,6 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 10,
             payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
-            pkid_tx: None,
         };
 
         let mut buf = BytesMut::new();
@@ -289,7 +248,6 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 0,
             payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
-            pkid_tx: None,
         };
 
         let mut buf = BytesMut::new();

@@ -1,10 +1,11 @@
-use crate::{Event, Incoming, Outgoing, Request};
+use crate::{Event, Incoming, Outgoing, Pkid, Request};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
 use fixedbitset::FixedBitSet;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
+use tokio::sync::oneshot;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -108,7 +109,7 @@ impl MqttState {
 
         for publish in second_half.iter_mut().chain(first_half) {
             if let Some(publish) = publish.take() {
-                let request = Request::Publish(publish);
+                let request = Request::Publish(None, publish);
                 pending.push(request);
             }
         }
@@ -140,10 +141,10 @@ impl MqttState {
         request: Request,
     ) -> Result<Option<Packet>, StateError> {
         let packet = match request {
-            Request::Publish(publish) => self.outgoing_publish(publish)?,
+            Request::Publish(tx, publish) => self.outgoing_publish(publish, tx)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
-            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
-            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
+            Request::Subscribe(tx, subscribe) => self.outgoing_subscribe(subscribe, tx)?,
+            Request::Unsubscribe(tx, unsubscribe) => self.outgoing_unsubscribe(unsubscribe, tx)?,
             Request::PingReq(_) => self.outgoing_ping()?,
             Request::Disconnect(_) => self.outgoing_disconnect()?,
             Request::PubAck(puback) => self.outgoing_puback(puback)?,
@@ -308,7 +309,11 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<Option<Packet>, StateError> {
+    fn outgoing_publish(
+        &mut self,
+        mut publish: Publish,
+        pkid_tx: Option<oneshot::Sender<Pkid>>,
+    ) -> Result<Option<Packet>, StateError> {
         // NOTE: pkid promise need not be fulfilled for QoS 0,
         // user should know this but still handled in Client.
         if publish.qos != QoS::AtMostOnce {
@@ -318,7 +323,7 @@ impl MqttState {
 
             let pkid = publish.pkid;
             // Fulfill the pkid promise
-            if let Some(pkid_tx) = publish.pkid_tx.take() {
+            if let Some(pkid_tx) = pkid_tx {
                 _ = pkid_tx.send(pkid);
             }
 
@@ -416,6 +421,7 @@ impl MqttState {
     fn outgoing_subscribe(
         &mut self,
         mut subscription: Subscribe,
+        pkid_tx: Option<oneshot::Sender<Pkid>>,
     ) -> Result<Option<Packet>, StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
@@ -424,7 +430,7 @@ impl MqttState {
         let pkid = self.next_pkid();
         subscription.pkid = pkid;
         // Fulfill the pkid promise
-        if let Some(pkid_tx) = subscription.pkid_tx.take() {
+        if let Some(pkid_tx) = pkid_tx {
             _ = pkid_tx.send(pkid);
         }
 
@@ -442,12 +448,13 @@ impl MqttState {
     fn outgoing_unsubscribe(
         &mut self,
         mut unsub: Unsubscribe,
+        pkid_tx: Option<oneshot::Sender<Pkid>>,
     ) -> Result<Option<Packet>, StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
 
         // Fulfill the pkid promise
-        if let Some(pkid_tx) = unsub.pkid_tx.take() {
+        if let Some(pkid_tx) = pkid_tx {
             _ = pkid_tx.send(pkid);
         }
 
@@ -571,7 +578,7 @@ mod test {
         let publish = build_outgoing_publish(QoS::AtMostOnce);
 
         // QoS 0 publish shouldn't be saved in queue
-        mqtt.outgoing_publish(publish).unwrap();
+        mqtt.outgoing_publish(publish, None).unwrap();
         assert_eq!(mqtt.last_pkid, 0);
         assert_eq!(mqtt.inflight, 0);
 
@@ -579,12 +586,12 @@ mod test {
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
 
         // Packet id should be set and publish should be saved in queue
-        mqtt.outgoing_publish(publish.clone()).unwrap();
+        mqtt.outgoing_publish(publish.clone(), None).unwrap();
         assert_eq!(mqtt.last_pkid, 1);
         assert_eq!(mqtt.inflight, 1);
 
         // Packet id should be incremented and publish should be saved in queue
-        mqtt.outgoing_publish(publish).unwrap();
+        mqtt.outgoing_publish(publish, None).unwrap();
         assert_eq!(mqtt.last_pkid, 2);
         assert_eq!(mqtt.inflight, 2);
 
@@ -592,12 +599,12 @@ mod test {
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
 
         // Packet id should be set and publish should be saved in queue
-        mqtt.outgoing_publish(publish.clone()).unwrap();
+        mqtt.outgoing_publish(publish.clone(), None).unwrap();
         assert_eq!(mqtt.last_pkid, 3);
         assert_eq!(mqtt.inflight, 3);
 
         // Packet id should be incremented and publish should be saved in queue
-        mqtt.outgoing_publish(publish).unwrap();
+        mqtt.outgoing_publish(publish, None).unwrap();
         assert_eq!(mqtt.last_pkid, 4);
         assert_eq!(mqtt.inflight, 4);
     }
@@ -683,8 +690,8 @@ mod test {
         let publish1 = build_outgoing_publish(QoS::AtLeastOnce);
         let publish2 = build_outgoing_publish(QoS::ExactlyOnce);
 
-        mqtt.outgoing_publish(publish1).unwrap();
-        mqtt.outgoing_publish(publish2).unwrap();
+        mqtt.outgoing_publish(publish1, None).unwrap();
+        mqtt.outgoing_publish(publish2, None).unwrap();
         assert_eq!(mqtt.inflight, 2);
 
         mqtt.handle_incoming_puback(&PubAck::new(1)).unwrap();
@@ -716,8 +723,8 @@ mod test {
         let publish1 = build_outgoing_publish(QoS::AtLeastOnce);
         let publish2 = build_outgoing_publish(QoS::ExactlyOnce);
 
-        let _publish_out = mqtt.outgoing_publish(publish1);
-        let _publish_out = mqtt.outgoing_publish(publish2);
+        let _publish_out = mqtt.outgoing_publish(publish1, None);
+        let _publish_out = mqtt.outgoing_publish(publish2, None);
 
         mqtt.handle_incoming_pubrec(&PubRec::new(2)).unwrap();
         assert_eq!(mqtt.inflight, 2);
@@ -735,7 +742,7 @@ mod test {
         let mut mqtt = build_mqttstate();
 
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
-        let packet = mqtt.outgoing_publish(publish).unwrap().unwrap();
+        let packet = mqtt.outgoing_publish(publish, None).unwrap().unwrap();
         match packet {
             Packet::Publish(publish) => assert_eq!(publish.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
@@ -777,7 +784,7 @@ mod test {
         let mut mqtt = build_mqttstate();
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
 
-        mqtt.outgoing_publish(publish).unwrap();
+        mqtt.outgoing_publish(publish, None).unwrap();
         mqtt.handle_incoming_pubrec(&PubRec::new(1)).unwrap();
 
         mqtt.handle_incoming_pubcomp(&PubComp::new(1)).unwrap();
@@ -791,7 +798,7 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_packet(Request::Publish(publish))
+        mqtt.handle_outgoing_packet(Request::Publish(None, publish))
             .unwrap();
         mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1)))
             .unwrap();
@@ -830,7 +837,6 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 1,
                     payload: "".into(),
-                    pkid_tx: None,
                 }),
                 Some(Publish {
                     dup: false,
@@ -839,7 +845,6 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 2,
                     payload: "".into(),
-                    pkid_tx: None,
                 }),
                 Some(Publish {
                     dup: false,
@@ -848,7 +853,6 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 3,
                     payload: "".into(),
-                    pkid_tx: None,
                 }),
                 None,
                 None,
@@ -859,7 +863,6 @@ mod test {
                     topic: "test".to_string(),
                     pkid: 6,
                     payload: "".into(),
-                    pkid_tx: None,
                 }),
             ]
         }
@@ -869,7 +872,7 @@ mod test {
         let requests = mqtt.clean();
         let res = vec![6, 1, 2, 3];
         for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(publish) = req {
+            if let Request::Publish(_, publish) = req {
                 assert_eq!(publish.pkid, idx);
             } else {
                 unreachable!()
@@ -881,7 +884,7 @@ mod test {
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
         for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(publish) = req {
+            if let Request::Publish(_, publish) = req {
                 assert_eq!(publish.pkid, idx);
             } else {
                 unreachable!()
@@ -893,7 +896,7 @@ mod test {
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
         for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(publish) = req {
+            if let Request::Publish(_, publish) = req {
                 assert_eq!(publish.pkid, idx);
             } else {
                 unreachable!()

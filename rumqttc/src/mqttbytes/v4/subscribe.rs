@@ -1,34 +1,12 @@
-use bytes::{Buf, Bytes};
-use tokio::sync::oneshot::Sender;
-
 use super::*;
-use crate::Pkid;
+use bytes::{Buf, Bytes};
 
 /// Subscription packet
+#[derive(Clone, Eq, PartialEq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<SubscribeFilter>,
-    pub pkid_tx: Option<Sender<Pkid>>,
 }
-
-// TODO: figure out if this is even required
-impl Clone for Subscribe {
-    fn clone(&self) -> Self {
-        Self {
-            pkid: self.pkid,
-            filters: self.filters.clone(),
-            pkid_tx: None,
-        }
-    }
-}
-
-impl PartialEq for Subscribe {
-    fn eq(&self, other: &Self) -> bool {
-        self.pkid == other.pkid && self.filters == other.filters
-    }
-}
-
-impl Eq for Subscribe {}
 
 impl Subscribe {
     pub fn new<S: Into<String>>(path: S, qos: QoS) -> Subscribe {
@@ -40,7 +18,6 @@ impl Subscribe {
         Subscribe {
             pkid: 0,
             filters: vec![filter],
-            pkid_tx: None,
         }
     }
 
@@ -50,11 +27,7 @@ impl Subscribe {
     {
         let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
 
-        Subscribe {
-            pkid: 0,
-            filters,
-            pkid_tx: None,
-        }
+        Subscribe { pkid: 0, filters }
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {
@@ -98,11 +71,7 @@ impl Subscribe {
 
         match filters.len() {
             0 => Err(Error::EmptySubscription),
-            _ => Ok(Subscribe {
-                pkid,
-                filters,
-                pkid_tx: None,
-            }),
+            _ => Ok(Subscribe { pkid, filters }),
         }
     }
 
@@ -123,10 +92,6 @@ impl Subscribe {
         }
 
         Ok(1 + remaining_len_bytes + remaining_len)
-    }
-
-    pub fn place_pkid_tx(&mut self, pkid_tx: Sender<Pkid>) {
-        self.pkid_tx = Some(pkid_tx)
     }
 }
 
@@ -229,7 +194,6 @@ mod test {
                     SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
                     SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce)
                 ],
-                pkid_tx: None,
             }
         );
     }
@@ -243,7 +207,6 @@ mod test {
                 SubscribeFilter::new("#".to_owned(), QoS::AtLeastOnce),
                 SubscribeFilter::new("a/b/c".to_owned(), QoS::ExactlyOnce),
             ],
-            pkid_tx: None,
         };
 
         let mut buf = BytesMut::new();

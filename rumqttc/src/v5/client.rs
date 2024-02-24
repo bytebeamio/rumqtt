@@ -89,13 +89,14 @@ impl AsyncClient {
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
         // Fulfill instantly for QoS 0
-        if qos == QoS::AtMostOnce {
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
@@ -152,13 +153,14 @@ impl AsyncClient {
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
         // Fulfill instantly for QoS 0
-        if qos == QoS::AtMostOnce {
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
@@ -232,13 +234,14 @@ impl AsyncClient {
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
         // Fulfill instantly for QoS 0
-        if qos == QoS::AtMostOnce {
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
@@ -284,13 +287,11 @@ impl AsyncClient {
     ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
-        let mut subscribe = Subscribe::new(filter, properties);
+        let subscribe = Subscribe::new(filter, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
 
-        subscribe.place_pkid_tx(pkid_tx);
-
-        let request: Request = Request::Subscribe(subscribe);
+        let request: Request = Request::Subscribe(Some(pkid_tx), subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
@@ -324,12 +325,11 @@ impl AsyncClient {
     ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
-        let mut subscribe = Subscribe::new(filter, properties);
+        let subscribe = Subscribe::new(filter, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         if !is_filter_valid {
             return Err(ClientError::TryRequest(request));
         }
@@ -365,12 +365,11 @@ impl AsyncClient {
     {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let mut subscribe = Subscribe::new_many(topics_iter, properties);
+        let subscribe = Subscribe::new_many(topics_iter, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
@@ -408,12 +407,11 @@ impl AsyncClient {
     {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let mut subscribe = Subscribe::new_many(topics_iter, properties);
+        let subscribe = Subscribe::new_many(topics_iter, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         if !is_valid_filters {
             return Err(ClientError::TryRequest(request));
         }
@@ -445,12 +443,11 @@ impl AsyncClient {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<PkidPromise, ClientError> {
-        let mut unsubscribe = Unsubscribe::new(topic, properties);
+        let unsubscribe = Unsubscribe::new(topic, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        unsubscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Unsubscribe(unsubscribe);
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -473,12 +470,11 @@ impl AsyncClient {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<PkidPromise, ClientError> {
-        let mut unsubscribe = Unsubscribe::new(topic, properties);
+        let unsubscribe = Unsubscribe::new(topic, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        unsubscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Unsubscribe(unsubscribe);
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -580,13 +576,14 @@ impl Client {
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
         // Fulfill instantly for QoS 0
-        if qos == QoS::AtMostOnce {
+        let pkid_tx = if qos == QoS::AtMostOnce {
             _ = pkid_tx.send(0);
+            None
         } else {
-            publish.place_pkid_tx(pkid_tx);
-        }
+            Some(pkid_tx)
+        };
 
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
@@ -678,12 +675,11 @@ impl Client {
     ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
-        let mut subscribe = Subscribe::new(filter, properties);
+        let subscribe = Subscribe::new(filter, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
@@ -738,12 +734,11 @@ impl Client {
     {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let mut subscribe = Subscribe::new_many(topics_iter, properties);
+        let subscribe = Subscribe::new_many(topics_iter, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        subscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Subscribe(subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
@@ -794,12 +789,11 @@ impl Client {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<PkidPromise, ClientError> {
-        let mut unsubscribe = Unsubscribe::new(topic, properties);
+        let unsubscribe = Unsubscribe::new(topic, properties);
 
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-        unsubscribe.place_pkid_tx(pkid_tx);
 
-        let request = Request::Unsubscribe(unsubscribe);
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
