@@ -166,8 +166,14 @@ pub struct PkidPromise {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PkidError {
-    #[error("Eventloop dropped Sender: {0}")]
-    Recv(#[from] oneshot::error::RecvError),
+    #[error("Eventloop dropped Sender")]
+    Recv,
+}
+
+impl From<oneshot::error::RecvError> for PkidError {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        Self::Recv
+    }
 }
 
 impl PkidPromise {
