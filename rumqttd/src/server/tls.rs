@@ -9,12 +9,12 @@ use {
 
 use crate::TlsConfig;
 #[cfg(feature = "verify-client-cert")]
-use tokio_rustls::rustls::{server::AllowAnyAuthenticatedClient, RootCertStore};
+use tokio_rustls::rustls::{server::WebPkiClientVerifier, RootCertStore};
 #[cfg(feature = "use-rustls")]
 use {
     rustls_pemfile::Item,
     std::{io::BufReader, sync::Arc},
-    tokio_rustls::rustls::{Certificate, Error as RustlsError, PrivateKey, ServerConfig},
+    tokio_rustls::rustls::{pki_types::PrivateKeyDer, Error as RustlsError, ServerConfig},
     tracing::error,
 };
 
@@ -127,7 +127,7 @@ impl TLSAcceptor {
                     let peer_certificates = session
                         .peer_certificates()
                         .ok_or(Error::NoPeerCertificate)?;
-                    extract_tenant_id(&peer_certificates[0].0)?
+                    extract_tenant_id(&peer_certificates[0])?
                 };
                 #[cfg(not(feature = "verify-client-cert"))]
                 let tenant_id: Option<String> = None;
@@ -200,12 +200,9 @@ impl TLSAcceptor {
             // Get certificates
             let cert_file = File::open(cert_path);
             let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert_path.clone()))?;
-            let certs = rustls_pemfile::certs(&mut BufReader::new(cert_file));
-            let certs = certs.map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
-            let certs = certs
-                .iter()
-                .map(|cert| Certificate(cert.to_owned()))
-                .collect();
+            let certs = rustls_pemfile::certs(&mut BufReader::new(cert_file))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
 
             // Get private key
             let key = first_private_key_in_pemfile(key_path)?;
@@ -213,7 +210,7 @@ impl TLSAcceptor {
             (certs, key)
         };
 
-        let builder = ServerConfig::builder().with_safe_defaults();
+        let builder = ServerConfig::builder();
 
         // client authentication with a CA. CA isn't required otherwise
         #[cfg(feature = "verify-client-cert")]
@@ -221,18 +218,22 @@ impl TLSAcceptor {
             let ca_file = File::open(ca_path);
             let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
             let ca_file = &mut BufReader::new(ca_file);
-            let ca_certs = rustls_pemfile::certs(ca_file)?;
-            let ca_cert = ca_certs
-                .first()
-                .map(|c| Certificate(c.to_owned()))
-                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
+            let ca_cert = rustls_pemfile::certs(ca_file)
+                .next()
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))??;
 
             let mut store = RootCertStore::empty();
             store
-                .add(&ca_cert)
+                .add(ca_cert)
                 .map_err(|_| Error::InvalidCACert(ca_path.to_string()))?;
 
-            builder.with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient::new(store)))
+            // This will only return an error if no trust anchors are provided or invalid CRLs are
+            // provided. We always provide a trust anchor, and don't provide any CRLs, so it is safe
+            // to unwrap.
+            let verifier = WebPkiClientVerifier::builder(Arc::new(store))
+                .build()
+                .unwrap();
+            builder.with_client_cert_verifier(verifier)
         };
 
         #[cfg(not(feature = "verify-client-cert"))]
@@ -247,7 +248,7 @@ impl TLSAcceptor {
 
 #[cfg(feature = "use-rustls")]
 /// Get the first private key in a PEM file
-fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKey, Error> {
+fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKeyDer<'static>, Error> {
     // Get private key
     let key_file = File::open(key_path);
     let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
@@ -262,8 +263,14 @@ fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKey, Error> 
         })?;
 
         match item {
-            Some(Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key)) => {
-                return Ok(PrivateKey(key));
+            Some(Item::Sec1Key(key)) => {
+                return Ok(key.into());
+            }
+            Some(Item::Pkcs1Key(key)) => {
+                return Ok(key.into());
+            }
+            Some(Item::Pkcs8Key(key)) => {
+                return Ok(key.into());
             }
             None => {
                 error!("No private key found in {:?}", key_path);

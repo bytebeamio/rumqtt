@@ -51,8 +51,8 @@ fn main() {
     });
 
     // Iterate to poll the eventloop for connection progress
-    for notification in connection.iter() {
-        if let Ok(Event::Incoming(Incoming::Publish(packet))) = notification {
+    for notification in connection.iter().flatten() {
+        if let Event::Incoming(Incoming::Publish(packet)) = notification {
             match Message::try_from(packet.payload.as_ref()) {
                 Ok(message) => println!("Payload = {message:?}"),
                 Err(error) => println!("Error = {error}"),

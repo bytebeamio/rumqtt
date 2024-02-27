@@ -1,12 +1,10 @@
 #[cfg(feature = "use-rustls")]
 use rustls_pemfile::Item;
 #[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls;
-#[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls::client::InvalidDnsNameError;
-#[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{
-    Certificate, ClientConfig, OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
+    self,
+    pki_types::{InvalidDnsNameError, ServerName},
+    ClientConfig, RootCertStore,
 };
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::TlsConnector as RustlsConnector;
@@ -77,34 +75,22 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
         } => {
             // Add ca to root store if the connection is TLS
             let mut root_cert_store = RootCertStore::empty();
-            let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(ca)))?;
+            let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(ca)))
+                .collect::<Result<Vec<_>, _>>()?;
 
-            let trust_anchors = certs.iter().map_while(|cert| {
-                if let Ok(ta) = webpki::TrustAnchor::try_from_cert_der(&cert[..]) {
-                    Some(OwnedTrustAnchor::from_subject_spki_name_constraints(
-                        ta.subject,
-                        ta.spki,
-                        ta.name_constraints,
-                    ))
-                } else {
-                    None
-                }
-            });
-
-            root_cert_store.add_trust_anchors(trust_anchors);
+            root_cert_store.add_parsable_certificates(certs);
 
             if root_cert_store.is_empty() {
                 return Err(Error::NoValidCertInChain);
             }
 
-            let config = ClientConfig::builder()
-                .with_safe_defaults()
-                .with_root_certificates(root_cert_store);
+            let config = ClientConfig::builder().with_root_certificates(root_cert_store);
 
             // Add der encoded client cert and key
             let mut config = if let Some(client) = client_auth.as_ref() {
                 let certs =
-                    rustls_pemfile::certs(&mut BufReader::new(Cursor::new(client.0.clone())))?;
+                    rustls_pemfile::certs(&mut BufReader::new(Cursor::new(client.0.clone())))
+                        .collect::<Result<Vec<_>, _>>()?;
                 if certs.is_empty() {
                     return Err(Error::NoValidClientCertInChain);
                 }
@@ -116,16 +102,21 @@ pub async fn rustls_connector(tls_config: &TlsConfiguration) -> Result<RustlsCon
                 let key = loop {
                     let item = rustls_pemfile::read_one(&mut key_buffer)?;
                     match item {
-                        Some(Item::ECKey(key) | Item::RSAKey(key) | Item::PKCS8Key(key)) => {
-                            break key;
+                        Some(Item::Sec1Key(key)) => {
+                            break key.into();
+                        }
+                        Some(Item::Pkcs1Key(key)) => {
+                            break key.into();
+                        }
+                        Some(Item::Pkcs8Key(key)) => {
+                            break key.into();
                         }
                         None => return Err(Error::NoValidKeyInChain),
                         _ => {}
                     }
                 };
 
-                let certs = certs.into_iter().map(Certificate).collect();
-                config.with_client_auth_cert(certs, PrivateKey(key))?
+                config.with_client_auth_cert(certs, key)?
             } else {
                 config.with_no_client_auth()
             };
@@ -181,7 +172,7 @@ pub async fn tls_connect(
         #[cfg(feature = "use-rustls")]
         TlsConfiguration::Simple { .. } | TlsConfiguration::Rustls(_) => {
             let connector = rustls_connector(tls_config).await?;
-            let domain = ServerName::try_from(addr)?;
+            let domain = ServerName::try_from(addr)?.to_owned();
             Box::new(connector.connect(domain, tcp).await?)
         }
         #[cfg(feature = "use-native-tls")]

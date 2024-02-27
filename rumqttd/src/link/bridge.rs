@@ -16,13 +16,17 @@ use tokio::{
 };
 
 #[cfg(feature = "use-rustls")]
+use rustls_pemfile::Item;
+
+#[cfg(feature = "use-rustls")]
 use tokio_rustls::{
     rustls::{
-        client::InvalidDnsNameError, Certificate, ClientConfig, Error as TLSError,
-        OwnedTrustAnchor, PrivateKey, RootCertStore, ServerName,
+        pki_types::{InvalidDnsNameError, ServerName},
+        ClientConfig, Error as TLSError, RootCertStore,
     },
     TlsConnector,
 };
+
 use tracing::*;
 
 use crate::{
@@ -189,6 +193,7 @@ async fn network_connect<P: Protocol>(
         }
     }
 }
+
 #[cfg(feature = "use-rustls")]
 pub async fn tls_connect<P: AsRef<Path>>(
     host: &str,
@@ -198,62 +203,41 @@ pub async fn tls_connect<P: AsRef<Path>>(
 ) -> Result<Box<dyn N>, BridgeError> {
     let mut root_cert_store = RootCertStore::empty();
 
-    let ca_certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?)))?;
-    let trust_anchors = ca_certs.iter().map_while(|cert| {
-        if let Ok(ta) = webpki::TrustAnchor::try_from_cert_der(&cert[..]) {
-            Some(OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            ))
-        } else {
-            None
-        }
-    });
-
-    root_cert_store.add_trust_anchors(trust_anchors);
+    for cert in rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?))) {
+        root_cert_store.add(cert?)?;
+    }
 
     if root_cert_store.is_empty() {
         return Err(BridgeError::NoValidCertInChain);
     }
 
-    let config = ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(root_cert_store);
+    let config = ClientConfig::builder().with_root_certificates(root_cert_store);
 
     let config = if let Some(ClientAuth {
         certs: certs_path,
         key: key_path,
     }) = client_auth_opt
     {
-        let read_certs =
-            rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))?;
+        let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let read_keys = match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(
-            key_path,
-        )?)))? {
-            Some(rustls_pemfile::Item::RSAKey(_)) => rustls_pemfile::rsa_private_keys(
-                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
-            )?,
-            Some(rustls_pemfile::Item::PKCS8Key(_)) => rustls_pemfile::pkcs8_private_keys(
-                &mut BufReader::new(Cursor::new(fs::read(key_path)?)),
-            )?,
-            None | Some(_) => return Err(BridgeError::NoValidCertInChain),
+        let key = loop {
+            match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(key_path)?)))? {
+                Some(Item::Pkcs1Key(key)) => break key.into(),
+                Some(Item::Pkcs8Key(key)) => break key.into(),
+                Some(Item::Sec1Key(key)) => break key.into(),
+                None => return Err(BridgeError::NoValidCertInChain),
+                _ => {}
+            };
         };
 
-        let read_key = match read_keys.first() {
-            Some(v) => v.clone(),
-            None => return Err(BridgeError::NoValidCertInChain),
-        };
-
-        let certs = read_certs.into_iter().map(Certificate).collect();
-        config.with_client_auth_cert(certs, PrivateKey(read_key))?
+        config.with_client_auth_cert(certs, key)?
     } else {
         config.with_no_client_auth()
     };
 
     let connector = TlsConnector::from(Arc::new(config));
-    let domain = ServerName::try_from(host).unwrap();
+    let domain = ServerName::try_from(host)?.to_owned();
     Ok(Box::new(connector.connect(domain, tcp).await?))
 }
 

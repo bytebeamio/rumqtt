@@ -62,8 +62,10 @@ impl AsyncClient {
         (client, eventloop)
     }
 
-    /// Create a new `AsyncClient` from a pair of async channel `Sender`s. This is mostly useful for
-    /// creating a test instance.
+    /// Create a new `AsyncClient` from a channel `Sender`.
+    ///
+    /// This is mostly useful for creating a test instance where you can
+    /// listen on the corresponding receiver.
     pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
         AsyncClient { request_tx }
     }
@@ -470,6 +472,16 @@ impl Client {
         (client, connection)
     }
 
+    /// Create a new `Client` from a channel `Sender`.
+    ///
+    /// This is mostly useful for creating a test instance where you can
+    /// listen on the corresponding receiver.
+    pub fn from_sender(request_tx: Sender<Request>) -> Client {
+        Client {
+            client: AsyncClient::from_senders(request_tx),
+        }
+    }
+
     /// Sends a MQTT Publish to the `EventLoop`
     fn handle_publish<S, P>(
         &self,
@@ -845,5 +857,15 @@ mod test {
         let (_, mut connection) = Client::new(mqttoptions, 10);
         let _ = connection.iter();
         let _ = connection.iter();
+    }
+
+    #[test]
+    fn should_be_able_to_build_test_client_from_channel() {
+        let (tx, rx) = flume::bounded(1);
+        let client = Client::from_sender(tx);
+        client
+            .publish("hello/world", QoS::ExactlyOnce, false, "good bye")
+            .expect("Should be able to publish");
+        let _ = rx.try_recv().expect("Should have message");
     }
 }

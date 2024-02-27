@@ -1,12 +1,8 @@
-#[cfg(feature = "websocket")]
-use rumqttc::{self, AsyncClient, MqttOptions, QoS, Transport};
-#[cfg(feature = "websocket")]
+use rumqttc::{AsyncClient, MqttOptions, QoS, Transport};
 use std::{error::Error, time::Duration};
-#[cfg(feature = "websocket")]
 use tokio::{task, time};
 
-#[cfg(feature = "websocket")]
-#[tokio::main(worker_threads = 1)]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
@@ -37,7 +33,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-#[cfg(feature = "websocket")]
 async fn requests(client: AsyncClient) {
     client
         .subscribe("hello/world", QoS::AtMostOnce)
@@ -54,9 +49,4 @@ async fn requests(client: AsyncClient) {
     }
 
     time::sleep(Duration::from_secs(120)).await;
-}
-
-#[cfg(not(feature = "websocket"))]
-fn main() {
-    panic!("Enable websocket feature with `--features=websocket`");
 }

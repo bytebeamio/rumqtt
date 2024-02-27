@@ -118,18 +118,7 @@ impl MqttOptions {
     /// # use rumqttc::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost").unwrap();
     /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost").unwrap();
-    /// ```
     pub fn new<S: Into<String>, T: AsRef<str>>(id: S, host: T) -> Result<MqttOptions, OptionError> {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id");
-        }
-
         // mqtt[s]://[username][:password]@host.domain[:port]
         // ref: https://github.com/mqtt/mqtt.org/wiki/URI-Scheme
         let mut host = host.as_ref();
@@ -188,7 +177,7 @@ impl MqttOptions {
             transport,
             keep_alive: Duration::from_secs(60),
             clean_start: true,
-            client_id: id,
+            client_id: id.into(),
             credentials,
             request_channel_capacity: 10,
             max_request_batch: 0,
@@ -605,14 +594,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1")
-            .unwrap()
-            .set_clean_start(true);
-    }
-
-    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         use crate::{TlsConfiguration, Transport};
@@ -641,10 +622,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
-    fn no_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1")
-            .unwrap()
-            .set_clean_start(true);
+    fn allow_empty_client_id() {
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
     }
 }
