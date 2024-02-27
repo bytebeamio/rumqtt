@@ -623,6 +623,8 @@ mod test {
 
     #[test]
     fn allow_empty_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1")
+            .unwrap()
+            .set_clean_start(true);
     }
 }

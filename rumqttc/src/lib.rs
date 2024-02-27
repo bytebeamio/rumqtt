@@ -545,7 +545,6 @@ impl MqttOptions {
         };
 
         Ok(MqttOptions {
-
             broker_addr: host.into(),
             port,
             addr_path: addr_path.into(),
@@ -649,7 +648,7 @@ impl MqttOptions {
     ///
     /// ```should_panic
     /// # use rumqttc::MqttOptions;
-    /// let mut options = MqttOptions::new("", "localhost", 1883);
+    /// let mut options = MqttOptions::new("", "localhost").unwrap();
     /// options.set_clean_session(false);
     /// ```
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
@@ -825,12 +824,14 @@ mod test {
 
     #[test]
     fn accept_empty_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
+        let _mqtt_opts = MqttOptions::new("", "127.0.0.1")
+            .unwrap()
+            .set_clean_session(true);
     }
 
     #[test]
     fn set_clean_session_when_client_id_present() {
-        let mut options = MqttOptions::new("client_id", "127.0.0.1", 1883);
+        let mut options = MqttOptions::new("client_id", "127.0.0.1").unwrap();
         options.set_clean_session(false);
         options.set_clean_session(true);
     }
