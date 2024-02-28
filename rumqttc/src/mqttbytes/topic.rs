@@ -1,12 +1,32 @@
+/// Maximum length of a topic or topic filter according to
+/// [MQTT-4.7.3-3](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718109)
+pub const MAX_TOPIC_LEN: usize = 65535;
+
 /// Checks if a topic or topic filter has wildcards
 pub fn has_wildcards(s: &str) -> bool {
-    s.contains('+') || s.contains('#')
+    s.contains(['+', '#'])
 }
 
-/// Checks if a topic is valid
+/// Check if a topic is valid for PUBLISH packet.
 pub fn valid_topic(topic: &str) -> bool {
-    // topic can't contain wildcards
-    if topic.contains('+') || topic.contains('#') {
+    is_valid_topic_or_filter(topic) && !has_wildcards(topic)
+}
+
+/// Check if a topic is valid to qualify as a topic name or topic filter.
+///
+/// According to MQTT v3 Spec, it has to follow the following rules:
+/// 1. All Topic Names and Topic Filters MUST be at least one character long [MQTT-4.7.3-1]
+/// 2. Topic Names and Topic Filters are case sensitive
+/// 3. Topic Names and Topic Filters can include the space character
+/// 4. A leading or trailing `/` creates a distinct Topic Name or Topic Filter
+/// 5. A Topic Name or Topic Filter consisting only of the `/` character is valid
+/// 6. Topic Names and Topic Filters MUST NOT include the null character (Unicode U+0000) [MQTT-4.7.3-2]
+/// 7. Topic Names and Topic Filters are UTF-8 encoded strings, they MUST NOT encode to more than 65535 bytes.
+fn is_valid_topic_or_filter(topic_or_filter: &str) -> bool {
+    if topic_or_filter.is_empty()
+        || topic_or_filter.len() > MAX_TOPIC_LEN
+        || topic_or_filter.contains('\0')
+    {
         return false;
     }
 
@@ -17,7 +37,7 @@ pub fn valid_topic(topic: &str) -> bool {
 ///
 /// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
 pub fn valid_filter(filter: &str) -> bool {
-    if filter.is_empty() {
+    if !is_valid_topic_or_filter(filter) {
         return false;
     }
 
