@@ -1,4 +1,8 @@
+// reexport valid_filter and valid_topic since they are identical in nature for
+// both v3 and v5
+pub use crate::mqttbytes::{valid_filter, valid_topic};
 use std::{str::Utf8Error, vec};
+use super::PublishProperties;
 
 /// This module is the place where all the protocol specifics gets abstracted
 /// out and creates a structures which are common across protocols. Since,
@@ -32,61 +36,26 @@ pub fn qos(num: u8) -> Option<QoS> {
     }
 }
 
-/// Checks if a topic or topic filter has wildcards
-pub fn has_wildcards(s: &str) -> bool {
-    s.contains('+') || s.contains('#')
-}
+#[inline]
+pub(crate) fn validate_topic_name_and_alias(
+    topic: &str,
+    properties: &Option<PublishProperties>,
+) -> bool {
+    let is_topic_empty = topic.is_empty();
+    // The topic alias is considered valid only if it is greater than zero.
+    // If it is not supplied, it is still considered valid because in that
+    // case, the validity depends on the topic name itself.
+    let is_topic_valid = valid_topic(topic);
+    let is_alias_given = properties
+        .as_ref()
+        .map_or(false, |p| p.topic_alias.is_some());
+    let is_alias_valid = properties
+        .as_ref()
+        .map_or(false, |p| p.topic_alias.map_or(false, |a| a > 0));
 
-/// Checks if a topic is valid
-pub fn valid_topic(topic: &str) -> bool {
-    // topic can't contain wildcards
-    if topic.contains('+') || topic.contains('#') {
-        return false;
-    }
-
-    true
-}
-
-/// Checks if the filter is valid
-///
-/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
-pub fn valid_filter(filter: &str) -> bool {
-    if filter.is_empty() {
-        return false;
-    }
-
-    // rev() is used so we can easily get the last entry
-    let mut hirerarchy = filter.split('/').rev();
-
-    // split will never return an empty iterator
-    // even if the pattern isn't matched, the original string will be there
-    // so it is safe to just unwrap here!
-    let last = hirerarchy.next().unwrap();
-
-    // only single '#" or '+' is allowed in last entry
-    // invalid: sport/tennis#
-    // invalid: sport/++
-    if last.len() != 1 && (last.contains('#') || last.contains('+')) {
-        return false;
-    }
-
-    // remaining entries
-    for entry in hirerarchy {
-        // # is not allowed in filter except as a last entry
-        // invalid: sport/tennis#/player
-        // invalid: sport/tennis/#/ranking
-        if entry.contains('#') {
-            return false;
-        }
-
-        // + must occupy an entire level of the filter
-        // invalid: sport+
-        if entry.len() > 1 && entry.contains('+') {
-            return false;
-        }
-    }
-
-    true
+    (is_topic_valid || is_topic_empty)
+        && (!is_topic_empty || is_alias_given)
+        && (!is_alias_given || is_alias_valid)
 }
 
 /// Checks if topic matches a filter. topic and filter validation isn't done here.

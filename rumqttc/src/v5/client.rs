@@ -6,7 +6,7 @@ use super::mqttbytes::v5::{
     Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
     Unsubscribe, UnsubscribeProperties,
 };
-use super::mqttbytes::{valid_filter, QoS};
+use super::mqttbytes::{valid_filter, validate_topic_name_and_alias, QoS};
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use crate::valid_topic;
 
@@ -84,10 +84,11 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
+        let is_ok = validate_topic_name_and_alias(&topic, &properties);
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !is_ok {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
