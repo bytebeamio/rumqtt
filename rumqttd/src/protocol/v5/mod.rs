@@ -426,7 +426,14 @@ impl Protocol for V5 {
                 let (pubcomp, properties) = pubcomp::read(fixed_header, packet)?;
                 Packet::PubComp(pubcomp, properties)
             }
-            _ => unreachable!(),
+            PacketType::ConnAck => {
+                let (puback, properties) = connack::read(fixed_header, packet)?;
+                Packet::ConnAck(puback, properties)
+            }
+            PacketType::UnsubAck => {
+                let (unsuback, properties) = unsuback::read(fixed_header, packet)?;
+                Packet::UnsubAck(unsuback, properties)
+            }
         };
 
         Ok(packet)
