@@ -1,8 +1,8 @@
 // reexport valid_filter and valid_topic since they are identical in nature for
 // both v3 and v5
+use super::PublishProperties;
 pub use crate::mqttbytes::{valid_filter, valid_topic};
 use std::{str::Utf8Error, vec};
-use super::PublishProperties;
 
 /// This module is the place where all the protocol specifics gets abstracted
 /// out and creates a structures which are common across protocols. Since,
@@ -36,11 +36,11 @@ pub fn qos(num: u8) -> Option<QoS> {
     }
 }
 
-#[inline]
 pub(crate) fn validate_topic_name_and_alias(
-    topic: &str,
+    topic: impl AsRef<str>,
     properties: &Option<PublishProperties>,
 ) -> bool {
+    let topic = topic.as_ref();
     let is_topic_empty = topic.is_empty();
     // The topic alias is considered valid only if it is greater than zero.
     // If it is not supplied, it is still considered valid because in that
