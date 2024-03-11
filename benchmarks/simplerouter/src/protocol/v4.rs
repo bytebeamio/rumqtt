@@ -497,7 +497,6 @@ pub(crate) mod publish {
 
         buffer.extend_from_slice(payload);
 
-        // TODO: Returned length is wrong in other packets. Fix it
         Ok(1 + count + len)
     }
 }
