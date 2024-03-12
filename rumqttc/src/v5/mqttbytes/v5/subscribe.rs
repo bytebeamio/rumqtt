@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Subscription packet
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Subscribe {
     pub pkid: u16,
     pub filters: Vec<Filter>,

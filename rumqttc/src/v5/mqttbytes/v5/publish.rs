@@ -2,7 +2,7 @@ use super::*;
 use bytes::{Buf, Bytes};
 
 /// Publish packet
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Publish {
     pub dup: bool,
     pub qos: QoS,

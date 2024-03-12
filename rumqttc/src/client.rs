@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, PkidPromise, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -72,7 +72,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -80,12 +80,22 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+            None
+        } else {
+            Some(pkid_tx)
+        };
+
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
@@ -95,7 +105,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -103,12 +113,22 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+            None
+        } else {
+            Some(pkid_tx)
+        };
+
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -137,69 +157,105 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+            None
+        } else {
+            Some(pkid_tx)
+        };
+
+        let publish = Request::Publish(pkid_tx, publish);
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub async fn subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        let request = Request::Subscribe(subscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn try_subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        let request = Request::Subscribe(subscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let request = Request::Subscribe(subscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let request = Request::Subscribe(subscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
-        let request = Request::Unsubscribe(unsubscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.request_tx.send_async(request).await?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
-        let request = Request::Unsubscribe(unsubscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.request_tx.try_send(request)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
@@ -274,7 +330,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -282,12 +338,22 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+        // Fulfill instantly for QoS 0
+        let pkid_tx = if qos == QoS::AtMostOnce {
+            _ = pkid_tx.send(0);
+            None
+        } else {
+            Some(pkid_tx)
+        };
+
+        let publish = Request::Publish(pkid_tx, publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     pub fn try_publish<S, V>(
@@ -296,13 +362,12 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<PkidPromise, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.client.try_publish(topic, qos, retain, payload)?;
-        Ok(())
+        self.client.try_publish(topic, qos, retain, payload)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -322,31 +387,44 @@ impl Client {
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
         let subscribe = Subscribe::new(topic.into(), qos);
-        let request = Request::Subscribe(subscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.client.request_tx.send(request)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        self.client.try_subscribe(topic, qos)?;
-        Ok(())
+    pub fn try_subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<PkidPromise, ClientError> {
+        self.client.try_subscribe(topic, qos)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let request = Request::Subscribe(subscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
         self.client.request_tx.send(request)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<PkidPromise, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -354,17 +432,19 @@ impl Client {
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
-        let request = Request::Unsubscribe(unsubscribe);
+
+        let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
+
+        let request = Request::Unsubscribe(Some(pkid_tx), unsubscribe);
         self.client.request_tx.send(request)?;
-        Ok(())
+        Ok(PkidPromise::new(pkid_rx))
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
-        self.client.try_unsubscribe(topic)?;
-        Ok(())
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<PkidPromise, ClientError> {
+        self.client.try_unsubscribe(topic)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
