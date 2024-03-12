@@ -63,6 +63,5 @@ pub fn write(publish: &Publish, buffer: &mut BytesMut) -> Result<usize, Error> {
 
     buffer.extend_from_slice(&publish.payload);
 
-    // TODO: Returned length is wrong in other packets. Fix it
     Ok(1 + count + len)
 }
