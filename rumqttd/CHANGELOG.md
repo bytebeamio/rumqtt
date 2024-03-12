@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MQTT keep alive interval
 - record client id for remote link's span
 - session present flag in connack
+- (MQTT v5) handle connack and unsuback packets properly instead of panic.
 
 ### Security
 

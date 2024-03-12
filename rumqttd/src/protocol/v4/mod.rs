@@ -334,7 +334,6 @@ impl Protocol for V4 {
             // v4 Disconnect packet gets handled in the previous check, this branch gets hit when
             // Disconnect packet has properties which is only valid for v5
             PacketType::Disconnect => return Err(Error::InvalidProtocol),
-            _ => unreachable!(),
         };
 
         Ok(packet)

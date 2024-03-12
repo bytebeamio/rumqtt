@@ -388,6 +388,10 @@ impl Protocol for V5 {
                     connect::read(fixed_header, packet)?;
                 Packet::Connect(connect, properties, will, willproperties, login)
             }
+            PacketType::ConnAck => {
+                let (puback, properties) = connack::read(fixed_header, packet)?;
+                Packet::ConnAck(puback, properties)
+            }
             PacketType::Publish => {
                 let (publish, properties) = publish::read(fixed_header, packet)?;
                 Packet::Publish(publish, properties)
@@ -408,6 +412,10 @@ impl Protocol for V5 {
                 let (unsubscribe, properties) = unsubscribe::read(fixed_header, packet)?;
                 Packet::Unsubscribe(unsubscribe, properties)
             }
+            PacketType::UnsubAck => {
+                let (unsuback, properties) = unsuback::read(fixed_header, packet)?;
+                Packet::UnsubAck(unsuback, properties)
+            }
             PacketType::PingReq => Packet::PingReq(PingReq),
             PacketType::PingResp => Packet::PingResp(PingResp),
             PacketType::Disconnect => {
@@ -426,7 +434,6 @@ impl Protocol for V5 {
                 let (pubcomp, properties) = pubcomp::read(fixed_header, packet)?;
                 Packet::PubComp(pubcomp, properties)
             }
-            _ => unreachable!(),
         };
 
         Ok(packet)
