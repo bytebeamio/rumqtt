@@ -13,7 +13,7 @@ fn main() {
 }
 
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn Error>> {
-    let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new(id, "localhost")?;
     mqttoptions.set_keep_alive(Duration::from_secs(20));
     mqttoptions.set_inflight(100);
 

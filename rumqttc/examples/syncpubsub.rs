@@ -5,7 +5,7 @@ use std::time::Duration;
 fn main() {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost").unwrap();
     let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))

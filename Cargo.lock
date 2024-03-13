@@ -1951,7 +1951,6 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
- "url",
  "ws_stream_tungstenite",
 ]
 

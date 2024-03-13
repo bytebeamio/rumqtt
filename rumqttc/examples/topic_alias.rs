@@ -9,7 +9,7 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost")?;
     mqttoptions.set_keep_alive(Duration::from_secs(5));
     mqttoptions.set_topic_alias_max(10.into());
 

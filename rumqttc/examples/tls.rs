@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "mqtt.example.server", 8883);
+    let mut mqttoptions = MqttOptions::new("test-1", "mqtt.example.server:8883")?;
     mqttoptions.set_keep_alive(std::time::Duration::from_secs(5));
     mqttoptions.set_credentials("username", "password");
 
