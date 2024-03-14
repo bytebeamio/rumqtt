@@ -1,5 +1,6 @@
 use super::*;
 use bytes::{Buf, Bytes};
+use core::str::from_utf8;
 
 fn len(publish: &Publish) -> usize {
     let len = 2 + publish.topic.len() + publish.payload.len();
@@ -18,6 +19,10 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Erro
     let variable_header_index = fixed_header.fixed_header_len;
     bytes.advance(variable_header_index);
     let topic = read_mqtt_bytes(&mut bytes)?;
+
+    if !valid_topic(from_utf8(&topic).map_err(|_| Error::TopicNotUtf8)?) {
+        return Err(Error::MalformedPacket);
+    }
 
     // Packet identifier exists where QoS > 0
     let pkid = match qos {

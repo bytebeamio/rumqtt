@@ -32,6 +32,10 @@ pub fn read(
 
     while bytes.has_remaining() {
         let path = read_mqtt_string(&mut bytes)?;
+        if !valid_filter(&path) {
+            return Err(Error::MalformedPacket);
+        }
+
         let options = read_u8(&mut bytes)?;
         let requested_qos = options & 0b0000_0011;
 

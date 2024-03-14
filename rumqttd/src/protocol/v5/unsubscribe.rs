@@ -31,6 +31,9 @@ pub fn read(
     let mut filters = Vec::with_capacity(1);
     while bytes.has_remaining() {
         let filter = read_mqtt_string(&mut bytes)?;
+        if !valid_filter(&filter) {
+            return Err(Error::MalformedPacket);
+        }
         filters.push(filter);
     }
 
