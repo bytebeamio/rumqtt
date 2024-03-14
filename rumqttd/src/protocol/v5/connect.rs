@@ -122,7 +122,7 @@ pub fn write(
 
     // update connect flags
     buffer[flags_index] = connect_flags;
-    Ok(len)
+    Ok(1 + count + len)
 }
 
 mod will {
