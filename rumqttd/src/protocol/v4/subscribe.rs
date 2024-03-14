@@ -13,6 +13,10 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Subscribe, Er
     let pkid = read_u16(&mut bytes)?;
     let filters = filter::read(&mut bytes)?;
 
+    if filters.iter().any(|f| !valid_filter(&f.path)) {
+        return Err(Error::MalformedPacket);
+    }
+
     match filters.len() {
         0 => Err(Error::EmptySubscription),
         _ => Ok(Subscribe { pkid, filters }),
