@@ -47,6 +47,27 @@ pub enum Packet {
     Disconnect,
 }
 
+impl Packet {
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Publish(publish) => publish.size(),
+            Self::Subscribe(subscription) => subscription.size(),
+            Self::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Self::ConnAck(ack) => ack.size(),
+            Self::PubAck(ack) => ack.size(),
+            Self::SubAck(ack) => ack.size(),
+            Self::UnsubAck(unsuback) => unsuback.size(),
+            Self::PubRec(pubrec) => pubrec.size(),
+            Self::PubRel(pubrel) => pubrel.size(),
+            Self::PubComp(pubcomp) => pubcomp.size(),
+            Self::Connect(connect) => connect.size(),
+            Self::PingReq => PingReq.size(),
+            Self::PingResp => PingResp.size(),
+            Self::Disconnect => Disconnect.size(),
+        }
+    }
+}
+
 /// Reads a stream of bytes and extracts next MQTT packet out of it
 pub fn read(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
     let fixed_header = check(stream.iter(), max_size)?;
