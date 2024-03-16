@@ -703,7 +703,7 @@ mod test {
         let publish = build_incoming_publish(QoS::ExactlyOnce, 1);
 
         mqtt.handle_incoming_publish(&publish).unwrap();
-        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = Packet::read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubRec(pubrec) => assert_eq!(pubrec.pkid, 1),
             _ => panic!("Invalid network request: {:?}", packet),
@@ -770,14 +770,14 @@ mod test {
 
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
         mqtt.outgoing_publish(publish).unwrap();
-        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = Packet::read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::Publish(publish) => assert_eq!(publish.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
         }
 
         mqtt.handle_incoming_pubrec(&PubRec::new(1)).unwrap();
-        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = Packet::read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubRel(pubrel) => assert_eq!(pubrel.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
@@ -790,14 +790,14 @@ mod test {
         let publish = build_incoming_publish(QoS::ExactlyOnce, 1);
 
         mqtt.handle_incoming_publish(&publish).unwrap();
-        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = Packet::read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubRec(pubrec) => assert_eq!(pubrec.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
         }
 
         mqtt.handle_incoming_pubrel(&PubRel::new(1)).unwrap();
-        let packet = read(&mut mqtt.write, 10 * 1024).unwrap();
+        let packet = Packet::read(&mut mqtt.write, 10 * 1024).unwrap();
         match packet {
             Packet::PubComp(pubcomp) => assert_eq!(pubcomp.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
