@@ -2,7 +2,7 @@ use super::framed::Network;
 use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
-use crate::framed::N;
+use crate::framed::AsyncReadWrite;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -304,7 +304,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         _ => options.broker_address(),
     };
 
-    let tcp_stream: Box<dyn N> = {
+    let tcp_stream: Box<dyn AsyncReadWrite> = {
         #[cfg(feature = "proxy")]
         match options.proxy() {
             Some(proxy) => {
