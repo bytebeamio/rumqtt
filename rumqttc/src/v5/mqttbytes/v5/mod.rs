@@ -144,6 +144,25 @@ impl Packet {
             Self::Disconnect(disconnect) => disconnect.write(write),
         }
     }
+
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Publish(publish) => publish.size(),
+            Self::Subscribe(subscription) => subscription.size(),
+            Self::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Self::ConnAck(ack) => ack.size(),
+            Self::PubAck(ack) => ack.size(),
+            Self::SubAck(ack) => ack.size(),
+            Self::UnsubAck(unsuback) => unsuback.size(),
+            Self::PubRec(pubrec) => pubrec.size(),
+            Self::PubRel(pubrel) => pubrel.size(),
+            Self::PubComp(pubcomp) => pubcomp.size(),
+            Self::Connect(connect, will, login) => connect.size(will, login),
+            Self::PingReq(req) => req.size(),
+            Self::PingResp(resp) => resp.size(),
+            Self::Disconnect(disconnect) => disconnect.size(),
+        }
+    }
 }
 
 /// MQTT packet type
