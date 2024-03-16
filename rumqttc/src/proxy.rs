@@ -1,5 +1,5 @@
 use crate::eventloop::socket_connect;
-use crate::framed::N;
+use crate::framed::AsyncReadWrite;
 use crate::NetworkOptions;
 
 use std::io;
@@ -46,10 +46,10 @@ impl Proxy {
         broker_addr: &str,
         broker_port: u16,
         network_options: NetworkOptions,
-    ) -> Result<Box<dyn N>, ProxyError> {
+    ) -> Result<Box<dyn AsyncReadWrite>, ProxyError> {
         let proxy_addr = format!("{}:{}", self.addr, self.port);
 
-        let tcp: Box<dyn N> = Box::new(socket_connect(proxy_addr, network_options).await?);
+        let tcp: Box<dyn AsyncReadWrite> = Box::new(socket_connect(proxy_addr, network_options).await?);
         let mut tcp = match self.ty {
             ProxyType::Http => tcp,
             #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
@@ -67,7 +67,7 @@ impl ProxyAuth {
         self,
         host: &str,
         port: u16,
-        tcp_stream: &mut Box<dyn N>,
+        tcp_stream: &mut Box<dyn AsyncReadWrite>,
     ) -> Result<(), ProxyError> {
         match self {
             Self::None => async_http_proxy::http_connect_tokio(tcp_stream, host, port).await?,

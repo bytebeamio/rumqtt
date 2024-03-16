@@ -10,7 +10,7 @@ use std::io;
 /// appropriate to achieve performance
 pub struct Network {
     /// Socket for IO
-    socket: Box<dyn N>,
+    socket: Box<dyn AsyncReadWrite>,
     /// Buffered reads
     read: BytesMut,
     /// Maximum packet size
@@ -20,8 +20,8 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(socket: impl N + 'static, max_incoming_size: usize) -> Network {
-        let socket = Box::new(socket) as Box<dyn N>;
+    pub fn new(socket: impl AsyncReadWrite + 'static, max_incoming_size: usize) -> Network {
+        let socket = Box::new(socket) as Box<dyn AsyncReadWrite>;
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
@@ -117,5 +117,5 @@ impl Network {
     }
 }
 
-pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
