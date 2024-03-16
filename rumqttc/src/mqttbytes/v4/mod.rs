@@ -107,6 +107,26 @@ impl Packet {
 
         Ok(packet)
     }
+
+    /// Serializes the MQTT packet into a stream of bytes
+    pub fn write(&self, stream: &mut BytesMut) -> Result<usize, Error> {
+        match self {
+            Packet::Connect(c) => c.write(stream),
+            Packet::ConnAck(c) => c.write(stream),
+            Packet::Publish(p) => p.write(stream),
+            Packet::PubAck(p) => p.write(stream),
+            Packet::PubRec(p) => p.write(stream),
+            Packet::PubRel(p) => p.write(stream),
+            Packet::PubComp(p) => p.write(stream),
+            Packet::Subscribe(s) => s.write(stream),
+            Packet::SubAck(s) => s.write(stream),
+            Packet::Unsubscribe(u) => u.write(stream),
+            Packet::UnsubAck(u) => u.write(stream),
+            Packet::PingReq => PingReq.write(stream),
+            Packet::PingResp => PingResp.write(stream),
+            Packet::Disconnect => Disconnect.write(stream),
+        }
+    }
 }
 
 /// Return number of remaining length bytes required for encoding length
