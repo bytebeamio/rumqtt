@@ -1,11 +1,10 @@
+use crate::framed::Network;
 use crate::{Event, Incoming, Outgoing, Request};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
-use bytes::BytesMut;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
-use tokio_util::codec::Encoder;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -69,8 +68,6 @@ pub struct MqttState {
     pub collision: Option<Publish>,
     /// Buffered incoming packets
     pub events: VecDeque<Event>,
-    /// Write buffer
-    pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
     /// Used to encode packets
@@ -98,7 +95,6 @@ impl MqttState {
             collision: None,
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
-            write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
             codec: Codec {
                 max_outgoing_size: max_outgoing_packet_size,
@@ -138,7 +134,6 @@ impl MqttState {
         self.await_pingresp = false;
         self.collision_ping_count = 0;
         self.inflight = 0;
-        self.write.clear();
         pending
     }
 
@@ -148,16 +143,20 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
+    pub fn handle_outgoing_packet(
+        &mut self,
+        request: Request,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         match request {
-            Request::Publish(publish) => self.outgoing_publish(publish)?,
-            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
-            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
-            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
-            Request::PingReq(_) => self.outgoing_ping()?,
-            Request::Disconnect(_) => self.outgoing_disconnect()?,
-            Request::PubAck(puback) => self.outgoing_puback(puback)?,
-            Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec)?,
+            Request::Publish(publish) => self.outgoing_publish(publish, network)?,
+            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel, network)?,
+            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe, network)?,
+            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe, network)?,
+            Request::PingReq(_) => self.outgoing_ping(network)?,
+            Request::Disconnect(_) => self.outgoing_disconnect(network)?,
+            Request::PubAck(puback) => self.outgoing_puback(puback, network)?,
+            Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec, network)?,
             _ => unimplemented!(),
         };
 
@@ -169,16 +168,20 @@ impl MqttState {
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_packet(&mut self, packet: Incoming) -> Result<(), StateError> {
+    pub fn handle_incoming_packet(
+        &mut self,
+        packet: Incoming,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         let out = match &packet {
             Incoming::PingResp => self.handle_incoming_pingresp(),
-            Incoming::Publish(publish) => self.handle_incoming_publish(publish),
+            Incoming::Publish(publish) => self.handle_incoming_publish(publish, network),
             Incoming::SubAck(_suback) => self.handle_incoming_suback(),
             Incoming::UnsubAck(_unsuback) => self.handle_incoming_unsuback(),
-            Incoming::PubAck(puback) => self.handle_incoming_puback(puback),
-            Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
-            Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
-            Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
+            Incoming::PubAck(puback) => self.handle_incoming_puback(puback, network),
+            Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec, network),
+            Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel, network),
+            Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp, network),
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
                 return Err(StateError::WrongPacket);
@@ -201,7 +204,11 @@ impl MqttState {
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(&mut self, publish: &Publish) -> Result<(), StateError> {
+    fn handle_incoming_publish(
+        &mut self,
+        publish: &Publish,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         let qos = publish.qos;
 
         match qos {
@@ -209,7 +216,7 @@ impl MqttState {
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
                     let puback = PubAck::new(publish.pkid);
-                    self.outgoing_puback(puback)?;
+                    self.outgoing_puback(puback, network)?;
                 }
                 Ok(())
             }
@@ -219,14 +226,18 @@ impl MqttState {
 
                 if !self.manual_acks {
                     let pubrec = PubRec::new(pkid);
-                    self.outgoing_pubrec(pubrec)?;
+                    self.outgoing_pubrec(pubrec, network)?;
                 }
                 Ok(())
             }
         }
     }
 
-    fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
+    fn handle_incoming_puback(
+        &mut self,
+        puback: &PubAck,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         let publish = self
             .outgoing_pub
             .get_mut(puback.pkid as usize)
@@ -249,8 +260,7 @@ impl MqttState {
             self.inflight += 1;
 
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.codec
-                .encode(Packet::Publish(publish), &mut self.write)?;
+            network.write(Packet::Publish(publish))?;
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
@@ -258,7 +268,11 @@ impl MqttState {
         v
     }
 
-    fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), StateError> {
+    fn handle_incoming_pubrec(
+        &mut self,
+        pubrec: &PubRec,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         let publish = self
             .outgoing_pub
             .get_mut(pubrec.pkid as usize)
@@ -268,7 +282,7 @@ impl MqttState {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
                 let pubrel = PubRel { pkid: pubrec.pkid };
-                self.codec.encode(Packet::PubRel(pubrel), &mut self.write)?;
+                network.write(Packet::PubRel(pubrel))?;
 
                 let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
                 self.events.push_back(event);
@@ -281,7 +295,11 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
+    fn handle_incoming_pubrel(
+        &mut self,
+        pubrel: &PubRel,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         let publish = self
             .incoming_pub
             .get_mut(pubrel.pkid as usize)
@@ -290,8 +308,7 @@ impl MqttState {
             Some(_) => {
                 let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
                 let pubcomp = PubComp { pkid: pubrel.pkid };
-                self.codec
-                    .encode(Packet::PubComp(pubcomp), &mut self.write)?;
+                network.write(Packet::PubComp(pubcomp))?;
                 self.events.push_back(event);
                 Ok(())
             }
@@ -302,11 +319,14 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
+    fn handle_incoming_pubcomp(
+        &mut self,
+        pubcomp: &PubComp,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.codec
-                .encode(Packet::Publish(publish), &mut self.write)?;
+            network.write(Packet::Publish(publish))?;
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
@@ -334,7 +354,11 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(
+        &mut self,
+        mut publish: Publish,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
@@ -368,32 +392,31 @@ impl MqttState {
         );
 
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-        self.codec
-            .encode(Packet::Publish(publish), &mut self.write)?;
+        network.write(Packet::Publish(publish))?;
         self.events.push_back(event);
         Ok(())
     }
 
-    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<(), StateError> {
+    fn outgoing_pubrel(&mut self, pubrel: PubRel, network: &mut Network) -> Result<(), StateError> {
         let pubrel = self.save_pubrel(pubrel)?;
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
         let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
-        self.codec.encode(Packet::PubRel(pubrel), &mut self.write)?;
+        network.write(Packet::PubRel(pubrel))?;
         self.events.push_back(event);
         Ok(())
     }
 
-    fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
+    fn outgoing_puback(&mut self, puback: PubAck, network: &mut Network) -> Result<(), StateError> {
         let event = Event::Outgoing(Outgoing::PubAck(puback.pkid));
-        self.codec.encode(Packet::PubAck(puback), &mut self.write)?;
+        network.write(Packet::PubAck(puback))?;
         self.events.push_back(event);
         Ok(())
     }
 
-    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
+    fn outgoing_pubrec(&mut self, pubrec: PubRec, network: &mut Network) -> Result<(), StateError> {
         let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
-        self.codec.encode(Packet::PubRec(pubrec), &mut self.write)?;
+        network.write(Packet::PubRec(pubrec))?;
         self.events.push_back(event);
         Ok(())
     }
@@ -401,7 +424,7 @@ impl MqttState {
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    fn outgoing_ping(&mut self) -> Result<(), StateError> {
+    fn outgoing_ping(&mut self, network: &mut Network) -> Result<(), StateError> {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
@@ -428,12 +451,16 @@ impl MqttState {
         );
 
         let event = Event::Outgoing(Outgoing::PingReq);
-        self.codec.encode(Packet::PingReq, &mut self.write)?;
+        network.write(Packet::PingReq)?;
         self.events.push_back(event);
         Ok(())
     }
 
-    fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
+    fn outgoing_subscribe(
+        &mut self,
+        mut subscription: Subscribe,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
         }
@@ -447,13 +474,16 @@ impl MqttState {
         );
 
         let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
-        self.codec
-            .encode(Packet::Subscribe(subscription), &mut self.write)?;
+        network.write(Packet::Subscribe(subscription))?;
         self.events.push_back(event);
         Ok(())
     }
 
-    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
+    fn outgoing_unsubscribe(
+        &mut self,
+        mut unsub: Unsubscribe,
+        network: &mut Network,
+    ) -> Result<(), StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
 
@@ -463,17 +493,16 @@ impl MqttState {
         );
 
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
-        self.codec
-            .encode(Packet::Unsubscribe(unsub), &mut self.write)?;
+        network.write(Packet::Unsubscribe(unsub))?;
         self.events.push_back(event);
         Ok(())
     }
 
-    fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
+    fn outgoing_disconnect(&mut self, network: &mut Network) -> Result<(), StateError> {
         debug!("Disconnect");
 
         let event = Event::Outgoing(Outgoing::Disconnect);
-        self.codec.encode(Packet::Disconnect, &mut self.write)?;
+        network.write(Packet::Disconnect)?;
         self.events.push_back(event);
         Ok(())
     }

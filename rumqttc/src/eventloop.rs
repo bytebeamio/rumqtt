@@ -81,7 +81,7 @@ pub struct EventLoop {
     /// Pending packets from last session
     pub pending: VecDeque<Request>,
     /// Network connection to the broker
-    network: Option<Network>,
+    pub network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
     pub network_options: NetworkOptions,
@@ -189,7 +189,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                match time::timeout(network_timeout, network.flush()).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),
                 };
@@ -229,8 +229,8 @@ impl EventLoop {
                 self.mqtt_options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
-                    match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                    self.state.handle_outgoing_packet(request, network)?;
+                    match time::timeout(network_timeout, network.flush()).await {
                         Ok(inner) => inner?,
                         Err(_)=> return Err(ConnectionError::FlushTimeout),
                     };
@@ -245,8 +245,8 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq(PingReq))?;
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                self.state.handle_outgoing_packet(Request::PingReq(PingReq), network)?;
+                match time::timeout(network_timeout, network.flush()).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),
                 };
