@@ -1,5 +1,6 @@
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio_util::codec::Decoder;
 
 use crate::mqttbytes::{self, v4::*};
 use crate::{Incoming, MqttState, StateError};
@@ -13,8 +14,8 @@ pub struct Network {
     socket: Box<dyn AsyncReadWrite>,
     /// Buffered reads
     read: BytesMut,
-    /// Maximum packet size
-    max_incoming_size: usize,
+    /// Use to decode MQTT packets
+    codec: Codec,
     /// Maximum readv count
     max_readb_count: usize,
 }
@@ -25,7 +26,7 @@ impl Network {
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
-            max_incoming_size,
+            codec: Codec { max_incoming_size },
             max_readb_count: 10,
         }
     }
@@ -58,8 +59,10 @@ impl Network {
 
     pub async fn read(&mut self) -> io::Result<Incoming> {
         loop {
-            let required = match Packet::read(&mut self.read, self.max_incoming_size) {
-                Ok(packet) => return Ok(packet),
+            let required = match self.codec.decode(&mut self.read) {
+                Ok(Some(packet)) => return Ok(packet),
+                // TODO: figure out how not to block
+                Ok(_) => 2,
                 Err(mqttbytes::Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
             };
@@ -75,17 +78,19 @@ impl Network {
     pub async fn readb(&mut self, state: &mut MqttState) -> Result<(), StateError> {
         let mut count = 0;
         loop {
-            match Packet::read(&mut self.read, self.max_incoming_size) {
-                Ok(packet) => {
+            match self.codec.decode(&mut self.read) {
+                Ok(Some(packet)) => {
                     state.handle_incoming_packet(packet)?;
 
                     count += 1;
                     if count >= self.max_readb_count {
-                        return Ok(());
+                        break;
                     }
                 }
                 // If some packets are already framed, return those
-                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
+                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => break,
+                // TODO: figure out how not to block
+                Ok(_) => break,
                 // Wait for more bytes until a frame can be created
                 Err(mqttbytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
@@ -93,6 +98,8 @@ impl Network {
                 Err(e) => return Err(StateError::Deserialization(e)),
             };
         }
+
+        Ok(())
     }
 
     pub async fn connect(&mut self, connect: Connect) -> io::Result<usize> {

@@ -1,5 +1,6 @@
 use super::*;
 
+mod codec;
 mod connack;
 mod connect;
 mod disconnect;
@@ -27,6 +28,7 @@ pub use suback::*;
 pub use subscribe::*;
 pub use unsuback::*;
 pub use unsubscribe::*;
+pub use codec::*;
 
 /// Encapsulates all MQTT packet types
 #[derive(Debug, Clone, PartialEq, Eq)]
