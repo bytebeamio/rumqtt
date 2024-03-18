@@ -356,7 +356,11 @@ async fn network_connect(
     if matches!(options.transport(), Transport::Unix) {
         let file = options.broker_addr.as_str();
         let socket = UnixStream::connect(Path::new(file)).await?;
-        let network = Network::new(socket, options.max_incoming_packet_size);
+        let network = Network::new(
+            socket,
+            options.max_incoming_packet_size,
+            options.max_outgoing_packet_size,
+        );
         return Ok(network);
     }
 
@@ -388,13 +392,21 @@ async fn network_connect(
     };
 
     let network = match options.transport() {
-        Transport::Tcp => Network::new(tcp_stream, options.max_incoming_packet_size),
+        Transport::Tcp => Network::new(
+            tcp_stream,
+            options.max_incoming_packet_size,
+            options.max_outgoing_packet_size,
+        ),
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
                     .await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            Network::new(
+                socket,
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+            )
         }
         #[cfg(unix)]
         Transport::Unix => unreachable!(),

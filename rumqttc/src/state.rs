@@ -5,6 +5,7 @@ use crate::mqttbytes::{self, *};
 use bytes::BytesMut;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
+use tokio_util::codec::Encoder;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -30,8 +31,6 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
-    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
-    OutgoingPacketTooLarge { pkt_size: usize, max: usize },
 }
 
 /// State of the mqtt connection.
@@ -74,8 +73,8 @@ pub struct MqttState {
     pub write: BytesMut,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
-    /// Maximum outgoing packet size, set via MqttOptions
-    pub max_outgoing_packet_size: usize,
+    /// Used to encode packets
+    pub codec: Codec,
 }
 
 impl MqttState {
@@ -101,7 +100,11 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             write: BytesMut::with_capacity(10 * 1024),
             manual_acks,
-            max_outgoing_packet_size,
+            codec: Codec {
+                max_outgoing_size: max_outgoing_packet_size,
+                // The following is ignored for encoding
+                max_incoming_size: max_outgoing_packet_size,
+            },
         }
     }
 
@@ -146,8 +149,6 @@ impl MqttState {
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
-        // Enforce max outgoing packet size
-        self.check_size(request.size())?;
         match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
@@ -247,8 +248,9 @@ impl MqttState {
             self.outgoing_pub[publish.pkid as usize] = Some(publish.clone());
             self.inflight += 1;
 
-            publish.write(&mut self.write)?;
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.codec
+                .encode(Packet::Publish(publish), &mut self.write)?;
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
@@ -265,7 +267,8 @@ impl MqttState {
             Some(_) => {
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                PubRel::new(pubrec.pkid).write(&mut self.write)?;
+                let pubrel = PubRel { pkid: pubrec.pkid };
+                self.codec.encode(Packet::PubRel(pubrel), &mut self.write)?;
 
                 let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
                 self.events.push_back(event);
@@ -285,8 +288,10 @@ impl MqttState {
             .ok_or(StateError::Unsolicited(pubrel.pkid))?;
         match publish.take() {
             Some(_) => {
-                PubComp::new(pubrel.pkid).write(&mut self.write)?;
                 let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+                let pubcomp = PubComp { pkid: pubrel.pkid };
+                self.codec
+                    .encode(Packet::PubComp(pubcomp), &mut self.write)?;
                 self.events.push_back(event);
                 Ok(())
             }
@@ -299,8 +304,9 @@ impl MqttState {
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
-            publish.write(&mut self.write)?;
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.codec
+                .encode(Packet::Publish(publish), &mut self.write)?;
             self.events.push_back(event);
             self.collision_ping_count = 0;
         }
@@ -361,8 +367,9 @@ impl MqttState {
             publish.payload.len()
         );
 
-        publish.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+        self.codec
+            .encode(Packet::Publish(publish), &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
@@ -371,23 +378,22 @@ impl MqttState {
         let pubrel = self.save_pubrel(pubrel)?;
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
-        PubRel::new(pubrel.pkid).write(&mut self.write)?;
-
         let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
+        self.codec.encode(Packet::PubRel(pubrel), &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
 
     fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
-        puback.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PubAck(puback.pkid));
+        self.codec.encode(Packet::PubAck(puback), &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
 
     fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
-        pubrec.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
+        self.codec.encode(Packet::PubRec(pubrec), &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
@@ -421,8 +427,8 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        PingReq.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PingReq);
+        self.codec.encode(Packet::PingReq, &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
@@ -440,8 +446,9 @@ impl MqttState {
             subscription.filters, subscription.pkid
         );
 
-        subscription.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
+        self.codec
+            .encode(Packet::Subscribe(subscription), &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
@@ -455,8 +462,9 @@ impl MqttState {
             unsub.topics, unsub.pkid
         );
 
-        unsub.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
+        self.codec
+            .encode(Packet::Unsubscribe(unsub), &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
@@ -464,8 +472,8 @@ impl MqttState {
     fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
         debug!("Disconnect");
 
-        Disconnect.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Disconnect);
+        self.codec.encode(Packet::Disconnect, &mut self.write)?;
         self.events.push_back(event);
         Ok(())
     }
@@ -478,17 +486,6 @@ impl MqttState {
         }
 
         None
-    }
-
-    fn check_size(&self, pkt_size: usize) -> Result<(), StateError> {
-        if pkt_size > self.max_outgoing_packet_size {
-            Err(StateError::OutgoingPacketTooLarge {
-                pkt_size,
-                max: self.max_outgoing_packet_size,
-            })
-        } else {
-            Ok(())
-        }
     }
 
     fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {
