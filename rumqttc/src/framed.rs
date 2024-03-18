@@ -90,7 +90,9 @@ impl Network {
         loop {
             match self.codec.decode(&mut self.read) {
                 Ok(Some(packet)) => {
-                    state.handle_incoming_packet(packet, self)?;
+                    if let Some(packet) = state.handle_incoming_packet(packet)? {
+                        self.write(packet)?;
+                    }
 
                     count += 1;
                     if count >= self.max_readb_count {
@@ -113,17 +115,14 @@ impl Network {
     }
 
     pub async fn connect(&mut self, connect: Connect) -> io::Result<()> {
-        let mut write = BytesMut::new();
-        self.codec
-            .encode(Packet::Connect(connect), &mut write)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-
-        self.socket.write_all(&write[..]).await?;
-        Ok(())
+        self.write(Packet::Connect(connect))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
     }
 
-    pub fn write(&mut self, packet: Packet) -> Result<(), crate::mqttbytes::Error> {
-        self.codec.encode(packet, &mut self.write)
+    pub fn write(&mut self, packet: Packet) -> Result<(), crate::state::StateError> {
+        self.codec
+            .encode(packet, &mut self.write)
+            .map_err(Into::into)
     }
 
     pub async fn flush(&mut self) -> io::Result<()> {
