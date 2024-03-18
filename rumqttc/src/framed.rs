@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio_util::codec::Decoder;
+use tokio_util::codec::{Decoder, Encoder};
 
 use crate::mqttbytes::{self, v4::*};
 use crate::{Incoming, MqttState, StateError};
@@ -21,12 +21,19 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(socket: impl AsyncReadWrite + 'static, max_incoming_size: usize) -> Network {
+    pub fn new(
+        socket: impl AsyncReadWrite + 'static,
+        max_incoming_size: usize,
+        max_outgoing_size: usize,
+    ) -> Network {
         let socket = Box::new(socket) as Box<dyn AsyncReadWrite>;
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
-            codec: Codec { max_incoming_size },
+            codec: Codec {
+                max_incoming_size,
+                max_outgoing_size,
+            },
             max_readb_count: 10,
         }
     }
@@ -102,15 +109,14 @@ impl Network {
         Ok(())
     }
 
-    pub async fn connect(&mut self, connect: Connect) -> io::Result<usize> {
+    pub async fn connect(&mut self, connect: Connect) -> io::Result<()> {
         let mut write = BytesMut::new();
-        let len = match connect.write(&mut write) {
-            Ok(size) => size,
-            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-        };
+        self.codec
+            .encode(Packet::Connect(connect), &mut write)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
         self.socket.write_all(&write[..]).await?;
-        Ok(len)
+        Ok(())
     }
 
     pub async fn flush(&mut self, write: &mut BytesMut) -> io::Result<()> {

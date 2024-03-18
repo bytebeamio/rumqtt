@@ -111,7 +111,14 @@ impl Packet {
     }
 
     /// Serializes the MQTT packet into a stream of bytes
-    pub fn write(&self, stream: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, stream: &mut BytesMut, max_size: usize) -> Result<usize, Error> {
+        if self.size() > max_size {
+            return Err(Error::OutgoingPacketTooLarge {
+                pkt_size: self.size(),
+                max: max_size,
+            })
+        }
+
         match self {
             Packet::Connect(c) => c.write(stream),
             Packet::ConnAck(c) => c.write(stream),
