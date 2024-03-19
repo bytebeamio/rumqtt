@@ -11,7 +11,7 @@ use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use crate::valid_topic;
 
 use bytes::Bytes;
-use flume::{SendError, Sender, TrySendError};
+use flume::{bounded, SendError, Sender, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
@@ -54,8 +54,8 @@ impl AsyncClient {
     ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let eventloop = EventLoop::new(options, cap);
-        let request_tx = eventloop.requests_tx.clone();
+        let (request_tx, request_rx) = bounded(cap);
+        let eventloop = EventLoop::new(options, request_rx);
 
         let client = AsyncClient { request_tx };
 
