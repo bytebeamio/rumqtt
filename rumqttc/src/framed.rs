@@ -118,7 +118,9 @@ impl Network {
 
     pub async fn connect(&mut self, connect: Connect) -> io::Result<()> {
         self.write(Packet::Connect(connect))
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        self.flush().await
     }
 
     pub fn write(&mut self, packet: Packet) -> Result<(), crate::state::StateError> {
