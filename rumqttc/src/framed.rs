@@ -4,7 +4,7 @@ use tokio::time::timeout;
 use tokio_util::codec::Framed;
 
 use crate::mqttbytes::{self, v4::*};
-use crate::{Incoming, MqttState, StateError};
+use crate::{Incoming, StateError};
 use std::time::Duration;
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -13,8 +13,6 @@ use std::time::Duration;
 pub struct Network {
     /// Frame MQTT packets from network connection
     framed: Framed<Box<dyn AsyncReadWrite>, Codec>,
-    /// Maximum readv count
-    max_readb_count: usize,
     /// Time within which network operations should complete
     timeout: Duration,
 }
@@ -33,11 +31,7 @@ impl Network {
         };
         let framed = Framed::new(socket, codec);
 
-        Network {
-            framed,
-            max_readb_count: 10,
-            timeout,
-        }
+        Network { framed, timeout }
     }
 
     pub async fn read(&mut self) -> Result<Incoming, StateError> {
@@ -46,33 +40,6 @@ impl Network {
             Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None => unreachable!(),
             Some(Err(e)) => Err(StateError::Deserialization(e)),
         }
-    }
-
-    /// Read packets in bulk. This allow replies to be in bulk. This method is used
-    /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(&mut self, state: &mut MqttState) -> Result<(), StateError> {
-        let mut count = 0;
-        loop {
-            match self.framed.next().await {
-                Some(Ok(packet)) => {
-                    if let Some(packet) = state.handle_incoming_packet(packet)? {
-                        self.send(packet).await?;
-                    }
-
-                    count += 1;
-                    if count >= self.max_readb_count {
-                        break;
-                    }
-                }
-                // If some packets are already framed, return those
-                Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None if count > 0 => break,
-                // NOTE: read atleast 1 packet
-                Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None => unreachable!(),
-                Some(Err(e)) => return Err(StateError::Deserialization(e)),
-            };
-        }
-
-        Ok(())
     }
 
     pub async fn send(&mut self, packet: Packet) -> Result<(), crate::state::StateError> {

@@ -182,8 +182,11 @@ impl EventLoop {
         // instead of returning a None event, we try again.
         select! {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state) => {
-                o?;
+            o = network.read() => {
+                let incoming = o?;
+                if let Some(packet) = self.state.handle_incoming_packet(incoming)? {
+                    network.send(packet).await?;
+                }
                 Ok(self.state.events.pop_front().unwrap())
             },
              // Handles pending and new requests.
