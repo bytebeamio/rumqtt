@@ -38,8 +38,6 @@ pub enum ConnectionError {
     MqttState(#[from] StateError),
     #[error("Network timeout")]
     NetworkTimeout,
-    #[error("Flush timeout")]
-    FlushTimeout,
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -173,7 +171,6 @@ impl EventLoop {
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
         let collision = self.state.collision.is_some();
-        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -187,11 +184,6 @@ impl EventLoop {
             // Pull a bunch of packets from network, reply in bunch and yield the first item
             o = network.readb(&mut self.state) => {
                 o?;
-                // flush all the acks and return first incoming packet
-                match time::timeout(network_timeout, network.flush()).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
                 Ok(self.state.events.pop_front().unwrap())
             },
              // Handles pending and new requests.
@@ -229,12 +221,9 @@ impl EventLoop {
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
-                        network.write(outgoing)?;
+                        network.send(outgoing).await?;
                     }
-                    match time::timeout(network_timeout, network.flush()).await {
-                        Ok(inner) => inner?,
-                        Err(_)=> return Err(ConnectionError::FlushTimeout),
-                    };
+
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -247,12 +236,8 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
                 if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq(PingReq))? {
-                    network.write(outgoing)?;
+                    network.send(outgoing).await?;
                 }
-                match time::timeout(network_timeout, network.flush()).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -354,6 +339,7 @@ async fn network_connect(
     options: &MqttOptions,
     network_options: NetworkOptions,
 ) -> Result<Network, ConnectionError> {
+    let network_timeout = Duration::from_secs(network_options.connection_timeout());
     // Process Unix files early, as proxy is not supported for them.
     #[cfg(unix)]
     if matches!(options.transport(), Transport::Unix) {
@@ -363,6 +349,7 @@ async fn network_connect(
             socket,
             options.max_incoming_packet_size,
             options.max_outgoing_packet_size,
+            network_timeout,
         );
         return Ok(network);
     }
@@ -399,6 +386,7 @@ async fn network_connect(
             tcp_stream,
             options.max_incoming_packet_size,
             options.max_outgoing_packet_size,
+            network_timeout,
         ),
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
@@ -409,6 +397,7 @@ async fn network_connect(
                 socket,
                 options.max_incoming_packet_size,
                 options.max_outgoing_packet_size,
+                network_timeout,
             )
         }
         #[cfg(unix)]
@@ -428,7 +417,12 @@ async fn network_connect(
                 async_tungstenite::tokio::client_async(request, tcp_stream).await?;
             validate_response_headers(response)?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+                network_timeout,
+            )
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
@@ -451,7 +445,12 @@ async fn network_connect(
             .await?;
             validate_response_headers(response)?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+                network_timeout,
+            )
         }
     };
 
@@ -477,7 +476,7 @@ async fn mqtt_connect(
     }
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.send(Packet::Connect(connect)).await?;
 
     // validate connack
     match network.read().await? {

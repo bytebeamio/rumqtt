@@ -29,6 +29,8 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
+    #[error("Flush timeout")]
+    FlushTimeout,
 }
 
 /// State of the mqtt connection.
