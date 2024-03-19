@@ -100,9 +100,11 @@ impl Network {
                     }
                 }
                 // If some packets are already framed, return those
-                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => break,
-                // TODO: figure out how not to block
-                Ok(_) => break,
+                Err(mqttbytes::Error::InsufficientBytes(_)) | Ok(_) if count > 0 => break,
+                // NOTE: read atleast 1 packet
+                Ok(_) => {
+                    self.read_bytes(2).await?;
+                }
                 // Wait for more bytes until a frame can be created
                 Err(mqttbytes::Error::InsufficientBytes(required)) => {
                     self.read_bytes(required).await?;
