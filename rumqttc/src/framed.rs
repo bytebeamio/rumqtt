@@ -52,8 +52,8 @@ impl Network {
         loop {
             match res {
                 Some(Ok(packet)) => {
-                    if let Some(packet) = state.handle_incoming_packet(packet)? {
-                        self.write(packet).await?;
+                    if let Some(outgoing) = state.handle_incoming_packet(packet)? {
+                        self.write(outgoing).await?;
                     }
 
                     count += 1;
