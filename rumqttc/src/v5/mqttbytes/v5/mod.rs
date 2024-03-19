@@ -1,6 +1,7 @@
 use std::slice::Iter;
 
 pub use self::{
+    codec::Codec,
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
     connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
     disconnect::{Disconnect, DisconnectReasonCode},
@@ -19,6 +20,7 @@ pub use self::{
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+mod codec;
 mod connack;
 mod connect;
 mod disconnect;
@@ -126,7 +128,17 @@ impl Packet {
         Ok(packet)
     }
 
-    pub fn write(&self, write: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, write: &mut BytesMut, max_size: Option<usize>) -> Result<usize, Error> {
+        if let Some(max_size) = max_size {
+            if self.size() > max_size {
+                dbg!();
+                return Err(Error::OutgoingPacketTooLarge {
+                    pkt_size: self.size() as u32,
+                    max: max_size as u32,
+                });
+            }
+        }
+
         match self {
             Self::Publish(publish) => publish.write(write),
             Self::Subscribe(subscription) => subscription.write(write),

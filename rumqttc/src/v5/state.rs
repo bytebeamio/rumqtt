@@ -9,8 +9,8 @@ use super::{Event, Incoming, Outgoing, Request};
 
 use bytes::{Bytes, BytesMut};
 use std::collections::{HashMap, VecDeque};
-use std::convert::TryInto;
 use std::{io, time::Instant};
+use tokio::time::error::Elapsed;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -42,10 +42,6 @@ pub enum StateError {
         "Cannot use topic alias '{alias:?}'. It's greater than the broker's maximum of '{max:?}'."
     )]
     InvalidAlias { alias: u16, max: u16 },
-    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
-    OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
-    #[error("Cannot receive packet of size '{pkt_size:?}'. It's greater than the client's maximum packet size of: '{max:?}'")]
-    IncomingPacketTooLarge { pkt_size: usize, max: usize },
     #[error("Server sent disconnect with reason `{reason_string:?}` and code '{reason_code:?}' ")]
     ServerDisconnect {
         reason_code: DisconnectReasonCode,
@@ -65,6 +61,8 @@ pub enum StateError {
     PubCompFail { reason: PubCompReason },
     #[error("Connection failed with reason '{reason:?}' ")]
     ConnFail { reason: ConnectReturnCode },
+    #[error("Timeout")]
+    Timeout(#[from] Elapsed),
 }
 
 /// State of the mqtt connection.
@@ -108,7 +106,7 @@ pub struct MqttState {
     /// `topic_alias_maximum` RECEIVED via connack packet
     pub broker_topic_alias_max: u16,
     /// The broker's `max_packet_size` received via connack
-    pub max_outgoing_packet_size: Option<u32>,
+    pub max_outgoing_packet_size: Option<usize>,
     /// Maximum number of allowed inflight QoS1 & QoS2 requests
     pub(crate) max_outgoing_inflight: u16,
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
@@ -181,77 +179,67 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
-        match request {
-            Request::Publish(publish) => {
-                self.check_size(publish.size())?;
-                self.outgoing_publish(publish)?
-            }
-            Request::PubRel(pubrel) => {
-                self.check_size(pubrel.size())?;
-                self.outgoing_pubrel(pubrel)?
-            }
-            Request::Subscribe(subscribe) => {
-                self.check_size(subscribe.size())?;
-                self.outgoing_subscribe(subscribe)?
-            }
-            Request::Unsubscribe(unsubscribe) => {
-                self.check_size(unsubscribe.size())?;
-                self.outgoing_unsubscribe(unsubscribe)?
-            }
+    pub fn handle_outgoing_packet(
+        &mut self,
+        request: Request,
+    ) -> Result<Option<Packet>, StateError> {
+        let packet = match request {
+            Request::Publish(publish) => self.outgoing_publish(publish)?,
+            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
+            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
+            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
             Request::Disconnect => {
                 self.outgoing_disconnect(DisconnectReasonCode::NormalDisconnection)?
             }
-            Request::PubAck(puback) => {
-                self.check_size(puback.size())?;
-                self.outgoing_puback(puback)?
-            }
-            Request::PubRec(pubrec) => {
-                self.check_size(pubrec.size())?;
-                self.outgoing_pubrec(pubrec)?
-            }
+            Request::PubAck(puback) => self.outgoing_puback(puback)?,
+            Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec)?,
             _ => unimplemented!(),
         };
 
         self.last_outgoing = Instant::now();
-        Ok(())
+        Ok(packet)
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Notification` which for the
     /// user to consume and `Packet` which for the eventloop to put on the network
     /// E.g For incoming QoS1 publish packet, this method returns (Publish, Puback). Publish packet will
     /// be forwarded to user and Pubck packet will be written to network
-    pub fn handle_incoming_packet(&mut self, mut packet: Incoming) -> Result<(), StateError> {
-        let out = match &mut packet {
-            Incoming::PingResp(_) => self.handle_incoming_pingresp(),
-            Incoming::Publish(publish) => self.handle_incoming_publish(publish),
-            Incoming::SubAck(suback) => self.handle_incoming_suback(suback),
-            Incoming::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback),
-            Incoming::PubAck(puback) => self.handle_incoming_puback(puback),
-            Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec),
-            Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel),
-            Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp),
-            Incoming::ConnAck(connack) => self.handle_incoming_connack(connack),
-            Incoming::Disconnect(disconn) => self.handle_incoming_disconn(disconn),
+    pub fn handle_incoming_packet(
+        &mut self,
+        mut packet: Incoming,
+    ) -> Result<Option<Packet>, StateError> {
+        let outgoing = match &mut packet {
+            Incoming::PingResp(_) => self.handle_incoming_pingresp()?,
+            Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
+            Incoming::SubAck(suback) => self.handle_incoming_suback(suback)?,
+            Incoming::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback)?,
+            Incoming::PubAck(puback) => self.handle_incoming_puback(puback)?,
+            Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec)?,
+            Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel)?,
+            Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp)?,
+            Incoming::ConnAck(connack) => self.handle_incoming_connack(connack)?,
+            Incoming::Disconnect(disconn) => self.handle_incoming_disconn(disconn)?,
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
                 return Err(StateError::WrongPacket);
             }
         };
 
-        out?;
         self.events.push_back(Event::Incoming(packet));
         self.last_incoming = Instant::now();
-        Ok(())
+        Ok(outgoing)
     }
 
-    pub fn handle_protocol_error(&mut self) -> Result<(), StateError> {
+    pub fn handle_protocol_error(&mut self) -> Result<Option<Packet>, StateError> {
         // send DISCONNECT packet with REASON_CODE 0x82
         self.outgoing_disconnect(DisconnectReasonCode::ProtocolError)
     }
 
-    fn handle_incoming_suback(&mut self, suback: &mut SubAck) -> Result<(), StateError> {
+    fn handle_incoming_suback(
+        &mut self,
+        suback: &mut SubAck,
+    ) -> Result<Option<Packet>, StateError> {
         for reason in suback.return_codes.iter() {
             match reason {
                 SubscribeReasonCode::Success(qos) => {
@@ -260,19 +248,25 @@ impl MqttState {
                 _ => return Err(StateError::SubFail { reason: *reason }),
             }
         }
-        Ok(())
+        Ok(None)
     }
 
-    fn handle_incoming_unsuback(&mut self, unsuback: &mut UnsubAck) -> Result<(), StateError> {
+    fn handle_incoming_unsuback(
+        &mut self,
+        unsuback: &mut UnsubAck,
+    ) -> Result<Option<Packet>, StateError> {
         for reason in unsuback.reasons.iter() {
             if reason != &UnsubAckReason::Success {
                 return Err(StateError::UnsubFail { reason: *reason });
             }
         }
-        Ok(())
+        Ok(None)
     }
 
-    fn handle_incoming_connack(&mut self, connack: &mut ConnAck) -> Result<(), StateError> {
+    fn handle_incoming_connack(
+        &mut self,
+        connack: &mut ConnAck,
+    ) -> Result<Option<Packet>, StateError> {
         if connack.code != ConnectReturnCode::Success {
             return Err(StateError::ConnFail {
                 reason: connack.code,
@@ -291,12 +285,15 @@ impl MqttState {
                 // to save some space.
             }
 
-            self.max_outgoing_packet_size = props.max_packet_size;
+            self.max_outgoing_packet_size = props.max_packet_size.map(|i| i as usize);
         }
-        Ok(())
+        Ok(None)
     }
 
-    fn handle_incoming_disconn(&mut self, disconn: &mut Disconnect) -> Result<(), StateError> {
+    fn handle_incoming_disconn(
+        &mut self,
+        disconn: &mut Disconnect,
+    ) -> Result<Option<Packet>, StateError> {
         let reason_code = disconn.reason_code;
         let reason_string = if let Some(props) = &disconn.properties {
             props.reason_string.clone()
@@ -311,7 +308,10 @@ impl MqttState {
 
     /// Results in a publish notification in all the QoS cases. Replys with an ack
     /// in case of QoS1 and Replys rec in case of QoS while also storing the message
-    fn handle_incoming_publish(&mut self, publish: &mut Publish) -> Result<(), StateError> {
+    fn handle_incoming_publish(
+        &mut self,
+        publish: &mut Publish,
+    ) -> Result<Option<Packet>, StateError> {
         let qos = publish.qos;
 
         let topic_alias = match &publish.properties {
@@ -332,13 +332,13 @@ impl MqttState {
         }
 
         match qos {
-            QoS::AtMostOnce => Ok(()),
+            QoS::AtMostOnce => Ok(None),
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
                     let puback = PubAck::new(publish.pkid, None);
                     self.outgoing_puback(puback)?;
                 }
-                Ok(())
+                Ok(None)
             }
             QoS::ExactlyOnce => {
                 let pkid = publish.pkid;
@@ -348,12 +348,12 @@ impl MqttState {
                     let pubrec = PubRec::new(pkid, None);
                     self.outgoing_pubrec(pubrec)?;
                 }
-                Ok(())
+                Ok(None)
             }
         }
     }
 
-    fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<(), StateError> {
+    fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<Option<Packet>, StateError> {
         let publish = self
             .outgoing_pub
             .get_mut(puback.pkid as usize)
@@ -361,7 +361,7 @@ impl MqttState {
         let v = match publish.take() {
             Some(_) => {
                 self.inflight -= 1;
-                Ok(())
+                Ok(None)
             }
             None => {
                 error!("Unsolicited puback packet: {:?}", puback.pkid);
@@ -382,7 +382,7 @@ impl MqttState {
             self.inflight += 1;
 
             let pkid = publish.pkid;
-            Packet::Publish(publish).write(&mut self.write)?;
+            Packet::Publish(publish).write(&mut self.write, self.max_outgoing_packet_size)?;
             let event = Event::Outgoing(Outgoing::Publish(pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -391,7 +391,7 @@ impl MqttState {
         v
     }
 
-    fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<(), StateError> {
+    fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<Option<Packet>, StateError> {
         let publish = self
             .outgoing_pub
             .get_mut(pubrec.pkid as usize)
@@ -408,11 +408,12 @@ impl MqttState {
 
                 // NOTE: Inflight - 1 for qos2 in comp
                 self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                Packet::PubRel(PubRel::new(pubrec.pkid, None)).write(&mut self.write)?;
+                Packet::PubRel(PubRel::new(pubrec.pkid, None))
+                    .write(&mut self.write, self.max_outgoing_packet_size)?;
 
                 let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
                 self.events.push_back(event);
-                Ok(())
+                Ok(None)
             }
             None => {
                 error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
@@ -421,7 +422,7 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<(), StateError> {
+    fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Packet>, StateError> {
         let publish = self
             .incoming_pub
             .get_mut(pubrel.pkid as usize)
@@ -434,10 +435,11 @@ impl MqttState {
                     });
                 }
 
-                Packet::PubComp(PubComp::new(pubrel.pkid, None)).write(&mut self.write)?;
+                Packet::PubComp(PubComp::new(pubrel.pkid, None))
+                    .write(&mut self.write, self.max_outgoing_packet_size)?;
                 let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
                 self.events.push_back(event);
-                Ok(())
+                Ok(None)
             }
             None => {
                 error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
@@ -446,10 +448,10 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<(), StateError> {
+    fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
         if let Some(publish) = self.check_collision(pubcomp.pkid) {
             let pkid = publish.pkid;
-            Packet::Publish(publish).write(&mut self.write)?;
+            Packet::Publish(publish).write(&mut self.write, self.max_outgoing_packet_size)?;
             let event = Event::Outgoing(Outgoing::Publish(pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -468,7 +470,7 @@ impl MqttState {
                 }
 
                 self.inflight -= 1;
-                Ok(())
+                Ok(None)
             }
             None => {
                 error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
@@ -477,14 +479,14 @@ impl MqttState {
         }
     }
 
-    fn handle_incoming_pingresp(&mut self) -> Result<(), StateError> {
+    fn handle_incoming_pingresp(&mut self) -> Result<Option<Packet>, StateError> {
         self.await_pingresp = false;
-        Ok(())
+        Ok(None)
     }
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<Option<Packet>, StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
@@ -501,7 +503,7 @@ impl MqttState {
                 self.collision = Some(publish);
                 let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
                 self.events.push_back(event);
-                return Ok(());
+                return Ok(None);
             }
 
             // if there is an existing publish at this pkid, this implies that broker hasn't acked this
@@ -532,43 +534,44 @@ impl MqttState {
             }
         };
 
-        Packet::Publish(publish).write(&mut self.write)?;
+        Packet::Publish(publish).write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::Publish(pkid));
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
-    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<(), StateError> {
+    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<Option<Packet>, StateError> {
         let pubrel = self.save_pubrel(pubrel)?;
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
-        Packet::PubRel(PubRel::new(pubrel.pkid, None)).write(&mut self.write)?;
+        Packet::PubRel(PubRel::new(pubrel.pkid, None))
+            .write(&mut self.write, self.max_outgoing_packet_size)?;
 
         let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
-    fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
+    fn outgoing_puback(&mut self, puback: PubAck) -> Result<Option<Packet>, StateError> {
         let pkid = puback.pkid;
-        Packet::PubAck(puback).write(&mut self.write)?;
+        Packet::PubAck(puback).write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::PubAck(pkid));
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
-    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
+    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<Option<Packet>, StateError> {
         let pkid = pubrec.pkid;
-        Packet::PubRec(pubrec).write(&mut self.write)?;
+        Packet::PubRec(pubrec).write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::PubRec(pkid));
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    fn outgoing_ping(&mut self) -> Result<(), StateError> {
+    fn outgoing_ping(&mut self) -> Result<Option<Packet>, StateError> {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
@@ -591,13 +594,16 @@ impl MqttState {
             elapsed_in, elapsed_out,
         );
 
-        Packet::PingReq(PingReq).write(&mut self.write)?;
+        Packet::PingReq(PingReq).write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::PingReq);
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
-    fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
+    fn outgoing_subscribe(
+        &mut self,
+        mut subscription: Subscribe,
+    ) -> Result<Option<Packet>, StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
         }
@@ -611,13 +617,16 @@ impl MqttState {
         );
 
         let pkid = subscription.pkid;
-        Packet::Subscribe(subscription).write(&mut self.write)?;
+        Packet::Subscribe(subscription).write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::Subscribe(pkid));
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
-    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
+    fn outgoing_unsubscribe(
+        &mut self,
+        mut unsub: Unsubscribe,
+    ) -> Result<Option<Packet>, StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
 
@@ -627,19 +636,23 @@ impl MqttState {
         );
 
         let pkid = unsub.pkid;
-        Packet::Unsubscribe(unsub).write(&mut self.write)?;
+        Packet::Unsubscribe(unsub).write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::Unsubscribe(pkid));
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
-    fn outgoing_disconnect(&mut self, reason: DisconnectReasonCode) -> Result<(), StateError> {
+    fn outgoing_disconnect(
+        &mut self,
+        reason: DisconnectReasonCode,
+    ) -> Result<Option<Packet>, StateError> {
         debug!("Disconnect with {:?}", reason);
 
-        Packet::Disconnect(Disconnect::new(reason)).write(&mut self.write)?;
+        Packet::Disconnect(Disconnect::new(reason))
+            .write(&mut self.write, self.max_outgoing_packet_size)?;
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
-        Ok(())
+        Ok(None)
     }
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
@@ -650,18 +663,6 @@ impl MqttState {
         }
 
         None
-    }
-
-    fn check_size(&self, pkt_size: usize) -> Result<(), StateError> {
-        let pkt_size = pkt_size.try_into()?;
-
-        match self.max_outgoing_packet_size {
-            Some(max_size) if pkt_size > max_size => Err(StateError::OutgoingPacketTooLarge {
-                pkt_size,
-                max: max_size,
-            }),
-            _ => Ok(()),
-        }
     }
 
     fn save_pubrel(&mut self, mut pubrel: PubRel) -> Result<PubRel, StateError> {

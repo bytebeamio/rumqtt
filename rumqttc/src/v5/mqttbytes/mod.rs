@@ -130,7 +130,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
 }
 
 /// Error during serialization and deserialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Invalid return code received as response for connect = {0}")]
     InvalidConnectReturnCode(u8),
@@ -183,4 +183,8 @@ pub enum Error {
     /// proceed further
     #[error("Insufficient number of bytes to frame packet, {0} more bytes required")]
     InsufficientBytes(usize),
+    #[error("IO: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
+    OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
 }
