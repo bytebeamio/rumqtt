@@ -31,6 +31,9 @@ use {
 #[cfg(feature = "proxy")]
 use crate::proxy::ProxyError;
 
+/// Number of packets or requests processed before flusing the network
+const BATCH_SIZE: usize = 10;
+
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -212,7 +215,7 @@ impl EventLoop {
                 Err(_) => Err(ConnectionError::RequestsDone),
             },
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state) => {
+            o = network.readb(&mut self.state, BATCH_SIZE) => {
                 o?;
                 // flush all the acks and return first incoming packet
                 network.flush().await?;
