@@ -163,8 +163,8 @@ impl EventLoop {
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
-        let inflight_full = self.state.inflight >= self.state.max_outgoing_inflight;
-        let collision = self.state.collision.is_some();
+        let inflight_full = self.state.is_inflight_full();
+        let collision = self.state.has_collision();
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -208,8 +208,38 @@ impl EventLoop {
                 Ok(self.state.events.pop_front().unwrap())
             },
             request = self.request_rx.recv_async(), if self.pending.is_empty() && !inflight_full && !collision => {
+                // Process first request
                 let request = request.map_err(|_| ConnectionError::RequestsDone)?;
                 self.state.handle_outgoing_packet(request)?;
+
+                // Take up to BATCH_SIZE - 1 requests from the channel until
+                // - the channel is empty
+                // - the inflight queue is full
+                // - there is a collision
+                // If the channel is closed this is reported in the next iteration from the async recv above.
+                for _ in 0..(BATCH_SIZE - 1) {
+                    if self.request_rx.is_empty() || self.state.is_inflight_full() || self.state.has_collision()
+                    {
+                        break;
+                    }
+
+                    // Safe to call the blocking `recv` in here since we know the channel is not empty.
+                    // Ensure a flush in case of any error.
+                    if let Err(e) = self
+                        .request_rx
+                        .recv()
+                        .map_err(|_| ConnectionError::RequestsDone)
+                        .and_then(|request| {
+                            self.state
+                                .handle_outgoing_packet(request)
+                                .map_err(Into::into)
+                        })
+                    {
+                        network.flush().await?;
+                        return Err(e);
+                    }
+                }
+
                 network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             },

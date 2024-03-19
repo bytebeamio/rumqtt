@@ -185,6 +185,16 @@ impl MqttState {
         self.inflight
     }
 
+    /// Returns true if the inflight limit is reached
+    pub fn is_inflight_full(&self) -> bool {
+        self.inflight >= self.max_outgoing_inflight
+    }
+
+    /// Returns true if the state has a unresolved collision
+    pub fn has_collision(&self) -> bool {
+        self.collision.is_some()
+    }
+
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(
