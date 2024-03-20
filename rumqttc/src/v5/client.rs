@@ -319,9 +319,10 @@ impl AsyncClient {
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
-        let is_err = topics.clone().into_iter().any(|t| !valid_filter(t.path));
+        let topics = topics.into_iter().collect::<Vec<_>>();
+        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics, properties);
         let request = Request::Subscribe(subscribe);
         if is_err {
@@ -337,14 +338,14 @@ impl AsyncClient {
         properties: SubscribeProperties,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, Some(properties)).await
     }
 
     pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, None).await
     }
@@ -356,9 +357,10 @@ impl AsyncClient {
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
-        let is_err = topics.clone().into_iter().any(|t| !valid_filter(t.path));
+        let topics = topics.into_iter().collect::<Vec<_>>();
+        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics, properties);
         let request = Request::Subscribe(subscribe);
         if is_err {
@@ -374,14 +376,14 @@ impl AsyncClient {
         properties: SubscribeProperties,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.handle_try_subscribe_many(topics, Some(properties))
     }
 
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.handle_try_subscribe_many(topics, None)
     }
@@ -661,9 +663,10 @@ impl Client {
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
-        let is_err = topics.clone().into_iter().any(|t| !valid_filter(t.path));
+        let topics = topics.into_iter().collect::<Vec<_>>();
+        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics, properties);
         let request = Request::Subscribe(subscribe);
         if is_err {
@@ -679,14 +682,14 @@ impl Client {
         properties: SubscribeProperties,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, Some(properties))
     }
 
     pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, None)
     }
@@ -697,7 +700,7 @@ impl Client {
         properties: SubscribeProperties,
     ) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.client
             .try_subscribe_many_with_properties(topics, properties)
@@ -705,7 +708,7 @@ impl Client {
 
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = Filter> + Clone,
+        T: IntoIterator<Item = Filter>,
     {
         self.client.try_subscribe_many(topics)
     }

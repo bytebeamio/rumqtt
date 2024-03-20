@@ -179,9 +179,10 @@ impl AsyncClient {
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter> + Clone,
+        T: IntoIterator<Item = SubscribeFilter>,
     {
-        let is_err = topics.clone().into_iter().any(|t| !valid_filter(t.path));
+        let topics = topics.into_iter().collect::<Vec<_>>();
+        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         if is_err {
@@ -194,9 +195,10 @@ impl AsyncClient {
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter> + Clone,
+        T: IntoIterator<Item = SubscribeFilter>,
     {
-        let is_err = topics.clone().into_iter().any(|t| !valid_filter(t.path));
+        let topics = topics.into_iter().collect::<Vec<_>>();
+        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         if is_err {
@@ -369,9 +371,10 @@ impl Client {
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter> + Clone,
+        T: IntoIterator<Item = SubscribeFilter>,
     {
-        let is_err = topics.clone().into_iter().any(|t| !valid_filter(t.path));
+        let topics = topics.into_iter().collect::<Vec<_>>();
+        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics);
         let request = Request::Subscribe(subscribe);
         if is_err {
@@ -383,7 +386,7 @@ impl Client {
 
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter> + Clone,
+        T: IntoIterator<Item = SubscribeFilter>,
     {
         self.client.try_subscribe_many(topics)
     }
