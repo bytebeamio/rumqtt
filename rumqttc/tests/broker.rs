@@ -147,6 +147,9 @@ impl Broker {
 
     /// Selects between outgoing and incoming packets
     pub async fn tick(&mut self) -> Event {
+        if let Some(incoming) = self.incoming.pop_front() {
+            return Event::Incoming(incoming);
+        }
         select! {
             request = self.outgoing_rx.recv_async() => {
                 let request = request.unwrap();

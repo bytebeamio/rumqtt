@@ -211,7 +211,7 @@ impl EventLoop {
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
-                        network.send(outgoing).await?;
+                        network.write(outgoing).await?;
                     }
 
                     Ok(self.state.events.pop_front().unwrap())
@@ -222,7 +222,7 @@ impl EventLoop {
             o = network.read() => {
                 let incoming = o?;
                 if let Some(packet) = self.state.handle_incoming_packet(incoming)? {
-                    network.send(packet).await?;
+                    network.write(packet).await?;
                 }
 
                 Ok(self.state.events.pop_front().unwrap())
@@ -234,8 +234,9 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
                 if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
-                    network.send(outgoing).await?;
+                    network.write(outgoing).await?;
                 }
+                network.flush().await?;
 
                 Ok(self.state.events.pop_front().unwrap())
             }
@@ -304,6 +305,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             max_incoming_pkt_size,
             max_outgoing_pkt_size,
             network_timeout,
+            options.max_request_batch,
         );
         return Ok(network);
     }
@@ -345,6 +347,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             max_incoming_pkt_size,
             max_outgoing_pkt_size,
             network_timeout,
+            options.max_request_batch,
         ),
         #[cfg(any(feature = "use-native-tls", feature = "use-rustls"))]
         Transport::Tls(tls_config) => {
@@ -356,6 +359,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 max_incoming_pkt_size,
                 max_outgoing_pkt_size,
                 network_timeout,
+                options.max_request_batch,
             )
         }
         #[cfg(unix)]
@@ -380,6 +384,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 max_incoming_pkt_size,
                 max_outgoing_pkt_size,
                 network_timeout,
+                options.max_request_batch,
             )
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
@@ -408,6 +413,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 max_incoming_pkt_size,
                 max_outgoing_pkt_size,
                 network_timeout,
+                options.max_request_batch,
             )
         }
     };
@@ -434,8 +440,9 @@ async fn mqtt_connect(
 
     // send mqtt connect packet
     network
-        .send(Packet::Connect(connect, last_will, None))
+        .write(Packet::Connect(connect, last_will, None))
         .await?;
+    network.flush().await?;
 
     // validate connack
     match network.read().await? {

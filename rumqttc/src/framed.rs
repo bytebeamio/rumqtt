@@ -15,6 +15,10 @@ pub struct Network {
     framed: Framed<Box<dyn AsyncReadWrite>, Codec>,
     /// Time within which network operations should complete
     timeout: Duration,
+    /// Number of packets currently written into buffer
+    buffered_packets: usize,
+    /// Maximum number of packets that can be buffered
+    max_buffered_packets: usize,
 }
 
 impl Network {
@@ -23,6 +27,7 @@ impl Network {
         max_incoming_size: usize,
         max_outgoing_size: usize,
         timeout: Duration,
+        max_buffered_packets: usize,
     ) -> Network {
         let socket = Box::new(socket) as Box<dyn AsyncReadWrite>;
         let codec = Codec {
@@ -31,7 +36,12 @@ impl Network {
         };
         let framed = Framed::new(socket, codec);
 
-        Network { framed, timeout }
+        Network {
+            framed,
+            timeout,
+            buffered_packets: 0,
+            max_buffered_packets,
+        }
     }
 
     pub async fn read(&mut self) -> Result<Incoming, StateError> {
@@ -42,9 +52,25 @@ impl Network {
         }
     }
 
-    pub async fn send(&mut self, packet: Packet) -> Result<(), crate::state::StateError> {
-        match timeout(self.timeout, self.framed.send(packet)).await {
-            Ok(inner) => inner.map_err(Into::into),
+    /// Write packets into buffer, flush after `MAX_BUFFERED_PACKETS``
+    pub async fn write(&mut self, packet: Packet) -> Result<(), StateError> {
+        self.buffered_packets += 1;
+        self.framed
+            .feed(packet)
+            .await
+            .map_err(StateError::Deserialization)?;
+        if self.buffered_packets >= self.max_buffered_packets {
+            self.flush().await?;
+        }
+
+        Ok(())
+    }
+
+    /// Force flush all packets in buffer, reset count
+    pub async fn flush(&mut self) -> Result<(), StateError> {
+        self.buffered_packets = 0;
+        match timeout(self.timeout, self.framed.flush()).await {
+            Ok(inner) => inner.map_err(StateError::Deserialization),
             Err(_) => Err(StateError::FlushTimeout),
         }
     }
