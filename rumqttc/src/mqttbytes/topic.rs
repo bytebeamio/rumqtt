@@ -9,7 +9,7 @@ pub fn has_wildcards(s: impl AsRef<str>) -> bool {
 
 /// Check if a topic is valid for PUBLISH packet.
 pub fn valid_topic(topic: impl AsRef<str>) -> bool {
-    is_valid_topic_or_filter(&topic) && !has_wildcards(topic)
+    can_be_topic_or_filter(&topic) && !has_wildcards(topic)
 }
 
 /// Check if a topic is valid to qualify as a topic name or topic filter.
@@ -22,7 +22,7 @@ pub fn valid_topic(topic: impl AsRef<str>) -> bool {
 /// 5. A Topic Name or Topic Filter consisting only of the `/` character is valid
 /// 6. Topic Names and Topic Filters MUST NOT include the null character (Unicode U+0000) [MQTT-4.7.3-2]
 /// 7. Topic Names and Topic Filters are UTF-8 encoded strings, they MUST NOT encode to more than 65535 bytes.
-fn is_valid_topic_or_filter(topic_or_filter: impl AsRef<str>) -> bool {
+fn can_be_topic_or_filter(topic_or_filter: impl AsRef<str>) -> bool {
     let topic_or_filter = topic_or_filter.as_ref();
     if topic_or_filter.is_empty()
         || topic_or_filter.len() > MAX_TOPIC_LEN
@@ -39,7 +39,7 @@ fn is_valid_topic_or_filter(topic_or_filter: impl AsRef<str>) -> bool {
 /// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
 pub fn valid_filter(filter: impl AsRef<str>) -> bool {
     let filter = filter.as_ref();
-    if !is_valid_topic_or_filter(filter) {
+    if !can_be_topic_or_filter(filter) {
         return false;
     }
 
