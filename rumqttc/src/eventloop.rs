@@ -455,10 +455,7 @@ async fn mqtt_connect(
     connect.keep_alive = keep_alive;
     connect.clean_session = clean_session;
     connect.last_will = last_will;
-
-    if let Some(login) = options.credentials() {
-        connect.login = Some(login);
-    }
+    connect.login = options.credentials();
 
     // send mqtt connect packet
     network.connect(connect).await?;
