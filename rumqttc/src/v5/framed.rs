@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::mqttbytes;
-use super::mqttbytes::v5::{Connect, Login, Packet};
+use super::mqttbytes::v5::{Connect, Packet};
 use super::{Incoming, MqttOptions, MqttState, StateError};
 use std::io;
 
@@ -103,10 +103,7 @@ impl Network {
     pub async fn connect(&mut self, connect: Connect, options: &MqttOptions) -> io::Result<usize> {
         let mut write = BytesMut::new();
         let last_will = options.last_will();
-        let login = options.credentials().map(|l| Login {
-            username: l.0,
-            password: l.1,
-        });
+        let login = options.credentials();
 
         let len = match Packet::Connect(connect, last_will, login).write(&mut write) {
             Ok(size) => size,

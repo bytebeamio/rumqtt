@@ -456,8 +456,7 @@ async fn mqtt_connect(
     connect.clean_session = clean_session;
     connect.last_will = last_will;
 
-    if let Some((username, password)) = options.credentials() {
-        let login = Login::new(username, password);
+    if let Some(login) = options.credentials() {
         connect.login = Some(login);
     }
 
