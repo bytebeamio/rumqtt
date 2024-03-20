@@ -126,7 +126,7 @@ impl MqttOptions {
             client_id: id.into(),
             credentials: None,
             request_channel_capacity: 10,
-            max_request_batch: 0,
+            max_request_batch: 10,
             pending_throttle: Duration::from_micros(0),
             last_will: None,
             conn_timeout: 5,
@@ -271,6 +271,12 @@ impl MqttOptions {
     /// Set request channel capacity
     pub fn set_request_channel_capacity(&mut self, capacity: usize) -> &mut Self {
         self.request_channel_capacity = capacity;
+        self
+    }
+
+    /// set maximum request batch count
+    pub fn set_max_request_batch(&mut self, max_request_batch: usize) -> &mut Self {
+        self.max_request_batch = max_request_batch;
         self
     }
 

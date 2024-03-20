@@ -483,7 +483,7 @@ impl MqttOptions {
             max_incoming_packet_size: 10 * 1024,
             max_outgoing_packet_size: 10 * 1024,
             request_channel_capacity: 10,
-            max_request_batch: 0,
+            max_request_batch: 10,
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
@@ -640,6 +640,12 @@ impl MqttOptions {
     /// Request channel capacity
     pub fn request_channel_capacity(&self) -> usize {
         self.request_channel_capacity
+    }
+
+    /// set maximum request batch count
+    pub fn set_max_request_batch(&mut self, max_request_batch: usize) -> &mut Self {
+        self.max_request_batch = max_request_batch;
+        self
     }
 
     /// Enables throttling and sets outoing message rate to the specified 'rate'
