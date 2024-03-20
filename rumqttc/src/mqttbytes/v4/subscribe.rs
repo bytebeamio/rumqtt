@@ -21,13 +21,11 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many<T>(topics: T) -> Subscribe
-    where
-        T: IntoIterator<Item = SubscribeFilter>,
-    {
-        let filters: Vec<SubscribeFilter> = topics.into_iter().collect();
-
-        Subscribe { pkid: 0, filters }
+    pub fn new_many(topics: impl AsRef<[SubscribeFilter]>) -> Subscribe {
+        Subscribe {
+            pkid: 0,
+            filters: topics.as_ref().to_vec(),
+        }
     }
 
     pub fn add(&mut self, path: String, qos: QoS) -> &mut Self {

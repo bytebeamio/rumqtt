@@ -18,12 +18,12 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many<F>(filters: F, properties: Option<SubscribeProperties>) -> Self
-    where
-        F: IntoIterator<Item = Filter>,
-    {
+    pub fn new_many(
+        filters: impl AsRef<[Filter]>,
+        properties: Option<SubscribeProperties>,
+    ) -> Self {
         Self {
-            filters: filters.into_iter().collect(),
+            filters: filters.as_ref().to_vec(),
             properties,
             ..Default::default()
         }
