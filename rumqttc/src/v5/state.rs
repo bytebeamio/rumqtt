@@ -63,6 +63,8 @@ pub enum StateError {
     ConnFail { reason: ConnectReturnCode },
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
+    #[error("Connection Closed")]
+    ConnectionClosed,
 }
 
 /// State of the mqtt connection.

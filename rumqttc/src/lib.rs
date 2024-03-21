@@ -442,8 +442,8 @@ pub struct MqttOptions {
     max_outgoing_packet_size: usize,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
-    /// Max internal request batching
-    max_request_batch: usize,
+    /// Network buffer capacity in memory
+    network_buffer_capacity: usize,
     /// Minimum delay time between consecutive outgoing packets
     /// while retransmitting pending packets
     pending_throttle: Duration,
@@ -483,7 +483,7 @@ impl MqttOptions {
             max_incoming_packet_size: 10 * 1024,
             max_outgoing_packet_size: 10 * 1024,
             request_channel_capacity: 10,
-            max_request_batch: 10,
+            network_buffer_capacity: 10 * 1024,
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
@@ -642,9 +642,9 @@ impl MqttOptions {
         self.request_channel_capacity
     }
 
-    /// set maximum request batch count
-    pub fn set_max_request_batch(&mut self, max_request_batch: usize) -> &mut Self {
-        self.max_request_batch = max_request_batch;
+    /// Maximum buffer capacity before network flush
+    pub fn set_network_buffer_capacity(&mut self, network_buffer_capacity: usize) -> &mut Self {
+        self.network_buffer_capacity = network_buffer_capacity;
         self
     }
 
@@ -848,12 +848,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.request_channel_capacity = request_channel_capacity;
         }
 
-        if let Some(max_request_batch) = queries
-            .remove("max_request_batch_num")
+        if let Some(network_buffer_capacity) = queries
+            .remove("network_buffer_capacity_num")
             .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxRequestBatch))
             .transpose()?
         {
-            options.max_request_batch = max_request_batch;
+            options.network_buffer_capacity = network_buffer_capacity;
         }
 
         if let Some(pending_throttle) = queries
@@ -893,7 +893,7 @@ impl Debug for MqttOptions {
             .field("credentials", &self.credentials)
             .field("max_packet_size", &self.max_incoming_packet_size)
             .field("request_channel_capacity", &self.request_channel_capacity)
-            .field("max_request_batch", &self.max_request_batch)
+            .field("network_buffer_capacity", &self.network_buffer_capacity)
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
@@ -976,7 +976,7 @@ mod test {
             OptionError::RequestChannelCapacity
         );
         assert_eq!(
-            err("mqtt://host:42?client_id=foo&max_request_batch_num=foo"),
+            err("mqtt://host:42?client_id=foo&network_buffer_capacity_num=foo"),
             OptionError::MaxRequestBatch
         );
         assert_eq!(

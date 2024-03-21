@@ -31,6 +31,8 @@ pub enum StateError {
     Deserialization(#[from] mqttbytes::Error),
     #[error("Flush timeout")]
     FlushTimeout,
+    #[error("Connection Closed")]
+    ConnectionClosed,
 }
 
 /// State of the mqtt connection.

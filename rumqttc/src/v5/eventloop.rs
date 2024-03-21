@@ -305,7 +305,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             max_incoming_pkt_size,
             max_outgoing_pkt_size,
             network_timeout,
-            options.max_request_batch,
+            options.network_buffer_capacity,
         );
         return Ok(network);
     }
@@ -347,7 +347,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
             max_incoming_pkt_size,
             max_outgoing_pkt_size,
             network_timeout,
-            options.max_request_batch,
+            options.network_buffer_capacity,
         ),
         #[cfg(any(feature = "use-native-tls", feature = "use-rustls"))]
         Transport::Tls(tls_config) => {
@@ -359,7 +359,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 max_incoming_pkt_size,
                 max_outgoing_pkt_size,
                 network_timeout,
-                options.max_request_batch,
+                options.network_buffer_capacity,
             )
         }
         #[cfg(unix)]
@@ -384,7 +384,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 max_incoming_pkt_size,
                 max_outgoing_pkt_size,
                 network_timeout,
-                options.max_request_batch,
+                options.network_buffer_capacity,
             )
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
@@ -413,7 +413,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 max_incoming_pkt_size,
                 max_outgoing_pkt_size,
                 network_timeout,
-                options.max_request_batch,
+                options.network_buffer_capacity,
             )
         }
     };

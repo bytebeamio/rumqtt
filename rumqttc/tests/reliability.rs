@@ -292,7 +292,7 @@ async fn requests_are_blocked_after_max_inflight_queue_size() {
 #[tokio::test]
 async fn requests_are_recovered_after_inflight_queue_size_falls_below_max() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1888);
-    options.set_inflight(3).set_max_request_batch(1);
+    options.set_inflight(3).set_network_buffer_capacity(0); // NOTE: to instantly flush
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
 
@@ -476,7 +476,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3001);
     options
         .set_keep_alive(Duration::from_secs(5))
-        .set_max_request_batch(1);
+        .set_network_buffer_capacity(0); // NOTE: to instantly flush
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
     let (client, mut eventloop) = AsyncClient::new(options, 5);
@@ -518,7 +518,7 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
     options
         .set_keep_alive(Duration::from_secs(5))
-        .set_max_request_batch(1);
+        .set_network_buffer_capacity(0); // NOTE: to instantly flush
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
