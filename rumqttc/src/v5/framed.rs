@@ -18,7 +18,10 @@ pub struct Network {
     framed: Framed<Box<dyn AsyncReadWrite>, Codec>,
     /// Time within which network write operations should complete
     timeout: Duration,
+    /// Capacity upto which buffering is good
+    buffer_capacity: usize,
 }
+
 impl Network {
     pub fn new(
         socket: impl AsyncReadWrite + 'static,
@@ -34,7 +37,11 @@ impl Network {
         };
         let framed = Framed::with_capacity(socket, codec, buffer_capacity);
 
-        Network { framed, timeout }
+        Network {
+            framed,
+            timeout,
+            buffer_capacity,
+        }
     }
 
     pub async fn read(&mut self) -> Result<Incoming, StateError> {
@@ -46,12 +53,24 @@ impl Network {
         }
     }
 
-    /// Write packets into buffer, flush after `MAX_BUFFERED_PACKETS`
+    /// Write packets into buffer, flushes `Connect`/`PingReq`/`PingResp` packets instantly,
+    /// or on breaching buffer capacity
     pub async fn write(&mut self, packet: Packet) -> Result<(), StateError> {
-        match timeout(self.timeout, self.framed.send(packet)).await {
-            Ok(inner) => inner.map_err(StateError::Deserialization),
-            Err(e) => Err(StateError::Timeout(e)),
+        let packet_size = packet.size();
+        let should_flush = match packet {
+            Packet::Connect(..) | Packet::PingReq(_) | Packet::PingResp(_) => true,
+            _ => false,
+        };
+        self.framed
+            .feed(packet)
+            .await
+            .map_err(StateError::Deserialization)?;
+
+        if should_flush || self.framed.write_buffer().len() + packet_size >= self.buffer_capacity {
+            self.flush().await?;
         }
+
+        Ok(())
     }
 
     /// Force flush all packets in buffer, reset count

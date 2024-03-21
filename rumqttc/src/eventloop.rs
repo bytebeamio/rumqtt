@@ -241,8 +241,6 @@ impl EventLoop {
                 if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq(PingReq))? {
                     network.write(outgoing).await?;
                 }
-                // NOTE: Pings should be sent instantly
-                network.flush().await?;
 
                 Ok(self.state.events.pop_front().unwrap())
             }
@@ -488,7 +486,6 @@ async fn mqtt_connect(
 
     // send mqtt connect packet
     network.write(Packet::Connect(connect)).await?;
-    network.flush().await?;
 
     // validate connack
     match network.read().await? {

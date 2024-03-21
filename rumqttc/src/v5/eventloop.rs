@@ -236,7 +236,6 @@ impl EventLoop {
                 if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
                     network.write(outgoing).await?;
                 }
-                network.flush().await?;
 
                 Ok(self.state.events.pop_front().unwrap())
             }
@@ -442,7 +441,6 @@ async fn mqtt_connect(
     network
         .write(Packet::Connect(connect, last_will, None))
         .await?;
-    network.flush().await?;
 
     // validate connack
     match network.read().await? {
