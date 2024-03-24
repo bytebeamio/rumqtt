@@ -14,6 +14,8 @@ pub struct Network {
     socket: Box<dyn AsyncReadWrite>,
     /// Buffered reads
     read: BytesMut,
+    /// Buffered writes
+    pub write: BytesMut,
     /// Use to decode MQTT packets
     codec: Codec,
     /// Maximum readv count
@@ -30,6 +32,7 @@ impl Network {
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
+            write: BytesMut::with_capacity(10 * 1024),
             codec: Codec {
                 max_incoming_size,
                 max_outgoing_size,
@@ -87,7 +90,9 @@ impl Network {
         loop {
             match self.codec.decode(&mut self.read) {
                 Ok(Some(packet)) => {
-                    state.handle_incoming_packet(packet)?;
+                    if let Some(packet) = state.handle_incoming_packet(packet)? {
+                        self.write(packet)?;
+                    }
 
                     count += 1;
                     if count >= self.max_readb_count {
@@ -109,6 +114,12 @@ impl Network {
         Ok(())
     }
 
+    pub fn write(&mut self, packet: Packet) -> Result<(), crate::state::StateError> {
+        self.codec
+            .encode(packet, &mut self.write)
+            .map_err(Into::into)
+    }
+
     pub async fn connect(&mut self, connect: Connect) -> io::Result<()> {
         let mut write = BytesMut::new();
         self.codec
@@ -119,13 +130,13 @@ impl Network {
         Ok(())
     }
 
-    pub async fn flush(&mut self, write: &mut BytesMut) -> io::Result<()> {
-        if write.is_empty() {
+    pub async fn flush(&mut self) -> io::Result<()> {
+        if self.write.is_empty() {
             return Ok(());
         }
 
-        self.socket.write_all(&write[..]).await?;
-        write.clear();
+        self.socket.write_all(&self.write[..]).await?;
+        self.write.clear();
         Ok(())
     }
 }
