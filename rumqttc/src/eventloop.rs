@@ -2,7 +2,7 @@ use crate::{framed::Network, Transport};
 use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
-use crate::framed::N;
+use crate::framed::AsyncReadWrite;
 use crate::mqttbytes::v4::*;
 use flume::{bounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
@@ -369,7 +369,7 @@ async fn network_connect(
         _ => options.broker_address(),
     };
 
-    let tcp_stream: Box<dyn N> = {
+    let tcp_stream: Box<dyn AsyncReadWrite> = {
         #[cfg(feature = "proxy")]
         match options.proxy() {
             Some(proxy) => proxy.connect(&domain, port, network_options).await?,
