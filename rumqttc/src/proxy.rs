@@ -49,7 +49,8 @@ impl Proxy {
     ) -> Result<Box<dyn AsyncReadWrite>, ProxyError> {
         let proxy_addr = format!("{}:{}", self.addr, self.port);
 
-        let tcp: Box<dyn AsyncReadWrite> = Box::new(socket_connect(proxy_addr, network_options).await?);
+        let tcp: Box<dyn AsyncReadWrite> =
+            Box::new(socket_connect(proxy_addr, network_options).await?);
         let mut tcp = match self.ty {
             ProxyType::Http => tcp,
             #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]

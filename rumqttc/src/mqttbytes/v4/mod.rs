@@ -15,6 +15,7 @@ mod subscribe;
 mod unsuback;
 mod unsubscribe;
 
+pub use codec::*;
 pub use connack::*;
 pub use connect::*;
 pub use disconnect::*;
@@ -28,7 +29,6 @@ pub use suback::*;
 pub use subscribe::*;
 pub use unsuback::*;
 pub use unsubscribe::*;
-pub use codec::*;
 
 /// Encapsulates all MQTT packet types
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,7 +116,7 @@ impl Packet {
             return Err(Error::OutgoingPacketTooLarge {
                 pkt_size: self.size(),
                 max: max_size,
-            })
+            });
         }
 
         match self {
