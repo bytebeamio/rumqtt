@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
 use tracing::{trace, Span};
@@ -254,15 +255,13 @@ async fn handle_auth(
     }
 
     if let Some(pairs) = &config.auth {
-        let static_auth_verified = pairs
-            .iter()
-            .any(|(user, pass)| (user, pass) == (username, password));
-
-        if !static_auth_verified {
-            return Err(Error::InvalidAuth);
+        if let Some(stored_password) = pairs.get(username) {
+            if stored_password.as_bytes().ct_eq(password.as_bytes()).into() {
+                return Ok(());
+            }
         }
 
-        return Ok(());
+        return Err(Error::InvalidAuth);
     }
 
     Err(Error::InvalidAuth)
