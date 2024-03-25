@@ -127,6 +127,13 @@ impl Connect {
         buffer[flags_index] = connect_flags;
         Ok(1 + count + len)
     }
+
+    pub fn size(&self, will: &Option<LastWill>, login: &Option<Login>) -> usize {
+        let len = self.len(will, login);
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

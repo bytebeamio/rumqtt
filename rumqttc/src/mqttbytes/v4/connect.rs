@@ -132,6 +132,13 @@ impl Connect {
         buffer[flags_index] = connect_flags;
         Ok(1 + count + len)
     }
+
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
 }
 
 /// LastWill that broker forwards on behalf of the client

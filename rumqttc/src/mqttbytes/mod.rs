@@ -13,7 +13,7 @@ pub mod v4;
 pub use topic::*;
 
 /// Error during serialization and deserialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Expected Connect, received: {0:?}")]
     NotConnect(PacketType),
@@ -60,6 +60,10 @@ pub enum Error {
     /// proceed further
     #[error("At least {0} more bytes required to frame packet")]
     InsufficientBytes(usize),
+    #[error("IO: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
+    OutgoingPacketTooLarge { pkt_size: usize, max: usize },
 }
 
 /// MQTT packet type
