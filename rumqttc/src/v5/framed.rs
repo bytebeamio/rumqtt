@@ -1,131 +1,109 @@
-use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use futures_util::{FutureExt, SinkExt};
+use tokio_stream::StreamExt;
+use tokio_util::codec::Framed;
 
 use crate::framed::AsyncReadWrite;
 
-use super::mqttbytes;
-use super::mqttbytes::v5::{Connect, Login, Packet};
-use super::{Incoming, MqttOptions, MqttState, StateError};
-use std::io;
+use super::mqttbytes::v5::Packet;
+use super::{mqttbytes, Codec, Connect, Login, MqttOptions, MqttState};
+use super::{Incoming, StateError};
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
 /// appropriate to achieve performance
 pub struct Network {
-    /// Socket for IO
-    socket: Box<dyn AsyncReadWrite>,
-    /// Buffered reads
-    read: BytesMut,
-    /// Maximum packet size
-    max_incoming_size: Option<usize>,
+    /// Frame MQTT packets from network connection
+    framed: Framed<Box<dyn AsyncReadWrite>, Codec>,
     /// Maximum readv count
     max_readb_count: usize,
 }
-
 impl Network {
-    pub fn new(socket: impl AsyncReadWrite + 'static, max_incoming_size: Option<usize>) -> Network {
+    pub fn new(socket: impl AsyncReadWrite + 'static, max_incoming_size: Option<u32>) -> Network {
         let socket = Box::new(socket) as Box<dyn AsyncReadWrite>;
-        Network {
-            socket,
-            read: BytesMut::with_capacity(10 * 1024),
+        let codec = Codec {
             max_incoming_size,
+            max_outgoing_size: None,
+        };
+        let framed = Framed::new(socket, codec);
+
+        Network {
+            framed,
             max_readb_count: 10,
         }
     }
 
-    /// Reads more than 'required' bytes to frame a packet into self.read buffer
-    async fn read_bytes(&mut self, required: usize) -> io::Result<usize> {
-        let mut total_read = 0;
-        loop {
-            let read = self.socket.read_buf(&mut self.read).await?;
-            if 0 == read {
-                return if self.read.is_empty() {
-                    Err(io::Error::new(
-                        io::ErrorKind::ConnectionAborted,
-                        "connection closed by peer",
-                    ))
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::ConnectionReset,
-                        "connection reset by peer",
-                    ))
-                };
-            }
-
-            total_read += read;
-            if total_read >= required {
-                return Ok(total_read);
-            }
-        }
+    pub fn set_max_outgoing_size(&mut self, max_outgoing_size: Option<u32>) {
+        self.framed.codec_mut().max_outgoing_size = max_outgoing_size;
     }
 
-    pub async fn read(&mut self) -> io::Result<Incoming> {
-        loop {
-            let required = match Packet::read(&mut self.read, self.max_incoming_size) {
-                Ok(packet) => return Ok(packet),
-                Err(mqttbytes::Error::InsufficientBytes(required)) => required,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-            };
-
-            // read more packets until a frame can be created. This function
-            // blocks until a frame can be created. Use this in a select! branch
-            self.read_bytes(required).await?;
+    /// Reads and returns a single packet from network
+    pub async fn read(&mut self) -> Result<Incoming, StateError> {
+        match self.framed.next().await {
+            Some(Ok(packet)) => Ok(packet),
+            Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None => unreachable!(),
+            Some(Err(e)) => Err(StateError::Deserialization(e)),
         }
     }
 
     /// Read packets in bulk. This allow replies to be in bulk. This method is used
     /// after the connection is established to read a bunch of incoming packets
     pub async fn readb(&mut self, state: &mut MqttState) -> Result<(), StateError> {
-        let mut count = 0;
+        // wait for the first read
+        let mut res = self.framed.next().await;
+        let mut count = 1;
         loop {
-            match Packet::read(&mut self.read, self.max_incoming_size) {
-                Ok(packet) => {
-                    state.handle_incoming_packet(packet)?;
+            match res {
+                Some(Ok(packet)) => {
+                    if let Some(outgoing) = state.handle_incoming_packet(packet)? {
+                        self.write(outgoing).await?;
+                    }
 
                     count += 1;
                     if count >= self.max_readb_count {
-                        return Ok(());
+                        break;
                     }
                 }
-                // If some packets are already framed, return those
-                Err(mqttbytes::Error::InsufficientBytes(_)) if count > 0 => return Ok(()),
-                // Wait for more bytes until a frame can be created
-                Err(mqttbytes::Error::InsufficientBytes(required)) => {
-                    self.read_bytes(required).await?;
-                }
-                Err(mqttbytes::Error::PayloadSizeLimitExceeded { pkt_size, max }) => {
-                    state.handle_protocol_error()?;
-                    return Err(StateError::IncomingPacketTooLarge { pkt_size, max });
-                }
-                Err(e) => return Err(StateError::Deserialization(e)),
+                Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None => unreachable!(),
+                Some(Err(e)) => return Err(StateError::Deserialization(e)),
+            }
+            // do not wait for subsequent reads
+            match self.framed.next().now_or_never() {
+                Some(r) => res = r,
+                _ => break,
             };
         }
+
+        Ok(())
     }
 
-    pub async fn connect(&mut self, connect: Connect, options: &MqttOptions) -> io::Result<usize> {
-        let mut write = BytesMut::new();
+    /// Serializes packet into write buffer
+    pub async fn write(&mut self, packet: Packet) -> Result<(), StateError> {
+        self.framed
+            .feed(packet)
+            .await
+            .map_err(StateError::Deserialization)
+    }
+
+    pub async fn connect(
+        &mut self,
+        connect: Connect,
+        options: &MqttOptions,
+    ) -> Result<(), StateError> {
         let last_will = options.last_will();
         let login = options.credentials().map(|l| Login {
             username: l.0,
             password: l.1,
         });
+        self.write(Packet::Connect(connect, last_will, login))
+            .await?;
 
-        let len = match Packet::Connect(connect, last_will, login).write(&mut write) {
-            Ok(size) => size,
-            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-        };
-
-        self.socket.write_all(&write[..]).await?;
-        Ok(len)
+        self.flush().await
     }
 
-    pub async fn flush(&mut self, write: &mut BytesMut) -> io::Result<()> {
-        if write.is_empty() {
-            return Ok(());
-        }
-
-        self.socket.write_all(&write[..]).await?;
-        write.clear();
-        Ok(())
+    pub async fn flush(&mut self) -> Result<(), StateError> {
+        self.framed
+            .flush()
+            .await
+            .map_err(StateError::Deserialization)
     }
 }

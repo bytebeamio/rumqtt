@@ -89,7 +89,7 @@ pub struct MqttOptions {
     conn_timeout: u64,
     /// Default value of for maximum incoming packet size.
     /// Used when `max_incomming_size` in `connect_properties` is NOT available.
-    default_max_incoming_size: usize,
+    default_max_incoming_size: u32,
     /// Connect Properties
     connect_properties: Option<ConnectProperties>,
     /// If set to `true` MQTT acknowledgements are not sent automatically.

@@ -9,7 +9,6 @@ use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
 
 use std::collections::VecDeque;
-use std::convert::TryInto;
 use std::io;
 use std::pin::Pin;
 use std::time::Duration;
@@ -211,7 +210,7 @@ impl EventLoop {
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     self.state.handle_outgoing_packet(request)?;
-                    network.flush(&mut self.state.write).await?;
+                    network.flush().await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -220,7 +219,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                network.flush(&mut self.state.write).await?;
+                network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
@@ -230,7 +229,7 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
                 self.state.handle_outgoing_packet(Request::PingReq)?;
-                network.flush(&mut self.state.write).await?;
+                network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -281,7 +280,6 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     // Override default value if max_packet_size is set on `connect_properties`
     if let Some(connect_props) = &options.connect_properties {
         if let Some(max_size) = connect_props.max_packet_size {
-            let max_size = max_size.try_into().map_err(StateError::Coversion)?;
             max_incoming_pkt_size = Some(max_size);
         }
     }
@@ -409,6 +407,7 @@ async fn mqtt_connect(
                 if let Some(keep_alive) = props.server_keep_alive {
                     options.keep_alive = Duration::from_secs(keep_alive as u64);
                 }
+                network.set_max_outgoing_size(props.max_packet_size);
             }
             Ok(Packet::ConnAck(connack))
         }
