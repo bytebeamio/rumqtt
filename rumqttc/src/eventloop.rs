@@ -229,7 +229,7 @@ impl EventLoop {
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
                     if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
-                        network.write(outgoing)?;
+                        network.write(outgoing).await?;
                     }
                     match time::timeout(network_timeout, network.flush()).await {
                         Ok(inner) => inner?,
@@ -247,7 +247,7 @@ impl EventLoop {
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
                 if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq(PingReq))? {
-                    network.write(outgoing)?;
+                    network.write(outgoing).await?;
                 }
                 match time::timeout(network_timeout, network.flush()).await {
                     Ok(inner) => inner?,
@@ -428,7 +428,11 @@ async fn network_connect(
                 async_tungstenite::tokio::client_async(request, tcp_stream).await?;
             validate_response_headers(response)?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+            )
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
@@ -451,7 +455,11 @@ async fn network_connect(
             .await?;
             validate_response_headers(response)?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+            )
         }
     };
 

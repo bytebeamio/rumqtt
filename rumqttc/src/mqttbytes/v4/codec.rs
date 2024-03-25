@@ -1,4 +1,4 @@
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
 
 use super::{Error, Packet};
@@ -17,12 +17,15 @@ impl Decoder for Codec {
     type Error = Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.remaining() == 0 {
-            return Ok(None);
+        match Packet::read(src, self.max_incoming_size) {
+            Ok(packet) => Ok(Some(packet)),
+            Err(Error::InsufficientBytes(b)) => {
+                // Get more packets to construct the incomplete packet
+                src.reserve(b);
+                Ok(None)
+            }
+            Err(e) => Err(e),
         }
-
-        let packet = Packet::read(src, self.max_incoming_size)?;
-        Ok(Some(packet))
     }
 }
 
