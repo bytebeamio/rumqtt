@@ -157,7 +157,7 @@ impl AsyncClient {
         let topic = topic.into();
         let subscribe = Subscribe::new(&topic, qos);
         let request = Request::Subscribe(subscribe);
-        if !valid_filter(topic) {
+        if !valid_filter(&topic) {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
@@ -169,8 +169,8 @@ impl AsyncClient {
         let topic = topic.into();
         let subscribe = Subscribe::new(&topic, qos);
         let request = Request::Subscribe(subscribe);
-        if !valid_filter(topic) {
-            return Err(ClientError::Request(request));
+        if !valid_filter(&topic) {
+            return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
         Ok(())
@@ -355,7 +355,7 @@ impl Client {
         let topic = topic.into();
         let subscribe = Subscribe::new(&topic, qos);
         let request = Request::Subscribe(subscribe);
-        if !valid_filter(topic) {
+        if !valid_filter(&topic) {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;

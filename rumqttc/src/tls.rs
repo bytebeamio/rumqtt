@@ -16,7 +16,7 @@ use std::io::{BufReader, Cursor};
 #[cfg(feature = "use-rustls")]
 use std::sync::Arc;
 
-use crate::framed::N;
+use crate::framed::AsyncReadWrite;
 use crate::TlsConfiguration;
 
 #[cfg(feature = "use-native-tls")]
@@ -166,9 +166,9 @@ pub async fn tls_connect(
     addr: &str,
     _port: u16,
     tls_config: &TlsConfiguration,
-    tcp: Box<dyn N>,
-) -> Result<Box<dyn N>, Error> {
-    let tls: Box<dyn N> = match tls_config {
+    tcp: Box<dyn AsyncReadWrite>,
+) -> Result<Box<dyn AsyncReadWrite>, Error> {
+    let tls: Box<dyn AsyncReadWrite> = match tls_config {
         #[cfg(feature = "use-rustls")]
         TlsConfiguration::Simple { .. } | TlsConfiguration::Rustls(_) => {
             let connector = rustls_connector(tls_config).await?;

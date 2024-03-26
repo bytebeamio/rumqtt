@@ -190,9 +190,7 @@ impl Outgoing {
     // But we don't support out of order / unsolicited pubcomps
     // to be consistent with the behaviour with other acks
     pub fn register_pubcomp(&mut self, pkid: u16) -> Option<()> {
-        let Some(id) = self.unacked_pubrels.pop_front() else {
-            return None;
-        };
+        let id = self.unacked_pubrels.pop_front()?;
 
         // out of order acks
         if pkid != id {

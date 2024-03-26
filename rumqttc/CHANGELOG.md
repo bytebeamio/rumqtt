@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* `size()` method on `Packet` calculates size once serialized.
+* `read()` and `write()` methods on `Packet`.
+
 ### Changed
+
+* rename `N` as `AsyncReadWrite` to describe usage.
+* use `Framed` to encode/decode MQTT packets.
 
 ### Deprecated
 

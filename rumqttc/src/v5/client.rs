@@ -258,11 +258,11 @@ impl AsyncClient {
         qos: QoS,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let topic = topic.into();
-        let filter = Filter::new(&topic, qos);
+        let filter = Filter::new(topic, qos);
+        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let request = Request::Subscribe(subscribe);
-        if !valid_filter(topic) {
+        let request: Request = Request::Subscribe(subscribe);
+        if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
@@ -289,11 +289,11 @@ impl AsyncClient {
         qos: QoS,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let topic = topic.into();
-        let filter = Filter::new(&topic, qos);
+        let filter = Filter::new(topic, qos);
+        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
         let request = Request::Subscribe(subscribe);
-        if !valid_filter(topic) {
+        if !is_filter_valid {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
@@ -618,11 +618,11 @@ impl Client {
         qos: QoS,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let topic = topic.into();
-        let filter = Filter::new(&topic, qos);
+        let filter = Filter::new(topic, qos);
+        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
         let request = Request::Subscribe(subscribe);
-        if !valid_filter(topic) {
+        if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;

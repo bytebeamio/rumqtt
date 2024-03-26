@@ -232,7 +232,7 @@ impl Network {
     pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> io::Result<()> {
         let mut count = 0;
         loop {
-            match read(&mut self.read, self.max_incoming_size) {
+            match Packet::read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => {
                     incoming.push_back(packet);
                     count += 1;

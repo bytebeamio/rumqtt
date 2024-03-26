@@ -9,6 +9,10 @@ impl PingReq {
         payload.put_slice(&[0xC0, 0x00]);
         Ok(2)
     }
+
+    pub fn size(&self) -> usize {
+        2
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,5 +22,9 @@ impl PingResp {
     pub fn write(payload: &mut BytesMut) -> Result<usize, Error> {
         payload.put_slice(&[0xD0, 0x00]);
         Ok(2)
+    }
+
+    pub fn size(&self) -> usize {
+        2
     }
 }
