@@ -435,7 +435,7 @@ pub struct MqttOptions {
     /// client identifier
     client_id: String,
     /// username and password
-    credentials: Option<(String, String)>,
+    credentials: Option<Login>,
     /// maximum incoming packet size (verifies remaining length of the packet)
     max_incoming_packet_size: usize,
     /// Maximum outgoing packet size (only verifies publish payload size)
@@ -622,12 +622,12 @@ impl MqttOptions {
         username: U,
         password: P,
     ) -> &mut Self {
-        self.credentials = Some((username.into(), password.into()));
+        self.credentials = Some(Login::new(username, password));
         self
     }
 
     /// Security options
-    pub fn credentials(&self) -> Option<(String, String)> {
+    pub fn credentials(&self) -> Option<Login> {
         self.credentials.clone()
     }
 

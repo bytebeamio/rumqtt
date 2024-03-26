@@ -5,7 +5,7 @@ use tokio_util::codec::Framed;
 use crate::framed::AsyncReadWrite;
 
 use super::mqttbytes::v5::Packet;
-use super::{mqttbytes, Codec, Connect, Login, MqttOptions, MqttState};
+use super::{mqttbytes, Codec, Connect, MqttOptions, MqttState};
 use super::{Incoming, StateError};
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -90,10 +90,7 @@ impl Network {
         options: &MqttOptions,
     ) -> Result<(), StateError> {
         let last_will = options.last_will();
-        let login = options.credentials().map(|l| Login {
-            username: l.0,
-            password: l.1,
-        });
+        let login = options.credentials();
         self.write(Packet::Connect(connect, last_will, login))
             .await?;
 

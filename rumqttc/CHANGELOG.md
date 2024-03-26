@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * rename `N` as `AsyncReadWrite` to describe usage.
 * use `Framed` to encode/decode MQTT packets.
+* use `Login` to store credentials
 
 ### Deprecated
 
