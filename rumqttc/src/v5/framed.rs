@@ -1,3 +1,4 @@
+use bytes::Buf;
 use futures_util::SinkExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -5,7 +6,7 @@ use tokio_util::codec::Framed;
 use crate::framed::AsyncReadWrite;
 
 use super::mqttbytes::v5::Packet;
-use super::{mqttbytes, Codec, Connect, Login, MqttOptions};
+use super::{Codec, Connect, Login, MqttOptions};
 use super::{Incoming, StateError};
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -31,13 +32,16 @@ impl Network {
         self.framed.codec_mut().max_outgoing_size = max_outgoing_size;
     }
 
+    pub fn read_buffer_remaining(&self) -> usize {
+        self.framed.read_buffer().remaining()
+    }
+
     /// Reads and returns a single packet from network
-    pub async fn read(&mut self) -> Result<Incoming, StateError> {
+    pub async fn read(&mut self) -> Result<Option<Incoming>, StateError> {
         match self.framed.next().await {
-            Some(Ok(packet)) => Ok(packet),
-            Some(Err(mqttbytes::Error::InsufficientBytes(_))) => unreachable!(),
+            Some(Ok(packet)) => Ok(Some(packet)),
             Some(Err(e)) => Err(StateError::Deserialization(e)),
-            None => Err(StateError::ConnectionAborted),
+            None => Ok(None)
         }
     }
 

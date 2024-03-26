@@ -78,8 +78,8 @@ pub struct MqttOptions {
     credentials: Option<Login>,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
-    /// Max internal request batching
-    max_request_batch: usize,
+    /// Max batch processing size
+    max_batch_size: usize,
     /// Minimum delay time between consecutive outgoing packets
     /// while retransmitting pending packets
     pending_throttle: Duration,
@@ -126,7 +126,7 @@ impl MqttOptions {
             client_id: id.into(),
             credentials: None,
             request_channel_capacity: 10,
-            max_request_batch: 0,
+            max_batch_size: 10,
             pending_throttle: Duration::from_micros(0),
             last_will: None,
             conn_timeout: 5,
@@ -654,12 +654,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.request_channel_capacity = request_channel_capacity;
         }
 
-        if let Some(max_request_batch) = queries
-            .remove("max_request_batch_num")
+        if let Some(max_batch_size) = queries
+            .remove("max_batch_size")
             .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxRequestBatch))
             .transpose()?
         {
-            options.max_request_batch = max_request_batch;
+            options.max_batch_size = max_batch_size;
         }
 
         if let Some(pending_throttle) = queries
@@ -704,7 +704,7 @@ impl Debug for MqttOptions {
             .field("client_id", &self.client_id)
             .field("credentials", &self.credentials)
             .field("request_channel_capacity", &self.request_channel_capacity)
-            .field("max_request_batch", &self.max_request_batch)
+            .field("max_request_batch", &self.max_batch_size)
             .field("pending_throttle", &self.pending_throttle)
             .field("last_will", &self.last_will)
             .field("conn_timeout", &self.conn_timeout)
