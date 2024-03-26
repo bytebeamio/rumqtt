@@ -225,10 +225,11 @@ impl MqttState {
             .ok_or(StateError::Unsolicited(puback.pkid))?;
 
         self.last_puback = puback.pkid;
-        publish.take().ok_or({
+
+        if publish.take().is_none() {
             error!("Unsolicited puback packet: {:?}", puback.pkid);
-            StateError::Unsolicited(puback.pkid)
-        })?;
+            return Err(StateError::Unsolicited(puback.pkid));
+        }
 
         self.inflight -= 1;
         let packet = self.check_collision(puback.pkid).map(|publish| {
@@ -250,21 +251,19 @@ impl MqttState {
             .outgoing_pub
             .get_mut(pubrec.pkid as usize)
             .ok_or(StateError::Unsolicited(pubrec.pkid))?;
-        match publish.take() {
-            Some(_) => {
-                // NOTE: Inflight - 1 for qos2 in comp
-                self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                let pubrel = PubRel { pkid: pubrec.pkid };
-                let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
-                self.events.push_back(event);
 
-                Ok(Some(Packet::PubRel(pubrel)))
-            }
-            None => {
-                error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
-                Err(StateError::Unsolicited(pubrec.pkid))
-            }
+        if publish.take().is_none() {
+            error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
+            return Err(StateError::Unsolicited(pubrec.pkid));
         }
+
+        // NOTE: Inflight - 1 for qos2 in comp
+        self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
+        let pubrel = PubRel { pkid: pubrec.pkid };
+        let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
+        self.events.push_back(event);
+
+        Ok(Some(Packet::PubRel(pubrel)))
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Packet>, StateError> {
@@ -272,30 +271,30 @@ impl MqttState {
             .incoming_pub
             .get_mut(pubrel.pkid as usize)
             .ok_or(StateError::Unsolicited(pubrel.pkid))?;
-        match publish.take() {
-            Some(_) => {
-                let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
-                let pubcomp = PubComp { pkid: pubrel.pkid };
-                self.events.push_back(event);
 
-                Ok(Some(Packet::PubComp(pubcomp)))
-            }
-            None => {
-                error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-                Err(StateError::Unsolicited(pubrel.pkid))
-            }
+        if publish.take().is_none() {
+            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
+            return Err(StateError::Unsolicited(pubrel.pkid));
         }
+
+        let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+        let pubcomp = PubComp { pkid: pubrel.pkid };
+        self.events.push_back(event);
+
+        Ok(Some(Packet::PubComp(pubcomp)))
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
-        self.outgoing_rel
+        if self
+            .outgoing_rel
             .get_mut(pubcomp.pkid as usize)
             .ok_or(StateError::Unsolicited(pubcomp.pkid))?
             .take()
-            .ok_or({
-                error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
-                StateError::Unsolicited(pubcomp.pkid)
-            })?;
+            .is_none()
+        {
+            error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
+            return Err(StateError::Unsolicited(pubcomp.pkid));
+        }
 
         self.inflight -= 1;
         let packet = self.check_collision(pubcomp.pkid).map(|publish| {
