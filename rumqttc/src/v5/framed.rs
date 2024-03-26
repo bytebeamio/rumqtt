@@ -1,11 +1,11 @@
-use futures_util::{FutureExt, SinkExt};
+use futures_util::SinkExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
 use crate::framed::AsyncReadWrite;
 
 use super::mqttbytes::v5::Packet;
-use super::{mqttbytes, Codec, Connect, MqttOptions, MqttState};
+use super::{mqttbytes, Codec, Connect, Login, MqttOptions};
 use super::{Incoming, StateError};
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -41,46 +41,18 @@ impl Network {
         }
     }
 
-    /// Read packets in bulk. This allow replies to be in bulk. This method is used
-    /// after the connection is established to read a bunch of incoming packets
-    pub async fn readb(
-        &mut self,
-        state: &mut MqttState,
-        batch_size: usize,
-    ) -> Result<(), StateError> {
-        // wait for the first read
-        let mut res = self.framed.next().await;
-        let mut count = 1;
-        loop {
-            match res {
-                Some(Ok(packet)) => {
-                    if let Some(outgoing) = state.handle_incoming_packet(packet)? {
-                        self.write(outgoing).await?;
-                    }
-
-                    count += 1;
-                    if count >= batch_size {
-                        break;
-                    }
-                }
-                Some(Err(mqttbytes::Error::InsufficientBytes(_))) => unreachable!(),
-                Some(Err(e)) => return Err(StateError::Deserialization(e)),
-                None => return Err(StateError::ConnectionAborted),
-            }
-            // do not wait for subsequent reads
-            match self.framed.next().now_or_never() {
-                Some(r) => res = r,
-                _ => break,
-            };
-        }
-
-        Ok(())
-    }
-
     /// Serializes packet into write buffer
     pub async fn write(&mut self, packet: Packet) -> Result<(), StateError> {
         self.framed
             .feed(packet)
+            .await
+            .map_err(StateError::Deserialization)
+    }
+
+    /// Flush the outgoing sink
+    pub async fn flush(&mut self) -> Result<(), StateError> {
+        self.framed
+            .flush()
             .await
             .map_err(StateError::Deserialization)
     }
@@ -96,12 +68,5 @@ impl Network {
             .await?;
 
         self.flush().await
-    }
-
-    pub async fn flush(&mut self) -> Result<(), StateError> {
-        self.framed
-            .flush()
-            .await
-            .map_err(StateError::Deserialization)
     }
 }

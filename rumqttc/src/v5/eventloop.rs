@@ -211,41 +211,15 @@ impl EventLoop {
                 // Process first request
                 let request = request.map_err(|_| ConnectionError::RequestsDone)?;
                 self.state.handle_outgoing_packet(request)?;
-
-                // Take up to BATCH_SIZE - 1 requests from the channel until
-                // - the channel is empty
-                // - the inflight queue is full
-                // - there is a collision
-                // If the channel is closed this is reported in the next iteration from the async recv above.
-                for _ in 0..(BATCH_SIZE - 1) {
-                    if self.request_rx.is_empty() || self.state.is_inflight_full() || self.state.has_collision()
-                    {
-                        break;
-                    }
-
-                    // Safe to call the blocking `recv` in here since we know the channel is not empty.
-                    // Ensure a flush in case of any error.
-                    if let Err(e) = self
-                        .request_rx
-                        .recv()
-                        .map_err(|_| ConnectionError::RequestsDone)
-                        .and_then(|request| {
-                            self.state
-                                .handle_outgoing_packet(request)
-                                .map_err(Into::into)
-                        })
-                    {
-                        network.flush().await?;
-                        return Err(e);
-                    }
-                }
-
                 network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state, BATCH_SIZE) => {
-                o?;
+            packet = network.read() => {
+                let packet = packet?;
+                if let Some(packet) = self.state.handle_incoming_packet(packet)? {
+                    network.write(packet).await?;
+                }
                 // flush all the acks and return first incoming packet
                 network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
