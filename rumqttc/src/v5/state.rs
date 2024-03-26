@@ -362,17 +362,13 @@ impl MqttState {
             .outgoing_pub
             .get_mut(puback.pkid as usize)
             .ok_or(StateError::Unsolicited(puback.pkid))?;
-        let v = match publish.take() {
-            Some(_) => {
-                self.inflight -= 1;
 
-                Ok(None)
-            }
-            None => {
-                error!("Unsolicited puback packet: {:?}", puback.pkid);
-                Err(StateError::Unsolicited(puback.pkid))
-            }
-        };
+        if publish.take().is_none() {
+            error!("Unsolicited puback packet: {:?}", puback.pkid);
+            return Err(StateError::Unsolicited(puback.pkid));
+        }
+
+        self.inflight -= 1;
 
         if puback.reason != PubAckReason::Success
             && puback.reason != PubAckReason::NoMatchingSubscribers
@@ -394,7 +390,7 @@ impl MqttState {
             return Ok(Some(Packet::Publish(publish)));
         }
 
-        v
+        Ok(None)
     }
 
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<Option<Packet>, StateError> {
@@ -402,28 +398,26 @@ impl MqttState {
             .outgoing_pub
             .get_mut(pubrec.pkid as usize)
             .ok_or(StateError::Unsolicited(pubrec.pkid))?;
-        match publish.take() {
-            Some(_) => {
-                if pubrec.reason != PubRecReason::Success
-                    && pubrec.reason != PubRecReason::NoMatchingSubscribers
-                {
-                    return Err(StateError::PubRecFail {
-                        reason: pubrec.reason,
-                    });
-                }
 
-                // NOTE: Inflight - 1 for qos2 in comp
-                self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
-                let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
-                self.events.push_back(event);
-
-                Ok(Some(Packet::PubRel(PubRel::new(pubrec.pkid, None))))
-            }
-            None => {
-                error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
-                Err(StateError::Unsolicited(pubrec.pkid))
-            }
+        if publish.take().is_none() {
+            error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
+            return Err(StateError::Unsolicited(pubrec.pkid));
         }
+
+        if pubrec.reason != PubRecReason::Success
+            && pubrec.reason != PubRecReason::NoMatchingSubscribers
+        {
+            return Err(StateError::PubRecFail {
+                reason: pubrec.reason,
+            });
+        }
+
+        // NOTE: Inflight - 1 for qos2 in comp
+        self.outgoing_rel[pubrec.pkid as usize] = Some(pubrec.pkid);
+        let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
+        self.events.push_back(event);
+
+        Ok(Some(Packet::PubRel(PubRel::new(pubrec.pkid, None))))
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Packet>, StateError> {
@@ -431,24 +425,22 @@ impl MqttState {
             .incoming_pub
             .get_mut(pubrel.pkid as usize)
             .ok_or(StateError::Unsolicited(pubrel.pkid))?;
-        match publish.take() {
-            Some(_) => {
-                if pubrel.reason != PubRelReason::Success {
-                    return Err(StateError::PubRelFail {
-                        reason: pubrel.reason,
-                    });
-                }
 
-                let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
-                self.events.push_back(event);
-
-                Ok(Some(Packet::PubComp(PubComp::new(pubrel.pkid, None))))
-            }
-            None => {
-                error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-                Err(StateError::Unsolicited(pubrel.pkid))
-            }
+        if publish.take().is_none() {
+            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
+            return Err(StateError::Unsolicited(pubrel.pkid));
         }
+
+        if pubrel.reason != PubRelReason::Success {
+            return Err(StateError::PubRelFail {
+                reason: pubrel.reason,
+            });
+        }
+
+        let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+        self.events.push_back(event);
+
+        Ok(Some(Packet::PubComp(PubComp::new(pubrel.pkid, None))))
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
@@ -465,22 +457,19 @@ impl MqttState {
             .outgoing_rel
             .get_mut(pubcomp.pkid as usize)
             .ok_or(StateError::Unsolicited(pubcomp.pkid))?;
-        match pubrel.take() {
-            Some(_) => {
-                if pubcomp.reason != PubCompReason::Success {
-                    return Err(StateError::PubCompFail {
-                        reason: pubcomp.reason,
-                    });
-                }
-
-                self.inflight -= 1;
-                Ok(outgoing)
-            }
-            None => {
-                error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
-                Err(StateError::Unsolicited(pubcomp.pkid))
-            }
+        if pubrel.take().is_none() {
+            error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
+            return Err(StateError::Unsolicited(pubcomp.pkid));
         }
+
+        if pubcomp.reason != PubCompReason::Success {
+            return Err(StateError::PubCompFail {
+                reason: pubcomp.reason,
+            });
+        }
+
+        self.inflight -= 1;
+        Ok(outgoing)
     }
 
     fn handle_incoming_pingresp(&mut self) -> Result<Option<Packet>, StateError> {
