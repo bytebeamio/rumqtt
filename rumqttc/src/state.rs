@@ -29,6 +29,8 @@ pub enum StateError {
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
     Deserialization(#[from] mqttbytes::Error),
+    #[error("Connection closed by peer abruptly")]
+    ConnectionAborted,
 }
 
 /// State of the mqtt connection.
