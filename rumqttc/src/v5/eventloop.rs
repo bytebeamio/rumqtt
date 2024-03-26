@@ -7,7 +7,8 @@ use crate::framed::AsyncReadWrite;
 use flume::Receiver;
 use futures_util::{Stream, StreamExt};
 use tokio::select;
-use tokio::time::{self, error::Elapsed, Instant, Sleep};
+use tokio::time::Interval;
+use tokio::time::{self, error::Elapsed};
 
 use std::collections::VecDeque;
 use std::io;
@@ -85,7 +86,7 @@ pub struct EventLoop {
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time
-    keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    keepalive_interval: Interval,
 }
 
 /// Events which can be yielded by the event loop
@@ -103,6 +104,8 @@ impl EventLoop {
         let pending = IntervalQueue::new(options.pending_throttle);
         let batch_size = options.max_batch_size;
         let state = MqttState::new(inflight_limit, manual_acks);
+        assert!(!options.keep_alive.is_zero());
+        let keepalive_interval = time::interval(options.keep_alive());
 
         EventLoop {
             options,
@@ -111,7 +114,7 @@ impl EventLoop {
             requests,
             pending,
             network: None,
-            keepalive_timeout: None,
+            keepalive_interval,
         }
     }
 
@@ -124,7 +127,6 @@ impl EventLoop {
     /// > For this reason we recommend setting [`AsycClient`](super::AsyncClient)'s channel capacity to `0`.
     pub fn clean(&mut self) {
         self.network = None;
-        self.keepalive_timeout = None;
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
@@ -144,14 +146,12 @@ impl EventLoop {
             .await??;
             self.network = Some(network);
 
-            if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
-            }
-
             // A connack never produces a response packet. Safe to ignore the return value
             // of `handle_incoming_packet`
             self.state.handle_incoming_packet(connack)?;
-            self.pending.reset();
+
+            self.pending.reset_immediately();
+            self.keepalive_interval.reset();
         }
 
         // Read buffered events from previous polls before calling a new poll
@@ -216,8 +216,10 @@ impl EventLoop {
                         network.write(packet).await?;
                     }
                 },
-                // Process next packet received from io
+                // Process next packet from io
                 packet = network.read() => {
+                    // Reset keepalive interval due to packet reception
+                    self.keepalive_interval.reset();
                     match packet? {
                         Some(packet) => if let Some(packet) = self.state.handle_incoming_packet(packet)? {
                             let flush = matches!(packet, Packet::PingResp(_));
@@ -229,11 +231,8 @@ impl EventLoop {
                         None => return Err(ConnectionError::ConnectionClosed),
                     }
                 },
-                // We generate pings irrespective of network activity. This keeps the ping logic
-                // simple. We can change this behavior in future if necessary (to prevent extra pings)
-                _ = self.keepalive_timeout.as_mut().unwrap() => {
-                    let timeout = self.keepalive_timeout.as_mut().unwrap();
-                    timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
+                // Send a ping request on each interval tick
+                _ = self.keepalive_interval.tick() => {
                     if let Some(packet) = self.state.handle_outgoing_packet(Request::PingReq)? {
                         network.write(packet).await?;
                     }
@@ -291,10 +290,10 @@ impl<T> IntervalQueue<T> {
         self.queue.extend(requests);
     }
 
-    /// Reset the pending interval tick
-    pub fn reset(&mut self) {
+    /// Reset the pending interval tick. Next tick yields immediately
+    pub fn reset_immediately(&mut self) {
         if let Some(interval) = self.interval.as_mut() {
-            interval.reset();
+            interval.reset_immediately();
         }
     }
 }

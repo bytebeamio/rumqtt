@@ -6,7 +6,7 @@ use tokio_util::codec::Framed;
 use crate::framed::AsyncReadWrite;
 
 use super::mqttbytes::v5::Packet;
-use super::{Codec, Connect, Login, MqttOptions};
+use super::{Codec, Connect, MqttOptions};
 use super::{Incoming, StateError};
 
 /// Network transforms packets <-> frames efficiently. It takes
@@ -41,7 +41,7 @@ impl Network {
         match self.framed.next().await {
             Some(Ok(packet)) => Ok(Some(packet)),
             Some(Err(e)) => Err(StateError::Deserialization(e)),
-            None => Ok(None)
+            None => Ok(None),
         }
     }
 
