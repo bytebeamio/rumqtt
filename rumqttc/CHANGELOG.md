@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * `size()` method on `Packet` calculates size once serialized.
 * `read()` and `write()` methods on `Packet`.
+* `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
 
 ### Changed
 

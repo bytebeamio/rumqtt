@@ -40,8 +40,9 @@ impl Network {
     pub async fn read(&mut self) -> Result<Incoming, StateError> {
         match self.framed.next().await {
             Some(Ok(packet)) => Ok(packet),
-            Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None => unreachable!(),
+            Some(Err(mqttbytes::Error::InsufficientBytes(_))) => unreachable!(),
             Some(Err(e)) => Err(StateError::Deserialization(e)),
+            None => Err(StateError::ConnectionAborted),
         }
     }
 
@@ -63,8 +64,9 @@ impl Network {
                         break;
                     }
                 }
-                Some(Err(mqttbytes::Error::InsufficientBytes(_))) | None => unreachable!(),
+                Some(Err(mqttbytes::Error::InsufficientBytes(_))) => unreachable!(),
                 Some(Err(e)) => return Err(StateError::Deserialization(e)),
+                None => return Err(StateError::ConnectionAborted),
             }
             // do not wait for subsequent reads
             match self.framed.next().now_or_never() {

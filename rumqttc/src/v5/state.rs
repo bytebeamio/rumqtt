@@ -64,6 +64,8 @@ pub enum StateError {
     PubCompFail { reason: PubCompReason },
     #[error("Connection failed with reason '{reason:?}' ")]
     ConnFail { reason: ConnectReturnCode },
+    #[error("Connection closed by peer abruptly")]
+    ConnectionAborted
 }
 
 impl From<mqttbytes::Error> for StateError {
