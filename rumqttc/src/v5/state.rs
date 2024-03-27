@@ -9,14 +9,11 @@ use super::{Event, Incoming, Outgoing, Request};
 
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
-use std::{io, time::Instant};
+use std::time::Instant;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
-    /// Io Error while state is passed to network
-    #[error("Io error: {0:?}")]
-    Io(#[from] io::Error),
     #[error("Conversion error {0:?}")]
     Coversion(#[from] core::num::TryFromIntError),
     /// Invalid state for a given operation
@@ -64,8 +61,6 @@ pub enum StateError {
     PubCompFail { reason: PubCompReason },
     #[error("Connection failed with reason '{reason:?}' ")]
     ConnFail { reason: ConnectReturnCode },
-    #[error("Connection closed by peer abruptly")]
-    ConnectionAborted,
 }
 
 impl From<mqttbytes::Error> for StateError {
