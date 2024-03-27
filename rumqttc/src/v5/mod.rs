@@ -85,8 +85,8 @@ pub struct MqttOptions {
     pending_throttle: Duration,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
-    /// Connection timeout
-    conn_timeout: u64,
+    /// Connect timeout
+    connect_timeout: Duration,
     /// Default value of for maximum incoming packet size.
     /// Used when `max_incomming_size` in `connect_properties` is NOT available.
     default_max_incoming_size: u32,
@@ -95,6 +95,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    /// Network options
     network_options: NetworkOptions,
     #[cfg(feature = "proxy")]
     /// Proxy configuration.
@@ -129,7 +130,7 @@ impl MqttOptions {
             max_batch_size: 10,
             pending_throttle: Duration::from_micros(0),
             last_will: None,
-            conn_timeout: 5,
+            connect_timeout: Duration::from_secs(5),
             default_max_incoming_size: 10 * 1024,
             connect_properties: None,
             manual_acks: false,
@@ -290,15 +291,15 @@ impl MqttOptions {
         self.pending_throttle
     }
 
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
+    /// set connect timeout
+    pub fn set_connect_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.connect_timeout = timeout;
         self
     }
 
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
+    /// get connect timeout
+    pub fn connect_timeout(&self) -> Duration {
+        self.connect_timeout
     }
 
     /// set connection properties
@@ -494,10 +495,12 @@ impl MqttOptions {
         self.manual_acks
     }
 
-    pub fn network_options(&self) -> NetworkOptions {
-        self.network_options.clone()
+    /// get network options
+    pub fn network_options(&self) -> &NetworkOptions {
+        &self.network_options
     }
 
+    /// set network options
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
         self
@@ -676,11 +679,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             .transpose()?;
 
         if let Some(conn_timeout) = queries
-            .remove("conn_timeout_secs")
+            .remove("connect_timeout_secs")
             .map(|v| v.parse::<u64>().map_err(|_| OptionError::ConnTimeout))
             .transpose()?
         {
-            options.set_connection_timeout(conn_timeout);
+            let conn_timeout = Duration::from_secs(conn_timeout);
+            options.set_connect_timeout(conn_timeout);
         }
 
         if let Some((opt, _)) = queries.into_iter().next() {
@@ -707,8 +711,9 @@ impl Debug for MqttOptions {
             .field("max_request_batch", &self.max_batch_size)
             .field("pending_throttle", &self.pending_throttle)
             .field("last_will", &self.last_will)
-            .field("conn_timeout", &self.conn_timeout)
+            .field("connect_timeout", &self.connect_timeout)
             .field("manual_acks", &self.manual_acks)
+            .field("network_options", &self.network_options)
             .field("connect properties", &self.connect_properties)
             .finish()
     }

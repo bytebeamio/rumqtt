@@ -1,22 +1,23 @@
-use super::framed::Network;
-use super::mqttbytes::v5::*;
-use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
-use crate::eventloop::socket_connect;
-use crate::framed::AsyncReadWrite;
+use super::{
+    framed::Network, mqttbytes::v5::ConnectReturnCode, mqttbytes::v5::*, Incoming, MqttOptions,
+    MqttState, Outgoing, Request, StateError, Transport,
+};
+use crate::{eventloop::socket_connect, framed::AsyncReadWrite};
 
 use flume::Receiver;
 use futures_util::{Stream, StreamExt};
-use tokio::select;
-use tokio::time::Interval;
-use tokio::time::{self, error::Elapsed};
+use tokio::{
+    select,
+    time::{self, error::Elapsed, timeout, Interval},
+};
 
-use std::collections::VecDeque;
-use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::Duration;
-
-use super::mqttbytes::v5::ConnectReturnCode;
+use std::{
+    collections::VecDeque,
+    io,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
@@ -77,8 +78,6 @@ pub struct EventLoop {
     pub options: MqttOptions,
     /// Current state of the connection
     pub state: MqttState,
-    /// Batch size
-    batch_size: usize,
     /// Request stream
     requests: Receiver<Request>,
     /// Pending requests from the last session
@@ -102,7 +101,6 @@ impl EventLoop {
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;
         let pending = IntervalQueue::new(options.pending_throttle);
-        let batch_size = options.max_batch_size;
         let state = MqttState::new(inflight_limit, manual_acks);
         assert!(!options.keep_alive.is_zero());
         let keepalive_interval = time::interval(options.keep_alive());
@@ -110,7 +108,6 @@ impl EventLoop {
         EventLoop {
             options,
             state,
-            batch_size,
             requests,
             pending,
             network: None,
@@ -139,11 +136,8 @@ impl EventLoop {
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
-            let (network, connack) = time::timeout(
-                Duration::from_secs(self.options.connection_timeout()),
-                connect(&mut self.options),
-            )
-            .await??;
+            let connect_timeout = self.options.connect_timeout();
+            let (network, connack) = timeout(connect_timeout, connect(&mut self.options)).await??;
             self.network = Some(network);
 
             // A connack never produces a response packet. Safe to ignore the return value
@@ -171,8 +165,9 @@ impl EventLoop {
     /// Select on network and requests and generate keepalive pings when necessary
     async fn poll_process(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
+        let network_timeout = self.options.network_options().connection_timeout();
 
-        for _ in 0..self.batch_size {
+        for _ in 0..self.options.max_batch_size {
             let inflight_full = self.state.is_inflight_full();
             let collision = self.state.has_collision();
 
@@ -207,13 +202,13 @@ impl EventLoop {
                 // outgoing requests (along with 1b).
                 Some(request) = self.pending.next(), if !inflight_full && !collision => {
                     if let Some(packet) = self.state.handle_outgoing_packet(request)? {
-                        network.write(packet).await?;
+                        timeout(network_timeout, network.write(packet)).await??;
                     }
                 },
                 request = self.requests.recv_async(), if self.pending.is_empty() && !inflight_full && !collision => {
                     let request = request.map_err(|_| ConnectionError::RequestsDone)?;
                     if let Some(packet) = self.state.handle_outgoing_packet(request)? {
-                        network.write(packet).await?;
+                        timeout(network_timeout, network.write(packet)).await??;
                     }
                 },
                 // Process next packet from io
@@ -223,7 +218,7 @@ impl EventLoop {
                     match packet? {
                         Some(packet) => if let Some(packet) = self.state.handle_incoming_packet(packet)? {
                             let flush = matches!(packet, Packet::PingResp(_));
-                            network.write(packet).await?;
+                            timeout(network_timeout, network.write(packet)).await??;
                             if flush {
                                 break;
                             }
@@ -234,7 +229,7 @@ impl EventLoop {
                 // Send a ping request on each interval tick
                 _ = self.keepalive_interval.tick() => {
                     if let Some(packet) = self.state.handle_outgoing_packet(Request::PingReq)? {
-                        network.write(packet).await?;
+                        timeout(network_timeout, network.write(packet)).await??;
                     }
                 }
                 else => unreachable!("Eventloop select is exhaustive"),
@@ -253,7 +248,7 @@ impl EventLoop {
             }
         }
 
-        network.flush().await?;
+        timeout(network_timeout, network.flush()).await??;
 
         self.state
             .events
@@ -447,6 +442,7 @@ async fn mqtt_connect(
     let keep_alive = options.keep_alive().as_secs() as u16;
     let clean_start = options.clean_start();
     let client_id = options.client_id();
+    let connect_timeout = options.connect_timeout();
     let properties = options.connect_properties();
 
     let connect = Connect {
@@ -457,7 +453,14 @@ async fn mqtt_connect(
     };
 
     // send mqtt connect packet
-    network.connect(connect, options).await?;
+    let last_will = options.last_will();
+    let login = options.credentials();
+    let connect = Packet::Connect(connect, last_will, login);
+    timeout(connect_timeout, async {
+        network.write(connect).await?;
+        network.flush().await
+    })
+    .await??;
 
     // validate connack
     match network.read().await? {
@@ -477,4 +480,63 @@ async fn mqtt_connect(
         Some(packet) => Err(ConnectionError::NotConnAck(Box::new(packet))),
         None => Err(ConnectionError::ConnectionClosed),
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn connect_and_receive_connack() {
+    let mut options = MqttOptions::new("", "", 0);
+
+    // Prepare a connect packet that is expected to be received.
+    let mut connect = bytes::BytesMut::new();
+    Packet::Connect(
+        Connect {
+            keep_alive: options.keep_alive().as_secs() as u16,
+            client_id: options.client_id(),
+            clean_start: options.clean_start(),
+            properties: options.connect_properties(),
+        },
+        options.last_will(),
+        options.credentials(),
+    )
+    .write(&mut connect, None)
+    .ok();
+
+    // Prepare connect ack
+    let mut connect_ack = bytes::BytesMut::new();
+    Packet::ConnAck(ConnAck {
+        session_present: false,
+        code: ConnectReturnCode::Success,
+        properties: None,
+    })
+    .write(&mut connect_ack, None)
+    .ok();
+
+    // IO will assume a connect packet and *not* reply with a connack.
+    let io = tokio_test::io::Builder::new()
+        .write(&connect)
+        .read(&connect_ack)
+        .build();
+    let mut network = Network::new(io, None);
+
+    // Operation should timeout because io flush will not resolve.
+    let result = mqtt_connect(&mut options, &mut network).await;
+
+    assert!(matches!(dbg!(result), Ok(Packet::ConnAck(ConnAck { .. }))));
+}
+
+#[tokio::test(start_paused = true)]
+async fn connect_timeouts_connect_packet_write() {
+    let mut options = MqttOptions::new("", "", 0);
+    options.set_connect_timeout(Duration::from_secs(10));
+
+    // IO will not accept the connect packet write
+    let io = tokio_test::io::Builder::new()
+        .wait(Duration::from_secs(30))
+        .build();
+    let mut network = Network::new(io, None);
+
+    // Operation should timeout because io flush will not resolve.
+    let result = mqtt_connect(&mut options, &mut network).await;
+
+    assert!(matches!(result, Err(ConnectionError::Timeout(_))));
 }

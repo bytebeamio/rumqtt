@@ -365,11 +365,12 @@ impl From<ClientConfig> for TlsConfiguration {
 }
 
 /// Provides a way to configure low level network connection configurations
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
-    conn_timeout: u64,
+    /// Connection timeout
+    connection_timeout: Duration,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
 }
@@ -379,7 +380,7 @@ impl NetworkOptions {
         NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
-            conn_timeout: 5,
+            connection_timeout: Duration::from_secs(5),
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
         }
@@ -393,15 +394,15 @@ impl NetworkOptions {
         self.tcp_recv_buffer_size = Some(size);
     }
 
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
+    /// Set connection timeout
+    pub fn set_connection_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.connection_timeout = timeout;
         self
     }
 
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
+    /// Get connection timeout
+    pub fn connection_timeout(&self) -> Duration {
+        self.connection_timeout
     }
 
     /// bind connection to a specific network device by name
