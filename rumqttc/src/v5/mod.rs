@@ -790,7 +790,7 @@ mod test {
             OptionError::RequestChannelCapacity
         );
         assert_eq!(
-            err("mqtt://host:42?client_id=foo&max_request_batch_num=foo"),
+            err("mqtt://host:42?client_id=foo&max_batch_size=foo"),
             OptionError::MaxRequestBatch
         );
         assert_eq!(
@@ -802,7 +802,7 @@ mod test {
             OptionError::Inflight
         );
         assert_eq!(
-            err("mqtt://host:42?client_id=foo&conn_timeout_secs=foo"),
+            err("mqtt://host:42?client_id=foo&connect_timeout_secs=foo"),
             OptionError::ConnTimeout
         );
     }
