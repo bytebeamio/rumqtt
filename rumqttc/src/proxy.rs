@@ -45,7 +45,7 @@ impl Proxy {
         self,
         broker_addr: &str,
         broker_port: u16,
-        network_options: NetworkOptions,
+        network_options: &NetworkOptions,
     ) -> Result<Box<dyn AsyncReadWrite>, ProxyError> {
         let proxy_addr = format!("{}:{}", self.addr, self.port);
 

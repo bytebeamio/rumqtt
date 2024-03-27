@@ -3,8 +3,8 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use super::{Error, Packet};
 
-/// MQTT v4 codec
-#[derive(Debug, Clone)]
+/// MQTT v5 codec
+#[derive(Default, Debug, Clone)]
 pub struct Codec {
     /// Maximum packet size allowed by client
     pub max_incoming_size: Option<u32>,
@@ -33,16 +33,14 @@ impl Encoder<Packet> for Codec {
     type Error = Error;
 
     fn encode(&mut self, item: Packet, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        item.write(dst, self.max_outgoing_size)?;
-
-        Ok(())
+        item.write(dst, self.max_outgoing_size).map(drop)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
-    use tokio_util::codec::Encoder;
+    use bytes::{Buf, BytesMut};
+    use tokio_util::codec::{Decoder, Encoder};
 
     use super::Codec;
     use crate::v5::{
@@ -72,5 +70,56 @@ mod tests {
             }) => {}
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn encode_decode_multiple_packets() {
+        let mut buf = BytesMut::new();
+        let mut codec = Codec::default();
+        let publish = Packet::Publish(Publish::new(
+            "hello/world",
+            QoS::AtMostOnce,
+            vec![1; 10],
+            None,
+        ));
+
+        // Encode a fixed number of publications into `buf`
+        for _ in 0..100 {
+            codec
+                .encode(publish.clone(), &mut buf)
+                .expect("failed to encode");
+        }
+
+        // Decode a fixed number of packets from `buf`
+        for _ in 0..100 {
+            let result = codec.decode(&mut buf).expect("failed to encode");
+            assert!(matches!(result, Some(p) if p == publish));
+        }
+
+        assert_eq!(buf.remaining(), 0);
+    }
+
+    #[test]
+    fn decode_insufficient() {
+        let mut buf = BytesMut::new();
+        let mut codec = Codec::default();
+        let publish = Packet::Publish(Publish::new(
+            "hello/world",
+            QoS::AtMostOnce,
+            vec![1; 100],
+            None,
+        ));
+
+        // Encode packet into `buf`
+        codec
+            .encode(publish.clone(), &mut buf)
+            .expect("failed to encode");
+        let result = codec.decode(&mut buf);
+        assert!(matches!(result, Ok(Some(p)) if p == publish));
+
+        buf.resize(buf.remaining() / 2, 0);
+
+        let result = codec.decode(&mut buf);
+        assert!(matches!(result, Ok(None)));
     }
 }
