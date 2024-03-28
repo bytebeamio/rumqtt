@@ -25,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-* Validate filters while creating subscription requests.
-* Make v4::Connect::write return correct value
+- Make v4::Connect::write return correct value
+- Validate topic filter and topic name for MQTT v3 and v5 during `Publish`, `Subscribe`, and `Unsubscribe` operations.
 
 ### Security
 

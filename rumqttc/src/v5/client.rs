@@ -6,9 +6,9 @@ use super::mqttbytes::v5::{
     Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
     Unsubscribe, UnsubscribeProperties,
 };
-use super::mqttbytes::{valid_filter, QoS};
+use super::mqttbytes::{validate_topic_name_and_alias, QoS};
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::valid_topic;
+use crate::valid_filter;
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -84,10 +84,11 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let mut publish = Publish::new(topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !is_ok {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -138,10 +139,11 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
+        let is_ok = validate_topic_name_and_alias(&topic, &properties);
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !is_ok {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
@@ -209,10 +211,11 @@ impl AsyncClient {
         S: Into<String>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let mut publish = Publish::new(topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !is_ok {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -319,14 +322,12 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
+        let subscribe = Subscribe::new_many(topics, properties);
+        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if !is_valid_filters {
+        if is_err {
             return Err(ClientError::Request(request));
         }
-
         self.request_tx.send_async(request).await?;
         Ok(())
     }
@@ -358,11 +359,10 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
+        let subscribe = Subscribe::new_many(topics, properties);
+        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if !is_valid_filters {
+        if is_err {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
@@ -393,8 +393,12 @@ impl AsyncClient {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+        let topic = topic.into();
+        let unsubscribe = Unsubscribe::new(&topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
+        if !valid_filter(topic) {
+            return Err(ClientError::Request(request));
+        }
         self.request_tx.send_async(request).await?;
         Ok(())
     }
@@ -417,8 +421,12 @@ impl AsyncClient {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+        let topic = topic.into();
+        let unsubscribe = Unsubscribe::new(&topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
+        if !valid_filter(topic) {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(())
     }
@@ -515,10 +523,11 @@ impl Client {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let mut publish = Publish::new(topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !is_ok {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
@@ -655,11 +664,10 @@ impl Client {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
+        let subscribe = Subscribe::new_many(topics, properties);
+        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if !is_valid_filters {
+        if is_err {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
@@ -709,8 +717,12 @@ impl Client {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+        let topic = topic.into();
+        let unsubscribe = Unsubscribe::new(&topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
+        if !valid_filter(topic) {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(())
     }

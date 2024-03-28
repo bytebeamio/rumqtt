@@ -11,6 +11,9 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe, 
 
     while payload_bytes > 0 {
         let topic_filter = read_mqtt_string(&mut bytes)?;
+        if !valid_filter(&topic_filter) {
+            return Err(Error::MalformedPacket);
+        }
         payload_bytes -= topic_filter.len() + 2;
         filters.push(topic_filter);
     }

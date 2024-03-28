@@ -1,6 +1,7 @@
 use super::*;
 use bytes::{Buf, Bytes};
 use core::fmt;
+use std::str::from_utf8;
 
 pub fn len(publish: &Publish, properties: &Option<PublishProperties>) -> usize {
     let mut len = 2 + publish.topic.len();
@@ -33,6 +34,10 @@ pub fn read(
     let variable_header_index = fixed_header.fixed_header_len;
     bytes.advance(variable_header_index);
     let topic = read_mqtt_bytes(&mut bytes)?;
+
+    if !valid_topic(from_utf8(&topic).map_err(|_| Error::TopicNotUtf8)?) {
+        return Err(Error::MalformedPacket);
+    }
 
     // Packet identifier exists where QoS > 0
     let pkid = match qos {
