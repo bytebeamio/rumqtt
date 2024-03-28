@@ -19,11 +19,11 @@ impl Subscribe {
     }
 
     pub fn new_many(
-        filters: impl AsRef<[Filter]>,
+        filters: impl IntoIterator<Item = Filter>,
         properties: Option<SubscribeProperties>,
     ) -> Self {
         Self {
-            filters: filters.as_ref().to_vec(),
+            filters: filters.into_iter().collect(),
             properties,
             ..Default::default()
         }
