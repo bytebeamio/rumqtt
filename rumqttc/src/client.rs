@@ -177,10 +177,13 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter);
+        let subscribe = Subscribe::new_many(topics);
+        let is_valid_filters = subscribe
+            .filters
+            .iter()
+            .all(|filter| valid_filter(&filter.path));
         let request = Request::Subscribe(subscribe);
+
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
@@ -193,10 +196,13 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter);
+        let subscribe = Subscribe::new_many(topics);
+        let is_valid_filters = subscribe
+            .filters
+            .iter()
+            .all(|filter| valid_filter(&filter.path));
         let request = Request::Subscribe(subscribe);
+
         if !is_valid_filters {
             return Err(ClientError::TryRequest(request));
         }
