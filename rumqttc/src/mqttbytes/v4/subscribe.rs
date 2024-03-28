@@ -21,10 +21,10 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many(topics: impl AsRef<[SubscribeFilter]>) -> Subscribe {
+    pub fn new_many(topics: impl IntoIterator<Item = SubscribeFilter>) -> Subscribe {
         Subscribe {
             pkid: 0,
-            filters: topics.as_ref().to_vec(),
+            filters: topics.into_iter().collect(),
         }
     }
 

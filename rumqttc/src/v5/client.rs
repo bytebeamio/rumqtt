@@ -321,9 +321,8 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let topics = topics.into_iter().collect::<Vec<_>>();
-        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics, properties);
+        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
         if is_err {
             return Err(ClientError::Request(request));
@@ -359,9 +358,8 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let topics = topics.into_iter().collect::<Vec<_>>();
-        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics, properties);
+        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
         if is_err {
             return Err(ClientError::TryRequest(request));
@@ -665,9 +663,8 @@ impl Client {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let topics = topics.into_iter().collect::<Vec<_>>();
-        let is_err = topics.iter().any(|t| !valid_filter(&t.path));
         let subscribe = Subscribe::new_many(topics, properties);
+        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
         if is_err {
             return Err(ClientError::Request(request));
