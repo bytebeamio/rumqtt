@@ -181,7 +181,7 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics.into_iter());
+        let subscribe = Subscribe::new_many(topics);
         let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
         if is_err {
