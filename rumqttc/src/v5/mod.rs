@@ -117,7 +117,7 @@ pub struct MqttOptions {
     /// client identifier
     client_id: String,
     /// username and password
-    credentials: Option<(String, String)>,
+    credentials: Option<Login>,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// Max internal request batching
@@ -131,7 +131,7 @@ pub struct MqttOptions {
     conn_timeout: u64,
     /// Default value of for maximum incoming packet size.
     /// Used when `max_incomming_size` in `connect_properties` is NOT available.
-    default_max_incoming_size: usize,
+    default_max_incoming_size: u32,
     /// Connect Properties
     connect_properties: Option<ConnectProperties>,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
@@ -301,12 +301,12 @@ impl MqttOptions {
         username: U,
         password: P,
     ) -> &mut Self {
-        self.credentials = Some((username.into(), password.into()));
+        self.credentials = Some(Login::new(username, password));
         self
     }
 
     /// Security options
-    pub fn credentials(&self) -> Option<(String, String)> {
+    pub fn credentials(&self) -> Option<Login> {
         self.credentials.clone()
     }
 

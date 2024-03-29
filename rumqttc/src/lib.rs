@@ -182,7 +182,7 @@ impl PkidPromise {
     }
 
     /// Wait for the pkid to resolve by blocking the current thread
-    /// 
+    ///
     /// # Panics
     /// Panics if called in an async context
     pub fn wait(self) -> Result<Pkid, PkidError> {
@@ -242,66 +242,6 @@ pub enum Request {
     Unsubscribe(Option<oneshot::Sender<Pkid>>, Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
-}
-
-impl Clone for Request {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Publish(_, p) => Self::Publish(None, p.clone()),
-            Self::PubAck(p) => Self::PubAck(p.clone()),
-            Self::PubRec(p) => Self::PubRec(p.clone()),
-            Self::PubRel(p) => Self::PubRel(p.clone()),
-            Self::PubComp(p) => Self::PubComp(p.clone()),
-            Self::Subscribe(_, p) => Self::Subscribe(None, p.clone()),
-            Self::SubAck(p) => Self::SubAck(p.clone()),
-            Self::PingReq(p) => Self::PingReq(p.clone()),
-            Self::PingResp(p) => Self::PingResp(p.clone()),
-            Self::Disconnect(p) => Self::Disconnect(p.clone()),
-            Self::Unsubscribe(_, p) => Self::Unsubscribe(None, p.clone()),
-            Self::UnsubAck(p) => Self::UnsubAck(p.clone()),
-        }
-    }
-}
-
-impl PartialEq for Request {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Publish(_, p1), Self::Publish(_, p2)) => p1 == p2,
-            (Self::PubAck(p1), Self::PubAck(p2)) => p1 == p2,
-            (Self::PubRec(p1), Self::PubRec(p2)) => p1 == p2,
-            (Self::PubRel(p1), Self::PubRel(p2)) => p1 == p2,
-            (Self::PubComp(p1), Self::PubComp(p2)) => p1 == p2,
-            (Self::Subscribe(_, p1), Self::Subscribe(_, p2)) => p1 == p2,
-            (Self::SubAck(p1), Self::SubAck(p2)) => p1 == p2,
-            (Self::PingReq(p1), Self::PingReq(p2)) => p1 == p2,
-            (Self::PingResp(p1), Self::PingResp(p2)) => p1 == p2,
-            (Self::Unsubscribe(_, p1), Self::Unsubscribe(_, p2)) => p1 == p2,
-            (Self::UnsubAck(p1), Self::UnsubAck(p2)) => p1 == p2,
-            (Self::Disconnect(p1), Self::Disconnect(p2)) => p1 == p2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Request {}
-
-impl Request {
-    fn size(&self) -> usize {
-        match &self {
-            Request::Publish(_, publish) => publish.size(),
-            Request::PubAck(puback) => puback.size(),
-            Request::PubRec(pubrec) => pubrec.size(),
-            Request::PubComp(pubcomp) => pubcomp.size(),
-            Request::PubRel(pubrel) => pubrel.size(),
-            Request::PingReq(pingreq) => pingreq.size(),
-            Request::PingResp(pingresp) => pingresp.size(),
-            Request::Subscribe(_, subscribe) => subscribe.size(),
-            Request::SubAck(suback) => suback.size(),
-            Request::Unsubscribe(_, unsubscribe) => unsubscribe.size(),
-            Request::UnsubAck(unsuback) => unsuback.size(),
-            Request::Disconnect(disconn) => disconn.size(),
-        }
-    }
 }
 
 impl From<Publish> for Request {
@@ -539,7 +479,7 @@ pub struct MqttOptions {
     /// client identifier
     client_id: String,
     /// username and password
-    credentials: Option<(String, String)>,
+    credentials: Option<Login>,
     /// maximum incoming packet size (verifies remaining length of the packet)
     max_incoming_packet_size: usize,
     /// Maximum outgoing packet size (only verifies publish payload size)
@@ -726,12 +666,12 @@ impl MqttOptions {
         username: U,
         password: P,
     ) -> &mut Self {
-        self.credentials = Some((username.into(), password.into()));
+        self.credentials = Some(Login::new(username, password));
         self
     }
 
     /// Security options
-    pub fn credentials(&self) -> Option<(String, String)> {
+    pub fn credentials(&self) -> Option<Login> {
         self.credentials.clone()
     }
 

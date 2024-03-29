@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, PkidPromise, Request};
+use crate::{
+    valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, PkidPromise, Request,
+};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -184,11 +186,13 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
     ) -> Result<PkidPromise, ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-
+        let topic = topic.into();
+        let subscribe = Subscribe::new(&topic, qos);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !valid_filter(&topic) {
+            return Err(ClientError::Request(request));
+        }
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -199,11 +203,13 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
     ) -> Result<PkidPromise, ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-
+        let topic = topic.into();
+        let subscribe = Subscribe::new(&topic, qos);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !valid_filter(&topic) {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -213,11 +219,14 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
-
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::Request(request));
+        }
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -227,11 +236,14 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
-
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -392,11 +404,13 @@ impl Client {
         topic: S,
         qos: QoS,
     ) -> Result<PkidPromise, ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
-
+        let topic = topic.into();
+        let subscribe = Subscribe::new(&topic, qos);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !valid_filter(&topic) {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -415,11 +429,14 @@ impl Client {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
-
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }

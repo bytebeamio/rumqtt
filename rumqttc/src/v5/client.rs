@@ -6,7 +6,7 @@ use super::mqttbytes::v5::{
     Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
     Unsubscribe, UnsubscribeProperties,
 };
-use super::mqttbytes::QoS;
+use super::mqttbytes::{valid_filter, QoS};
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use crate::{valid_topic, PkidPromise};
 
@@ -286,11 +286,13 @@ impl AsyncClient {
         properties: Option<SubscribeProperties>,
     ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
+        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
-        let request: Request = Request::Subscribe(Some(pkid_tx), subscribe);
+        let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_filter_valid {
+            return Err(ClientError::Request(request));
+        }
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -320,11 +322,13 @@ impl AsyncClient {
         properties: Option<SubscribeProperties>,
     ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
+        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_filter_valid {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -355,11 +359,15 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let subscribe = Subscribe::new_many(topics, properties);
-
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter, properties);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::Request(request));
+        }
+
         self.request_tx.send_async(request).await?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -391,11 +399,14 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let subscribe = Subscribe::new_many(topics, properties);
-
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter, properties);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -655,11 +666,13 @@ impl Client {
         properties: Option<SubscribeProperties>,
     ) -> Result<PkidPromise, ClientError> {
         let filter = Filter::new(topic, qos);
+        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_filter_valid {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }
@@ -709,11 +722,14 @@ impl Client {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let subscribe = Subscribe::new_many(topics, properties);
-
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter, properties);
         let (pkid_tx, pkid_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Subscribe(Some(pkid_tx), subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(PkidPromise::new(pkid_rx))
     }

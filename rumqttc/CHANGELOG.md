@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+* `size()` method on `Packet` calculates size once serialized.
+* `read()` and `write()` methods on `Packet`.
+* `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
+
+### Changed
+
+* rename `N` as `AsyncReadWrite` to describe usage.
+* use `Framed` to encode/decode MQTT packets.
+* use `Login` to store credentials
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+* Validate filters while creating subscription requests.
+* Make v4::Connect::write return correct value
+
+### Security
+
+---
+
+## [rumqttc 0.24.0] - 27-02-2024
+
+### Added
 - Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
 - Support for all variants of TLS key formats currently supported by Rustls: `PKCS#1`, `PKCS#8`, `RFC5915`. In practice we should now support all RSA keys and ECC keys in `DER` and `SEC1` encoding. Previously only `PKCS#1` and `PKCS#8` where supported.
 - TLS Error variants: `NoValidClientCertInChain`, `NoValidKeyInChain`.
