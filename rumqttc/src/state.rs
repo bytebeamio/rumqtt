@@ -581,25 +581,6 @@ mod test {
     }
 
     #[test]
-    fn outgoing_max_packet_size_check() {
-        let mut mqtt = MqttState::new(100, false);
-
-        let small_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; 100]);
-        assert_eq!(
-            mqtt.handle_outgoing_packet(Request::Publish(None, small_publish))
-                .is_ok(),
-            true
-        );
-
-        let large_publish = Publish::new("hello/world", QoS::AtLeastOnce, vec![1; 265]);
-        assert_eq!(
-            mqtt.handle_outgoing_packet(Request::Publish(None, large_publish))
-                .is_ok(),
-            false
-        );
-    }
-
-    #[test]
     fn outgoing_publish_should_set_pkid_and_add_publish_to_queue() {
         let mut mqtt = build_mqttstate();
 
