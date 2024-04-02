@@ -2,6 +2,7 @@
 // both v3 and v5
 use super::PublishProperties;
 pub use crate::mqttbytes::{valid_filter, valid_topic};
+use memchr::memchr;
 use std::{str::Utf8Error, vec};
 
 /// This module is the place where all the protocol specifics gets abstracted
@@ -64,7 +65,7 @@ pub(crate) fn validate_topic_name_and_alias(
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
-    if !topic.is_empty() && topic[..1].contains('$') {
+    if !topic.is_empty() && memchr(b'$', topic[..1].as_bytes()).is_some() {
         return false;
     }
 

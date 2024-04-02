@@ -1,10 +1,12 @@
+use memchr::{memchr, memchr2};
+
 /// Maximum length of a topic or topic filter according to
 /// [MQTT-4.7.3-3](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718109)
 pub const MAX_TOPIC_LEN: usize = 65535;
 
 /// Checks if a topic or topic filter has wildcards
 pub fn has_wildcards(s: impl AsRef<str>) -> bool {
-    s.as_ref().contains(['+', '#'])
+    memchr2(b'+', b'#', s.as_ref().as_bytes()).is_some()
 }
 
 /// Check if a topic is valid for PUBLISH packet.
@@ -26,7 +28,7 @@ fn can_be_topic_or_filter(topic_or_filter: impl AsRef<str>) -> bool {
     let topic_or_filter = topic_or_filter.as_ref();
     if topic_or_filter.is_empty()
         || topic_or_filter.len() > MAX_TOPIC_LEN
-        || topic_or_filter.contains('\0')
+        || memchr(b'\0', topic_or_filter.as_bytes()).is_some()
     {
         return false;
     }
@@ -54,7 +56,7 @@ pub fn valid_filter(filter: impl AsRef<str>) -> bool {
     // only single '#" or '+' is allowed in last entry
     // invalid: sport/tennis#
     // invalid: sport/++
-    if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+    if last.len() != 1 && has_wildcards(last) {
         return false;
     }
 
@@ -63,13 +65,13 @@ pub fn valid_filter(filter: impl AsRef<str>) -> bool {
         // # is not allowed in filter except as a last entry
         // invalid: sport/tennis#/player
         // invalid: sport/tennis/#/ranking
-        if entry.contains('#') {
+        if memchr(b'#', entry.as_bytes()).is_some() {
             return false;
         }
 
         // + must occupy an entire level of the filter
         // invalid: sport+
-        if entry.len() > 1 && entry.contains('+') {
+        if entry.len() > 1 && memchr(b'+', entry.as_bytes()).is_some() {
             return false;
         }
     }
@@ -86,7 +88,7 @@ pub fn matches(topic: impl AsRef<str>, filter: impl AsRef<str>) -> bool {
     let topic = topic.as_ref();
     let filter = filter.as_ref();
 
-    if !topic.is_empty() && topic[..1].contains('$') {
+    if !topic.is_empty() && memchr(b'$', topic[..1].as_bytes()).is_some() {
         return false;
     }
 
