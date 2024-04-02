@@ -83,11 +83,11 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let is_valid = validate_topic_name_and_alias(&topic, &properties);
         let mut publish = Publish::new(topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !is_ok {
+        if !is_valid {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -138,11 +138,11 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let is_valid = validate_topic_name_and_alias(&topic, &properties);
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !is_ok {
+        if !is_valid {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
@@ -210,11 +210,11 @@ impl AsyncClient {
         S: Into<String>,
     {
         let topic = topic.into();
-        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let is_valid = validate_topic_name_and_alias(&topic, &properties);
         let mut publish = Publish::new(topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !is_ok {
+        if !is_valid {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -322,9 +322,9 @@ impl AsyncClient {
         T: IntoIterator<Item = Filter>,
     {
         let subscribe = Subscribe::new_many(topics, properties);
-        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
+        let is_invalid_filter = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if is_err {
+        if is_invalid_filter {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
@@ -359,9 +359,9 @@ impl AsyncClient {
         T: IntoIterator<Item = Filter>,
     {
         let subscribe = Subscribe::new_many(topics, properties);
-        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
+        let is_invalid_filter = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if is_err {
+        if is_invalid_filter {
             return Err(ClientError::TryRequest(request));
         }
         self.request_tx.try_send(request)?;
@@ -522,11 +522,11 @@ impl Client {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let is_ok = validate_topic_name_and_alias(&topic, &properties);
+        let is_valid = validate_topic_name_and_alias(&topic, &properties);
         let mut publish = Publish::new(topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !is_ok {
+        if !is_valid {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
@@ -664,9 +664,9 @@ impl Client {
         T: IntoIterator<Item = Filter>,
     {
         let subscribe = Subscribe::new_many(topics, properties);
-        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
+        let is_invalid_filter = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if is_err {
+        if is_invalid_filter {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;

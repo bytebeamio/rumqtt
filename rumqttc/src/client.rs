@@ -182,9 +182,9 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
+        let is_invalid_filter = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if is_err {
+        if is_invalid_filter {
             return Err(ClientError::Request(request));
         }
         self.request_tx.send_async(request).await?;
@@ -197,9 +197,9 @@ impl AsyncClient {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
+        let is_invalid_filter = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if is_err {
+        if is_invalid_filter {
             return Err(ClientError::Request(request));
         }
         self.request_tx.try_send(request)?;
@@ -372,9 +372,9 @@ impl Client {
         T: IntoIterator<Item = SubscribeFilter>,
     {
         let subscribe = Subscribe::new_many(topics);
-        let is_err = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
+        let is_invalid_filter = subscribe.filters.iter().any(|t| !valid_filter(&t.path));
         let request = Request::Subscribe(subscribe);
-        if is_err {
+        if is_invalid_filter {
             return Err(ClientError::Request(request));
         }
         self.client.request_tx.send(request)?;
