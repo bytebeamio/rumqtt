@@ -51,7 +51,9 @@ pub fn valid_filter(filter: impl AsRef<str>) -> bool {
     // split will never return an empty iterator
     // even if the pattern isn't matched, the original string will be there
     // so it is safe to just unwrap here!
-    let last = hirerarchy.next().unwrap();
+    let Some(last) = hirerarchy.next() else {
+        return false;
+    };
 
     // only single '#" or '+' is allowed in last entry
     // invalid: sport/tennis#
