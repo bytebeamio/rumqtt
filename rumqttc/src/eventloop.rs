@@ -324,6 +324,10 @@ pub(crate) async fn socket_connect(
             socket.set_recv_buffer_size(recv_buffer_size).unwrap();
         }
 
+        if let Some(bind_addr) = network_options.bind_addr {
+            socket.bind(bind_addr)?;
+        }
+
         #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
         {
             if let Some(bind_device) = &network_options.bind_device {
