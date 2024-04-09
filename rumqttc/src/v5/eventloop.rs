@@ -77,7 +77,7 @@ pub struct EventLoop {
     /// Requests handle to send requests
     pub(crate) requests_tx: Sender<Request>,
     /// Pending packets from last session
-    pub pending: VecDeque<Request>,
+    pub(crate) pending: VecDeque<Request>,
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time

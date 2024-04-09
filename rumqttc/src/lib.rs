@@ -160,46 +160,57 @@ pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
-pub type Pkid = u16;
-
-/// A token through which the user can access the assigned packet id of an associated request, once it
-/// is processed by the [`EventLoop`].
-pub struct PkidPromise {
-    inner: oneshot::Receiver<Pkid>,
-}
+use v5::mqttbytes::v5::{SubscribeReasonCode as V5SubscribeReasonCode, UnsubAckReason};
 
 #[derive(Debug, thiserror::Error)]
-pub enum PkidError {
+pub enum NoticeError {
     #[error("Eventloop dropped Sender")]
     Recv,
+    #[error(" v4 Subscription Failure Reason Code: {0:?}")]
+    V4Subscribe(SubscribeReasonCode),
+    #[error(" v5 Subscription Failure Reason Code: {0:?}")]
+    V5Subscribe(V5SubscribeReasonCode),
+    #[error(" v5 Unsubscription Failure Reason: {0:?}")]
+    V5Unsubscribe(UnsubAckReason),
 }
 
-impl From<oneshot::error::RecvError> for PkidError {
+impl From<oneshot::error::RecvError> for NoticeError {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self::Recv
     }
 }
 
-impl PkidPromise {
-    pub fn new(inner: oneshot::Receiver<Pkid>) -> Self {
-        Self { inner }
-    }
+type NoticeResult = Result<(), NoticeError>;
 
-    /// Wait for the pkid to resolve by blocking the current thread
+/// A token through which the user is notified of the publish/subscribe/unsubscribe packet being acked by the broker.
+#[derive(Debug)]
+pub struct NoticeFuture(oneshot::Receiver<NoticeResult>);
+
+impl NoticeFuture {
+    /// Wait for broker to acknowledge by blocking the current thread
     ///
     /// # Panics
     /// Panics if called in an async context
-    pub fn wait(self) -> Result<Pkid, PkidError> {
-        let pkid = self.inner.blocking_recv()?;
-
-        Ok(pkid)
+    pub fn wait(self) -> NoticeResult {
+        self.0.blocking_recv()?
     }
 
-    /// Await pkid resolution without blocking the current thread
-    pub async fn wait_async(self) -> Result<Pkid, PkidError> {
-        let pkid = self.inner.await?;
+    /// Await the packet acknowledgement from broker, without blocking the current thread
+    pub async fn wait_async(self) -> NoticeResult {
+        self.0.await?
+    }
+}
 
-        Ok(pkid)
+#[derive(Debug)]
+pub struct NoticeTx(oneshot::Sender<NoticeResult>);
+
+impl NoticeTx {
+    fn success(self) {
+        _ = self.0.send(Ok(()));
+    }
+
+    fn error(self, e: NoticeError) {
+        _ = self.0.send(Err(e));
     }
 }
 
@@ -234,60 +245,19 @@ pub enum Outgoing {
 /// handled one by one.
 #[derive(Debug)]
 pub enum Request {
-    Publish(Option<oneshot::Sender<Pkid>>, Publish),
+    Publish(Option<NoticeTx>, Publish),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
-    PubRel(PubRel),
+    PubRel(Option<NoticeTx>, PubRel),
     PingReq(PingReq),
     PingResp(PingResp),
-    Subscribe(Option<oneshot::Sender<Pkid>>, Subscribe),
+    Subscribe(Option<NoticeTx>, Subscribe),
     SubAck(SubAck),
-    Unsubscribe(Option<oneshot::Sender<Pkid>>, Unsubscribe),
+    Unsubscribe(Option<NoticeTx>, Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
 }
-
-impl Clone for Request {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Publish(_, p) => Self::Publish(None, p.clone()),
-            Self::PubAck(p) => Self::PubAck(p.clone()),
-            Self::PubRec(p) => Self::PubRec(p.clone()),
-            Self::PubRel(p) => Self::PubRel(p.clone()),
-            Self::PubComp(p) => Self::PubComp(p.clone()),
-            Self::Subscribe(_, p) => Self::Subscribe(None, p.clone()),
-            Self::SubAck(p) => Self::SubAck(p.clone()),
-            Self::PingReq(p) => Self::PingReq(p.clone()),
-            Self::PingResp(p) => Self::PingResp(p.clone()),
-            Self::Disconnect(p) => Self::Disconnect(p.clone()),
-            Self::Unsubscribe(_, p) => Self::Unsubscribe(None, p.clone()),
-            Self::UnsubAck(p) => Self::UnsubAck(p.clone()),
-        }
-    }
-}
-
-impl PartialEq for Request {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Publish(_, p1), Self::Publish(_, p2)) => p1 == p2,
-            (Self::PubAck(p1), Self::PubAck(p2)) => p1 == p2,
-            (Self::PubRec(p1), Self::PubRec(p2)) => p1 == p2,
-            (Self::PubRel(p1), Self::PubRel(p2)) => p1 == p2,
-            (Self::PubComp(p1), Self::PubComp(p2)) => p1 == p2,
-            (Self::Subscribe(_, p1), Self::Subscribe(_, p2)) => p1 == p2,
-            (Self::SubAck(p1), Self::SubAck(p2)) => p1 == p2,
-            (Self::PingReq(p1), Self::PingReq(p2)) => p1 == p2,
-            (Self::PingResp(p1), Self::PingResp(p2)) => p1 == p2,
-            (Self::Unsubscribe(_, p1), Self::Unsubscribe(_, p2)) => p1 == p2,
-            (Self::UnsubAck(p1), Self::UnsubAck(p2)) => p1 == p2,
-            (Self::Disconnect(p1), Self::Disconnect(p2)) => p1 == p2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Request {}
 
 impl Request {
     fn size(&self) -> usize {
@@ -296,7 +266,7 @@ impl Request {
             Request::PubAck(puback) => puback.size(),
             Request::PubRec(pubrec) => pubrec.size(),
             Request::PubComp(pubcomp) => pubcomp.size(),
-            Request::PubRel(pubrel) => pubrel.size(),
+            Request::PubRel(_, pubrel) => pubrel.size(),
             Request::PingReq(pingreq) => pingreq.size(),
             Request::PingResp(pingresp) => pingresp.size(),
             Request::Subscribe(_, subscribe) => subscribe.size(),

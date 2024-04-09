@@ -7,7 +7,6 @@ use std::{
     pin::Pin,
     sync::Arc,
 };
-use tokio::sync::oneshot;
 
 mod client;
 mod eventloop;
@@ -16,7 +15,7 @@ pub mod mqttbytes;
 mod state;
 
 use crate::{NetworkOptions, Transport};
-use crate::{Outgoing, Pkid};
+use crate::{NoticeTx, Outgoing};
 
 use mqttbytes::v5::*;
 
@@ -36,16 +35,16 @@ pub type Incoming = Packet;
 /// handled one by one.
 #[derive(Debug)]
 pub enum Request {
-    Publish(Option<oneshot::Sender<Pkid>>, Publish),
+    Publish(Option<NoticeTx>, Publish),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
-    PubRel(PubRel),
+    PubRel(Option<NoticeTx>, PubRel),
     PingReq,
     PingResp,
-    Subscribe(Option<oneshot::Sender<Pkid>>, Subscribe),
+    Subscribe(Option<NoticeTx>, Subscribe),
     SubAck(SubAck),
-    Unsubscribe(Option<oneshot::Sender<Pkid>>, Unsubscribe),
+    Unsubscribe(Option<NoticeTx>, Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect,
 }
@@ -56,7 +55,7 @@ impl Clone for Request {
             Self::Publish(_, p) => Self::Publish(None, p.clone()),
             Self::PubAck(p) => Self::PubAck(p.clone()),
             Self::PubRec(p) => Self::PubRec(p.clone()),
-            Self::PubRel(p) => Self::PubRel(p.clone()),
+            Self::PubRel(_, p) => Self::PubRel(None, p.clone()),
             Self::PubComp(p) => Self::PubComp(p.clone()),
             Self::Subscribe(_, p) => Self::Subscribe(None, p.clone()),
             Self::SubAck(p) => Self::SubAck(p.clone()),
@@ -75,7 +74,7 @@ impl PartialEq for Request {
             (Self::Publish(_, p1), Self::Publish(_, p2)) => p1 == p2,
             (Self::PubAck(p1), Self::PubAck(p2)) => p1 == p2,
             (Self::PubRec(p1), Self::PubRec(p2)) => p1 == p2,
-            (Self::PubRel(p1), Self::PubRel(p2)) => p1 == p2,
+            (Self::PubRel(_, p1), Self::PubRel(_, p2)) => p1 == p2,
             (Self::PubComp(p1), Self::PubComp(p2)) => p1 == p2,
             (Self::Subscribe(_, p1), Self::Subscribe(_, p2)) => p1 == p2,
             (Self::SubAck(p1), Self::SubAck(p2)) => p1 == p2,
