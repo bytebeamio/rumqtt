@@ -55,6 +55,8 @@ pub enum ConnectionError {
     NotConnAck(Box<Packet>),
     #[error("Requests done")]
     RequestsDone,
+    #[error("Auth processing error")]
+    AuthProcessingError,
     #[cfg(feature = "websocket")]
     #[error("Invalid Url: {0}")]
     InvalidUrl(#[from] UrlError),
@@ -82,6 +84,9 @@ pub struct EventLoop {
     network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+
+    pub auth_sdata_rx: Option<Receiver<String>>,
+    pub auth_cdata_tx: Option<Sender<String>>,
 }
 
 /// Events which can be yielded by the event loop
@@ -101,15 +106,33 @@ impl EventLoop {
         let pending = VecDeque::new();
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;
+        
+        // set state according to authentication method
+        let mut auth_sdata_tx = None;
+        let mut auth_sdata_rx = None;
+        let mut auth_cdata_rx = None;
+        let mut auth_cdata_tx = None;
+
+        if options.authentication_method().is_some() {
+            let (auth_ctx, auth_crx) = bounded(1);
+            let (auth_stx, auth_srx) = bounded(1);
+
+            auth_sdata_tx = Some(auth_stx);
+            auth_sdata_rx = Some(auth_srx);
+            auth_cdata_rx = Some(auth_crx);
+            auth_cdata_tx = Some(auth_ctx);
+        }
 
         EventLoop {
             options,
-            state: MqttState::new(inflight_limit, manual_acks),
+            state: MqttState::new(inflight_limit, manual_acks, auth_cdata_rx, auth_sdata_tx),
             requests_tx,
             requests_rx,
             pending,
             network: None,
             keepalive_timeout: None,
+            auth_sdata_rx,
+            auth_cdata_tx,
         }
     }
 
@@ -138,7 +161,7 @@ impl EventLoop {
         if self.network.is_none() {
             let (network, connack) = time::timeout(
                 Duration::from_secs(self.options.connection_timeout()),
-                connect(&mut self.options),
+                connect(&mut self.options, &mut self.state),
             )
             .await??;
             self.network = Some(network);
@@ -263,12 +286,12 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &mut MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(options: &mut MqttOptions, state: &mut MqttState) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(options, &mut network).await?;
+    let packet = mqtt_connect(options, &mut network, state).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
@@ -387,12 +410,12 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 async fn mqtt_connect(
     options: &mut MqttOptions,
     network: &mut Network,
+    state: &mut MqttState,
 ) -> Result<Incoming, ConnectionError> {
     let keep_alive = options.keep_alive().as_secs() as u16;
     let clean_start = options.clean_start();
     let client_id = options.client_id();
     let properties = options.connect_properties();
-
     let connect = Connect {
         keep_alive,
         client_id,
@@ -404,18 +427,29 @@ async fn mqtt_connect(
     network.connect(connect, options).await?;
 
     // validate connack
-    match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            // Override local keep_alive value if set by server.
-            if let Some(props) = &connack.properties {
-                if let Some(keep_alive) = props.server_keep_alive {
-                    options.keep_alive = Duration::from_secs(keep_alive as u64);
+    loop {
+        match network.read().await? {
+            Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+                // Override local keep_alive value if set by server.
+                if let Some(props) = &connack.properties {
+                    if let Some(keep_alive) = props.server_keep_alive {
+                        options.keep_alive = Duration::from_secs(keep_alive as u64);
+                    }
+                    network.set_max_outgoing_size(props.max_packet_size);
                 }
-                network.set_max_outgoing_size(props.max_packet_size);
+                return Ok(Packet::ConnAck(connack));
             }
-            Ok(Packet::ConnAck(connack))
+            Incoming::ConnAck(connack) => return Err(ConnectionError::ConnectionRefused(connack.code)),
+            Incoming::Auth(auth) => {
+                if let Some(outgoing) = state.handle_incoming_packet(Incoming::Auth(auth))? {
+                    network.write(outgoing).await?;
+                    network.flush().await?;
+                }
+                else {
+                    return Err(ConnectionError::AuthProcessingError);
+                }
+            }
+            packet => return Err(ConnectionError::NotConnAck(Box::new(packet))),
         }
-        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-        packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
     }
 }

@@ -180,6 +180,8 @@ pub enum Outgoing {
     Disconnect,
     /// Await for an ack for more outgoing progress
     AwaitAck(u16),
+    /// Auth packet
+    Auth,
 }
 
 /// Requests by the client to mqtt event loop. Request are

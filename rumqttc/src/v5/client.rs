@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use super::mqttbytes::v5::{
-    Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
+    Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties, Auth, AuthProperties, AuthReasonCode,
     Unsubscribe, UnsubscribeProperties,
 };
 use super::mqttbytes::{valid_filter, QoS};
@@ -11,7 +11,7 @@ use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
 use crate::valid_topic;
 
 use bytes::Bytes;
-use flume::{SendError, Sender, TrySendError};
+use flume::{SendError, Sender, Receiver, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
@@ -47,6 +47,8 @@ impl From<TrySendError<Request>> for ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
+    auth_tx: Option<Sender<String>>,
+    auth_rx: Option<Receiver<String>>,
 }
 
 impl AsyncClient {
@@ -56,10 +58,37 @@ impl AsyncClient {
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
+        let auth_tx = eventloop.auth_cdata_tx.clone();
+        let auth_rx = eventloop.auth_sdata_rx.clone();
 
-        let client = AsyncClient { request_tx };
+        let client = AsyncClient { request_tx, auth_tx, auth_rx};
 
         (client, eventloop)
+    }
+
+    pub async fn recv_server_auth_data(&self) -> Result<String, ClientError> {
+        if self.auth_rx.is_none() {
+            return Err(ClientError::Request(Request::Disconnect));
+        }
+        let string = self.auth_rx.as_ref().unwrap().recv_async().await;
+
+        if let Err(_) = string {
+            return Err(ClientError::Request(Request::Disconnect));
+        }
+
+        Ok(string.unwrap())
+    }
+
+    pub async fn send_client_auth_data(&self, data: String) -> Result<(), ClientError> {
+        if self.auth_tx.is_none() {
+            return Err(ClientError::Request(Request::Disconnect));
+        }
+
+        if let Err(_) = self.auth_tx.as_ref().unwrap().send_async(data).await {
+            return Err(ClientError::Request(Request::Disconnect));
+        }
+
+        Ok(())
     }
 
     /// Create a new `AsyncClient` from a channel `Sender`.
@@ -67,7 +96,7 @@ impl AsyncClient {
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
     pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
-        AsyncClient { request_tx }
+        AsyncClient { request_tx, auth_tx: None, auth_rx: None }
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
@@ -193,6 +222,22 @@ impl AsyncClient {
         if let Some(ack) = ack {
             self.request_tx.try_send(ack)?;
         }
+        Ok(())
+    }
+
+    /// Sends a MQTT AUTH to `EventLoop` for authentication.
+    pub async fn auth(&self, reason: AuthReasonCode, properties: Option<AuthProperties>) -> Result<(), ClientError>{
+        let auth = Auth::new(reason, properties);
+        let auth = Request::Auth(auth);
+        self.request_tx.send_async(auth).await?;
+        Ok(())
+    }
+
+    /// Attempts to send a MQTT AUTH to `EventLoop` for authentication.
+    pub fn try_auth(&self, reason: AuthReasonCode, properties: Option<AuthProperties>) -> Result<(), ClientError>{
+        let auth = Auth::new(reason, properties);
+        let auth = Request::Auth(auth);
+        self.request_tx.try_send(auth)?;
         Ok(())
     }
 

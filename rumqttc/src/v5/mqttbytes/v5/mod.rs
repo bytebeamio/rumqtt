@@ -15,6 +15,7 @@ pub use self::{
     subscribe::{Filter, RetainForwardRule, Subscribe, SubscribeProperties},
     unsuback::{UnsubAck, UnsubAckProperties, UnsubAckReason},
     unsubscribe::{Unsubscribe, UnsubscribeProperties},
+    auth::{Auth, AuthProperties, AuthReasonCode},
 };
 
 use super::*;
@@ -34,6 +35,7 @@ mod suback;
 mod subscribe;
 mod unsuback;
 mod unsubscribe;
+mod auth;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
@@ -51,6 +53,7 @@ pub enum Packet {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
+    Auth(Auth),
 }
 
 impl Packet {
@@ -123,6 +126,10 @@ impl Packet {
                 let disconnect = Disconnect::read(fixed_header, packet)?;
                 Packet::Disconnect(disconnect)
             }
+            PacketType::Auth => {
+                let auth = Auth::read(fixed_header, packet)?;
+                Packet::Auth(auth)
+            }
         };
 
         Ok(packet)
@@ -153,6 +160,7 @@ impl Packet {
             Self::PingReq(_) => PingReq::write(write),
             Self::PingResp(_) => PingResp::write(write),
             Self::Disconnect(disconnect) => disconnect.write(write),
+            Self::Auth(auth) => auth.write(write),
         }
     }
 
@@ -172,6 +180,7 @@ impl Packet {
             Self::PingReq(req) => req.size(),
             Self::PingResp(resp) => resp.size(),
             Self::Disconnect(disconnect) => disconnect.size(),
+            Self::Auth(auth) => auth.size(),
         }
     }
 }
@@ -194,6 +203,7 @@ pub enum PacketType {
     PingReq,
     PingResp,
     Disconnect,
+    Auth,
 }
 
 #[repr(u8)]
@@ -280,6 +290,7 @@ impl FixedHeader {
             12 => Ok(PacketType::PingReq),
             13 => Ok(PacketType::PingResp),
             14 => Ok(PacketType::Disconnect),
+            15 => Ok(PacketType::Auth),
             _ => Err(Error::InvalidPacketType(num)),
         }
     }

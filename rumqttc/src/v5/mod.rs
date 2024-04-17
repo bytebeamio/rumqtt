@@ -1,11 +1,13 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
+use flume::{Sender, Receiver};
+
 #[cfg(feature = "websocket")]
 use std::{
     future::{Future, IntoFuture},
     pin::Pin,
-    sync::Arc,
+    sync::Arc
 };
 
 mod client;
@@ -47,6 +49,7 @@ pub enum Request {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect,
+    Auth(Auth),
 }
 
 #[cfg(feature = "websocket")]
