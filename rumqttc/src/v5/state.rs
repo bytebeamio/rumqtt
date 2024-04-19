@@ -1,15 +1,17 @@
 use super::mqttbytes::v5::{
     ConnAck, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
     PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel, PubRelReason, Publish,
-    SubAck, Subscribe, SubscribeReasonCode, UnsubAck, UnsubAckReason, Unsubscribe, Auth, AuthProperties, AuthReasonCode
+    SubAck, Subscribe, SubscribeReasonCode, UnsubAck, UnsubAckReason, Unsubscribe, Auth, AuthProperties, AuthReasonCode,
 };
 use super::mqttbytes::{self, Error as MqttError, QoS};
 
-use super::{Event, Incoming, Outgoing, Request};
+use super::{Event, Incoming, Outgoing, Request, AuthManagerTrait};
 
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
 use std::{io, time::Instant};
+use std::rc::Rc;
+use std::cell::RefCell;
 use flume::{Receiver, Sender};
 
 /// Errors during state handling
@@ -122,15 +124,15 @@ pub struct MqttState {
     pub(crate) max_outgoing_inflight: u16,
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
-    auth_rx: Option<Receiver<String>>,
-    auth_sx: Option<Sender<String>>,
+    /// Authentication manager
+    auth_manager: Option<Rc<RefCell<dyn AuthManagerTrait>>>,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool, auth_rx: Option<Receiver<String>>, auth_sx: Option<Sender<String>>) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Rc<RefCell<dyn AuthManagerTrait>>>) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -151,8 +153,7 @@ impl MqttState {
             broker_topic_alias_max: 0,
             max_outgoing_inflight: max_inflight,
             max_outgoing_inflight_upper_limit: max_inflight,
-            auth_rx,
-            auth_sx,
+            auth_manager,
         }
     }
 
@@ -488,21 +489,14 @@ impl MqttState {
     
     fn handle_incoming_auth(&mut self, auth: &mut Auth) -> Result<Option<Packet>, StateError> {
         let props = auth.properties.clone().unwrap();
-        let auth_data = String::from_utf8(props.authentication_data.unwrap().to_vec()).unwrap();
+        let in_auth_data = String::from_utf8(props.authentication_data.unwrap().to_vec()).unwrap();
 
-        if self.auth_rx.is_none() || self.auth_sx.is_none() {
-            return Err(StateError::InvalidState);
-        }
-
-        // Send server authentication data to application.
-        self.auth_sx.as_ref().unwrap().send(auth_data).unwrap();
-
-        // Receive client authentication data from application.
-        let client_auth_data = self.auth_rx.as_ref().unwrap().recv().unwrap();
+        let auth_manager = self.auth_manager.clone().unwrap();
+        let out_auth_data = auth_manager.borrow_mut().auth_continue(in_auth_data).unwrap();
 
         let properties = AuthProperties{
             authentication_method: Some(props.authentication_method.unwrap().to_string()),
-            authentication_data: Some(client_auth_data.clone().into()),
+            authentication_data: Some(out_auth_data.clone().into()),
             reason_string: None,
             user_properties: Vec::new(),
         };
@@ -760,7 +754,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(u16::MAX, false, None, None)
+        MqttState::new(u16::MAX, false, None)
     }
 
     #[test]
@@ -821,7 +815,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_with_max_inflight_is_ok() {
-        let mut mqtt = MqttState::new(2, false, None, None);
+        let mut mqtt = MqttState::new(2, false, None);
 
         // QoS2 publish
         let publish = build_outgoing_publish(QoS::ExactlyOnce);

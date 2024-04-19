@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
+use std::rc::Rc;
+use std::cell::RefCell;
 use flume::{Sender, Receiver};
 
 #[cfg(feature = "websocket")]
@@ -32,6 +34,11 @@ pub use crate::tls::Error as TlsError;
 pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
+
+pub trait AuthManagerTrait: std::fmt::Debug {
+    fn auth_continue(&mut self, auth_data: String) -> Result<String, String>;
+}
+
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
@@ -107,6 +114,8 @@ pub struct MqttOptions {
     outgoing_inflight_upper_limit: Option<u16>,
     #[cfg(feature = "websocket")]
     request_modifier: Option<RequestModifierFn>,
+
+    auth_manager: Option<Rc<RefCell<dyn AuthManagerTrait>>>,
 }
 
 impl MqttOptions {
@@ -142,6 +151,7 @@ impl MqttOptions {
             outgoing_inflight_upper_limit: None,
             #[cfg(feature = "websocket")]
             request_modifier: None,
+            auth_manager: None,
         }
     }
 
@@ -528,6 +538,15 @@ impl MqttOptions {
     /// The server may set its own maximum inflight limit, the smaller of the two will be used.
     pub fn get_outgoing_inflight_upper_limit(&self) -> Option<u16> {
         self.outgoing_inflight_upper_limit
+    }
+
+    pub fn set_auth_manager(&mut self, auth_manager: Rc<RefCell<dyn AuthManagerTrait>>) -> &mut Self {
+        self.auth_manager = Some(auth_manager);
+        self
+    }
+
+    pub fn auth_manager(&self) -> Option<Rc<RefCell<dyn AuthManagerTrait>>> {
+        self.auth_manager.clone()
     }
 }
 

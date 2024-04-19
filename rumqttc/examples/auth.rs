@@ -1,49 +1,62 @@
 
 use rumqttc::v5::mqttbytes::{QoS, v5::AuthReasonCode, v5::AuthProperties, v5::Auth};
-use rumqttc::v5::{AsyncClient, MqttOptions};
+use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait};
 use tokio::task;
 use std::error::Error;
-use std::thread;
+use std::rc::Rc;
+use std::cell::RefCell;
 use scram::ScramClient;
+use scram::client::ServerFirst;
 
-#[tokio::main()]
+#[derive(Debug)]
+struct AuthManager <'a>{
+    scram_client: Option<ScramClient<'a>>,
+    scram_server: Option<ServerFirst<'a>>,
+}
+
+impl <'a> AuthManager <'a>{
+    fn new(user: &'a str, password: &'a str) -> AuthManager <'a>{
+        let scram = ScramClient::new(user, password, None);
+
+        AuthManager{
+            scram_client: Some(scram),
+            scram_server: None,
+        }
+    }
+
+    fn auth_start(&mut self) -> Result<String, String>{
+        let scram = self.scram_client.take().unwrap();
+        let (scram, client_first) = scram.client_first();
+        self.scram_server = Some(scram);
+
+        Ok(client_first)
+    }
+}
+
+impl <'a> AuthManagerTrait for AuthManager<'a> {
+    fn auth_continue(&mut self, auth_data: String) -> Result<String, String> {
+        let scram = self.scram_server.take().unwrap();
+        let scram = scram.handle_server_first(&auth_data).unwrap();
+        let (_, client_final) = scram.client_final();
+        Ok(client_final)
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
 
-    let scram = ScramClient::new("user1", "123456", None);
-    let (scram, client_first) = scram.client_first();
+    let mut authmanager = AuthManager::new("user1", "123456");
+    let client_first = authmanager.auth_start().unwrap();
 
     let mut mqttoptions = MqttOptions::new("auth_test", "127.0.0.1", 1883);
     mqttoptions.set_authentication_method(Some("SCRAM-SHA-256".to_string()));
     mqttoptions.set_authentication_data(Some(client_first.clone().into()));
-    mqttoptions.set_connection_timeout(20);
+    mqttoptions.set_auth_manager(Rc::new(RefCell::new(authmanager)));
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
-    let scram2 = ScramClient::new("user1", "123456", None);
-    let (scram2, client_first2) = scram2.client_first();
-
     task::spawn(async move {
-        let server_first: String = client.recv_server_auth_data().await.unwrap();
-        let scram = scram.handle_server_first(&server_first).unwrap();
-        let (scram, client_final) = scram.client_final();
-        client.send_client_auth_data(client_final).await.unwrap();
-
         client.subscribe("rumqtt_auth/topic", QoS::AtLeastOnce).await.unwrap();
         client.publish("rumqtt_auth/topic", QoS::AtLeastOnce, false, "hello world").await.unwrap();
-
-        // Reauthentication
-        let props = AuthProperties {
-            authentication_method: Some("SCRAM-SHA-256".to_string()),
-            authentication_data: Some(client_first2.clone().into()),
-            reason_string: None,
-            user_properties: vec![],
-        };
-
-        client.auth(AuthReasonCode::Reauthenticate, Some(props)).await.unwrap();
-
-        let server_first: String = client.recv_server_auth_data().await.unwrap();
-        let scram2 = scram2.handle_server_first(&server_first).unwrap();
-        let (scram2, client_final2) = scram2.client_final();
-        client.send_client_auth_data(client_final2).await.unwrap();
     });
 
     loop {

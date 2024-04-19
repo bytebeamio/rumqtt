@@ -84,9 +84,6 @@ pub struct EventLoop {
     network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
-
-    pub auth_sdata_rx: Option<Receiver<String>>,
-    pub auth_cdata_tx: Option<Sender<String>>,
 }
 
 /// Events which can be yielded by the event loop
@@ -106,33 +103,17 @@ impl EventLoop {
         let pending = VecDeque::new();
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;
-        
-        // set state according to authentication method
-        let mut auth_sdata_tx = None;
-        let mut auth_sdata_rx = None;
-        let mut auth_cdata_rx = None;
-        let mut auth_cdata_tx = None;
 
-        if options.authentication_method().is_some() {
-            let (auth_ctx, auth_crx) = bounded(1);
-            let (auth_stx, auth_srx) = bounded(1);
-
-            auth_sdata_tx = Some(auth_stx);
-            auth_sdata_rx = Some(auth_srx);
-            auth_cdata_rx = Some(auth_crx);
-            auth_cdata_tx = Some(auth_ctx);
-        }
+        let auth_manager = options.auth_manager();
 
         EventLoop {
             options,
-            state: MqttState::new(inflight_limit, manual_acks, auth_cdata_rx, auth_sdata_tx),
+            state: MqttState::new(inflight_limit, manual_acks, auth_manager),
             requests_tx,
             requests_rx,
             pending,
             network: None,
             keepalive_timeout: None,
-            auth_sdata_rx,
-            auth_cdata_tx,
         }
     }
 

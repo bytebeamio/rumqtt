@@ -47,8 +47,6 @@ impl From<TrySendError<Request>> for ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
-    auth_tx: Option<Sender<String>>,
-    auth_rx: Option<Receiver<String>>,
 }
 
 impl AsyncClient {
@@ -58,37 +56,9 @@ impl AsyncClient {
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
-        let auth_tx = eventloop.auth_cdata_tx.clone();
-        let auth_rx = eventloop.auth_sdata_rx.clone();
-
-        let client = AsyncClient { request_tx, auth_tx, auth_rx};
+        let client = AsyncClient { request_tx};
 
         (client, eventloop)
-    }
-
-    pub async fn recv_server_auth_data(&self) -> Result<String, ClientError> {
-        if self.auth_rx.is_none() {
-            return Err(ClientError::Request(Request::Disconnect));
-        }
-        let string = self.auth_rx.as_ref().unwrap().recv_async().await;
-
-        if let Err(_) = string {
-            return Err(ClientError::Request(Request::Disconnect));
-        }
-
-        Ok(string.unwrap())
-    }
-
-    pub async fn send_client_auth_data(&self, data: String) -> Result<(), ClientError> {
-        if self.auth_tx.is_none() {
-            return Err(ClientError::Request(Request::Disconnect));
-        }
-
-        if let Err(_) = self.auth_tx.as_ref().unwrap().send_async(data).await {
-            return Err(ClientError::Request(Request::Disconnect));
-        }
-
-        Ok(())
     }
 
     /// Create a new `AsyncClient` from a channel `Sender`.
@@ -96,7 +66,7 @@ impl AsyncClient {
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
     pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
-        AsyncClient { request_tx, auth_tx: None, auth_rx: None }
+        AsyncClient { request_tx }
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
