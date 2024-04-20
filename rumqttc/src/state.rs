@@ -221,6 +221,10 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<Option<Packet>, StateError> {
+        if puback.pkid > self.max_inflight {
+            return Ok(None);
+        }
+
         let publish = self
             .outgoing_pub
             .get_mut(puback.pkid as usize)
@@ -319,7 +323,7 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<Option<Packet>, StateError> {
-        if publish.qos != QoS::AtMostOnce {
+        if publish.qos != QoS::AtMostOnce || publish.pkid > self.max_inflight {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
             }
