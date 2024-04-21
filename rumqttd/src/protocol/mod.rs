@@ -10,6 +10,7 @@ use std::{io, str::Utf8Error, string::FromUtf8Error};
 /// MQTT is the core protocol that this broker supports, a lot of structs closely
 /// map to what MQTT specifies in its protocol
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use memchr::{memchr, memchr2};
 
 use crate::Notification;
 
@@ -596,17 +597,35 @@ pub fn qos(num: u8) -> Option<QoS> {
 }
 
 /// Checks if a topic or topic filter has wildcards
-pub fn has_wildcards(s: &str) -> bool {
-    s.contains('+') || s.contains('#')
+pub fn has_wildcards(s: impl AsRef<str>) -> bool {
+    memchr2(b'+', b'#', s.as_ref().as_bytes()).is_some()
 }
 
-/// Checks if a topic is valid
-pub fn valid_topic(topic: &str) -> bool {
-    if topic.contains('+') {
-        return false;
-    }
+/// Check if a topic is valid for PUBLISH packet.
+pub fn valid_topic(topic: impl AsRef<str>) -> bool {
+    is_valid_topic_or_filter(&topic) && !has_wildcards(topic)
+}
 
-    if topic.contains('#') {
+/// Maximum length of a topic or topic filter according to
+/// [MQTT-4.7.3-3](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718109)
+pub const MAX_TOPIC_LEN: usize = 65535;
+
+/// Check if a topic is valid to qualify as a topic name or topic filter.
+///
+/// According to MQTT v3 Spec, it has to follow the following rules:
+/// 1. All Topic Names and Topic Filters MUST be at least one character long [MQTT-4.7.3-1]
+/// 2. Topic Names and Topic Filters are case sensitive
+/// 3. Topic Names and Topic Filters can include the space character
+/// 4. A leading or trailing `/` creates a distinct Topic Name or Topic Filter
+/// 5. A Topic Name or Topic Filter consisting only of the `/` character is valid
+/// 6. Topic Names and Topic Filters MUST NOT include the null character (Unicode U+0000) [MQTT-4.7.3-2]
+/// 7. Topic Names and Topic Filters are UTF-8 encoded strings, they MUST NOT encode to more than 65535 bytes.
+fn is_valid_topic_or_filter(topic_or_filter: impl AsRef<str>) -> bool {
+    let topic_or_filter = topic_or_filter.as_ref();
+    if topic_or_filter.is_empty()
+        || topic_or_filter.len() > MAX_TOPIC_LEN
+        || memchr(b'\0', topic_or_filter.as_bytes()).is_some()
+    {
         return false;
     }
 
@@ -616,32 +635,41 @@ pub fn valid_topic(topic: &str) -> bool {
 /// Checks if the filter is valid
 ///
 /// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
-pub fn valid_filter(filter: &str) -> bool {
-    if filter.is_empty() {
+pub fn valid_filter(filter: impl AsRef<str>) -> bool {
+    let filter = filter.as_ref();
+    if !is_valid_topic_or_filter(filter) {
         return false;
     }
 
-    let hirerarchy = filter.split('/').collect::<Vec<&str>>();
-    if let Some((last, remaining)) = hirerarchy.split_last() {
-        for entry in remaining.iter() {
-            // # is not allowed in filter except as a last entry
-            // invalid: sport/tennis#/player
-            // invalid: sport/tennis/#/ranking
-            if entry.contains('#') {
-                return false;
-            }
+    // rev() is used so we can easily get the last entry
+    let mut hirerarchy = filter.split('/').rev();
 
-            // + must occupy an entire level of the filter
-            // invalid: sport+
-            if entry.len() > 1 && entry.contains('+') {
-                return false;
-            }
+    // split will never return an empty iterator
+    // even if the pattern isn't matched, the original string will be there
+    // so it is safe to just unwrap here!
+    let Some(last) = hirerarchy.next() else {
+        return false;
+    };
+
+    // only single '#" or '+' is allowed in last entry
+    // invalid: sport/tennis#
+    // invalid: sport/++
+    if last.len() != 1 && has_wildcards(last) {
+        return false;
+    }
+
+    // remaining entries
+    for entry in hirerarchy {
+        // # is not allowed in filter except as a last entry
+        // invalid: sport/tennis#/player
+        // invalid: sport/tennis/#/ranking
+        if memchr(b'#', entry.as_bytes()).is_some() {
+            return false;
         }
 
-        // only single '#" or '+' is allowed in last entry
-        // invalid: sport/tennis#
-        // invalid: sport/++
-        if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+        // + must occupy an entire level of the filter
+        // invalid: sport+
+        if entry.len() > 1 && memchr(b'+', entry.as_bytes()).is_some() {
             return false;
         }
     }
@@ -655,7 +683,7 @@ pub fn valid_filter(filter: &str) -> bool {
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
-    if !topic.is_empty() && topic[..1].contains('$') {
+    if !topic.is_empty() && memchr(b'$', topic[..1].as_bytes()).is_some() {
         return false;
     }
 

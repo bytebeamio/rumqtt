@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - record client id for remote link's span
 - session present flag in connack
 - Make write method return the number of bytes written correctly everywhere
+- Validate topic name and topic filter in MQTT v3 and v5 `Publish`, `Subscribe` and `Unsubscribe` packets.
 
 ### Security
 - Implement constant-time password comparison in authentication logic
@@ -177,7 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [rumqttd 0.12.4] - 01-02-2023
 
 ### Fixed
-- Client id with tenant prefix should be set globally (#564) 
+- Client id with tenant prefix should be set globally (#564)
 
 ## [rumqttd 0.12.3] - 23-01-2023
 

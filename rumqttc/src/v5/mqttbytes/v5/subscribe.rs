@@ -18,10 +18,10 @@ impl Subscribe {
         }
     }
 
-    pub fn new_many<F>(filters: F, properties: Option<SubscribeProperties>) -> Self
-    where
-        F: IntoIterator<Item = Filter>,
-    {
+    pub fn new_many(
+        filters: impl IntoIterator<Item = Filter>,
+        properties: Option<SubscribeProperties>,
+    ) -> Self {
         Self {
             filters: filters.into_iter().collect(),
             properties,
