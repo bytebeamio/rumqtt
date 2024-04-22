@@ -546,7 +546,7 @@ impl MqttOptions {
     }
 
     pub fn auth_manager(&self) -> Option<Rc<RefCell<dyn AuthManagerTrait>>> {
-        self.auth_manager.clone()
+        Some(Rc::clone(self.auth_manager.as_ref().unwrap()))
     }
 }
 
