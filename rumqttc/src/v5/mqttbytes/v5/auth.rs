@@ -212,3 +212,33 @@ fn code(value: AuthReasonCode) -> u8 {
         AuthReasonCode::Reauthenticate => 0x19
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
+    use super::*;
+    use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn length_calculation() {
+        let mut dummy_bytes = BytesMut::new();
+        // Use user_properties to pad the size to exceed ~128 bytes to make the
+        // remaining_length field in the packet be 2 bytes long.
+        let auth_props = AuthProperties {
+            authentication_method: Some("Authentication Method".into()),
+            authentication_data: Some("Authentication Data".into()),
+            reason_string: None,
+            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
+        };
+
+        let auth_pkt = Auth::new(AuthReasonCode::ContinueAuthentication, Some(auth_props));
+
+        let size_from_size = auth_pkt.size();
+        let size_from_write = auth_pkt.write(&mut dummy_bytes).unwrap();
+        let size_from_bytes = dummy_bytes.len();
+
+        assert_eq!(size_from_write, size_from_bytes);
+        assert_eq!(size_from_size, size_from_bytes);
+    }
+}
