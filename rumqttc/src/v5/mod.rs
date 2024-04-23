@@ -36,7 +36,7 @@ pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 pub type Incoming = Packet;
 
 pub trait AuthManagerTrait: std::fmt::Debug {
-    fn auth_continue(&mut self, auth_data: String) -> Result<String, String>;
+    fn auth_continue(&mut self, auth_data: String) -> Result<String, StateError>;
 }
 
 
@@ -546,6 +546,9 @@ impl MqttOptions {
     }
 
     pub fn auth_manager(&self) -> Option<Rc<RefCell<dyn AuthManagerTrait>>> {
+        if self.auth_manager.is_none() {
+            return None;
+        }
         Some(Rc::clone(self.auth_manager.as_ref().unwrap()))
     }
 }

@@ -492,7 +492,11 @@ impl MqttState {
         let in_auth_data = String::from_utf8(props.authentication_data.unwrap().to_vec()).unwrap();
 
         let auth_manager = Rc::clone(self.auth_manager.as_ref().unwrap());
-        let out_auth_data = auth_manager.borrow_mut().auth_continue(in_auth_data).unwrap();
+
+        let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_data) {
+            Ok(data) => data,
+            Err(err) => return Err(err),
+        };
 
         let properties = AuthProperties{
             authentication_method: Some(props.authentication_method.unwrap().to_string()),

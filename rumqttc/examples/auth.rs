@@ -1,6 +1,6 @@
 
 use rumqttc::v5::mqttbytes::{QoS, v5::AuthReasonCode, v5::AuthProperties, v5::Auth};
-use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait};
+use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait, StateError};
 use tokio::task;
 use std::error::Error;
 use std::rc::Rc;
@@ -24,7 +24,7 @@ impl <'a> AuthManager <'a>{
         }
     }
 
-    fn auth_start(&mut self) -> Result<String, String>{
+    fn auth_start(&mut self) -> Result<String, StateError>{
         let scram = self.scram_client.take().unwrap();
         let (scram, client_first) = scram.client_first();
         self.scram_server = Some(scram);
@@ -34,7 +34,7 @@ impl <'a> AuthManager <'a>{
 }
 
 impl <'a> AuthManagerTrait for AuthManager<'a> {
-    fn auth_continue(&mut self, auth_data: String) -> Result<String, String> {
+    fn auth_continue(&mut self, auth_data: String) -> Result<String, StateError> {
         let scram = self.scram_server.take().unwrap();
         let scram = scram.handle_server_first(&auth_data).unwrap();
         let (_, client_final) = scram.client_final();
