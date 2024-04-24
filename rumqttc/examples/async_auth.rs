@@ -24,9 +24,6 @@ impl <'a> AuthManager <'a>{
             scram: None,
         }
     }
-}
-
-impl <'a> AuthManagerTrait for AuthManager<'a> {
 
     fn auth_start(&mut self) -> Result<Option<Bytes>, String>{
         let scram = ScramClient::new(self.user, self.password, None);
@@ -35,7 +32,9 @@ impl <'a> AuthManagerTrait for AuthManager<'a> {
 
         Ok(Some(client_first.into()))
     }
+}
 
+impl <'a> AuthManagerTrait for AuthManager<'a> {
     fn auth_continue(&mut self, auth_method: Option<String>, auth_data: Option<Bytes>) -> Result<Option<Bytes>, String> {
 
         // Check if the authentication method is SCRAM-SHA-256
