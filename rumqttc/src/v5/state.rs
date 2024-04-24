@@ -68,7 +68,11 @@ pub enum StateError {
     #[error("Connection failed with reason '{reason:?}' ")]
     ConnFail { reason: ConnectReturnCode },
     #[error("Connection closed by peer abruptly")]
-    ConnectionAborted
+    ConnectionAborted,
+    #[error("Authentication error: {0}")]
+    AuthError(String),
+    #[error("Auth Manager not set")]
+    AuthManagerNotSet,
 }
 
 impl From<mqttbytes::Error> for StateError {
@@ -491,11 +495,16 @@ impl MqttState {
         let props = auth.properties.clone().unwrap();
         let in_auth_data = String::from_utf8(props.authentication_data.unwrap().to_vec()).unwrap();
 
+        // Check if auth manager is set
+        if self.auth_manager.is_none() {
+            return Err(StateError::AuthManagerNotSet);
+        }
+
         let auth_manager = Rc::clone(self.auth_manager.as_ref().unwrap());
 
         let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_data) {
             Ok(data) => data,
-            Err(err) => return Err(err),
+            Err(err) => return Err(StateError::AuthError(err)),
         };
 
         let properties = AuthProperties{

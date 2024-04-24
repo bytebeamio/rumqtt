@@ -34,7 +34,7 @@ impl <'a> AuthManager <'a>{
 }
 
 impl <'a> AuthManagerTrait for AuthManager<'a> {
-    fn auth_continue(&mut self, auth_data: String) -> Result<String, StateError> {
+    fn auth_continue(&mut self, auth_data: String) -> Result<String, String> {
         let scram = self.scram_server.take().unwrap();
         let scram = scram.handle_server_first(&auth_data).unwrap();
         let (_, client_final) = scram.client_final();
