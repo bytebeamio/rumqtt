@@ -35,6 +35,7 @@ pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 pub type Incoming = Packet;
 
 pub trait AuthManagerTrait: std::fmt::Debug {
+    fn auth_start(&mut self) -> Result<Option<Bytes>, String>;
     fn auth_continue(&mut self, auth_method: Option<String>, auth_data: Option<Bytes>) -> Result<Option<Bytes>, String>;
 }
 

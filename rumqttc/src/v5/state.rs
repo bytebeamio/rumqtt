@@ -492,33 +492,39 @@ impl MqttState {
     }
     
     fn handle_incoming_auth(&mut self, auth: &mut Auth) -> Result<Option<Packet>, StateError> {
-        let props = auth.properties.clone().unwrap();
-        let in_auth_method = props.authentication_method;
-        let in_auth_data = props.authentication_data;
-
-        // Check if auth manager is set
-        if self.auth_manager.is_none() {
-            return Err(StateError::AuthManagerNotSet);
+        match auth.reason {
+            AuthReasonCode::Success => Ok(None),
+            AuthReasonCode::ContinueAuthentication => {
+                let props = auth.properties.clone().unwrap();
+                let in_auth_method = props.authentication_method;
+                let in_auth_data = props.authentication_data;
+        
+                // Check if auth manager is set
+                if self.auth_manager.is_none() {
+                    return Err(StateError::AuthManagerNotSet);
+                }
+        
+                let auth_manager = self.auth_manager.clone().unwrap();
+        
+                // Call auth_continue method of auth manager
+                let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_method.clone(), in_auth_data) {
+                    Ok(data) => data,
+                    Err(err) => return Err(StateError::AuthError(err)),
+                };
+        
+                let properties = AuthProperties{
+                    authentication_method: in_auth_method,
+                    authentication_data: out_auth_data,
+                    reason_string: None,
+                    user_properties: Vec::new(),
+                };
+        
+                let client_auth = Auth::new(AuthReasonCode::ContinueAuthentication, Some(properties));
+        
+                self.outgoing_auth(client_auth)
+            }
+            _ => return Err(StateError::AuthError("Authentication Failed!".to_string())),
         }
-
-        let auth_manager = Arc::clone(self.auth_manager.as_ref().unwrap());
-
-        // Call auth_continue method of auth manager
-        let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_method.clone(), in_auth_data) {
-            Ok(data) => data,
-            Err(err) => return Err(StateError::AuthError(err)),
-        };
-
-        let properties = AuthProperties{
-            authentication_method: in_auth_method,
-            authentication_data: out_auth_data,
-            reason_string: None,
-            user_properties: Vec::new(),
-        };
-
-        let client_auth = Auth::new(AuthReasonCode::ContinueAuthentication, Some(properties));
-
-        self.outgoing_auth(client_auth)
     }
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
