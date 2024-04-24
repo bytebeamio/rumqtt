@@ -493,7 +493,8 @@ impl MqttState {
     
     fn handle_incoming_auth(&mut self, auth: &mut Auth) -> Result<Option<Packet>, StateError> {
         let props = auth.properties.clone().unwrap();
-        let in_auth_data = String::from_utf8(props.authentication_data.unwrap().to_vec()).unwrap();
+        let in_auth_method = props.authentication_method;
+        let in_auth_data = props.authentication_data;
 
         // Check if auth manager is set
         if self.auth_manager.is_none() {
@@ -502,14 +503,15 @@ impl MqttState {
 
         let auth_manager = Rc::clone(self.auth_manager.as_ref().unwrap());
 
-        let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_data) {
+        // Call auth_continue method of auth manager
+        let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_method.clone(), in_auth_data) {
             Ok(data) => data,
             Err(err) => return Err(StateError::AuthError(err)),
         };
 
         let properties = AuthProperties{
-            authentication_method: Some(props.authentication_method.unwrap().to_string()),
-            authentication_data: Some(out_auth_data.clone().into()),
+            authentication_method: in_auth_method,
+            authentication_data: out_auth_data,
             reason_string: None,
             user_properties: Vec::new(),
         };
