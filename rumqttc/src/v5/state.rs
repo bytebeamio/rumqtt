@@ -10,7 +10,7 @@ use super::{Event, Incoming, Outgoing, Request, AuthManagerTrait};
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
 use std::{io, time::Instant};
-use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
 use flume::{Receiver, Sender};
 
@@ -129,14 +129,14 @@ pub struct MqttState {
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
     /// Authentication manager
-    auth_manager: Option<Rc<RefCell<dyn AuthManagerTrait>>>,
+    auth_manager: Option<Arc<RefCell<dyn AuthManagerTrait>>>,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Rc<RefCell<dyn AuthManagerTrait>>>) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Arc<RefCell<dyn AuthManagerTrait>>>) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -501,7 +501,7 @@ impl MqttState {
             return Err(StateError::AuthManagerNotSet);
         }
 
-        let auth_manager = Rc::clone(self.auth_manager.as_ref().unwrap());
+        let auth_manager = Arc::clone(self.auth_manager.as_ref().unwrap());
 
         // Call auth_continue method of auth manager
         let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_method.clone(), in_auth_data) {

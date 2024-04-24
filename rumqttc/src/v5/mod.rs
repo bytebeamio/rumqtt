@@ -1,15 +1,14 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
 use flume::{Sender, Receiver};
 
 #[cfg(feature = "websocket")]
 use std::{
     future::{Future, IntoFuture},
-    pin::Pin,
-    sync::Arc
+    pin::Pin
 };
 
 mod client;
@@ -115,7 +114,7 @@ pub struct MqttOptions {
     #[cfg(feature = "websocket")]
     request_modifier: Option<RequestModifierFn>,
 
-    auth_manager: Option<Rc<RefCell<dyn AuthManagerTrait>>>,
+    auth_manager: Option<Arc<RefCell<dyn AuthManagerTrait>>>,
 }
 
 impl MqttOptions {
@@ -540,16 +539,17 @@ impl MqttOptions {
         self.outgoing_inflight_upper_limit
     }
 
-    pub fn set_auth_manager(&mut self, auth_manager: Rc<RefCell<dyn AuthManagerTrait>>) -> &mut Self {
+    pub fn set_auth_manager(&mut self, auth_manager: Arc<RefCell<dyn AuthManagerTrait>>) -> &mut Self {
         self.auth_manager = Some(auth_manager);
         self
     }
 
-    pub fn auth_manager(&self) -> Option<Rc<RefCell<dyn AuthManagerTrait>>> {
+    pub fn auth_manager(&self) -> Option<Arc<RefCell<dyn AuthManagerTrait>>> {
         if self.auth_manager.is_none() {
             return None;
         }
-        Some(Rc::clone(self.auth_manager.as_ref().unwrap()))
+
+        self.auth_manager.clone()
     }
 }
 

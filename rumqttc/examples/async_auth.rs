@@ -3,7 +3,7 @@ use rumqttc::v5::mqttbytes::{QoS, v5::AuthProperties};
 use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait};
 use tokio::task;
 use std::error::Error;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
 use bytes::Bytes;
 use scram::ScramClient;
@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut mqttoptions = MqttOptions::new("auth_test", "127.0.0.1", 1883);
     mqttoptions.set_authentication_method(Some("SCRAM-SHA-256".to_string()));
     mqttoptions.set_authentication_data(client_first);
-    mqttoptions.set_auth_manager(Rc::new(RefCell::new(authmanager)));
+    mqttoptions.set_auth_manager(Arc::new(RefCell::new(authmanager)));
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
     task::spawn(async move {
