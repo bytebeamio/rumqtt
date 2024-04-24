@@ -1,6 +1,6 @@
 
-use rumqttc::v5::mqttbytes::{QoS, v5::AuthReasonCode, v5::AuthProperties, v5::Auth};
-use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait, StateError};
+use rumqttc::v5::mqttbytes::{QoS, v5::AuthProperties};
+use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait};
 use tokio::task;
 use std::error::Error;
 use std::rc::Rc;
@@ -11,30 +11,32 @@ use scram::client::ServerFirst;
 
 #[derive(Debug)]
 struct AuthManager <'a>{
-    scram_client: Option<ScramClient<'a>>,
-    scram_server: Option<ServerFirst<'a>>,
+    user: &'a str,
+    password: &'a str,
+    scram: Option<ServerFirst<'a>>,
 }
 
 impl <'a> AuthManager <'a>{
     fn new(user: &'a str, password: &'a str) -> AuthManager <'a>{
-        let scram = ScramClient::new(user, password, None);
-
         AuthManager{
-            scram_client: Some(scram),
-            scram_server: None,
+            user,
+            password,
+            scram: None,
         }
     }
-
+    
     fn auth_start(&mut self) -> Result<Option<Bytes>, String>{
-        let scram = self.scram_client.take().unwrap();
+        let scram = ScramClient::new(self.user, self.password, None);
         let (scram, client_first) = scram.client_first();
-        self.scram_server = Some(scram);
+        self.scram = Some(scram);
 
         Ok(Some(client_first.into()))
     }
 }
 
 impl <'a> AuthManagerTrait for AuthManager<'a> {
+
+
     fn auth_continue(&mut self, auth_method: Option<String>, auth_data: Option<Bytes>) -> Result<Option<Bytes>, String> {
 
         // Check if the authentication method is SCRAM-SHA-256
@@ -42,9 +44,23 @@ impl <'a> AuthManagerTrait for AuthManager<'a> {
             return Err("Invalid authentication method".to_string());
         }
 
-        let scram = self.scram_server.take().unwrap();
-        let scram = scram.handle_server_first(&String::from_utf8(auth_data.unwrap().to_vec()).unwrap()).unwrap();
+        if self.scram.is_none() {
+            return Err("Invalid state".to_string());
+        }
+
+        let scram = self.scram.take().unwrap();
+
+        let auth_data = String::from_utf8(auth_data.unwrap().to_vec()).unwrap();
+
+        // Process the server first message and reassign the SCRAM state.
+        let scram = match(scram.handle_server_first(&auth_data)){
+            Ok(scram) => scram,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        // Get the client final message and reassign the SCRAM state.
         let (_, client_final) = scram.client_final();
+
         Ok(Some(client_final.into()))
     }
 }
