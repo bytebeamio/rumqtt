@@ -1,6 +1,6 @@
 
 use rumqttc::v5::mqttbytes::{QoS, v5::AuthProperties};
-use rumqttc::v5::{AsyncClient, MqttOptions, AuthManagerTrait};
+use rumqttc::v5::{AsyncClient, MqttOptions, AuthManager};
 use tokio::task;
 use std::error::Error;
 use std::sync::Arc;
@@ -10,15 +10,15 @@ use scram::ScramClient;
 use scram::client::ServerFirst;
 
 #[derive(Debug)]
-struct AuthManager <'a>{
+struct ScramAuthManager <'a>{
     user: &'a str,
     password: &'a str,
     scram: Option<ServerFirst<'a>>,
 }
 
-impl <'a> AuthManager <'a>{
-    fn new(user: &'a str, password: &'a str) -> AuthManager <'a>{
-        AuthManager{
+impl <'a> ScramAuthManager <'a>{
+    fn new(user: &'a str, password: &'a str) -> ScramAuthManager <'a>{
+        ScramAuthManager{
             user,
             password,
             scram: None,
@@ -34,7 +34,7 @@ impl <'a> AuthManager <'a>{
     }
 }
 
-impl <'a> AuthManagerTrait for AuthManager<'a> {
+impl <'a> AuthManager for ScramAuthManager<'a> {
     fn auth_continue(&mut self, auth_method: Option<String>, auth_data: Option<Bytes>) -> Result<Option<Bytes>, String> {
 
         // Check if the authentication method is SCRAM-SHA-256
@@ -66,7 +66,7 @@ impl <'a> AuthManagerTrait for AuthManager<'a> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
 
-    let mut authmanager = AuthManager::new("user1", "123456");
+    let mut authmanager = ScramAuthManager::new("user1", "123456");
     let client_first = authmanager.auth_start().unwrap();
     let authmanager = Arc::new(RefCell::new(authmanager));
 

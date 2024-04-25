@@ -5,7 +5,7 @@ use super::mqttbytes::v5::{
 };
 use super::mqttbytes::{self, Error as MqttError, QoS};
 
-use super::{Event, Incoming, Outgoing, Request, AuthManagerTrait};
+use super::{Event, Incoming, Outgoing, Request, AuthManager};
 
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
@@ -129,14 +129,14 @@ pub struct MqttState {
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
     /// Authentication manager
-    auth_manager: Option<Arc<RefCell<dyn AuthManagerTrait>>>,
+    auth_manager: Option<Arc<RefCell<dyn AuthManager>>>,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Arc<RefCell<dyn AuthManagerTrait>>>) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Arc<RefCell<dyn AuthManager>>>) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,

@@ -3,7 +3,6 @@ use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 use std::sync::Arc;
 use std::cell::RefCell;
-use flume::{Sender, Receiver};
 
 #[cfg(feature = "websocket")]
 use std::{
@@ -34,7 +33,19 @@ pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
-pub trait AuthManagerTrait: std::fmt::Debug {
+pub trait AuthManager: std::fmt::Debug {
+    /// Process authentication data received from the server and generate authentication data to be sent back.
+    ///
+    /// # Arguments
+    ///
+    /// * `auth_method` - The authentication method received from the server.
+    /// * `auth_data` - The authentication data received from the server.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(auth_data)` - The authentication data to be sent back to the server.
+    /// * `Err(error_message)` - An error indicating that the authentication process has failed or terminated.
+
     fn auth_continue(&mut self, auth_method: Option<String>, auth_data: Option<Bytes>) -> Result<Option<Bytes>, String>;
 }
 
@@ -114,7 +125,7 @@ pub struct MqttOptions {
     #[cfg(feature = "websocket")]
     request_modifier: Option<RequestModifierFn>,
 
-    auth_manager: Option<Arc<RefCell<dyn AuthManagerTrait>>>,
+    auth_manager: Option<Arc<RefCell<dyn AuthManager>>>,
 }
 
 impl MqttOptions {
@@ -539,12 +550,12 @@ impl MqttOptions {
         self.outgoing_inflight_upper_limit
     }
 
-    pub fn set_auth_manager(&mut self, auth_manager: Arc<RefCell<dyn AuthManagerTrait>>) -> &mut Self {
+    pub fn set_auth_manager(&mut self, auth_manager: Arc<RefCell<dyn AuthManager>>) -> &mut Self {
         self.auth_manager = Some(auth_manager);
         self
     }
 
-    pub fn auth_manager(&self) -> Option<Arc<RefCell<dyn AuthManagerTrait>>> {
+    pub fn auth_manager(&self) -> Option<Arc<RefCell<dyn AuthManager>>> {
         if self.auth_manager.is_none() {
             return None;
         }
