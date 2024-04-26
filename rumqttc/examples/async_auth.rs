@@ -3,8 +3,7 @@ use rumqttc::v5::mqttbytes::{QoS, v5::AuthProperties};
 use rumqttc::v5::{AsyncClient, MqttOptions, AuthManager};
 use tokio::task;
 use std::error::Error;
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use scram::ScramClient;
 use scram::client::ServerFirst;
@@ -68,7 +67,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut authmanager = ScramAuthManager::new("user1", "123456");
     let client_first = authmanager.auth_start().unwrap();
-    let authmanager = Arc::new(RefCell::new(authmanager));
+    let authmanager = Arc::new(Mutex::new(authmanager));
 
     let mut mqttoptions = MqttOptions::new("auth_test", "127.0.0.1", 1883);
     mqttoptions.set_authentication_method(Some("SCRAM-SHA-256".to_string()));
@@ -80,6 +79,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     task::spawn(async move {
         client.subscribe("rumqtt_auth/topic", QoS::AtLeastOnce).await.unwrap();
         client.publish("rumqtt_auth/topic", QoS::AtLeastOnce, false, "hello world").await.unwrap();
+
+        // Sleep for 5 seconds for the connection to be established.
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        let client_first = authmanager.clone().lock().unwrap().auth_start().unwrap();
+        let properties = AuthProperties{
+            authentication_method: Some("SCRAM-SHA-256".to_string()),
+            authentication_data: client_first,
+            reason_string: None,
+            user_properties: Vec::new(),
+        };
+        client.reauth(Some(properties)).await.unwrap();
     });
 
     loop {
@@ -91,14 +102,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match(event){
                     rumqttc::v5::Event::Incoming(rumqttc::v5::Incoming::ConnAck(_)) => {
                         // Test re-authentication.
-                        let client_first = authmanager.clone().borrow_mut().auth_start().unwrap();
-                        let properties = AuthProperties{
-                            authentication_method: Some("SCRAM-SHA-256".to_string()),
-                            authentication_data: client_first,
-                            reason_string: None,
-                            user_properties: Vec::new(),
-                        };
-                        client2.reauth(Some(properties)).await.unwrap();
                     }
                     _ => {},
                 }

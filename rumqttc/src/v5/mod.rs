@@ -1,8 +1,7 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "websocket")]
 use std::{
@@ -125,7 +124,7 @@ pub struct MqttOptions {
     #[cfg(feature = "websocket")]
     request_modifier: Option<RequestModifierFn>,
 
-    auth_manager: Option<Arc<RefCell<dyn AuthManager>>>,
+    auth_manager: Option<Arc<Mutex<dyn AuthManager>>>,
 }
 
 impl MqttOptions {
@@ -550,12 +549,12 @@ impl MqttOptions {
         self.outgoing_inflight_upper_limit
     }
 
-    pub fn set_auth_manager(&mut self, auth_manager: Arc<RefCell<dyn AuthManager>>) -> &mut Self {
+    pub fn set_auth_manager(&mut self, auth_manager: Arc<Mutex<dyn AuthManager>>) -> &mut Self {
         self.auth_manager = Some(auth_manager);
         self
     }
 
-    pub fn auth_manager(&self) -> Option<Arc<RefCell<dyn AuthManager>>> {
+    pub fn auth_manager(&self) -> Option<Arc<Mutex<dyn AuthManager>>> {
         if self.auth_manager.is_none() {
             return None;
         }

@@ -10,8 +10,7 @@ use super::{Event, Incoming, Outgoing, Request, AuthManager};
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
 use std::{io, time::Instant};
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use flume::{Receiver, Sender};
 
 /// Errors during state handling
@@ -129,14 +128,14 @@ pub struct MqttState {
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
     /// Authentication manager
-    auth_manager: Option<Arc<RefCell<dyn AuthManager>>>,
+    auth_manager: Option<Arc<Mutex<dyn AuthManager>>>,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Arc<RefCell<dyn AuthManager>>>) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Arc<Mutex<dyn AuthManager>>>) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -507,7 +506,7 @@ impl MqttState {
                 let auth_manager = self.auth_manager.clone().unwrap();
         
                 // Call auth_continue method of auth manager
-                let out_auth_data = match auth_manager.borrow_mut().auth_continue(in_auth_method.clone(), in_auth_data) {
+                let out_auth_data = match auth_manager.lock().unwrap().auth_continue(in_auth_method.clone(), in_auth_data) {
                     Ok(data) => data,
                     Err(err) => return Err(StateError::AuthError(err)),
                 };
