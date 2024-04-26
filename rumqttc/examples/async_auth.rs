@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use scram::ScramClient;
 use scram::client::ServerFirst;
+use flume::bounded;
 
 #[derive(Debug)]
 struct ScramAuthManager <'a>{
@@ -74,14 +75,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     mqttoptions.set_authentication_data(client_first);
     mqttoptions.set_auth_manager(authmanager.clone());
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
-    let client2 = client.clone();
+    
+    let (tx, rx) = bounded(1);
 
     task::spawn(async move {
         client.subscribe("rumqtt_auth/topic", QoS::AtLeastOnce).await.unwrap();
         client.publish("rumqtt_auth/topic", QoS::AtLeastOnce, false, "hello world").await.unwrap();
 
-        // Sleep for 5 seconds for the connection to be established.
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        // Wait for the connection to be established.
+        rx.recv_async().await.unwrap();
 
         let client_first = authmanager.clone().lock().unwrap().auth_start().unwrap();
         let properties = AuthProperties{
@@ -101,7 +103,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("{:?}", event);
                 match(event){
                     rumqttc::v5::Event::Incoming(rumqttc::v5::Incoming::ConnAck(_)) => {
-                        // Test re-authentication.
+                        tx.send_async("Connected").await.unwrap();
                     }
                     _ => {},
                 }
