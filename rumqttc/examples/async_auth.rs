@@ -85,6 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Wait for the connection to be established.
         rx.recv_async().await.unwrap();
 
+        // Reauthenticate using SCRAM-SHA-256
         let client_first = authmanager.clone().lock().unwrap().auth_start().unwrap();
         let properties = AuthProperties{
             authentication_method: Some("SCRAM-SHA-256".to_string()),
@@ -100,7 +101,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         match notification {
             Ok(event) => {
-                println!("{:?}", event);
+                println!("Event = {:?}", event);
                 match(event){
                     rumqttc::v5::Event::Incoming(rumqttc::v5::Incoming::ConnAck(_)) => {
                         tx.send_async("Connected").await.unwrap();
