@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `size()` method on `Packet` calculates size once serialized.
 * `read()` and `write()` methods on `Packet`.
 * `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
+* `AUTH` packet support for enhanced authentication.
+* `MqttOptions::set_auth_manager` that allows users to set their own authentication manager that implements the `AuthManager` trait.
+* `Client::reauth` that enables users to send `AUTH` packet for re-authentication purposes.
+
 
 ### Changed
 
