@@ -1,17 +1,17 @@
 use super::mqttbytes::v5::{
-    ConnAck, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
-    PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel, PubRelReason, Publish,
-    SubAck, Subscribe, SubscribeReasonCode, UnsubAck, UnsubAckReason, Unsubscribe, Auth, AuthProperties, AuthReasonCode,
+    Auth, AuthProperties, AuthReasonCode, ConnAck, ConnectReturnCode, Disconnect,
+    DisconnectReasonCode, Packet, PingReq, PubAck, PubAckReason, PubComp, PubCompReason, PubRec,
+    PubRecReason, PubRel, PubRelReason, Publish, SubAck, Subscribe, SubscribeReasonCode, UnsubAck,
+    UnsubAckReason, Unsubscribe,
 };
 use super::mqttbytes::{self, Error as MqttError, QoS};
 
-use super::{Event, Incoming, Outgoing, Request, AuthManager};
+use super::{AuthManager, Event, Incoming, Outgoing, Request};
 
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
-use std::{io, time::Instant};
 use std::sync::{Arc, Mutex};
-use flume::{Receiver, Sender};
+use std::{io, time::Instant};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -135,7 +135,11 @@ impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool, auth_manager: Option<Arc<Mutex<dyn AuthManager>>>) -> Self {
+    pub fn new(
+        max_inflight: u16,
+        manual_acks: bool,
+        auth_manager: Option<Arc<Mutex<dyn AuthManager>>>,
+    ) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -489,7 +493,7 @@ impl MqttState {
         self.await_pingresp = false;
         Ok(None)
     }
-    
+
     fn handle_incoming_auth(&mut self, auth: &mut Auth) -> Result<Option<Packet>, StateError> {
         match auth.reason {
             AuthReasonCode::Success => Ok(None),
@@ -497,29 +501,34 @@ impl MqttState {
                 let props = auth.properties.clone().unwrap();
                 let in_auth_method = props.authentication_method;
                 let in_auth_data = props.authentication_data;
-        
+
                 // Check if auth manager is set
                 if self.auth_manager.is_none() {
                     return Err(StateError::AuthManagerNotSet);
                 }
-        
+
                 let auth_manager = self.auth_manager.clone().unwrap();
-        
+
                 // Call auth_continue method of auth manager
-                let out_auth_data = match auth_manager.lock().unwrap().auth_continue(in_auth_method.clone(), in_auth_data) {
+                let out_auth_data = match auth_manager
+                    .lock()
+                    .unwrap()
+                    .auth_continue(in_auth_method.clone(), in_auth_data)
+                {
                     Ok(data) => data,
                     Err(err) => return Err(StateError::AuthError(err)),
                 };
-        
-                let properties = AuthProperties{
+
+                let properties = AuthProperties {
                     authentication_method: in_auth_method,
                     authentication_data: out_auth_data,
                     reason_string: None,
                     user_properties: Vec::new(),
                 };
-        
-                let client_auth = Auth::new(AuthReasonCode::ContinueAuthentication, Some(properties));
-        
+
+                let client_auth =
+                    Auth::new(AuthReasonCode::ContinueAuthentication, Some(properties));
+
                 self.outgoing_auth(client_auth)
             }
             _ => return Err(StateError::AuthError("Authentication Failed!".to_string())),
@@ -693,10 +702,13 @@ impl MqttState {
 
         Ok(Some(Packet::Disconnect(Disconnect::new(reason))))
     }
-    
+
     fn outgoing_auth(&mut self, auth: Auth) -> Result<Option<Packet>, StateError> {
         let props = auth.properties.as_ref().unwrap();
-        debug!("Auth packet sent. Auth Method: {:?}. Auth Data: {:?}", props.authentication_method, props.authentication_data);
+        debug!(
+            "Auth packet sent. Auth Method: {:?}. Auth Data: {:?}",
+            props.authentication_method, props.authentication_data
+        );
         let event = Event::Outgoing(Outgoing::Auth);
         self.events.push_back(event);
         Ok(Some(Packet::Auth(auth)))

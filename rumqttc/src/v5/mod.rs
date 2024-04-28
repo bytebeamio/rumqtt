@@ -1,12 +1,12 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
-use std::time::Duration;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[cfg(feature = "websocket")]
 use std::{
     future::{Future, IntoFuture},
-    pin::Pin
+    pin::Pin,
 };
 
 mod client;
@@ -45,9 +45,12 @@ pub trait AuthManager: std::fmt::Debug {
     /// * `Ok(auth_data)` - The authentication data to be sent back to the server.
     /// * `Err(error_message)` - An error indicating that the authentication process has failed or terminated.
 
-    fn auth_continue(&mut self, auth_method: Option<String>, auth_data: Option<Bytes>) -> Result<Option<Bytes>, String>;
+    fn auth_continue(
+        &mut self,
+        auth_method: Option<String>,
+        auth_data: Option<Bytes>,
+    ) -> Result<Option<Bytes>, String>;
 }
-
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.

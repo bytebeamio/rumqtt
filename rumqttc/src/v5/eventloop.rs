@@ -267,7 +267,10 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &mut MqttOptions, state: &mut MqttState) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(
+    options: &mut MqttOptions,
+    state: &mut MqttState,
+) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
@@ -420,13 +423,14 @@ async fn mqtt_connect(
                 }
                 return Ok(Packet::ConnAck(connack));
             }
-            Incoming::ConnAck(connack) => return Err(ConnectionError::ConnectionRefused(connack.code)),
+            Incoming::ConnAck(connack) => {
+                return Err(ConnectionError::ConnectionRefused(connack.code))
+            }
             Incoming::Auth(auth) => {
                 if let Some(outgoing) = state.handle_incoming_packet(Incoming::Auth(auth))? {
                     network.write(outgoing).await?;
                     network.flush().await?;
-                }
-                else {
+                } else {
                     return Err(ConnectionError::AuthProcessingError);
                 }
             }

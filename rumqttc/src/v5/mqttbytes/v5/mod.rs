@@ -1,6 +1,7 @@
 use std::slice::Iter;
 
 pub use self::{
+    auth::{Auth, AuthProperties, AuthReasonCode},
     codec::Codec,
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
     connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
@@ -15,12 +16,12 @@ pub use self::{
     subscribe::{Filter, RetainForwardRule, Subscribe, SubscribeProperties},
     unsuback::{UnsubAck, UnsubAckProperties, UnsubAckReason},
     unsubscribe::{Unsubscribe, UnsubscribeProperties},
-    auth::{Auth, AuthProperties, AuthReasonCode},
 };
 
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+mod auth;
 mod codec;
 mod connack;
 mod connect;
@@ -35,7 +36,6 @@ mod suback;
 mod subscribe;
 mod unsuback;
 mod unsubscribe;
-mod auth;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {

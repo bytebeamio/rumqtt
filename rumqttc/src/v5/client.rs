@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use super::mqttbytes::v5::{
-    Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties, Auth, AuthProperties, AuthReasonCode,
-    Unsubscribe, UnsubscribeProperties,
+    Auth, AuthProperties, AuthReasonCode, Filter, PubAck, PubRec, Publish, PublishProperties,
+    Subscribe, SubscribeProperties, Unsubscribe, UnsubscribeProperties,
 };
 use super::mqttbytes::{valid_filter, QoS};
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
@@ -196,7 +196,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT AUTH to `EventLoop` for authentication.
-    pub async fn reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError>{
+    pub async fn reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
         let auth = Auth::new(AuthReasonCode::Reauthenticate, properties);
         let auth = Request::Auth(auth);
         self.request_tx.send_async(auth).await?;
@@ -204,7 +204,7 @@ impl AsyncClient {
     }
 
     /// Attempts to send a MQTT AUTH to `EventLoop` for authentication.
-    pub fn try_reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError>{
+    pub fn try_reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
         let auth = Auth::new(AuthReasonCode::Reauthenticate, properties);
         let auth = Request::Auth(auth);
         self.request_tx.try_send(auth)?;

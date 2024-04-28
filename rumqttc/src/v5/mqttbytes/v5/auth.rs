@@ -10,11 +10,7 @@ pub struct Auth {
 
 impl Auth {
     pub fn new(reason: AuthReasonCode, properties: Option<AuthProperties>) -> Self {
-        
-        Self {
-            reason,
-            properties,
-        }
+        Self { reason, properties }
     }
 
     pub fn size(&self) -> usize {
@@ -45,10 +41,7 @@ impl Auth {
         let code = read_u8(&mut bytes)?;
         let reason = reason(code)?;
         let properties = AuthProperties::read(&mut bytes)?;
-        let auth = Auth {
-            reason,
-            properties,
-        };
+        let auth = Auth { reason, properties };
 
         Ok(auth)
     }
@@ -75,7 +68,7 @@ impl Auth {
 pub enum AuthReasonCode {
     Success,
     ContinueAuthentication,
-    Reauthenticate
+    Reauthenticate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -209,7 +202,7 @@ fn code(value: AuthReasonCode) -> u8 {
     match value {
         AuthReasonCode::Success => 0x00,
         AuthReasonCode::ContinueAuthentication => 0x18,
-        AuthReasonCode::Reauthenticate => 0x19
+        AuthReasonCode::Reauthenticate => 0x19,
     }
 }
 
