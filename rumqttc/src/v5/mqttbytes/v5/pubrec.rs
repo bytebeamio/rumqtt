@@ -33,6 +33,32 @@ impl PubRec {
         }
     }
 
+    pub fn set_code(&mut self, code: u8) {
+        self.reason = reason(code).unwrap();
+    }
+
+    pub fn set_reason_string(&mut self, reason_string: Option<String>) {
+        if let Some(props) = &mut self.properties {
+            props.reason_string = reason_string;
+        } else {
+            self.properties = Some(PubRecProperties {
+                reason_string,
+                user_properties: Vec::<(String, String)>::new(),
+            });
+        }
+    }
+
+    pub fn set_user_properties(&mut self, user_properties: Vec<(String, String)>) {
+        if let Some(props) = &mut self.properties {
+            props.user_properties = user_properties;
+        } else {
+            self.properties = Some(PubRecProperties {
+                reason_string: None,
+                user_properties,
+            });
+        }
+    }
+
     pub fn size(&self) -> usize {
         let len = self.len();
         let remaining_len_size = len_len(len);
@@ -83,12 +109,12 @@ impl PubRec {
         }
 
         let properties = PubRecProperties::read(&mut bytes)?;
-        let puback = PubRec {
+        let pubrec = PubRec {
             pkid,
             reason: reason(ack_reason)?,
             properties,
         };
-        Ok(puback)
+        Ok(pubrec)
     }
 
     pub fn write(&self, buffer: &mut BytesMut) -> Result<usize, Error> {

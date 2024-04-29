@@ -2,16 +2,17 @@ use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
+use rumqttc::v5::{AsyncClient, Event, EventLoop, ManualAckReason, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
-        .set_clean_start(false);
+        .set_clean_start(false)
+        .set_session_expiry_interval(u32::MAX.into());
 
     AsyncClient::new(mqttoptions, 10)
 }
@@ -20,6 +21,9 @@ fn create_conn() -> (AsyncClient, EventLoop) {
 async fn main() -> Result<(), Box<dyn Error>> {
     // todo!("fix this example with new way of spawning clients")
     pretty_env_logger::init();
+
+    println!("");
+    println!(">>>>>>>>>>> Create broker connection, do not ack broker publishes!!!");
 
     // create mqtt connection with clean_session = false and manual_acks = true
     let (client, mut eventloop) = create_conn();
@@ -50,6 +54,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    println!("");
+    println!(">>>>>>>>>>> Create new broker connection to get unack packets again!!!");
+
     // create new broker connection
     let (client, mut eventloop) = create_conn();
 
@@ -65,7 +72,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Its important not to block notifier as this can cause deadlock.
             let c = client.clone();
             tokio::spawn(async move {
-                c.ack(&publish).await.unwrap();
+                let mut ack = c.get_manual_ack(&publish);
+                ack.set_reason(ManualAckReason::UnspecifiedError);
+                ack.set_reason_string("Testing error".to_string().into());
+                c.manual_ack(ack).await.unwrap();
+                // c.ack(&publish).await.unwrap();
             });
         }
     }
@@ -74,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(client: &AsyncClient) {
-    for i in 1..=10 {
+    for i in 1..=5 {
         client
             .publish("hello/world", QoS::AtLeastOnce, false, vec![1; i])
             .await

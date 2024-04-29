@@ -177,6 +177,33 @@ impl AsyncClient {
         self.handle_try_publish(topic, qos, retain, payload, None)
     }
 
+    /// Get a MQTT ManualAck (PubAck/PubRec) for manual_ack/try_manual_ack to send to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn get_manual_ack(&self, publish: &Publish) -> ManualAck {
+        match publish.qos {
+            QoS::AtMostOnce => ManualAck::None,
+            QoS::AtLeastOnce => ManualAck::PubAck(PubAck::new(publish.pkid, None)),
+            QoS::ExactlyOnce => ManualAck::PubRec(PubRec::new(publish.pkid, None)),
+        }
+    }
+
+    /// Sends a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub async fn manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        let ack = get_manual_ack_req(ack);
+        if let Some(ack) = ack {
+            self.request_tx.send_async(ack).await?;
+        }
+        Ok(())
+    }
+
+    /// Attempts to send a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn try_manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        let ack = get_manual_ack_req(ack);
+        if let Some(ack) = ack {
+            self.request_tx.try_send(ack)?;
+        }
+        Ok(())
+    }
+
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
@@ -450,6 +477,91 @@ impl AsyncClient {
     }
 }
 
+/// Reasons for ManualAck Preparation
+pub enum ManualAckReason {
+    Success,
+    NoMatchingSubscribers,
+    UnspecifiedError,
+    ImplementationSpecificError,
+    NotAuthorized,
+    TopicNameInvalid,
+    PacketIdentifierInUse,
+    QuotaExceeded,
+    PayloadFormatInvalid,
+}
+impl ManualAckReason {
+    pub fn code(&self) -> u8 {
+        match self {
+            ManualAckReason::Success => 0,
+            ManualAckReason::NoMatchingSubscribers => 16,
+            ManualAckReason::UnspecifiedError => 128,
+            ManualAckReason::ImplementationSpecificError => 131,
+            ManualAckReason::NotAuthorized => 135,
+            ManualAckReason::TopicNameInvalid => 144,
+            ManualAckReason::PacketIdentifierInUse => 145,
+            ManualAckReason::QuotaExceeded => 151,
+            ManualAckReason::PayloadFormatInvalid => 153,
+        }
+    }
+}
+
+/// ManualAck packet for manual_ack
+pub enum ManualAck {
+    None,
+    PubAck(PubAck),
+    PubRec(PubRec),
+}
+
+impl ManualAck {
+    /// Set reason code for manual_ack sending
+    pub fn set_reason(&mut self, reason: ManualAckReason) -> &mut Self {
+        match self {
+            ManualAck::None => (),
+            ManualAck::PubAck(ack) => ack.set_code(reason.code()),
+            ManualAck::PubRec(ack) => ack.set_code(reason.code()),
+        }
+        self
+    }
+
+    /// Set reason code number for manual_ack sending
+    pub fn set_code(&mut self, code: u8) -> &mut Self {
+        match self {
+            ManualAck::None => (),
+            ManualAck::PubAck(ack) => ack.set_code(code),
+            ManualAck::PubRec(ack) => ack.set_code(code),
+        }
+        self
+    }
+
+    /// Set reason string on manual_ack properties
+    pub fn set_reason_string(&mut self, reason_string: Option<String>) -> &mut Self {
+        match self {
+            ManualAck::None => (),
+            ManualAck::PubAck(ack) => ack.set_reason_string(reason_string),
+            ManualAck::PubRec(ack) => ack.set_reason_string(reason_string),
+        }
+        self
+    }
+
+    /// Set user properties on manual_ack properties
+    pub fn set_user_properties(&mut self, user_properties: Vec<(String, String)>) -> &mut Self {
+        match self {
+            ManualAck::None => (),
+            ManualAck::PubAck(ack) => ack.set_user_properties(user_properties),
+            ManualAck::PubRec(ack) => ack.set_user_properties(user_properties),
+        }
+        self
+    }
+}
+
+fn get_manual_ack_req(ack: ManualAck) -> Option<Request> {
+    match ack {
+        ManualAck::None => None,
+        ManualAck::PubAck(ack) => Some(Request::PubAck(ack)),
+        ManualAck::PubRec(ack) => Some(Request::PubRec(ack)),
+    }
+}
+
 fn get_ack_req(publish: &Publish) -> Option<Request> {
     let ack = match publish.qos {
         QoS::AtMostOnce => return None,
@@ -582,6 +694,26 @@ impl Client {
         P: Into<Bytes>,
     {
         self.client.try_publish(topic, qos, retain, payload)
+    }
+
+    /// Get a MQTT ManualAck (PubAck/PubRec) for manual_ack/try_manual_ack to send to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn get_manual_ack(&self, publish: &Publish) -> ManualAck {
+        self.client.get_manual_ack(publish)
+    }
+
+    /// Sends a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        let ack = get_manual_ack_req(ack);
+        if let Some(ack) = ack {
+            self.client.request_tx.send(ack)?;
+        }
+        Ok(())
+    }
+
+    /// Attempts to send a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn try_manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        self.client.try_manual_ack(ack)?;
+        Ok(())
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
