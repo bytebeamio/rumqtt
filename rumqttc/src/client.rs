@@ -111,6 +111,33 @@ impl AsyncClient {
         Ok(())
     }
 
+    /// Get a MQTT ManualAck (PubAck/PubRec) for manual_ack/try_manual_ack to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn get_manual_ack(&self, publish: &Publish) -> ManualAck {
+        match publish.qos {
+            QoS::AtMostOnce => ManualAck::None,
+            QoS::AtLeastOnce => ManualAck::PubAck(PubAck::new(publish.pkid)),
+            QoS::ExactlyOnce => ManualAck::PubRec(PubRec::new(publish.pkid)),
+        }
+    }
+
+    /// Sends a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub async fn manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        let ack = get_manual_ack_req(ack);
+        if let Some(ack) = ack {
+            self.request_tx.send_async(ack).await?;
+        }
+        Ok(())
+    }
+
+    /// Attempts to send a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn try_manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        let ack = get_manual_ack_req(ack);
+        if let Some(ack) = ack {
+            self.request_tx.try_send(ack)?;
+        }
+        Ok(())
+    }
+
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
@@ -235,6 +262,22 @@ impl AsyncClient {
     }
 }
 
+
+/// ManualAck packet for manual_ack
+pub enum ManualAck {
+    None,
+    PubAck(PubAck),
+    PubRec(PubRec),
+}
+
+fn get_manual_ack_req(ack: ManualAck) -> Option<Request> {
+    match ack {
+        ManualAck::None => None,
+        ManualAck::PubAck(ack) => Some(Request::PubAck(ack)),
+        ManualAck::PubRec(ack) => Some(Request::PubRec(ack)),
+    }
+}
+
 fn get_ack_req(publish: &Publish) -> Option<Request> {
     let ack = match publish.qos {
         QoS::AtMostOnce => return None,
@@ -320,6 +363,30 @@ impl Client {
         V: Into<Vec<u8>>,
     {
         self.client.try_publish(topic, qos, retain, payload)?;
+        Ok(())
+    }
+
+    /// Get a MQTT ManualAck (PubAck/PubRec) for manual_ack/try_manual_ack to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn get_manual_ack(&self, publish: &Publish) -> ManualAck {
+        match publish.qos {
+            QoS::AtMostOnce => ManualAck::None,
+            QoS::AtLeastOnce => ManualAck::PubAck(PubAck::new(publish.pkid)),
+            QoS::ExactlyOnce => ManualAck::PubRec(PubRec::new(publish.pkid)),
+        }
+    }
+
+    /// Sends a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub async fn manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        let ack = get_manual_ack_req(ack);
+        if let Some(ack) = ack {
+            self.client.request_tx.send(ack)?;
+        }
+        Ok(())
+    }
+
+    /// Attempts to send a prepared MQTT ManualAck (PubAck/PubRec) to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    pub fn try_manual_ack(&self, ack: ManualAck) -> Result<(), ClientError> {
+        self.client.try_manual_ack(ack)?;
         Ok(())
     }
 

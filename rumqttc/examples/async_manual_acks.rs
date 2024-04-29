@@ -68,7 +68,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Its important not to block eventloop as this can cause deadlock.
             let c = client.clone();
             tokio::spawn(async move {
-                c.ack(&publish).await.unwrap();
+                let ack = c.get_manual_ack(&publish);
+                c.manual_ack(ack).await.unwrap();
+                // c.ack(&publish).await.unwrap();
             });
         }
     }
