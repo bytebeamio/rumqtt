@@ -7,12 +7,11 @@ use std::error::Error;
 use std::time::Duration;
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
-        .set_clean_start(false)
-        .set_session_expiry_interval(u32::MAX.into());
+        .set_clean_start(false);
 
     AsyncClient::new(mqttoptions, 10)
 }
@@ -21,9 +20,6 @@ fn create_conn() -> (AsyncClient, EventLoop) {
 async fn main() -> Result<(), Box<dyn Error>> {
     // todo!("fix this example with new way of spawning clients")
     pretty_env_logger::init();
-
-    println!("");
-    println!(">>>>>>>>>>> Create broker connection, do not ack broker publishes!!!");
 
     // create mqtt connection with clean_session = false and manual_acks = true
     let (client, mut eventloop) = create_conn();
@@ -54,9 +50,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    println!("");
-    println!(">>>>>>>>>>> Create new broker connection to get unack packets again!!!");
-
     // create new broker connection
     let (client, mut eventloop) = create_conn();
 
@@ -73,10 +66,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let c = client.clone();
             tokio::spawn(async move {
                 let mut ack = c.get_manual_ack(&publish);
-                ack.set_reason(ManualAckReason::UnspecifiedError);
-                ack.set_reason_string("Testing error".to_string().into());
+                ack.set_reason(ManualAckReason::Success);
+                ack.set_reason_string("There is no error".to_string().into());
                 c.manual_ack(ack).await.unwrap();
-                // c.ack(&publish).await.unwrap();
             });
         }
     }
