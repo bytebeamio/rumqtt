@@ -130,7 +130,15 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let requests_in_channel = self.requests_rx.drain();
+        let mut requests_in_channel:Vec<_> = self.requests_rx.drain().collect();
+
+        requests_in_channel.retain(|request| {
+            match request {
+                Request::PubAck(_) => false, // Remove this request,wait for publish retransmittion. Or else isolate puback will be recived by broker.
+                _ => true,                   // Keep this request
+            }
+        });
+        
         self.pending.extend(requests_in_channel);
     }
 
