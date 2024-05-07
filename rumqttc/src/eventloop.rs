@@ -130,7 +130,7 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let mut requests_in_channel:Vec<_> = self.requests_rx.drain().collect();
+        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
 
         requests_in_channel.retain(|request| {
             match request {
@@ -138,7 +138,7 @@ impl EventLoop {
                 _ => true,                   // Keep this request
             }
         });
-        
+
         self.pending.extend(requests_in_channel);
     }
 
