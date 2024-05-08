@@ -19,7 +19,7 @@ use crate::{NetworkOptions, Transport};
 
 use mqttbytes::v5::*;
 
-pub use client::{AsyncClient, Client, ClientError, Connection, Iter, ManualAckReason};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter, ManualAck, ManualAckReason};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
