@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::{v5::AuthProperties, QoS};
-use rumqttc::v5::{Client, AuthManager, MqttOptions};
+use rumqttc::v5::{AuthManager, Client, MqttOptions};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::thread;

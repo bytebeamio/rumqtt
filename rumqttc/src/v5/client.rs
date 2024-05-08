@@ -930,7 +930,8 @@ mod test {
 
     #[test]
     fn test_reauth() {
-        let (client, mut connection) = Client::new(MqttOptions::new("test-1", "localhost", 1883), 10);
+        let (client, mut connection) =
+            Client::new(MqttOptions::new("test-1", "localhost", 1883), 10);
         let _ = client.reauth(None).expect("Should be able to reauth");
         let _ = connection.iter().next().expect("Should have event");
 
