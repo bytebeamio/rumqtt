@@ -65,7 +65,7 @@ pub enum StateError {
     #[error("Connection failed with reason '{reason:?}' ")]
     ConnFail { reason: ConnectReturnCode },
     #[error("Connection closed by peer abruptly")]
-    ConnectionAborted
+    ConnectionAborted,
 }
 
 impl From<mqttbytes::Error> for StateError {
@@ -217,6 +217,8 @@ impl MqttState {
         &mut self,
         mut packet: Incoming,
     ) -> Result<Option<Packet>, StateError> {
+        self.events.push_back(Event::Incoming(packet.to_owned()));
+
         let outgoing = match &mut packet {
             Incoming::PingResp(_) => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
@@ -234,7 +236,6 @@ impl MqttState {
             }
         };
 
-        self.events.push_back(Event::Incoming(packet));
         self.last_incoming = Instant::now();
         Ok(outgoing)
     }

@@ -165,6 +165,8 @@ impl MqttState {
         &mut self,
         packet: Incoming,
     ) -> Result<Option<Packet>, StateError> {
+        self.events.push_back(Event::Incoming(packet.clone()));
+
         let outgoing = match &packet {
             Incoming::PingResp => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
@@ -179,7 +181,6 @@ impl MqttState {
                 return Err(StateError::WrongPacket);
             }
         };
-        self.events.push_back(Event::Incoming(packet));
         self.last_incoming = Instant::now();
 
         Ok(outgoing)
