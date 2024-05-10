@@ -12,16 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `size()` method on `Packet` calculates size once serialized.
 * `read()` and `write()` methods on `Packet`.
 * `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
+* `connection_timeout()` and `set_connection_timeout()` method on (non-v5) `MqttOptions`.
+* `network_options()` method on (non-v5) `MqttOptions` on to instead `EventLoop.network_options()`.
+* `set_network_options()` method on (non-v5) `MqttOptions` on to instead `EventLoop.set_network_options()`.
 
 ### Changed
 
 * rename `N` as `AsyncReadWrite` to describe usage.
 * use `Framed` to encode/decode MQTT packets.
-* use `Login` to store credentials
+* use `Login` to store credentials.
 
 ### Deprecated
 
+* Use (non-v5) `MqttOptions.network_options` instead of `EventLoop.network_options`.
+* Use (non-v5) `MqttOptions.set_network_options` instead of `EventLoop.set_network_options`.
+
 ### Removed
+
+* move `NetworkOptions.conn_timeout` to (non-v5) `MqttOptions.conn_timeout`.
 
 ### Fixed
 

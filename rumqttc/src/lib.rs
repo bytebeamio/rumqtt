@@ -369,7 +369,6 @@ impl From<ClientConfig> for TlsConfiguration {
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
-    conn_timeout: u64,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
 }
@@ -379,7 +378,6 @@ impl NetworkOptions {
         NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
-            conn_timeout: 5,
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
         }
@@ -391,17 +389,6 @@ impl NetworkOptions {
 
     pub fn set_tcp_recv_buffer_size(&mut self, size: u32) {
         self.tcp_recv_buffer_size = Some(size);
-    }
-
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
-        self
-    }
-
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
     }
 
     /// bind connection to a specific network device by name
@@ -449,11 +436,15 @@ pub struct MqttOptions {
     pending_throttle: Duration,
     /// maximum number of outgoing inflight messages
     inflight: u16,
+    /// Connection timeout
+    conn_timeout: u64,
     /// Last will that will be issued on unexpected disconnect
     last_will: Option<LastWill>,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    /// Provides a way to configure low level network connection configurations.
+    network_options: NetworkOptions,
     #[cfg(feature = "proxy")]
     /// Proxy configuration.
     proxy: Option<Proxy>,
@@ -487,7 +478,9 @@ impl MqttOptions {
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
+            conn_timeout: 5,
             manual_acks: false,
+            network_options: NetworkOptions::new(),
             #[cfg(feature = "proxy")]
             proxy: None,
             #[cfg(feature = "websocket")]
@@ -675,6 +668,28 @@ impl MqttOptions {
     /// get manual acknowledgements
     pub fn manual_acks(&self) -> bool {
         self.manual_acks
+    }
+
+    /// set connection timeout in secs
+    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
+        self.conn_timeout = timeout;
+        self
+    }
+
+    /// get timeout in secs
+    pub fn connection_timeout(&self) -> u64 {
+        self.conn_timeout
+    }
+
+    /// get network options
+    pub fn network_options(&self) -> NetworkOptions {
+        self.network_options.clone()
+    }
+
+    /// set network options
+    pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
+        self.network_options = network_options;
+        self
     }
 
     #[cfg(feature = "proxy")]
@@ -891,6 +906,7 @@ impl Debug for MqttOptions {
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
+            .field("conn_timeout", &self.conn_timeout)
             .field("manual_acks", &self.manual_acks)
             .finish()
     }

@@ -95,6 +95,7 @@ pub struct MqttOptions {
     /// If set to `true` MQTT acknowledgements are not sent automatically.
     /// Every incoming publish packet must be manually acknowledged with `client.ack(...)` method.
     manual_acks: bool,
+    /// Provides a way to configure low level network connection configurations.
     network_options: NetworkOptions,
     #[cfg(feature = "proxy")]
     /// Proxy configuration.
@@ -494,10 +495,12 @@ impl MqttOptions {
         self.manual_acks
     }
 
+    /// get network options
     pub fn network_options(&self) -> NetworkOptions {
         self.network_options.clone()
     }
 
+    /// set network options
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
         self

@@ -84,7 +84,6 @@ pub struct EventLoop {
     pub network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
-    pub network_options: NetworkOptions,
 }
 
 /// Events which can be yielded by the event loop
@@ -113,7 +112,6 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
-            network_options: NetworkOptions::new(),
         }
     }
 
@@ -141,8 +139,8 @@ impl EventLoop {
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let (network, connack) = match time::timeout(
-                Duration::from_secs(self.network_options.connection_timeout()),
-                connect(&self.mqtt_options, self.network_options.clone()),
+                Duration::from_secs(self.mqtt_options.connection_timeout()),
+                connect(&self.mqtt_options),
             )
             .await
             {
@@ -173,7 +171,7 @@ impl EventLoop {
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
         let collision = self.state.collision.is_some();
-        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
+        let network_timeout = Duration::from_secs(self.mqtt_options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -258,12 +256,17 @@ impl EventLoop {
         }
     }
 
+    #[deprecated(since = "0.25.0", note = "Use `MqttOptions.network_options` instead.")]
     pub fn network_options(&self) -> NetworkOptions {
-        self.network_options.clone()
+        self.mqtt_options.network_options()
     }
 
+    #[deprecated(
+        since = "0.25.0",
+        note = "Use `MqttOptions.set_network_options` instead."
+    )]
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
-        self.network_options = network_options;
+        self.mqtt_options.set_network_options(network_options);
         self
     }
 
@@ -291,12 +294,9 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(
-    mqtt_options: &MqttOptions,
-    network_options: NetworkOptions,
-) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(mqtt_options: &MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
-    let mut network = network_connect(mqtt_options, network_options).await?;
+    let mut network = network_connect(mqtt_options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
     let packet = mqtt_connect(mqtt_options, &mut network).await?;
@@ -350,10 +350,7 @@ pub(crate) async fn socket_connect(
     }))
 }
 
-async fn network_connect(
-    options: &MqttOptions,
-    network_options: NetworkOptions,
-) -> Result<Network, ConnectionError> {
+async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
     // Process Unix files early, as proxy is not supported for them.
     #[cfg(unix)]
     if matches!(options.transport(), Transport::Unix) {
@@ -389,7 +386,7 @@ async fn network_connect(
         #[cfg(not(feature = "proxy"))]
         {
             let addr = format!("{domain}:{port}");
-            let tcp = socket_connect(addr, network_options).await?;
+            let tcp = socket_connect(addr, options.network_options()).await?;
             Box::new(tcp)
         }
     };

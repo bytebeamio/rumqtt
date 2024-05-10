@@ -550,9 +550,9 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
     options.set_keep_alive(Duration::from_secs(5));
     let mut network_options = NetworkOptions::new();
     network_options.set_tcp_send_buffer_size(1024);
+    options.set_network_options(network_options);
 
     let (client, mut eventloop) = AsyncClient::new(options, 5);
-    eventloop.set_network_options(network_options);
     task::spawn(async move {
         start_requests_with_payload(100, QoS::AtLeastOnce, 0, client, 5000).await;
         time::sleep(Duration::from_secs(10)).await;
