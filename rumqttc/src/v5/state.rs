@@ -332,7 +332,7 @@ impl MqttState {
             }
         } else if let Some(alias) = topic_alias {
             if let Some(topic) = self.topic_alises.get(&alias) {
-                publish.topic = topic.to_owned();
+                topic.clone_into(&mut publish.topic);
             } else {
                 self.handle_protocol_error()?;
             };
