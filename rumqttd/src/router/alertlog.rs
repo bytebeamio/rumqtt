@@ -71,14 +71,14 @@ pub mod alert {
 pub use alert::*;
 
 pub struct AlertLog {
-    pub config: RouterConfig,
+    pub _config: RouterConfig,
     pub alerts: VecDeque<Alert>,
 }
 
 impl AlertLog {
-    pub fn new(config: RouterConfig) -> AlertLog {
+    pub fn new(_config: RouterConfig) -> AlertLog {
         AlertLog {
-            config,
+            _config,
             alerts: VecDeque::with_capacity(100),
         }
     }

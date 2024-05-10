@@ -322,7 +322,7 @@ impl Router {
                 |session_state| {
                     connection.subscriptions = session_state.subscriptions;
                     // for using in acklog
-                    pending_acks = session_state.unacked_pubrels.clone();
+                    pending_acks.clone_from(&session_state.unacked_pubrels);
                     outgoing.unacked_pubrels = session_state.unacked_pubrels;
                     session_state.tracker
                 },

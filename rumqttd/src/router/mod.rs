@@ -212,7 +212,7 @@ pub struct Message {
     /// Log to sweep
     pub topic: String,
     /// Qos of the topic
-    pub qos: u8,
+    pub _qos: u8,
     /// Reply data chain
     pub payload: Bytes,
 }
@@ -250,12 +250,12 @@ impl fmt::Debug for Data {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Disconnection {
-    pub id: String,
-    pub execute_will: bool,
-    pub pending: Vec<Notification>,
-}
+// #[derive(Debug, Clone)]
+// pub struct Disconnection {
+//     pub id: String,
+//     pub execute_will: bool,
+//     pub pending: Vec<Notification>,
+// }
 
 #[derive(Debug, Clone)]
 pub struct ShadowRequest {
