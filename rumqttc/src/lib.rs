@@ -365,11 +365,12 @@ impl From<ClientConfig> for TlsConfiguration {
 }
 
 /// Provides a way to configure low level network connection configurations
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
-    conn_timeout: u64,
+    /// Connection timeout
+    connection_timeout: Duration,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
 }
@@ -379,7 +380,7 @@ impl NetworkOptions {
         NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
-            conn_timeout: 5,
+            connection_timeout: Duration::from_secs(5),
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
         }
@@ -393,15 +394,15 @@ impl NetworkOptions {
         self.tcp_recv_buffer_size = Some(size);
     }
 
-    /// set connection timeout in secs
-    pub fn set_connection_timeout(&mut self, timeout: u64) -> &mut Self {
-        self.conn_timeout = timeout;
+    /// Set connection timeout
+    pub fn set_connection_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.connection_timeout = timeout;
         self
     }
 
-    /// get timeout in secs
-    pub fn connection_timeout(&self) -> u64 {
-        self.conn_timeout
+    /// Get connection timeout
+    pub fn connection_timeout(&self) -> Duration {
+        self.connection_timeout
     }
 
     /// bind connection to a specific network device by name
@@ -443,7 +444,7 @@ pub struct MqttOptions {
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// Max internal request batching
-    max_request_batch: usize,
+    max_batch_size: usize,
     /// Minimum delay time between consecutive outgoing packets
     /// while retransmitting pending packets
     pending_throttle: Duration,
@@ -483,7 +484,7 @@ impl MqttOptions {
             max_incoming_packet_size: 10 * 1024,
             max_outgoing_packet_size: 10 * 1024,
             request_channel_capacity: 10,
-            max_request_batch: 0,
+            max_batch_size: 0,
             pending_throttle: Duration::from_micros(0),
             inflight: 100,
             last_will: None,
@@ -734,7 +735,7 @@ pub enum OptionError {
     RequestChannelCapacity,
 
     #[error("Invalid max-request-batch value.")]
-    MaxRequestBatch,
+    MaxBatchSize,
 
     #[error("Invalid pending-throttle value.")]
     PendingThrottle,
@@ -842,12 +843,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             options.request_channel_capacity = request_channel_capacity;
         }
 
-        if let Some(max_request_batch) = queries
-            .remove("max_request_batch_num")
-            .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxRequestBatch))
+        if let Some(max_batch_size) = queries
+            .remove("max_batch_size")
+            .map(|v| v.parse::<usize>().map_err(|_| OptionError::MaxBatchSize))
             .transpose()?
         {
-            options.max_request_batch = max_request_batch;
+            options.max_batch_size = max_batch_size;
         }
 
         if let Some(pending_throttle) = queries
@@ -887,7 +888,7 @@ impl Debug for MqttOptions {
             .field("credentials", &self.credentials)
             .field("max_packet_size", &self.max_incoming_packet_size)
             .field("request_channel_capacity", &self.request_channel_capacity)
-            .field("max_request_batch", &self.max_request_batch)
+            .field("max_batch_size", &self.max_batch_size)
             .field("pending_throttle", &self.pending_throttle)
             .field("inflight", &self.inflight)
             .field("last_will", &self.last_will)
@@ -970,8 +971,8 @@ mod test {
             OptionError::RequestChannelCapacity
         );
         assert_eq!(
-            err("mqtt://host:42?client_id=foo&max_request_batch_num=foo"),
-            OptionError::MaxRequestBatch
+            err("mqtt://host:42?client_id=foo&max_batch_size=foo"),
+            OptionError::MaxBatchSize
         );
         assert_eq!(
             err("mqtt://host:42?client_id=foo&pending_throttle_usecs=foo"),

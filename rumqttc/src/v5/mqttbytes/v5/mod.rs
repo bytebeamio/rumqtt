@@ -129,14 +129,19 @@ impl Packet {
     }
 
     pub fn write(&self, write: &mut BytesMut, max_size: Option<u32>) -> Result<usize, Error> {
+        let size = self.size();
+
         if let Some(max_size) = max_size {
-            if self.size() > max_size as usize {
+            if size > max_size as usize {
                 return Err(Error::OutgoingPacketTooLarge {
                     pkt_size: self.size() as u32,
                     max: max_size,
                 });
             }
         }
+
+        // Ensure that `write` can take the serialized packet
+        write.reserve(size);
 
         match self {
             Self::Publish(publish) => publish.write(write),

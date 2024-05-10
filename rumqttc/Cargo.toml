@@ -57,6 +57,7 @@ matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.5"
 serde = { version = "1", features = ["derive"] }
+tokio-test = "0.4.4"
 
 [[example]]
 name = "tls"

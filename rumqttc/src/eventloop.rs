@@ -141,8 +141,8 @@ impl EventLoop {
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
         if self.network.is_none() {
             let (network, connack) = match time::timeout(
-                Duration::from_secs(self.network_options.connection_timeout()),
-                connect(&self.mqtt_options, self.network_options.clone()),
+                self.network_options.connection_timeout(),
+                connect(&self.mqtt_options, self.network_options()),
             )
             .await
             {
@@ -173,7 +173,7 @@ impl EventLoop {
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
         let collision = self.state.collision.is_some();
-        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
+        let network_timeout = self.network_options.connection_timeout();
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -258,10 +258,12 @@ impl EventLoop {
         }
     }
 
-    pub fn network_options(&self) -> NetworkOptions {
-        self.network_options.clone()
+    /// Get network options
+    pub fn network_options(&self) -> &NetworkOptions {
+        &self.network_options
     }
 
+    /// Set network options
     pub fn set_network_options(&mut self, network_options: NetworkOptions) -> &mut Self {
         self.network_options = network_options;
         self
@@ -293,7 +295,7 @@ impl EventLoop {
 /// between re-connections so that cancel semantics can be used during this sleep
 async fn connect(
     mqtt_options: &MqttOptions,
-    network_options: NetworkOptions,
+    network_options: &NetworkOptions,
 ) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(mqtt_options, network_options).await?;
@@ -306,7 +308,7 @@ async fn connect(
 
 pub(crate) async fn socket_connect(
     host: String,
-    network_options: NetworkOptions,
+    network_options: &NetworkOptions,
 ) -> io::Result<TcpStream> {
     let addrs = lookup_host(host).await?;
     let mut last_err = None;
@@ -352,7 +354,7 @@ pub(crate) async fn socket_connect(
 
 async fn network_connect(
     options: &MqttOptions,
-    network_options: NetworkOptions,
+    network_options: &NetworkOptions,
 ) -> Result<Network, ConnectionError> {
     // Process Unix files early, as proxy is not supported for them.
     #[cfg(unix)]
