@@ -98,7 +98,10 @@
 #[macro_use]
 extern crate log;
 
-use std::fmt::{self, Debug, Formatter};
+use std::{
+    fmt::{self, Debug, Formatter},
+    net::{SocketAddr, ToSocketAddrs},
+};
 
 #[cfg(any(feature = "use-rustls", feature = "websocket"))]
 use std::sync::Arc;
@@ -370,6 +373,7 @@ pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
     conn_timeout: u64,
+    bind_addr: Option<SocketAddr>,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
 }
@@ -380,6 +384,7 @@ impl NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
             conn_timeout: 5,
+            bind_addr: None,
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
         }
@@ -402,6 +407,14 @@ impl NetworkOptions {
     /// get timeout in secs
     pub fn connection_timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// bind connection to a specific socket address
+    pub fn set_bind_addr(&mut self, bind_addr: impl ToSocketAddrs) -> &mut Self {
+        self.bind_addr = bind_addr
+            .to_socket_addrs()
+            .map_or(None, |mut iter| iter.next());
+        self
     }
 
     /// bind connection to a specific network device by name
