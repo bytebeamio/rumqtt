@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Validate filters while creating subscription requests.
 * Make v4::Connect::write return correct value
+* Filter PUBACK in pending save requests to fix unexpected PUBACK sent to reconnected broker.
 
 ### Security
 
