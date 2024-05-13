@@ -138,7 +138,7 @@ impl EventLoop {
         if self.network.is_none() {
             let (network, connack) = time::timeout(
                 Duration::from_secs(self.options.connection_timeout()),
-                connect(&mut self.options),
+                connect(&mut self.pending, &mut self.options),
             )
             .await??;
             self.network = Some(network);
@@ -263,15 +263,15 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &mut MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(pending: &mut VecDeque<Request>, options: &mut MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(options, &mut network).await?;
+    let packet = mqtt_connect(pending, options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
-    // republished in the next session
+    // republished in the next session if session is resumed
     // move pending messages from state to eventloop
     // let pending = self.state.clean();
     // self.pending = pending.into_iter();
@@ -385,6 +385,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 }
 
 async fn mqtt_connect(
+    pending: &mut VecDeque<Request>,
     options: &mut MqttOptions,
     network: &mut Network,
 ) -> Result<Incoming, ConnectionError> {
@@ -406,12 +407,22 @@ async fn mqtt_connect(
     // validate connack
     match network.read().await? {
         Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            // Override local keep_alive value if set by server.
+            // Check if it's a new session
+            if !connack.session_present {
+                // If it's a new session, clear the pendings
+                pending.clear();
+            }
+            // Override local settings if set by server.
             if let Some(props) = &connack.properties {
+                // Override local keep_alive value if set by server.
                 if let Some(keep_alive) = props.server_keep_alive {
                     options.keep_alive = Duration::from_secs(keep_alive as u64);
                 }
                 network.set_max_outgoing_size(props.max_packet_size);
+                // Override local session_expiry_interval value if set by server.
+                if (props.session_expiry_interval).is_some() {
+                    options.set_session_expiry_interval(props.session_expiry_interval);
+                }
             }
             Ok(Packet::ConnAck(connack))
         }
