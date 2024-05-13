@@ -130,8 +130,8 @@ impl EventLoop {
 
         requests_in_channel.retain(|request| {
             match request {
-                Request::PubAck(_) => false, // Remove this request,wait for publish retransmittion. Or else isolate puback will be recived by broker.
-                _ => true,                   // Keep this request
+                Request::PubAck(_) => false,  // Wait for publish retransmission, else the broker could be confused by an unexpected ack
+                _ => true,
             }
         });
 
