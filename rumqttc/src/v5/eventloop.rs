@@ -412,19 +412,13 @@ async fn mqtt_connect(
                 // If it's a new session, clear the pendings
                 pending.clear();
             }
-            // Override local settings if set by server.
             if let Some(props) = &connack.properties {
-                // Override local keep_alive value if set by server.
                 if let Some(keep_alive) = props.server_keep_alive {
                     options.keep_alive = Duration::from_secs(keep_alive as u64);
                 }
                 network.set_max_outgoing_size(props.max_packet_size);
-                // Override local session_expiry_interval value if set by server.
-                if (props.session_expiry_interval).is_some() {
-                    options.set_session_expiry_interval(props.session_expiry_interval);
-                }
             }
-            Ok(Packet::ConnAck(connack))
+            Ok(connack)
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
