@@ -90,7 +90,7 @@ impl MqttState {
             // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
             outgoing_rel: vec![None; max_inflight as usize + 1],
-            incoming_pub: vec![None; std::u16::MAX as usize + 1],
+            incoming_pub: vec![None; u16::MAX as usize + 1],
             collision: None,
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
@@ -165,6 +165,8 @@ impl MqttState {
         &mut self,
         packet: Incoming,
     ) -> Result<Option<Packet>, StateError> {
+        self.events.push_back(Event::Incoming(packet.clone()));
+
         let outgoing = match &packet {
             Incoming::PingResp => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
@@ -179,7 +181,6 @@ impl MqttState {
                 return Err(StateError::WrongPacket);
             }
         };
-        self.events.push_back(Event::Incoming(packet));
         self.last_incoming = Instant::now();
 
         Ok(outgoing)

@@ -23,7 +23,7 @@ websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 proxy = ["dep:async-http-proxy"]
 
 [dependencies]
-futures-util = { version = "0.3", default_features = false, features = ["std", "sink"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tokio = { version = "1.36", features = ["rt", "macros", "io-util", "net", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1.5"
