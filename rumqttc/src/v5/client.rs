@@ -178,6 +178,10 @@ impl AsyncClient {
     }
 
     /// Get a MQTT ManualAck (PubAck/PubRec) for manual_ack/try_manual_ack to send to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    /// This is useful when you want to ack a publish later.
+    /// By default the ack reason code is success, you can change it using `ack.set_reason`.
+    /// By default the ack reason string is empty, you can change it using `ack.set_reason_string`.
+    /// By default the ack user properties is empty, you can change it using `ack.set_user_properties`.
     pub fn get_manual_ack(&self, publish: &Publish) -> ManualAck {
         match publish.qos {
             QoS::AtMostOnce => ManualAck::None,
@@ -697,6 +701,10 @@ impl Client {
     }
 
     /// Get a MQTT ManualAck (PubAck/PubRec) for manual_ack/try_manual_ack to send to the `EventLoop`. Only needed in if `manual_acks` flag is set.
+    /// This is useful when you want to ack a publish later.
+    /// By default the ack reason code is success, you can change it using `ack.set_reason`.
+    /// By default the ack reason string is empty, you can change it using `ack.set_reason_string`.
+    /// By default the ack user properties is empty, you can change it using `ack.set_user_properties`.
     pub fn get_manual_ack(&self, publish: &Publish) -> ManualAck {
         self.client.get_manual_ack(publish)
     }
