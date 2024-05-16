@@ -412,6 +412,11 @@ async fn mqtt_connect(
                     options.keep_alive = Duration::from_secs(keep_alive as u64);
                 }
                 network.set_max_outgoing_size(props.max_packet_size);
+
+                // Override local session_expiry_interval value if set by server.
+                if props.session_expiry_interval.is_some() {
+                    options.set_session_expiry_interval(props.session_expiry_interval);
+                }
             }
             Ok(Packet::ConnAck(connack))
         }
