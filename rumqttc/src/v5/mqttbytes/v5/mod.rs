@@ -1,6 +1,7 @@
 use std::slice::Iter;
 
 pub use self::{
+    auth::Auth,
     codec::Codec,
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
     connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
@@ -20,6 +21,7 @@ pub use self::{
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+mod auth;
 mod codec;
 mod connack;
 mod connect;
@@ -37,6 +39,7 @@ mod unsubscribe;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
+    Auth(Auth),
     Connect(Connect, Option<LastWill>, Option<Login>),
     ConnAck(ConnAck),
     Publish(Publish),
@@ -139,6 +142,7 @@ impl Packet {
         }
 
         match self {
+            Self::Auth(auth) => auth.write(write),
             Self::Publish(publish) => publish.write(write),
             Self::Subscribe(subscription) => subscription.write(write),
             Self::Unsubscribe(unsubscribe) => unsubscribe.write(write),
@@ -158,6 +162,7 @@ impl Packet {
 
     pub fn size(&self) -> usize {
         match self {
+            Self::Auth(auth) => auth.size(),
             Self::Publish(publish) => publish.size(),
             Self::Subscribe(subscription) => subscription.size(),
             Self::Unsubscribe(unsubscribe) => unsubscribe.size(),
