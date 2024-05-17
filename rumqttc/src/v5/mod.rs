@@ -312,6 +312,27 @@ impl MqttOptions {
         self.connect_properties.clone()
     }
 
+    /// set session expiry interval on connection properties
+    pub fn set_session_expiry_interval(&mut self, interval: Option<u32>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.session_expiry_interval = interval;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.session_expiry_interval = interval;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get session expiry interval on connection properties
+    pub fn session_expiry_interval(&self) -> Option<u32> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.session_expiry_interval
+        } else {
+            None
+        }
+    }
+
     /// set receive maximum on connection properties
     pub fn set_receive_maximum(&mut self, recv_max: Option<u16>) -> &mut Self {
         if let Some(conn_props) = &mut self.connect_properties {
