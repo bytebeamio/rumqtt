@@ -474,7 +474,9 @@ async fn next_poll_after_connect_failure_reconnects() {
 #[tokio::test]
 async fn reconnection_resumes_from_the_previous_state() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3001);
-    options.set_keep_alive(Duration::from_secs(5));
+    options
+        .set_keep_alive(Duration::from_secs(5))
+        .set_clean_session(false);
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
     let (client, mut eventloop) = AsyncClient::new(options, 5);
@@ -503,7 +505,7 @@ async fn reconnection_resumes_from_the_previous_state() {
     // a block around broker with {} is closing the connection as expected
 
     // broker connection 2
-    let mut broker = Broker::new(3001, 0, false).await;
+    let mut broker = Broker::new(3001, 0, true).await;
     for i in 3..=4 {
         let packet = broker.read_publish().await.unwrap();
         assert_eq!(i, packet.payload[0]);
