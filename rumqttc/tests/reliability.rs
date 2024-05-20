@@ -514,7 +514,9 @@ async fn reconnection_resumes_from_the_previous_state() {
 #[tokio::test]
 async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
-    options.set_keep_alive(Duration::from_secs(5));
+    options
+        .set_keep_alive(Duration::from_secs(5))
+        .set_clean_session(false);
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
