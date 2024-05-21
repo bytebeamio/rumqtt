@@ -3,7 +3,7 @@ use std::slice::Iter;
 pub use self::{
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
     connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
-    disconnect::{Disconnect, DisconnectReasonCode},
+    disconnect::{Disconnect, DisconnectProperties, DisconnectReasonCode},
     ping::{PingReq, PingResp},
     puback::{PubAck, PubAckProperties, PubAckReason},
     pubcomp::{PubComp, PubCompProperties, PubCompReason},
