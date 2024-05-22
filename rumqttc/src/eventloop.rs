@@ -130,7 +130,15 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let requests_in_channel = self.requests_rx.drain();
+        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+
+        requests_in_channel.retain(|request| {
+            match request {
+                Request::PubAck(_) => false,  // Wait for publish retransmission, else the broker could be confused by an unexpected ack
+                _ => true,
+            }
+        });
+
         self.pending.extend(requests_in_channel);
     }
 
