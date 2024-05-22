@@ -154,7 +154,7 @@ pub async fn native_tls_connector(
 
             connector_builder.build()?
         }
-        TlsConfiguration::Native => native_tls::TlsConnector::new()?,
+        TlsConfiguration::Native(builder) => builder.build()?,
         #[allow(unreachable_patterns)]
         _ => unreachable!("This cannot be called for other TLS backends than Native TLS"),
     };
@@ -176,7 +176,7 @@ pub async fn tls_connect(
             Box::new(connector.connect(domain, tcp).await?)
         }
         #[cfg(feature = "use-native-tls")]
-        TlsConfiguration::Native | TlsConfiguration::SimpleNative { .. } => {
+        TlsConfiguration::Native(_) | TlsConfiguration::SimpleNative { .. } => {
             let connector = native_tls_connector(tls_config).await?;
             Box::new(connector.connect(addr, tcp).await?)
         }
