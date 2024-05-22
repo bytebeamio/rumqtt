@@ -1,7 +1,7 @@
 use crate::{Event, Incoming, Outgoing, Request};
 
 use crate::mqttbytes::v4::*;
-use crate::mqttbytes::*;
+use crate::mqttbytes::{self, *};
 use fixedbitset::FixedBitSet;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
@@ -29,7 +29,7 @@ pub enum StateError {
     #[error("A Subscribe packet must contain atleast one filter")]
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
-    Deserialization(#[from] Error),
+    Deserialization(#[from] mqttbytes::Error),
     #[error("Connection closed by peer abruptly")]
     ConnectionAborted,
 }
