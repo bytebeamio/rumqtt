@@ -269,7 +269,7 @@ impl MqttState {
                 }
                 _ => {
                     if let Some(tx) = tx {
-                        tx.error(NoticeError::V5Subscribe(*reason))
+                        tx.error(NoticeError::V5Subscribe(*reason));
                     }
 
                     return Err(StateError::SubFail { reason: *reason });
@@ -278,7 +278,7 @@ impl MqttState {
         }
 
         if let Some(tx) = tx {
-            tx.success()
+            tx.success();
         }
 
         Ok(None)
@@ -301,7 +301,7 @@ impl MqttState {
         for reason in unsuback.reasons.iter() {
             if reason != &UnsubAckReason::Success {
                 if let Some(tx) = tx {
-                    tx.error(NoticeError::V5Unsubscribe(*reason))
+                    tx.error(NoticeError::V5Unsubscribe(*reason));
                 }
 
                 return Err(StateError::UnsubFail { reason: *reason });
@@ -309,7 +309,7 @@ impl MqttState {
         }
 
         if let Some(tx) = tx {
-            tx.success()
+            tx.success();
         }
 
         Ok(None)
@@ -409,22 +409,26 @@ impl MqttState {
             return Err(StateError::Unsolicited(puback.pkid));
         }
 
-        if let (_, Some(tx)) = self
+        let (_, tx) = self
             .outgoing_pub
             .remove(&puback.pkid)
-            .ok_or(StateError::Unsolicited(puback.pkid))?
-        {
-            tx.success()
-        }
+            .ok_or(StateError::Unsolicited(puback.pkid))?;
 
         self.inflight -= 1;
 
         if puback.reason != PubAckReason::Success
             && puback.reason != PubAckReason::NoMatchingSubscribers
         {
+            if let Some(tx) = tx {
+                tx.error(NoticeError::V5PubAck(puback.reason));
+            }
             return Err(StateError::PubAckFail {
                 reason: puback.reason,
             });
+        }
+        if let Some(tx) = tx
+        {
+            tx.success();
         }
 
         let packet = self.check_collision(puback.pkid).map(|(publish, tx)| {
@@ -456,6 +460,9 @@ impl MqttState {
         if pubrec.reason != PubRecReason::Success
             && pubrec.reason != PubRecReason::NoMatchingSubscribers
         {
+            if let Some(tx) = tx {
+                tx.error(NoticeError::V5PubRec(pubrec.reason));
+            }
             return Err(StateError::PubRecFail {
                 reason: pubrec.reason,
             });
@@ -497,15 +504,27 @@ impl MqttState {
             error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
             return Err(StateError::Unsolicited(pubcomp.pkid));
         }
-        if let Some(tx) = self
+        
+        let tx = self
             .outgoing_rel
             .remove(&pubcomp.pkid)
-            .ok_or(StateError::Unsolicited(pubcomp.pkid))?
-        {
-            tx.success()
-        }
+            .ok_or(StateError::Unsolicited(pubcomp.pkid))?;
 
         self.inflight -= 1;
+
+        if pubcomp.reason != PubCompReason::Success
+        {
+            if let Some(tx) = tx {
+                tx.error(NoticeError::V5PubComp(pubcomp.reason));
+            }
+            return Err(StateError::PubCompFail {
+                reason: pubcomp.reason,
+            });
+        }
+        if let Some(tx) = tx {
+            tx.success();
+        }
+
         let packet = self.check_collision(pubcomp.pkid).map(|(publish, tx)| {
             self.outgoing_pub
                 .insert(pubcomp.pkid, (publish.clone(), tx));
@@ -551,7 +570,7 @@ impl MqttState {
             self.outgoing_pub.insert(pkid, (publish.clone(), notice_tx));
             self.inflight += 1;
         } else if let Some(tx) = notice_tx {
-            tx.success()
+            tx.success();
         }
 
         debug!(

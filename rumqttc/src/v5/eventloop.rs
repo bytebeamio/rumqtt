@@ -209,7 +209,9 @@ impl EventLoop {
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
+                        network.write(outgoing).await?;
+                    }
                     network.flush().await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
@@ -228,7 +230,9 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
+                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
+                    network.write(outgoing).await?;
+                }
                 network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
