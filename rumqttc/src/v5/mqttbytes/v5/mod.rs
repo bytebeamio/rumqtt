@@ -39,6 +39,7 @@ mod unsubscribe;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
+    Auth(Auth),
     Connect(Connect, Option<LastWill>, Option<Login>),
     ConnAck(ConnAck),
     Publish(Publish),
@@ -53,7 +54,6 @@ pub enum Packet {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
-    Auth(Auth),
 }
 
 impl Packet {
@@ -76,6 +76,10 @@ impl Packet {
 
         let packet = packet.freeze();
         let packet = match packet_type {
+            PacketType::Auth => {
+                let auth = Auth::read(fixed_header, packet)?;
+                Packet::Auth(auth)
+            }
             PacketType::Connect => {
                 let (connect, will, login) = Connect::read(fixed_header, packet)?;
                 Packet::Connect(connect, will, login)
@@ -126,10 +130,6 @@ impl Packet {
                 let disconnect = Disconnect::read(fixed_header, packet)?;
                 Packet::Disconnect(disconnect)
             }
-            PacketType::Auth => {
-                let auth = Auth::read(fixed_header, packet)?;
-                Packet::Auth(auth)
-            }
         };
 
         Ok(packet)
@@ -146,6 +146,7 @@ impl Packet {
         }
 
         match self {
+            Self::Auth(auth) => auth.write(write),
             Self::Publish(publish) => publish.write(write),
             Self::Subscribe(subscription) => subscription.write(write),
             Self::Unsubscribe(unsubscribe) => unsubscribe.write(write),
@@ -160,12 +161,12 @@ impl Packet {
             Self::PingReq(_) => PingReq::write(write),
             Self::PingResp(_) => PingResp::write(write),
             Self::Disconnect(disconnect) => disconnect.write(write),
-            Self::Auth(auth) => auth.write(write),
         }
     }
 
     pub fn size(&self) -> usize {
         match self {
+            Self::Auth(auth) => auth.size(),
             Self::Publish(publish) => publish.size(),
             Self::Subscribe(subscription) => subscription.size(),
             Self::Unsubscribe(unsubscribe) => unsubscribe.size(),
@@ -180,7 +181,6 @@ impl Packet {
             Self::PingReq(req) => req.size(),
             Self::PingResp(resp) => resp.size(),
             Self::Disconnect(disconnect) => disconnect.size(),
-            Self::Auth(auth) => auth.size(),
         }
     }
 }

@@ -498,10 +498,10 @@ impl MqttState {
     fn handle_incoming_auth(&mut self, auth: &mut Auth) -> Result<Option<Packet>, StateError> {
         match auth.reason {
             AuthReasonCode::Success => Ok(None),
-            AuthReasonCode::ContinueAuthentication => {
+            AuthReasonCode::Continue => {
                 let props = auth.properties.clone().unwrap();
-                let in_auth_method = props.authentication_method;
-                let in_auth_data = props.authentication_data;
+                let in_auth_method = props.method;
+                let in_auth_data = props.data;
 
                 // Check if auth manager is set
                 if self.auth_manager.is_none() {
@@ -521,18 +521,17 @@ impl MqttState {
                 };
 
                 let properties = AuthProperties {
-                    authentication_method: in_auth_method,
-                    authentication_data: out_auth_data,
+                    method: in_auth_method,
+                    data: out_auth_data,
                     reason_string: None,
                     user_properties: Vec::new(),
                 };
 
-                let client_auth =
-                    Auth::new(AuthReasonCode::ContinueAuthentication, Some(properties));
+                let client_auth = Auth::new(AuthReasonCode::Continue, Some(properties));
 
                 self.outgoing_auth(client_auth)
             }
-            _ => return Err(StateError::AuthError("Authentication Failed!".to_string())),
+            _ => Err(StateError::AuthError("Authentication Failed!".to_string())),
         }
     }
 
@@ -708,7 +707,7 @@ impl MqttState {
         let props = auth.properties.as_ref().unwrap();
         debug!(
             "Auth packet sent. Auth Method: {:?}. Auth Data: {:?}",
-            props.authentication_method, props.authentication_data
+            props.method, props.data
         );
         let event = Event::Outgoing(Outgoing::Auth);
         self.events.push_back(event);
