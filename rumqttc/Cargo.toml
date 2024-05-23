@@ -30,6 +30,7 @@ bytes = "1.5"
 log = "0.4"
 flume = { version = "0.11", default-features = false, features = ["async"] }
 thiserror = "1"
+linked-hash-map = "0.5"
 
 # Optional
 # rustls

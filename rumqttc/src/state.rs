@@ -2,8 +2,9 @@ use crate::{Event, Incoming, NoticeError, NoticeTx, Outgoing, Request};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::{io, time::Instant};
+use linked_hash_map::LinkedHashMap;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -62,14 +63,14 @@ pub struct MqttState {
     /// Maximum number of allowed inflight
     pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub(crate) outgoing_pub: HashMap<u16, (Publish, Option<NoticeTx>)>,
+    pub(crate) outgoing_pub: LinkedHashMap<u16, (Publish, Option<NoticeTx>)>,
     /// Packet ids of released QoS 2 publishes
-    pub(crate) outgoing_rel: HashMap<u16, Option<NoticeTx>>,
+    pub(crate) outgoing_rel: LinkedHashMap<u16, Option<NoticeTx>>,
     /// Packet ids on incoming QoS 2 publishes
     pub(crate) incoming_pub: Vec<Option<u16>>,
 
-    outgoing_sub: HashMap<u16, Option<NoticeTx>>,
-    outgoing_unsub: HashMap<u16, Option<NoticeTx>>,
+    outgoing_sub: LinkedHashMap<u16, Option<NoticeTx>>,
+    outgoing_unsub: LinkedHashMap<u16, Option<NoticeTx>>,
 
     /// Last collision due to broker not acking in order
     pub collision: Option<(Publish, Option<NoticeTx>)>,
@@ -94,11 +95,11 @@ impl MqttState {
             inflight: 0,
             max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
-            outgoing_pub: HashMap::new(),
-            outgoing_rel: HashMap::new(),
-            incoming_pub: vec![None; std::u16::MAX as usize + 1],
-            outgoing_sub: HashMap::new(),
-            outgoing_unsub: HashMap::new(),
+            outgoing_pub: LinkedHashMap::new(),
+            outgoing_rel: LinkedHashMap::new(),
+            incoming_pub: vec![None; u16::MAX as usize + 1],
+            outgoing_sub: LinkedHashMap::new(),
+            outgoing_unsub: LinkedHashMap::new(),
             collision: None,
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
@@ -110,10 +111,21 @@ impl MqttState {
     pub fn clean(&mut self) -> Vec<Request> {
         let mut pending = Vec::with_capacity(100);
 
+        let mut second_half = Vec::with_capacity(100);
+        let mut last_pkid_found = false;
         for (_, (publish, tx)) in self.outgoing_pub.drain() {
+            let this_pkid = publish.pkid;
             let request = Request::Publish(tx, publish);
-            pending.push(request);
+            if !last_pkid_found {
+                second_half.push(request);
+                if this_pkid == self.last_puback {
+                    last_pkid_found = true;
+                }
+            } else {
+                pending.push(request);
+            }
         }
+        pending.extend(second_half);
 
         // remove and collect pending releases
         for (pkid, tx) in self.outgoing_rel.drain() {
@@ -579,7 +591,7 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use linked_hash_map::LinkedHashMap;
 
     use super::{MqttState, StateError};
     use crate::mqttbytes::v4::*;
@@ -886,8 +898,8 @@ mod test {
     fn clean_is_calculating_pending_correctly() {
         let mut mqtt = build_mqttstate();
 
-        fn build_outgoing_pub() -> HashMap<u16, (Publish, Option<NoticeTx>)> {
-            let mut outgoing_pub = HashMap::new();
+        fn build_outgoing_pub() -> LinkedHashMap<u16, (Publish, Option<NoticeTx>)> {
+            let mut outgoing_pub = LinkedHashMap::new();
             outgoing_pub.insert(
                 2,
                 (
