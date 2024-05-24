@@ -343,8 +343,11 @@ pub enum TlsConfiguration {
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     Rustls(Arc<ClientConfig>),
     #[cfg(feature = "use-native-tls")]
-    /// Injected rustls TlsConnectorBuilder for TLS, to allow more customisation.
-    Native(Arc<TlsConnectorBuilder>),
+    /// Use default native-tls configuration
+    Native,
+    #[cfg(feature = "use-native-tls")]
+    /// Injected native-tls TlsConnectorBuilder for TLS, to allow more customisation.
+    NativeBuilder(Arc<TlsConnectorBuilder>),
 }
 
 #[cfg(feature = "use-rustls")]
@@ -372,7 +375,7 @@ impl From<ClientConfig> for TlsConfiguration {
 #[cfg(feature = "use-native-tls")]
 impl From<TlsConnectorBuilder> for TlsConfiguration {
     fn from(builder: TlsConnectorBuilder) -> Self {
-        TlsConfiguration::Native(Arc::new(builder))
+        TlsConfiguration::NativeBuilder(Arc::new(builder))
     }
 }
 
