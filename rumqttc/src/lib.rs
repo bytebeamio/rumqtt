@@ -109,6 +109,7 @@ mod client;
 mod eventloop;
 mod framed;
 pub mod mqttbytes;
+mod notice;
 mod state;
 pub mod v5;
 
@@ -140,12 +141,13 @@ pub use client::{
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
+use notice::NoticeTx;
+pub use notice::{NoticeError, NoticeFuture};
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
-use tokio::sync::oneshot;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
@@ -155,60 +157,6 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
-
-use v5::mqttbytes::v5::{SubscribeReasonCode as V5SubscribeReasonCode, UnsubAckReason};
-
-#[derive(Debug, thiserror::Error)]
-pub enum NoticeError {
-    #[error("Eventloop dropped Sender")]
-    Recv,
-    #[error(" v4 Subscription Failure Reason Code: {0:?}")]
-    V4Subscribe(SubscribeReasonCode),
-    #[error(" v5 Subscription Failure Reason Code: {0:?}")]
-    V5Subscribe(V5SubscribeReasonCode),
-    #[error(" v5 Unsubscription Failure Reason: {0:?}")]
-    V5Unsubscribe(UnsubAckReason),
-}
-
-impl From<oneshot::error::RecvError> for NoticeError {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        Self::Recv
-    }
-}
-
-type NoticeResult = Result<(), NoticeError>;
-
-/// A token through which the user is notified of the publish/subscribe/unsubscribe packet being acked by the broker.
-#[derive(Debug)]
-pub struct NoticeFuture(oneshot::Receiver<NoticeResult>);
-
-impl NoticeFuture {
-    /// Wait for broker to acknowledge by blocking the current thread
-    ///
-    /// # Panics
-    /// Panics if called in an async context
-    pub fn wait(self) -> NoticeResult {
-        self.0.blocking_recv()?
-    }
-
-    /// Await the packet acknowledgement from broker, without blocking the current thread
-    pub async fn wait_async(self) -> NoticeResult {
-        self.0.await?
-    }
-}
-
-#[derive(Debug)]
-pub struct NoticeTx(oneshot::Sender<NoticeResult>);
-
-impl NoticeTx {
-    fn success(self) {
-        _ = self.0.send(Ok(()));
-    }
-
-    fn error(self, e: NoticeError) {
-        _ = self.0.send(Err(e));
-    }
-}
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,37 +187,37 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Request {
-    Publish(Option<NoticeTx>, Publish),
+    Publish(Publish),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
-    PubRel(Option<NoticeTx>, PubRel),
+    PubRel(PubRel),
     PingReq(PingReq),
     PingResp(PingResp),
-    Subscribe(Option<NoticeTx>, Subscribe),
+    Subscribe(Subscribe),
     SubAck(SubAck),
-    Unsubscribe(Option<NoticeTx>, Unsubscribe),
+    Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
 }
 
 impl From<Publish> for Request {
     fn from(publish: Publish) -> Request {
-        Request::Publish(None, publish)
+        Request::Publish(publish)
     }
 }
 
 impl From<Subscribe> for Request {
     fn from(subscribe: Subscribe) -> Request {
-        Request::Subscribe(None, subscribe)
+        Request::Subscribe(subscribe)
     }
 }
 
 impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
-        Request::Unsubscribe(None, unsubscribe)
+        Request::Unsubscribe(unsubscribe)
     }
 }
 

@@ -1,4 +1,5 @@
-use crate::{Event, Incoming, NoticeError, NoticeTx, Outgoing, Request};
+use crate::notice::NoticeTx;
+use crate::{Event, Incoming, NoticeError, Outgoing, Request};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
@@ -72,7 +73,7 @@ pub struct MqttState {
     outgoing_unsub: HashMap<u16, Option<NoticeTx>>,
 
     /// Last collision due to broker not acking in order
-    pub collision: Option<(Publish, Option<NoticeTx>)>,
+    pub(crate) collision: Option<(Publish, Option<NoticeTx>)>,
     /// Buffered incoming packets
     pub events: VecDeque<Event>,
     /// Indicates if acknowledgements should be send immediately
@@ -107,18 +108,18 @@ impl MqttState {
     }
 
     /// Returns inflight outgoing packets and clears internal queues
-    pub fn clean(&mut self) -> Vec<Request> {
+    pub fn clean(&mut self) -> Vec<(Option<NoticeTx>, Request)> {
         let mut pending = Vec::with_capacity(100);
 
         for (_, (publish, tx)) in self.outgoing_pub.drain() {
-            let request = Request::Publish(tx, publish);
-            pending.push(request);
+            let request = Request::Publish(publish);
+            pending.push((tx, request));
         }
 
         // remove and collect pending releases
         for (pkid, tx) in self.outgoing_rel.drain() {
-            let request = Request::PubRel(tx, PubRel::new(pkid));
-            pending.push(request);
+            let request = Request::PubRel(PubRel::new(pkid));
+            pending.push((tx, request));
         }
 
         // remove packed ids of incoming qos2 publishes
@@ -140,13 +141,14 @@ impl MqttState {
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(
         &mut self,
+        tx: Option<NoticeTx>,
         request: Request,
     ) -> Result<Option<Packet>, StateError> {
         let packet = match request {
-            Request::Publish(tx, publish) => self.outgoing_publish(publish, tx)?,
-            Request::PubRel(tx, pubrel) => self.outgoing_pubrel(pubrel, tx)?,
-            Request::Subscribe(tx, subscribe) => self.outgoing_subscribe(subscribe, tx)?,
-            Request::Unsubscribe(tx, unsubscribe) => self.outgoing_unsubscribe(unsubscribe, tx)?,
+            Request::Publish(publish) => self.outgoing_publish(publish, tx)?,
+            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel, tx)?,
+            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe, tx)?,
+            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe, tx)?,
             Request::PingReq(_) => self.outgoing_ping()?,
             Request::Disconnect(_) => self.outgoing_disconnect()?,
             Request::PubAck(puback) => self.outgoing_puback(puback)?,
@@ -857,7 +859,7 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_packet(Request::Publish(None, publish))
+        mqtt.handle_outgoing_packet(None, Request::Publish(publish))
             .unwrap();
         mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1)))
             .unwrap();
@@ -953,8 +955,8 @@ mod test {
         mqtt.last_puback = 3;
         let requests = mqtt.clean();
         let res = vec![6, 1, 2, 3];
-        for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(_, publish) = req {
+        for ((_, req), idx) in requests.iter().zip(res) {
+            if let Request::Publish(publish) = req {
                 assert_eq!(publish.pkid, idx);
             } else {
                 unreachable!()
@@ -965,8 +967,8 @@ mod test {
         mqtt.last_puback = 0;
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
-        for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(_, publish) = req {
+        for ((_, req), idx) in requests.iter().zip(res) {
+            if let Request::Publish(publish) = req {
                 assert_eq!(publish.pkid, idx);
             } else {
                 unreachable!()
@@ -977,8 +979,8 @@ mod test {
         mqtt.last_puback = 6;
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
-        for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(_, publish) = req {
+        for ((_, req), idx) in requests.iter().zip(res) {
+            if let Request::Publish(publish) = req {
                 assert_eq!(publish.pkid, idx);
             } else {
                 unreachable!()

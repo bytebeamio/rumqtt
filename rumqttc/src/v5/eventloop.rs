@@ -3,6 +3,7 @@ use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
+use crate::notice::NoticeTx;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -73,11 +74,11 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<Request>,
+    requests_rx: Receiver<(Option<NoticeTx>, Request)>,
     /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<Request>,
+    pub(crate) requests_tx: Sender<(Option<NoticeTx>, Request)>,
     /// Pending packets from last session
-    pub(crate) pending: VecDeque<Request>,
+    pub(crate) pending: VecDeque<(Option<NoticeTx>, Request)>,
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time
@@ -208,8 +209,8 @@ impl EventLoop {
                 &self.requests_rx,
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
-                Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
+                Ok((tx, request)) => {
+                    self.state.handle_outgoing_packet(tx, request)?;
                     network.flush().await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
@@ -228,7 +229,7 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
+                self.state.handle_outgoing_packet(None, Request::PingReq)?;
                 network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
@@ -236,10 +237,10 @@ impl EventLoop {
     }
 
     async fn next_request(
-        pending: &mut VecDeque<Request>,
-        rx: &Receiver<Request>,
+        pending: &mut VecDeque<(Option<NoticeTx>, Request)>,
+        rx: &Receiver<(Option<NoticeTx>, Request)>,
         pending_throttle: Duration,
-    ) -> Result<Request, ConnectionError> {
+    ) -> Result<(Option<NoticeTx>, Request), ConnectionError> {
         if !pending.is_empty() {
             time::sleep(pending_throttle).await;
             // We must call .next() AFTER sleep() otherwise .next() would

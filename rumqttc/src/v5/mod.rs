@@ -14,8 +14,8 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
+use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
-use crate::{NoticeTx, Outgoing};
 
 use mqttbytes::v5::*;
 
@@ -33,62 +33,21 @@ pub type Incoming = Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Request {
-    Publish(Option<NoticeTx>, Publish),
+    Publish(Publish),
     PubAck(PubAck),
     PubRec(PubRec),
     PubComp(PubComp),
-    PubRel(Option<NoticeTx>, PubRel),
+    PubRel(PubRel),
     PingReq,
     PingResp,
-    Subscribe(Option<NoticeTx>, Subscribe),
+    Subscribe(Subscribe),
     SubAck(SubAck),
-    Unsubscribe(Option<NoticeTx>, Unsubscribe),
+    Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect,
 }
-
-impl Clone for Request {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Publish(_, p) => Self::Publish(None, p.clone()),
-            Self::PubAck(p) => Self::PubAck(p.clone()),
-            Self::PubRec(p) => Self::PubRec(p.clone()),
-            Self::PubRel(_, p) => Self::PubRel(None, p.clone()),
-            Self::PubComp(p) => Self::PubComp(p.clone()),
-            Self::Subscribe(_, p) => Self::Subscribe(None, p.clone()),
-            Self::SubAck(p) => Self::SubAck(p.clone()),
-            Self::PingReq => Self::PingReq,
-            Self::PingResp => Self::PingResp,
-            Self::Disconnect => Self::Disconnect,
-            Self::Unsubscribe(_, p) => Self::Unsubscribe(None, p.clone()),
-            Self::UnsubAck(p) => Self::UnsubAck(p.clone()),
-        }
-    }
-}
-
-impl PartialEq for Request {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Publish(_, p1), Self::Publish(_, p2)) => p1 == p2,
-            (Self::PubAck(p1), Self::PubAck(p2)) => p1 == p2,
-            (Self::PubRec(p1), Self::PubRec(p2)) => p1 == p2,
-            (Self::PubRel(_, p1), Self::PubRel(_, p2)) => p1 == p2,
-            (Self::PubComp(p1), Self::PubComp(p2)) => p1 == p2,
-            (Self::Subscribe(_, p1), Self::Subscribe(_, p2)) => p1 == p2,
-            (Self::SubAck(p1), Self::SubAck(p2)) => p1 == p2,
-            (Self::PingReq, Self::PingReq)
-            | (Self::PingResp, Self::PingResp)
-            | (Self::Disconnect, Self::Disconnect) => true,
-            (Self::Unsubscribe(_, p1), Self::Unsubscribe(_, p2)) => p1 == p2,
-            (Self::UnsubAck(p1), Self::UnsubAck(p2)) => p1 == p2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Request {}
 
 #[cfg(feature = "websocket")]
 type RequestModifierFn = Arc<

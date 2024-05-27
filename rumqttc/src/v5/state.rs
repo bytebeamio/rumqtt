@@ -160,18 +160,18 @@ impl MqttState {
     }
 
     /// Returns inflight outgoing packets and clears internal queues
-    pub fn clean(&mut self) -> Vec<Request> {
+    pub fn clean(&mut self) -> Vec<(Option<NoticeTx>, Request)> {
         let mut pending = Vec::with_capacity(100);
         // remove and collect pending publishes
         for (_, (publish, tx)) in self.outgoing_pub.drain() {
-            let request = Request::Publish(tx, publish);
-            pending.push(request);
+            let request = Request::Publish(publish);
+            pending.push((tx, request));
         }
 
         // remove and collect pending releases
         for (pkid, tx) in self.outgoing_rel.drain() {
-            let request = Request::PubRel(tx, PubRel::new(pkid, None));
-            pending.push(request);
+            let request = Request::PubRel(PubRel::new(pkid, None));
+            pending.push((tx, request));
         }
 
         // remove packed ids of incoming qos2 publishes
@@ -193,13 +193,14 @@ impl MqttState {
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(
         &mut self,
+        tx: Option<NoticeTx>,
         request: Request,
     ) -> Result<Option<Packet>, StateError> {
         let packet = match request {
-            Request::Publish(tx, publish) => self.outgoing_publish(publish, tx)?,
-            Request::PubRel(tx, pubrel) => self.outgoing_pubrel(pubrel, tx)?,
-            Request::Subscribe(tx, subscribe) => self.outgoing_subscribe(subscribe, tx)?,
-            Request::Unsubscribe(tx, unsubscribe) => self.outgoing_unsubscribe(unsubscribe, tx)?,
+            Request::Publish(publish) => self.outgoing_publish(publish, tx)?,
+            Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel, tx)?,
+            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe, tx)?,
+            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe, tx)?,
             Request::PingReq => self.outgoing_ping()?,
             Request::Disconnect => {
                 self.outgoing_disconnect(DisconnectReasonCode::NormalDisconnection)?
@@ -1059,7 +1060,7 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_packet(Request::Publish(None, publish))
+        mqtt.handle_outgoing_packet(None, Request::Publish(publish))
             .unwrap();
         mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1, None)))
             .unwrap();
