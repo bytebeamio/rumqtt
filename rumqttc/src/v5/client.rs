@@ -86,17 +86,17 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
-        self.request_tx.send_async((notice_tx, publish)).await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        // Fulfill instantly for QoS 0
+        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn publish_with_properties<S, P>(
@@ -145,17 +145,17 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.try_send((notice_tx, publish))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        // Fulfill instantly for QoS 0
+        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_publish_with_properties<S, P>(
@@ -221,17 +221,17 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.send_async((notice_tx, publish)).await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        // Fulfill instantly for QoS 0
+        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn publish_bytes_with_properties<S>(
@@ -273,15 +273,16 @@ impl AsyncClient {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
         let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
-        self.request_tx
-            .send_async((Some(NoticeTx(notice_tx)), request))
-            .await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn subscribe_with_properties<S: Into<String>>(
@@ -311,14 +312,16 @@ impl AsyncClient {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
         let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::TryRequest(request));
         }
-        self.request_tx
-            .try_send((Some(NoticeTx(notice_tx)), request))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_subscribe_with_properties<S: Into<String>>(
@@ -350,16 +353,16 @@ impl AsyncClient {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
         let subscribe = Subscribe::new_many(topics_iter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
         let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
 
-        self.request_tx
-            .send_async((Some(NoticeTx(notice_tx)), request))
-            .await?;
-        Ok(NoticeFuture(notice_rx))
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn subscribe_many_with_properties<T>(
@@ -392,14 +395,16 @@ impl AsyncClient {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
         let subscribe = Subscribe::new_many(topics_iter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
         let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::TryRequest(request));
         }
-        self.request_tx
-            .try_send((Some(NoticeTx(notice_tx)), request))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_subscribe_many_with_properties<T>(
@@ -427,14 +432,13 @@ impl AsyncClient {
         properties: Option<UnsubscribeProperties>,
     ) -> Result<NoticeFuture, ClientError> {
         let unsubscribe = Unsubscribe::new(topic, properties);
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx
-            .send_async((Some(NoticeTx(notice_tx)), request))
-            .await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub async fn unsubscribe_with_properties<S: Into<String>>(
@@ -459,13 +463,13 @@ impl AsyncClient {
         properties: Option<UnsubscribeProperties>,
     ) -> Result<NoticeFuture, ClientError> {
         let unsubscribe = Unsubscribe::new(topic, properties);
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx
-            .try_send((Some(NoticeTx(notice_tx)), request))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
@@ -562,17 +566,17 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send((notice_tx, publish))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        // Fulfill instantly for QoS 0
+        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
+        self.client.request_tx.send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn publish_with_properties<S, P>(
@@ -660,14 +664,16 @@ impl Client {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let notice_tx = NoticeTx(notice_tx);
         let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send((Some(notice_tx), request))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.client.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn subscribe_with_properties<S: Into<String>>(
@@ -718,14 +724,16 @@ impl Client {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
         let subscribe = Subscribe::new_many(topics_iter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let notice_tx = NoticeTx(notice_tx);
         let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send((Some(notice_tx), request))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.client.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn subscribe_many_with_properties<T>(
@@ -772,13 +780,13 @@ impl Client {
         properties: Option<UnsubscribeProperties>,
     ) -> Result<NoticeFuture, ClientError> {
         let unsubscribe = Unsubscribe::new(topic, properties);
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let notice_tx = NoticeTx(notice_tx);
-
         let request = Request::Unsubscribe(unsubscribe);
-        self.client.request_tx.send((Some(notice_tx), request))?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        let notice_tx = Some(notice_tx);
+        self.client.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn unsubscribe_with_properties<S: Into<String>>(

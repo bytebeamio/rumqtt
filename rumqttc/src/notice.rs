@@ -48,6 +48,12 @@ impl NoticeFuture {
 pub struct NoticeTx(pub(crate) oneshot::Sender<NoticeResult>);
 
 impl NoticeTx {
+    pub fn new() -> (Self, NoticeFuture) {
+        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
+
+        (NoticeTx(notice_tx), NoticeFuture(notice_rx))
+    }
+
     pub(crate) fn success(self) {
         _ = self.0.send(Ok(()));
     }
