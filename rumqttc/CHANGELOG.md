@@ -14,15 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
 * `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`.
 * `Auth` packet as per MQTT5 standards
-* `tcp_nodelay` field on `NetworkOptions` type to enable configuring `tcp_nodelay` for the client
-* `set_tcp_nodelay` method on `Networkoptions`
+* Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`
 
 ### Changed
 
 * rename `N` as `AsyncReadWrite` to describe usage.
 * use `Framed` to encode/decode MQTT packets.
 * use `Login` to store credentials
-* check `tcp_nodelay` field of `NetworkOptions` when setting up the connection socket to set tcp_nodelay if the flag is set
 
 ### Deprecated
 

@@ -317,9 +317,7 @@ pub(crate) async fn socket_connect(
             SocketAddr::V6(_) => TcpSocket::new_v6()?,
         };
 
-        if let Some(nodelay) = network_options.tcp_nodelay {
-            socket.set_nodelay(nodelay)?;
-        }
+        socket.set_nodelay(network_options.tcp_nodelay)?;
 
         if let Some(send_buff_size) = network_options.tcp_send_buffer_size {
             socket.set_send_buffer_size(send_buff_size).unwrap();
