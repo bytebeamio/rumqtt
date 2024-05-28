@@ -1,14 +1,14 @@
 use bytes::Bytes;
+use flume::bounded;
 use rumqttc::v5::mqttbytes::{v5::AuthProperties, QoS};
-use rumqttc::v5::{AsyncClient, AuthManager, MqttOptions};
-use std::error::Error;
-use std::sync::{Arc, Mutex};
-use tokio::task;
-#[cfg(feature = "auth-scram")]
-use scram::ScramClient;
+use rumqttc::v5::{AuthManager, Client, MqttOptions};
 #[cfg(feature = "auth-scram")]
 use scram::client::ServerFirst;
-use flume::bounded;
+#[cfg(feature = "auth-scram")]
+use scram::ScramClient;
+use std::error::Error;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 #[derive(Debug)]
 struct ScramAuthManager<'a> {
@@ -51,7 +51,7 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
     ) -> Result<Option<Bytes>, String> {
         #[cfg(feature = "auth-scram")]
         {
-            // Check if the authentication method is SCRAM-SHA-256
+            //Check if the authentication method is SCRAM-SHA-256
             if auth_method.unwrap() != "SCRAM-SHA-256" {
                 return Err("Invalid authentication method".to_string());
             }
@@ -64,13 +64,13 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
 
             let auth_data = String::from_utf8(auth_data.unwrap().to_vec()).unwrap();
 
-            // Process the server first message and reassign the SCRAM state.
+            //Process the server first message and reassign the SCRAM state.
             let scram = match scram.handle_server_first(&auth_data) {
                 Ok(scram) => scram,
                 Err(e) => return Err(e.to_string()),
             };
 
-            // Get the client final message and reassign the SCRAM state.
+            //Get the client final message and reassign the SCRAM state.
             let (_, client_final) = scram.client_final();
 
             Ok(Some(client_final.into()))
@@ -81,8 +81,7 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut authmanager = ScramAuthManager::new("user1", "123456");
     let client_first = authmanager.auth_start().unwrap();
     let authmanager = Arc::new(Mutex::new(authmanager));
@@ -91,22 +90,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     mqttoptions.set_authentication_method(Some("SCRAM-SHA-256".to_string()));
     mqttoptions.set_authentication_data(client_first);
     mqttoptions.set_auth_manager(authmanager.clone());
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut connection) = Client::new(mqttoptions, 10);
 
     let (tx, rx) = bounded(1);
 
-    task::spawn(async move {
+    thread::spawn(move || {
         client
             .subscribe("rumqtt_auth/topic", QoS::AtLeastOnce)
-            .await
             .unwrap();
         client
             .publish("rumqtt_auth/topic", QoS::AtLeastOnce, false, "hello world")
-            .await
             .unwrap();
 
         // Wait for the connection to be established.
-        rx.recv_async().await.unwrap();
+        rx.recv().unwrap();
 
         // Reauthenticate using SCRAM-SHA-256
         let client_first = authmanager.clone().lock().unwrap().auth_start().unwrap();
@@ -116,18 +113,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             reason_string: None,
             user_properties: Vec::new(),
         };
-        client.reauth(Some(properties)).await.unwrap();
+        client.reauth(Some(properties)).unwrap();
     });
 
-    loop {
-        let notification = eventloop.poll().await;
-
+    for (_, notification) in connection.iter().enumerate() {
         match notification {
             Ok(event) => {
                 println!("Event = {:?}", event);
-                match event {
+                match (event) {
                     rumqttc::v5::Event::Incoming(rumqttc::v5::Incoming::ConnAck(_)) => {
-                        tx.send_async("Connected").await.unwrap();
+                        tx.send("Connected").unwrap();
                     }
                     _ => {}
                 }
