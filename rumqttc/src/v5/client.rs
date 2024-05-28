@@ -25,14 +25,14 @@ pub enum ClientError {
     TryRequest(Request),
 }
 
-impl From<SendError<(Option<NoticeTx>, Request)>> for ClientError {
-    fn from(e: SendError<(Option<NoticeTx>, Request)>) -> Self {
+impl From<SendError<(NoticeTx, Request)>> for ClientError {
+    fn from(e: SendError<(NoticeTx, Request)>) -> Self {
         Self::Request(e.into_inner().1)
     }
 }
 
-impl From<TrySendError<(Option<NoticeTx>, Request)>> for ClientError {
-    fn from(e: TrySendError<(Option<NoticeTx>, Request)>) -> Self {
+impl From<TrySendError<(NoticeTx, Request)>> for ClientError {
+    fn from(e: TrySendError<(NoticeTx, Request)>) -> Self {
         Self::TryRequest(e.into_inner().1)
     }
 }
@@ -46,7 +46,7 @@ impl From<TrySendError<(Option<NoticeTx>, Request)>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<(Option<NoticeTx>, Request)>,
+    request_tx: Sender<(NoticeTx, Request)>,
 }
 
 impl AsyncClient {
@@ -66,7 +66,7 @@ impl AsyncClient {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_senders(request_tx: Sender<(Option<NoticeTx>, Request)>) -> AsyncClient {
+    pub fn from_senders(request_tx: Sender<(NoticeTx, Request)>) -> AsyncClient {
         AsyncClient { request_tx }
     }
 
@@ -92,8 +92,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        // Fulfill instantly for QoS 0
-        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
         self.request_tx.send_async((notice_tx, request)).await?;
 
         Ok(future)
@@ -151,8 +149,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        // Fulfill instantly for QoS 0
-        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
         self.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -188,22 +184,27 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub async fn ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
         let ack = get_ack_req(publish);
 
+        let (notice_tx, future) = NoticeTx::new();
         if let Some(ack) = ack {
-            self.request_tx.send_async((None, ack)).await?;
+            self.request_tx.send_async((notice_tx, ack)).await?;
         }
-        Ok(())
+
+        Ok(future)
     }
 
     /// Attempts to send a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn try_ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
         let ack = get_ack_req(publish);
+
+        let (notice_tx, future) = NoticeTx::new();
         if let Some(ack) = ack {
-            self.request_tx.try_send((None, ack))?;
+            self.request_tx.try_send((notice_tx, ack))?;
         }
-        Ok(())
+
+        Ok(future)
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
@@ -227,8 +228,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        // Fulfill instantly for QoS 0
-        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
         self.request_tx.send_async((notice_tx, request)).await?;
 
         Ok(future)
@@ -279,7 +278,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.request_tx.send_async((notice_tx, request)).await?;
 
         Ok(future)
@@ -318,7 +316,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -359,7 +356,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.request_tx.send_async((notice_tx, request)).await?;
 
         Ok(future)
@@ -401,7 +397,6 @@ impl AsyncClient {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -435,7 +430,6 @@ impl AsyncClient {
         let request = Request::Unsubscribe(unsubscribe);
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -466,7 +460,6 @@ impl AsyncClient {
         let request = Request::Unsubscribe(unsubscribe);
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -485,17 +478,23 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub async fn disconnect(&self) -> Result<(), ClientError> {
+    pub async fn disconnect(&self) -> Result<NoticeFuture, ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.send_async((None, request)).await?;
-        Ok(())
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
+    pub fn try_disconnect(&self) -> Result<NoticeFuture, ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.try_send((None, request))?;
-        Ok(())
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 }
 
@@ -544,7 +543,7 @@ impl Client {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<(Option<NoticeTx>, Request)>) -> Client {
+    pub fn from_sender(request_tx: Sender<(NoticeTx, Request)>) -> Client {
         Client {
             client: AsyncClient::from_senders(request_tx),
         }
@@ -572,8 +571,6 @@ impl Client {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        // Fulfill instantly for QoS 0
-        let notice_tx = (qos == QoS::AtMostOnce).then_some(notice_tx);
         self.client.request_tx.send((notice_tx, request))?;
 
         Ok(future)
@@ -639,19 +636,20 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
         let ack = get_ack_req(publish);
 
+        let (notice_tx, future) = NoticeTx::new();
         if let Some(ack) = ack {
-            self.client.request_tx.send((None, ack))?;
+            self.client.request_tx.send((notice_tx, ack))?;
         }
-        Ok(())
+
+        Ok(future)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        self.client.try_ack(publish)?;
-        Ok(())
+    pub fn try_ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
+        self.client.try_ack(publish)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -670,7 +668,6 @@ impl Client {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.client.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -730,7 +727,6 @@ impl Client {
         }
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.client.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -783,7 +779,6 @@ impl Client {
         let request = Request::Unsubscribe(unsubscribe);
 
         let (notice_tx, future) = NoticeTx::new();
-        let notice_tx = Some(notice_tx);
         self.client.request_tx.try_send((notice_tx, request))?;
 
         Ok(future)
@@ -816,16 +811,18 @@ impl Client {
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn disconnect(&self) -> Result<(), ClientError> {
+    pub fn disconnect(&self) -> Result<NoticeFuture, ClientError> {
         let request = Request::Disconnect;
-        self.client.request_tx.send((None, request))?;
-        Ok(())
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.client.request_tx.send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        self.client.try_disconnect()?;
-        Ok(())
+    pub fn try_disconnect(&self) -> Result<NoticeFuture, ClientError> {
+        self.client.try_disconnect()
     }
 }
 
