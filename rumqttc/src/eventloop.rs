@@ -76,11 +76,11 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<(Option<NoticeTx>, Request)>,
+    requests_rx: Receiver<(NoticeTx, Request)>,
     /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<(Option<NoticeTx>, Request)>,
+    pub(crate) requests_tx: Sender<(NoticeTx, Request)>,
     /// Pending packets from last session
-    pub pending: VecDeque<(Option<NoticeTx>, Request)>,
+    pub pending: VecDeque<(NoticeTx, Request)>,
     /// Network connection to the broker
     pub network: Option<Network>,
     /// Keep alive time
@@ -247,7 +247,8 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
-                if let Some(outgoing) = self.state.handle_outgoing_packet(None, Request::PingReq(PingReq))? {
+                let (tx, _) = NoticeTx::new();
+                if let Some(outgoing) = self.state.handle_outgoing_packet(tx, Request::PingReq(PingReq))? {
                     network.write(outgoing).await?;
                 }
                 match time::timeout(network_timeout, network.flush()).await {
@@ -269,10 +270,10 @@ impl EventLoop {
     }
 
     async fn next_request(
-        pending: &mut VecDeque<(Option<NoticeTx>, Request)>,
-        rx: &Receiver<(Option<NoticeTx>, Request)>,
+        pending: &mut VecDeque<(NoticeTx, Request)>,
+        rx: &Receiver<(NoticeTx, Request)>,
         pending_throttle: Duration,
-    ) -> Result<(Option<NoticeTx>, Request), ConnectionError> {
+    ) -> Result<(NoticeTx, Request), ConnectionError> {
         if !pending.is_empty() {
             time::sleep(pending_throttle).await;
             // We must call .pop_front() AFTER sleep() otherwise we would have
