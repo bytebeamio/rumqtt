@@ -369,6 +369,7 @@ impl From<ClientConfig> for TlsConfiguration {
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
+    tcp_nodelay: bool,
     conn_timeout: u64,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
@@ -379,10 +380,15 @@ impl NetworkOptions {
         NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
+            tcp_nodelay: false,
             conn_timeout: 5,
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
         }
+    }
+
+    pub fn set_tcp_nodelay(&mut self, nodelay: bool) {
+        self.tcp_nodelay = nodelay;
     }
 
     pub fn set_tcp_send_buffer_size(&mut self, size: u32) {
