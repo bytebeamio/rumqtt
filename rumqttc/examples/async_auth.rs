@@ -4,15 +4,18 @@ use rumqttc::v5::{AsyncClient, AuthManager, MqttOptions};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use tokio::task;
-//use scram::ScramClient;
-//use scram::client::ServerFirst;
+#[cfg(feature = "auth-scram")]
+use scram::ScramClient;
+#[cfg(feature = "auth-scram")]
+use scram::client::ServerFirst;
 use flume::bounded;
 
 #[derive(Debug)]
 struct ScramAuthManager<'a> {
     user: &'a str,
     password: &'a str,
-    //scram: Option<ServerFirst<'a>>,
+    #[cfg(feature = "auth-scram")]
+    scram: Option<ServerFirst<'a>>,
 }
 
 impl<'a> ScramAuthManager<'a> {
@@ -20,17 +23,22 @@ impl<'a> ScramAuthManager<'a> {
         ScramAuthManager {
             user,
             password,
-            //scram: None,
+            #[cfg(feature = "auth-scram")]
+            scram: None,
         }
     }
 
     fn auth_start(&mut self) -> Result<Option<Bytes>, String> {
-        //let scram = ScramClient::new(self.user, self.password, None);
-        //let (scram, client_first) = scram.client_first();
-        //self.scram = Some(scram);
+        #[cfg(feature = "auth-scram")]
+        {
+            let scram = ScramClient::new(self.user, self.password, None);
+            let (scram, client_first) = scram.client_first();
+            self.scram = Some(scram);
 
-        //Ok(Some(client_first.into()))
+            Ok(Some(client_first.into()))
+        }
 
+        #[cfg(not(feature = "auth-scram"))]
         Ok(Some("client first message".into()))
     }
 }
@@ -41,30 +49,34 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
         auth_method: Option<String>,
         auth_data: Option<Bytes>,
     ) -> Result<Option<Bytes>, String> {
-        // Check if the authentication method is SCRAM-SHA-256
-        //if auth_method.unwrap() != "SCRAM-SHA-256" {
-        //    return Err("Invalid authentication method".to_string());
-        //}
+        #[cfg(feature = "auth-scram")]
+        {
+            // Check if the authentication method is SCRAM-SHA-256
+            if auth_method.unwrap() != "SCRAM-SHA-256" {
+                return Err("Invalid authentication method".to_string());
+            }
 
-        //if self.scram.is_none() {
-        //    return Err("Invalid state".to_string());
-        //}
+            if self.scram.is_none() {
+                return Err("Invalid state".to_string());
+            }
 
-        //let scram = self.scram.take().unwrap();
+            let scram = self.scram.take().unwrap();
 
-        //let auth_data = String::from_utf8(auth_data.unwrap().to_vec()).unwrap();
+            let auth_data = String::from_utf8(auth_data.unwrap().to_vec()).unwrap();
 
-        // Process the server first message and reassign the SCRAM state.
-        //let scram = match(scram.handle_server_first(&auth_data)){
-        //    Ok(scram) => scram,
-        //    Err(e) => return Err(e.to_string()),
-        //};
+            // Process the server first message and reassign the SCRAM state.
+            let scram = match scram.handle_server_first(&auth_data) {
+                Ok(scram) => scram,
+                Err(e) => return Err(e.to_string()),
+            };
 
-        // Get the client final message and reassign the SCRAM state.
-        //let (_, client_final) = scram.client_final();
+            // Get the client final message and reassign the SCRAM state.
+            let (_, client_final) = scram.client_final();
 
-        //Ok(Some(client_final.into()))
+            Ok(Some(client_final.into()))
+        }
 
+        #[cfg(not(feature = "auth-scram"))]
         Ok(Some("client final message".into()))
     }
 }
@@ -113,7 +125,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         match notification {
             Ok(event) => {
                 println!("Event = {:?}", event);
-                match (event) {
+                match event {
                     rumqttc::v5::Event::Incoming(rumqttc::v5::Incoming::ConnAck(_)) => {
                         tx.send_async("Connected").await.unwrap();
                     }
