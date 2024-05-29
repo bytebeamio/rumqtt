@@ -111,9 +111,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Reauthenticate using SCRAM-SHA-256
         let client_first = authmanager.clone().lock().unwrap().auth_start().unwrap();
         let properties = AuthProperties {
-            authentication_method: Some("SCRAM-SHA-256".to_string()),
-            authentication_data: client_first,
-            reason_string: None,
+            method: Some("SCRAM-SHA-256".to_string()),
+            data: client_first,
+            reason: None,
             user_properties: Vec::new(),
         };
         client.reauth(Some(properties)).await.unwrap();

@@ -39,9 +39,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         // Re-authentication test.
         let props = AuthProperties {
-            authentication_method: Some("OAUTH2-JWT".to_string()),
-            authentication_data: Some(pubsub_access_token.into()),
-            reason_string: None,
+            method: Some("OAUTH2-JWT".to_string()),
+            data: Some(pubsub_access_token.into()),
+            reason: None,
             user_properties: Vec::new(),
         };
 

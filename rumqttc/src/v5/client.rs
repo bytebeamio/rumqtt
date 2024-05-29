@@ -197,7 +197,7 @@ impl AsyncClient {
 
     /// Sends a MQTT AUTH to `EventLoop` for authentication.
     pub async fn reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
-        let auth = Auth::new(AuthReasonCode::Reauthenticate, properties);
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
         let auth = Request::Auth(auth);
         self.request_tx.send_async(auth).await?;
         Ok(())
@@ -205,7 +205,7 @@ impl AsyncClient {
 
     /// Attempts to send a MQTT AUTH to `EventLoop` for authentication.
     pub fn try_reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
-        let auth = Auth::new(AuthReasonCode::Reauthenticate, properties);
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
         let auth = Request::Auth(auth);
         self.request_tx.try_send(auth)?;
         Ok(())
@@ -617,7 +617,7 @@ impl Client {
 
     /// Sends a MQTT AUTH to `EventLoop` for authentication.
     pub fn reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
-        let auth = Auth::new(AuthReasonCode::Reauthenticate, properties);
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
         let auth = Request::Auth(auth);
         self.client.request_tx.send(auth)?;
         Ok(())
@@ -625,7 +625,7 @@ impl Client {
 
     /// Attempts to send a MQTT AUTH to `EventLoop` for authentication.
     pub fn try_reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
-        let auth = Auth::new(AuthReasonCode::Reauthenticate, properties);
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
         let auth = Request::Auth(auth);
         self.client.request_tx.try_send(auth)?;
         Ok(())
