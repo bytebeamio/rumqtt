@@ -158,6 +158,8 @@ pub type Incoming = Packet;
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outgoing {
+    /// Connect packet
+    Connect,
     /// Publish packet with packet identifier. 0 implies QoS 0
     Publish(u16),
     /// Subscribe packet with packet identifier

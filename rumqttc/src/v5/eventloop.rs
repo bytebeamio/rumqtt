@@ -13,8 +13,6 @@ use std::io;
 use std::pin::Pin;
 use std::time::Duration;
 
-use super::mqttbytes::v5::ConnectReturnCode;
-
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
 
@@ -38,6 +36,8 @@ pub enum ConnectionError {
     MqttState(#[from] StateError),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
+    #[error("Connection Timeout")]
+    ConnectionTimeout,
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -49,8 +49,6 @@ pub enum ConnectionError {
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
-    #[error("Connection refused, return code: `{0:?}`")]
-    ConnectionRefused(ConnectReturnCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
     NotConnAck(Box<Packet>),
     #[error("Requests done")]
@@ -82,6 +80,8 @@ pub struct EventLoop {
     network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    /// connection timeout
+    connection_timeout: Option<Pin<Box<Sleep>>>,
 }
 
 /// Events which can be yielded by the event loop
@@ -110,6 +110,7 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
+            connection_timeout: None,
         }
     }
 
@@ -123,6 +124,7 @@ impl EventLoop {
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
+        self.connection_timeout = None;
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
@@ -143,24 +145,44 @@ impl EventLoop {
     /// a disconnection.
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
+        // initiate a connection from scratch if not connected
         if self.network.is_none() {
-            let (network, connack) = time::timeout(
-                Duration::from_secs(self.options.connection_timeout()),
-                connect(&mut self.options),
-            )
-            .await??;
-            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
-            if !connack.session_present {
-                self.pending.clear();
-            }
-            self.network = Some(network);
+            self.connection_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
+            self.network = select! {
+                network = send_connect(&self.options) => {
+                    Some(network?)
+                }
+                _ = self.connection_timeout.as_mut().unwrap() => {
+                    return Err(ConnectionError::ConnectionTimeout)
+                }
+            };
 
-            if self.keepalive_timeout.is_none() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
-            }
+            return Ok(Event::Outgoing(Outgoing::Connect));
+        }
 
-            self.state
-                .handle_incoming_packet(Incoming::ConnAck(connack))?;
+        // complete connection by receiving connack
+        if self.connection_timeout.is_some() {
+            let network = self.network.as_mut().unwrap();
+            select! {
+                ack = recv_connack(network, &mut self.options, &mut self.state) => {
+                    let connack = ack?;
+                    // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+                    if !connack.session_present {
+                        self.pending.clear();
+                    }
+
+                    // connection successfully completed
+                    self.connection_timeout.take();
+
+                    // Set timeout for keepalive if not set
+                    if self.keepalive_timeout.is_none() {
+                        self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
+                    }
+                }
+                _ = self.connection_timeout.as_mut().unwrap() => {
+                    return Err(ConnectionError::ConnectionTimeout);
+                }
+            }
         }
 
         match self.select().await {
@@ -273,19 +295,55 @@ impl EventLoop {
     }
 }
 
-/// This stream internally processes requests from the request stream provided to the eventloop
-/// while also consuming byte stream from the network and yielding mqtt packets as the output of
-/// the stream.
-/// This function (for convenience) includes internal delays for users to perform internal sleeps
-/// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &mut MqttOptions) -> Result<(Network, ConnAck), ConnectionError> {
+// Perform a network connection first, then send an outgoing connect packet
+async fn send_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
-    // make MQTT connection request (which internally awaits for ack)
-    let connack = mqtt_connect(options, &mut network).await?;
+    // make an MQTT connection request
+    let packet = Packet::Connect(
+        Connect {
+            client_id: options.client_id(),
+            keep_alive: options.keep_alive().as_secs() as u16,
+            clean_start: options.clean_start(),
+            properties: options.connect_properties(),
+        },
+        options.last_will(),
+        options.credentials(),
+    );
 
-    Ok((network, connack))
+    // send mqtt connect packet
+    network.write(packet).await?;
+    network.flush().await?;
+
+    Ok(network)
+}
+
+// Expect a connack else fail
+async fn recv_connack(
+    network: &mut Network,
+    options: &mut MqttOptions,
+    state: &mut MqttState,
+) -> Result<ConnAck, ConnectionError> {
+    match network.read().await? {
+        Incoming::ConnAck(connack) => {
+            state.handle_incoming_packet(Incoming::ConnAck(connack.clone()))?;
+            if let Some(props) = &connack.properties {
+                if let Some(keep_alive) = props.server_keep_alive {
+                    options.keep_alive = Duration::from_secs(keep_alive as u64);
+                }
+                network.set_max_outgoing_size(props.max_packet_size);
+
+                // Override local session_expiry_interval value if set by server.
+                if props.session_expiry_interval.is_some() {
+                    options.set_session_expiry_interval(props.session_expiry_interval);
+                }
+            }
+
+            Ok(connack)
+        }
+        packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
+    }
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
@@ -392,44 +450,4 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     };
 
     Ok(network)
-}
-
-async fn mqtt_connect(
-    options: &mut MqttOptions,
-    network: &mut Network,
-) -> Result<ConnAck, ConnectionError> {
-    let packet = Packet::Connect(
-        Connect {
-            client_id: options.client_id(),
-            keep_alive: options.keep_alive().as_secs() as u16,
-            clean_start: options.clean_start(),
-            properties: options.connect_properties(),
-        },
-        options.last_will(),
-        options.credentials(),
-    );
-
-    // send mqtt connect packet
-    network.write(packet).await?;
-    network.flush().await?;
-
-    // validate connack
-    match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            if let Some(props) = &connack.properties {
-                if let Some(keep_alive) = props.server_keep_alive {
-                    options.keep_alive = Duration::from_secs(keep_alive as u64);
-                }
-                network.set_max_outgoing_size(props.max_packet_size);
-
-                // Override local session_expiry_interval value if set by server.
-                if props.session_expiry_interval.is_some() {
-                    options.set_session_expiry_interval(props.session_expiry_interval);
-                }
-            }
-            Ok(connack)
-        }
-        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-        packet => Err(ConnectionError::NotConnAck(Box::new(packet))),
-    }
 }

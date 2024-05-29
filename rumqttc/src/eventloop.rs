@@ -84,6 +84,8 @@ pub struct EventLoop {
     pub network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    /// connection timeout
+    connection_timeout: Option<Pin<Box<Sleep>>>,
     pub network_options: NetworkOptions,
 }
 
@@ -113,6 +115,7 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
+            connection_timeout: None,
             network_options: NetworkOptions::new(),
         }
     }
@@ -127,6 +130,7 @@ impl EventLoop {
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
+        self.connection_timeout = None;
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
@@ -147,27 +151,44 @@ impl EventLoop {
     /// a disconnection.
     /// **NOTE** Don't block this while iterating
     pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
+        // initiate a connection from scratch if not connected
         if self.network.is_none() {
-            let (network, connack) = match time::timeout(
-                Duration::from_secs(self.network_options.connection_timeout()),
-                connect(&self.mqtt_options, self.network_options.clone()),
-            )
-            .await
-            {
-                Ok(inner) => inner?,
-                Err(_) => return Err(ConnectionError::NetworkTimeout),
+            self.connection_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
+            self.network = select! {
+                network = send_connect(&self.mqtt_options, &self.network_options) => {
+                    Some(network?)
+                }
+                _ = self.connection_timeout.as_mut().unwrap() => {
+                    return Err(ConnectionError::NetworkTimeout)
+                }
             };
-            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
-            if !connack.session_present {
-                self.pending.clear();
-            }
-            self.network = Some(network);
 
-            if self.keepalive_timeout.is_none() && !self.mqtt_options.keep_alive.is_zero() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
-            }
+            return Ok(Event::Outgoing(Outgoing::Connect));
+        }
 
-            return Ok(Event::Incoming(Packet::ConnAck(connack)));
+        // complete connection by receiving connack
+        if self.connection_timeout.is_some() {
+            let network = self.network.as_mut().unwrap();
+            select! {
+                ack = recv_connack(network) => {
+                    let connack = ack?;
+                    // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+                    if !connack.session_present {
+                        self.pending.clear();
+                    }
+
+                    // connection successfully completed
+                    self.connection_timeout.take();
+
+                    // Set timeout for keepalive if not set
+                    if self.keepalive_timeout.is_none() {
+                        self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
+                    }
+                }
+                _ = self.connection_timeout.as_mut().unwrap() => {
+                    return Err(ConnectionError::NetworkTimeout);
+                }
+            }
         }
 
         match self.select().await {
@@ -300,22 +321,35 @@ impl EventLoop {
     }
 }
 
-/// This stream internally processes requests from the request stream provided to the eventloop
-/// while also consuming byte stream from the network and yielding mqtt packets as the output of
-/// the stream.
-/// This function (for convenience) includes internal delays for users to perform internal sleeps
-/// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(
-    mqtt_options: &MqttOptions,
-    network_options: NetworkOptions,
-) -> Result<(Network, ConnAck), ConnectionError> {
+// Perform a network connection first, then send an outgoing connect packet
+async fn send_connect(
+    options: &MqttOptions,
+    network_options: &NetworkOptions,
+) -> Result<Network, ConnectionError> {
     // connect to the broker
-    let mut network = network_connect(mqtt_options, network_options).await?;
+    let mut network = network_connect(options, network_options.clone()).await?;
 
-    // make MQTT connection request (which internally awaits for ack)
-    let connack = mqtt_connect(mqtt_options, &mut network).await?;
+    // make an MQTT connection request
+    let mut connect = Connect::new(options.client_id());
+    connect.keep_alive = options.keep_alive().as_secs() as u16;
+    connect.clean_session = options.clean_session();
+    connect.last_will = options.last_will();
+    connect.login = options.credentials();
 
-    Ok((network, connack))
+    // send mqtt connect packet
+    network.write(Packet::Connect(connect)).await?;
+    network.flush().await?;
+
+    Ok(network)
+}
+
+// Expect a connack else fail
+async fn recv_connack(network: &mut Network) -> Result<ConnAck, ConnectionError> {
+    match network.read().await? {
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => Ok(connack),
+        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
+        packet => Err(ConnectionError::NotConnAck(packet)),
+    }
 }
 
 pub(crate) async fn socket_connect(
@@ -480,26 +514,4 @@ async fn network_connect(
     };
 
     Ok(network)
-}
-
-async fn mqtt_connect(
-    options: &MqttOptions,
-    network: &mut Network,
-) -> Result<ConnAck, ConnectionError> {
-    let mut connect = Connect::new(options.client_id());
-    connect.keep_alive = options.keep_alive().as_secs() as u16;
-    connect.clean_session = options.clean_session();
-    connect.last_will = options.last_will();
-    connect.login = options.credentials();
-
-    // send mqtt connect packet
-    network.write(Packet::Connect(connect)).await?;
-    network.flush().await?;
-
-    // validate connack
-    match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => Ok(connack),
-        Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
-        packet => Err(ConnectionError::NotConnAck(packet)),
-    }
 }
