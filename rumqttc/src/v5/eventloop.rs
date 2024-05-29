@@ -148,14 +148,18 @@ impl EventLoop {
         // initiate a connection from scratch if not connected
         if self.network.is_none() {
             self.connection_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
-            self.network = select! {
-                network = send_connect(&self.options) => {
-                    Some(network?)
-                }
-                _ = self.connection_timeout.as_mut().unwrap() => {
-                    return Err(ConnectionError::ConnectionTimeout)
-                }
+            // Perform a network connection to the broker first
+            let mut network = select! {
+                network = network_connect(&self.options) => network?,
+                _ = self.connection_timeout.as_mut().unwrap() => return Err(ConnectionError::ConnectionTimeout),
             };
+
+            // make an MQTT connection request
+            select! {
+                _ = send_connect(&mut network, &self.options) => {},
+                _ = self.connection_timeout.as_mut().unwrap() => return Err(ConnectionError::ConnectionTimeout),
+            };
+            self.network = Some(network);
 
             return Ok(Event::Outgoing(Outgoing::Connect));
         }
@@ -295,12 +299,8 @@ impl EventLoop {
     }
 }
 
-// Perform a network connection first, then send an outgoing connect packet
-async fn send_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
-    // connect to the broker
-    let mut network = network_connect(options).await?;
-
-    // make an MQTT connection request
+// Send an MQTT connect packet
+async fn send_connect(network: &mut Network, options: &MqttOptions) -> Result<(), ConnectionError> {
     let packet = Packet::Connect(
         Connect {
             client_id: options.client_id(),
@@ -316,7 +316,7 @@ async fn send_connect(options: &MqttOptions) -> Result<Network, ConnectionError>
     network.write(packet).await?;
     network.flush().await?;
 
-    Ok(network)
+    Ok(())
 }
 
 // Expect a connack else fail

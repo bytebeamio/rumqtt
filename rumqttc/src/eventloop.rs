@@ -154,14 +154,18 @@ impl EventLoop {
         // initiate a connection from scratch if not connected
         if self.network.is_none() {
             self.connection_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
-            self.network = select! {
-                network = send_connect(&self.mqtt_options, &self.network_options) => {
-                    Some(network?)
-                }
-                _ = self.connection_timeout.as_mut().unwrap() => {
-                    return Err(ConnectionError::NetworkTimeout)
-                }
+            // Perform a network connection to the broker first
+            let mut network = select! {
+                network = network_connect(&self.mqtt_options, self.network_options.clone()) => network?,
+                _ = self.connection_timeout.as_mut().unwrap() => return Err(ConnectionError::NetworkTimeout),
             };
+
+            // make an MQTT connection request
+            select! {
+                _ = send_connect(&mut network, &self.mqtt_options) => {},
+                _ = self.connection_timeout.as_mut().unwrap() => return Err(ConnectionError::NetworkTimeout),
+            };
+            self.network = Some(network);
 
             return Ok(Event::Outgoing(Outgoing::Connect));
         }
@@ -321,15 +325,8 @@ impl EventLoop {
     }
 }
 
-// Perform a network connection first, then send an outgoing connect packet
-async fn send_connect(
-    options: &MqttOptions,
-    network_options: &NetworkOptions,
-) -> Result<Network, ConnectionError> {
-    // connect to the broker
-    let mut network = network_connect(options, network_options.clone()).await?;
-
-    // make an MQTT connection request
+// Send an MQTT connect packet
+async fn send_connect(network: &mut Network, options: &MqttOptions) -> Result<(), ConnectionError> {
     let mut connect = Connect::new(options.client_id());
     connect.keep_alive = options.keep_alive().as_secs() as u16;
     connect.clean_session = options.clean_session();
@@ -340,7 +337,7 @@ async fn send_connect(
     network.write(Packet::Connect(connect)).await?;
     network.flush().await?;
 
-    Ok(network)
+    Ok(())
 }
 
 // Expect a connack else fail
