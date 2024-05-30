@@ -126,7 +126,15 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let requests_in_channel = self.requests_rx.drain();
+        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+
+        requests_in_channel.retain(|request| {
+            match request {
+                Request::PubAck(_) => false, // Wait for publish retransmission, else the broker could be confused by an unexpected ack
+                _ => true,
+            }
+        });
+
         self.pending.extend(requests_in_channel);
     }
 
@@ -390,20 +398,20 @@ async fn mqtt_connect(
     options: &mut MqttOptions,
     network: &mut Network,
 ) -> Result<ConnAck, ConnectionError> {
-    let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_start = options.clean_start();
-    let client_id = options.client_id();
-    let properties = options.connect_properties();
-
-    let connect = Connect {
-        keep_alive,
-        client_id,
-        clean_start,
-        properties,
-    };
+    let packet = Packet::Connect(
+        Connect {
+            client_id: options.client_id(),
+            keep_alive: options.keep_alive().as_secs() as u16,
+            clean_start: options.clean_start(),
+            properties: options.connect_properties(),
+        },
+        options.last_will(),
+        options.credentials(),
+    );
 
     // send mqtt connect packet
-    network.connect(connect, options).await?;
+    network.write(packet).await?;
+    network.flush().await?;
 
     // validate connack
     match network.read().await? {

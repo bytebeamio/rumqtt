@@ -130,7 +130,15 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let requests_in_channel = self.requests_rx.drain();
+        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+
+        requests_in_channel.retain(|request| {
+            match request {
+                Request::PubAck(_) => false, // Wait for publish retransmission, else the broker could be confused by an unexpected ack
+                _ => true,
+            }
+        });
+
         self.pending.extend(requests_in_channel);
     }
 
@@ -323,6 +331,8 @@ pub(crate) async fn socket_connect(
             SocketAddr::V6(_) => TcpSocket::new_v6()?,
         };
 
+        socket.set_nodelay(network_options.tcp_nodelay)?;
+
         if let Some(send_buff_size) = network_options.tcp_send_buffer_size {
             socket.set_send_buffer_size(send_buff_size).unwrap();
         }
@@ -476,18 +486,15 @@ async fn mqtt_connect(
     options: &MqttOptions,
     network: &mut Network,
 ) -> Result<ConnAck, ConnectionError> {
-    let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_session = options.clean_session();
-    let last_will = options.last_will();
-
     let mut connect = Connect::new(options.client_id());
-    connect.keep_alive = keep_alive;
-    connect.clean_session = clean_session;
-    connect.last_will = last_will;
+    connect.keep_alive = options.keep_alive().as_secs() as u16;
+    connect.clean_session = options.clean_session();
+    connect.last_will = options.last_will();
     connect.login = options.credentials();
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.write(Packet::Connect(connect)).await?;
+    network.flush().await?;
 
     // validate connack
     match network.read().await? {
