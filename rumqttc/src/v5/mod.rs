@@ -37,19 +37,17 @@ pub trait AuthManager: std::fmt::Debug {
     ///
     /// # Arguments
     ///
-    /// * `auth_method` - The authentication method received from the server.
-    /// * `auth_data` - The authentication data received from the server.
+    /// * `auth_prop` - The authentication Properties received from the server.
     ///
     /// # Returns
     ///
-    /// * `Ok(auth_data)` - The authentication data to be sent back to the server.
+    /// * `Ok(auth_prop)` - The authentication Properties to be sent back to the server.
     /// * `Err(error_message)` - An error indicating that the authentication process has failed or terminated.
 
     fn auth_continue(
         &mut self,
-        auth_method: Option<String>,
-        auth_data: Option<Bytes>,
-    ) -> Result<Option<Bytes>, String>;
+        auth_prop: Option<AuthProperties>,
+    ) -> Result<Option<AuthProperties>, String>;
 }
 
 /// Requests by the client to mqtt event loop. Request are
