@@ -12,7 +12,9 @@ use tokio::task;
 
 #[derive(Debug)]
 struct ScramAuthManager<'a> {
+    #[allow(dead_code)]
     user: &'a str,
+    #[allow(dead_code)]
     password: &'a str,
     #[cfg(feature = "auth-scram")]
     scram: Option<ServerFirst<'a>>,
@@ -46,13 +48,20 @@ impl<'a> ScramAuthManager<'a> {
 impl<'a> AuthManager for ScramAuthManager<'a> {
     fn auth_continue(
         &mut self,
-        auth_method: Option<String>,
-        auth_data: Option<Bytes>,
-    ) -> Result<Option<Bytes>, String> {
+        #[allow(unused_variables)]
+        auth_prop: Option<AuthProperties>,
+    ) -> Result<Option<AuthProperties>, String> {
         #[cfg(feature = "auth-scram")]
         {
+            // Unwrap the properties.
+            let prop = auth_prop.unwrap();
+
             // Check if the authentication method is SCRAM-SHA-256
-            if auth_method.unwrap() != "SCRAM-SHA-256" {
+            if let Some(auth_method) = &prop.authentication_method {
+                if auth_method != "SCRAM-SHA-256" {
+                    return Err("Invalid authentication method".to_string());
+                }
+            } else {
                 return Err("Invalid authentication method".to_string());
             }
 
@@ -62,7 +71,7 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
 
             let scram = self.scram.take().unwrap();
 
-            let auth_data = String::from_utf8(auth_data.unwrap().to_vec()).unwrap();
+            let auth_data = String::from_utf8(prop.authentication_data.unwrap().to_vec()).unwrap();
 
             // Process the server first message and reassign the SCRAM state.
             let scram = match scram.handle_server_first(&auth_data) {
@@ -73,11 +82,21 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
             // Get the client final message and reassign the SCRAM state.
             let (_, client_final) = scram.client_final();
 
-            Ok(Some(client_final.into()))
+            Ok(Some(AuthProperties{
+                authentication_method: Some("SCRAM-SHA-256".to_string()),
+                authentication_data: Some(client_final.into()),
+                reason_string: None,
+                user_properties: Vec::new(),
+            }))
         }
 
         #[cfg(not(feature = "auth-scram"))]
-        Ok(Some("client final message".into()))
+        Ok(Some(AuthProperties {
+            authentication_method: Some("SCRAM-SHA-256".to_string()),
+            authentication_data: Some("client final message".into()),
+            reason_string: None,
+            user_properties: Vec::new(),
+        }))
     }
 }
 

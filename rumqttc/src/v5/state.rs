@@ -1,5 +1,5 @@
 use super::mqttbytes::v5::{
-    Auth, AuthProperties, AuthReasonCode, ConnAck, ConnectReturnCode, Disconnect,
+    Auth, AuthReasonCode, ConnAck, ConnectReturnCode, Disconnect,
     DisconnectReasonCode, Packet, PingReq, PubAck, PubAckReason, PubComp, PubCompReason, PubRec,
     PubRecReason, PubRel, PubRelReason, Publish, SubAck, Subscribe, SubscribeReasonCode, UnsubAck,
     UnsubAckReason, Unsubscribe,
@@ -500,8 +500,6 @@ impl MqttState {
             AuthReasonCode::Success => Ok(None),
             AuthReasonCode::ContinueAuthentication => {
                 let props = auth.properties.clone().unwrap();
-                let in_auth_method = props.authentication_method;
-                let in_auth_data = props.authentication_data;
 
                 // Check if auth manager is set
                 if self.auth_manager.is_none() {
@@ -511,24 +509,17 @@ impl MqttState {
                 let auth_manager = self.auth_manager.clone().unwrap();
 
                 // Call auth_continue method of auth manager
-                let out_auth_data = match auth_manager
+                let out_auth_prop = match auth_manager
                     .lock()
                     .unwrap()
-                    .auth_continue(in_auth_method.clone(), in_auth_data)
+                    .auth_continue(Some(props))
                 {
                     Ok(data) => data,
                     Err(err) => return Err(StateError::AuthError(err)),
                 };
 
-                let properties = AuthProperties {
-                    authentication_method: in_auth_method,
-                    authentication_data: out_auth_data,
-                    reason_string: None,
-                    user_properties: Vec::new(),
-                };
-
                 let client_auth =
-                    Auth::new(AuthReasonCode::ContinueAuthentication, Some(properties));
+                    Auth::new(AuthReasonCode::ContinueAuthentication, out_auth_prop);
 
                 self.outgoing_auth(client_auth)
             }
