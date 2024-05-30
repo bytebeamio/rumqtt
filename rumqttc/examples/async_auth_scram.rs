@@ -57,7 +57,7 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
             let prop = auth_prop.unwrap();
 
             // Check if the authentication method is SCRAM-SHA-256
-            if let Some(auth_method) = &prop.authentication_method {
+            if let Some(auth_method) = &prop.method {
                 if auth_method != "SCRAM-SHA-256" {
                     return Err("Invalid authentication method".to_string());
                 }
@@ -71,7 +71,7 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
 
             let scram = self.scram.take().unwrap();
 
-            let auth_data = String::from_utf8(prop.authentication_data.unwrap().to_vec()).unwrap();
+            let auth_data = String::from_utf8(prop.data.unwrap().to_vec()).unwrap();
 
             // Process the server first message and reassign the SCRAM state.
             let scram = match scram.handle_server_first(&auth_data) {
@@ -83,18 +83,18 @@ impl<'a> AuthManager for ScramAuthManager<'a> {
             let (_, client_final) = scram.client_final();
 
             Ok(Some(AuthProperties{
-                authentication_method: Some("SCRAM-SHA-256".to_string()),
-                authentication_data: Some(client_final.into()),
-                reason_string: None,
+                method: Some("SCRAM-SHA-256".to_string()),
+                data: Some(client_final.into()),
+                reason: None,
                 user_properties: Vec::new(),
             }))
         }
 
         #[cfg(not(feature = "auth-scram"))]
         Ok(Some(AuthProperties {
-            authentication_method: Some("SCRAM-SHA-256".to_string()),
-            authentication_data: Some("client final message".into()),
-            reason_string: None,
+            method: Some("SCRAM-SHA-256".to_string()),
+            data: Some("client final message".into()),
+            reason: None,
             user_properties: Vec::new(),
         }))
     }
@@ -130,9 +130,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Reauthenticate using SCRAM-SHA-256
         let client_first = authmanager.clone().lock().unwrap().auth_start().unwrap();
         let properties = AuthProperties {
-            authentication_method: Some("SCRAM-SHA-256".to_string()),
-            authentication_data: client_first,
-            reason_string: None,
+            method: Some("SCRAM-SHA-256".to_string()),
+            data: client_first,
+            reason: None,
             user_properties: Vec::new(),
         };
         client.reauth(Some(properties)).await.unwrap();
