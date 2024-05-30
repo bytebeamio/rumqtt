@@ -490,7 +490,7 @@ impl MqttState {
         match auth.code {
             AuthReasonCode::Success => Ok(None),
             AuthReasonCode::Continue => {
-                let props = auth.properties.clone().unwrap();
+                let props = auth.properties.clone();
 
                 // Check if auth manager is set
                 if self.auth_manager.is_none() {
@@ -500,16 +500,16 @@ impl MqttState {
                 let auth_manager = self.auth_manager.clone().unwrap();
 
                 // Call auth_continue method of auth manager
-                let out_auth_prop = match auth_manager
+                let out_auth_props = match auth_manager
                     .lock()
                     .unwrap()
-                    .auth_continue(Some(props))
+                    .auth_continue(props)
                 {
                     Ok(data) => data,
                     Err(err) => return Err(StateError::AuthError(err)),
                 };
 
-                let client_auth = Auth::new(AuthReasonCode::Continue, out_auth_prop);
+                let client_auth = Auth::new(AuthReasonCode::Continue, out_auth_props);
 
                 self.outgoing_auth(client_auth)
             }
