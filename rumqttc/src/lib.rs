@@ -100,7 +100,11 @@ extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
 
-#[cfg(any(feature = "use-rustls",feature = "use-native-tls", feature = "websocket"))]
+#[cfg(any(
+    feature = "use-rustls",
+    feature = "use-native-tls",
+    feature = "websocket"
+))]
 use std::sync::Arc;
 
 use std::time::Duration;
@@ -145,14 +149,14 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
+#[cfg(feature = "use-native-tls")]
+pub use tokio_native_tls;
+#[cfg(feature = "use-native-tls")]
+use tokio_native_tls::native_tls::{TlsConnector, TlsConnectorBuilder};
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-#[cfg(feature = "use-native-tls")]
-pub use tokio_native_tls;
-#[cfg(feature = "use-native-tls")]
-use tokio_native_tls::native_tls::TlsConnectorBuilder;
 
 #[cfg(feature = "proxy")]
 pub use proxy::{Proxy, ProxyAuth, ProxyType};
@@ -319,7 +323,7 @@ impl Transport {
 }
 
 /// TLS configuration method
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub enum TlsConfiguration {
     #[cfg(feature = "use-rustls")]
@@ -347,7 +351,25 @@ pub enum TlsConfiguration {
     Native,
     #[cfg(feature = "use-native-tls")]
     /// Injected native-tls TlsConnectorBuilder for TLS, to allow more customisation.
-    NativeBuilder(Arc<TlsConnectorBuilder>),
+    NativeBuilder(NativeTlsBuilder),
+}
+
+#[cfg(feature = "use-native-tls")]
+#[derive(Clone)]
+pub struct NativeTlsBuilder(Arc<TlsConnectorBuilder>);
+
+#[cfg(feature = "use-native-tls")]
+impl NativeTlsBuilder {
+    fn build(&self) -> native_tls::Result<TlsConnector> {
+        self.0.build()
+    }
+}
+
+#[cfg(feature = "use-native-tls")]
+impl Debug for NativeTlsBuilder {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("NativeBuilder").finish()
+    }
 }
 
 #[cfg(feature = "use-rustls")]
@@ -375,7 +397,7 @@ impl From<ClientConfig> for TlsConfiguration {
 #[cfg(feature = "use-native-tls")]
 impl From<TlsConnectorBuilder> for TlsConfiguration {
     fn from(builder: TlsConnectorBuilder) -> Self {
-        TlsConfiguration::NativeBuilder(Arc::new(builder))
+        TlsConfiguration::NativeBuilder(NativeTlsBuilder(Arc::new(builder)))
     }
 }
 
