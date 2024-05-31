@@ -68,9 +68,10 @@ pub struct MqttState {
     pub(crate) outgoing_rel: LinkedHashMap<u16, Option<NoticeTx>>,
     /// Packet ids on incoming QoS 2 publishes
     pub(crate) incoming_pub: Vec<Option<u16>>,
-
-    outgoing_sub: LinkedHashMap<u16, Option<NoticeTx>>,
-    outgoing_unsub: LinkedHashMap<u16, Option<NoticeTx>>,
+    /// Outgoing subscribes
+    pub(crate) outgoing_sub: LinkedHashMap<u16, Option<NoticeTx>>,
+    /// Outgoing unsubscribes
+    pub(crate) outgoing_unsub: LinkedHashMap<u16, Option<NoticeTx>>,
 
     /// Last collision due to broker not acking in order
     pub collision: Option<(Publish, Option<NoticeTx>)>,
@@ -321,8 +322,13 @@ impl MqttState {
             .remove(&pubrec.pkid)
             .ok_or(StateError::Unsolicited(pubrec.pkid))?;
 
+        // Notify user about the publish, pubrel and pubcomp will be handled in background
+        if let Some(tx) = tx  {
+            tx.success();
+        }
+
         // NOTE: Inflight - 1 for qos2 in comp
-        self.outgoing_rel.insert(pubrec.pkid, tx);
+        self.outgoing_rel.insert(pubrec.pkid, None);
         let pubrel = PubRel { pkid: pubrec.pkid };
         let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
         self.events.push_back(event);

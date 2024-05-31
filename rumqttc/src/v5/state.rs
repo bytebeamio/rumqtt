@@ -466,10 +466,16 @@ impl MqttState {
             return Err(StateError::PubRecFail {
                 reason: pubrec.reason,
             });
+        } else {
+
+            // Notifying the PUBREC from broker, PUBREL and PUBCOMP will be in backgroud
+            if let Some(tx) = tx {
+                tx.success();
+            }
         }
 
         // NOTE: Inflight - 1 for qos2 in comp
-        self.outgoing_rel.insert(pubrec.pkid, tx);
+        self.outgoing_rel.insert(pubrec.pkid, None);
         let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
         self.events.push_back(event);
 
