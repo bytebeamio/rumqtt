@@ -16,10 +16,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut builder = native_tls::TlsConnector::builder();
     let pem = vec![1, 2, 3];
     // let pem = include_bytes!("native-tls-cert.pem");
-    let cert = native_tls::Certificate::from_pem(&pem).unwrap();
+    let cert = native_tls::Certificate::from_pem(&pem)?;
     builder.add_root_certificate(cert);
+    let connector = builder.build()?;
 
-    mqttoptions.set_transport(Transport::tls_with_config(builder.into()));
+    mqttoptions.set_transport(Transport::tls_with_config(connector.into()));
 
     let (_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
