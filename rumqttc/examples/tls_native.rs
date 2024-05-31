@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut builder = native_tls::TlsConnector::builder();
     let pem = vec![1, 2, 3];
     // let pem = include_bytes!("native-tls-cert.pem");
-    let cert = native_tls::Certificate::from_pem(pem).unwrap();
+    let cert = native_tls::Certificate::from_pem(&pem).unwrap();
     builder.add_root_certificate(cert);
 
     mqttoptions.set_transport(Transport::tls_with_config(builder.into()));
