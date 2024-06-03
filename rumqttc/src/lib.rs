@@ -152,7 +152,7 @@ pub use tls::Error as TlsError;
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
 #[cfg(feature = "use-native-tls")]
-use tokio_native_tls::native_tls::{TlsConnector, TlsConnectorBuilder};
+use tokio_native_tls::native_tls::TlsConnector;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
@@ -350,26 +350,8 @@ pub enum TlsConfiguration {
     /// Use default native-tls configuration
     Native,
     #[cfg(feature = "use-native-tls")]
-    /// Injected native-tls TlsConnectorBuilder for TLS, to allow more customisation.
-    NativeBuilder(NativeTlsBuilder),
-}
-
-#[cfg(feature = "use-native-tls")]
-#[derive(Clone)]
-pub struct NativeTlsBuilder(Arc<TlsConnectorBuilder>);
-
-#[cfg(feature = "use-native-tls")]
-impl NativeTlsBuilder {
-    fn build(&self) -> native_tls::Result<TlsConnector> {
-        self.0.build()
-    }
-}
-
-#[cfg(feature = "use-native-tls")]
-impl Debug for NativeTlsBuilder {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("NativeBuilder").finish()
-    }
+    /// Injected native-tls TlsConnector for TLS, to allow more customisation.
+    NativeConnector(TlsConnector),
 }
 
 #[cfg(feature = "use-rustls")]
@@ -395,9 +377,9 @@ impl From<ClientConfig> for TlsConfiguration {
 }
 
 #[cfg(feature = "use-native-tls")]
-impl From<TlsConnectorBuilder> for TlsConfiguration {
-    fn from(builder: TlsConnectorBuilder) -> Self {
-        TlsConfiguration::NativeBuilder(NativeTlsBuilder(Arc::new(builder)))
+impl From<TlsConnector> for TlsConfiguration {
+    fn from(connector: TlsConnector) -> Self {
+        TlsConfiguration::NativeConnector(connector)
     }
 }
 
