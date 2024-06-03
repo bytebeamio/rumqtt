@@ -75,7 +75,7 @@ pub struct MqttOptions {
     /// client identifier
     client_id: String,
     /// username and password
-    credentials: Option<(String, String)>,
+    credentials: Option<Login>,
     /// request (publish, subscribe) channel capacity
     request_channel_capacity: usize,
     /// Max internal request batching
@@ -89,7 +89,7 @@ pub struct MqttOptions {
     conn_timeout: u64,
     /// Default value of for maximum incoming packet size.
     /// Used when `max_incomming_size` in `connect_properties` is NOT available.
-    default_max_incoming_size: usize,
+    default_max_incoming_size: u32,
     /// Connect Properties
     connect_properties: Option<ConnectProperties>,
     /// If set to `true` MQTT acknowledgements are not sent automatically.
@@ -113,28 +113,17 @@ impl MqttOptions {
     /// - port: The port number on which broker must be listening for incoming connections
     ///
     /// ```
-    /// # use rumqttc::MqttOptions;
+    /// # use rumqttc::v5::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost", 1883);
     /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id");
-        }
-
         MqttOptions {
             broker_addr: host.into(),
             port,
             transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
             clean_start: true,
-            client_id: id,
+            client_id: id.into(),
             credentials: None,
             request_channel_capacity: 10,
             max_request_batch: 0,
@@ -174,7 +163,6 @@ impl MqttOptions {
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();
     /// # let client_config = ClientConfig::builder()
-    /// #    .with_safe_defaults()
     /// #    .with_root_certificates(root_cert_store)
     /// #    .with_no_client_auth();
     /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
@@ -271,12 +259,12 @@ impl MqttOptions {
         username: U,
         password: P,
     ) -> &mut Self {
-        self.credentials = Some((username.into(), password.into()));
+        self.credentials = Some(Login::new(username, password));
         self
     }
 
     /// Security options
-    pub fn credentials(&self) -> Option<(String, String)> {
+    pub fn credentials(&self) -> Option<Login> {
         self.credentials.clone()
     }
 
@@ -322,6 +310,27 @@ impl MqttOptions {
     /// get connection properties
     pub fn connect_properties(&self) -> Option<ConnectProperties> {
         self.connect_properties.clone()
+    }
+
+    /// set session expiry interval on connection properties
+    pub fn set_session_expiry_interval(&mut self, interval: Option<u32>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.session_expiry_interval = interval;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.session_expiry_interval = interval;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get session expiry interval on connection properties
+    pub fn session_expiry_interval(&self) -> Option<u32> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.session_expiry_interval
+        } else {
+            None
+        }
     }
 
     /// set receive maximum on connection properties
@@ -731,12 +740,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_start(true);
-    }
-
-    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         use crate::{TlsConfiguration, Transport};
@@ -821,8 +824,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
-    fn no_client_id() {
+    fn allow_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_start(true);
     }
 }

@@ -2,14 +2,13 @@ use super::framed::Network;
 use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
-use crate::framed::N;
+use crate::framed::AsyncReadWrite;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
 
 use std::collections::VecDeque;
-use std::convert::TryInto;
 use std::io;
 use std::pin::Pin;
 use std::time::Duration;
@@ -127,7 +126,15 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let requests_in_channel = self.requests_rx.drain();
+        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+
+        requests_in_channel.retain(|request| {
+            match request {
+                Request::PubAck(_) => false, // Wait for publish retransmission, else the broker could be confused by an unexpected ack
+                _ => true,
+            }
+        });
+
         self.pending.extend(requests_in_channel);
     }
 
@@ -142,18 +149,25 @@ impl EventLoop {
                 connect(&mut self.options),
             )
             .await??;
+            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+            if !connack.session_present {
+                self.pending.clear();
+            }
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            self.state.handle_incoming_packet(connack)?;
+            self.state
+                .handle_incoming_packet(Incoming::ConnAck(connack))?;
         }
 
         match self.select().await {
             Ok(v) => Ok(v),
             Err(e) => {
+                // MQTT requires that packets pending acknowledgement should be republished on session resume.
+                // Move pending messages from state to eventloop.
                 self.clean();
                 Err(e)
             }
@@ -210,8 +224,10 @@ impl EventLoop {
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
-                    network.flush(&mut self.state.write).await?;
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
+                        network.write(outgoing).await?;
+                    }
+                    network.flush().await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -220,7 +236,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                network.flush(&mut self.state.write).await?;
+                network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
@@ -229,8 +245,10 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
-                network.flush(&mut self.state.write).await?;
+                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
+                    network.write(outgoing).await?;
+                }
+                network.flush().await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -260,19 +278,14 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &mut MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(options: &mut MqttOptions) -> Result<(Network, ConnAck), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(options, &mut network).await?;
+    let connack = mqtt_connect(options, &mut network).await?;
 
-    // Last session might contain packets which aren't acked. MQTT says these packets should be
-    // republished in the next session
-    // move pending messages from state to eventloop
-    // let pending = self.state.clean();
-    // self.pending = pending.into_iter();
-    Ok((network, packet))
+    Ok((network, connack))
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
@@ -281,7 +294,6 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     // Override default value if max_packet_size is set on `connect_properties`
     if let Some(connect_props) = &options.connect_properties {
         if let Some(max_size) = connect_props.max_packet_size {
-            let max_size = max_size.try_into().map_err(StateError::Coversion)?;
             max_incoming_pkt_size = Some(max_size);
         }
     }
@@ -304,7 +316,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         _ => options.broker_address(),
     };
 
-    let tcp_stream: Box<dyn N> = {
+    let tcp_stream: Box<dyn AsyncReadWrite> = {
         #[cfg(feature = "proxy")]
         match options.proxy() {
             Some(proxy) => {
@@ -385,32 +397,37 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 async fn mqtt_connect(
     options: &mut MqttOptions,
     network: &mut Network,
-) -> Result<Incoming, ConnectionError> {
-    let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_start = options.clean_start();
-    let client_id = options.client_id();
-    let properties = options.connect_properties();
-
-    let connect = Connect {
-        keep_alive,
-        client_id,
-        clean_start,
-        properties,
-    };
+) -> Result<ConnAck, ConnectionError> {
+    let packet = Packet::Connect(
+        Connect {
+            client_id: options.client_id(),
+            keep_alive: options.keep_alive().as_secs() as u16,
+            clean_start: options.clean_start(),
+            properties: options.connect_properties(),
+        },
+        options.last_will(),
+        options.credentials(),
+    );
 
     // send mqtt connect packet
-    network.connect(connect, options).await?;
+    network.write(packet).await?;
+    network.flush().await?;
 
     // validate connack
     match network.read().await? {
         Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            // Override local keep_alive value if set by server.
             if let Some(props) = &connack.properties {
                 if let Some(keep_alive) = props.server_keep_alive {
                     options.keep_alive = Duration::from_secs(keep_alive as u64);
                 }
+                network.set_max_outgoing_size(props.max_packet_size);
+
+                // Override local session_expiry_interval value if set by server.
+                if props.session_expiry_interval.is_some() {
+                    options.set_session_expiry_interval(props.session_expiry_interval);
+                }
             }
-            Ok(Packet::ConnAck(connack))
+            Ok(connack)
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(Box::new(packet))),

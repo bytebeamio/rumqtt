@@ -8,8 +8,8 @@ use axum::routing::post;
 use axum::Json;
 use axum::{routing::get, Router};
 use flume::Sender;
-use std::net::TcpListener;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tracing::info;
 
 #[derive(Debug)]
@@ -40,7 +40,9 @@ impl ConsoleLink {
 
 #[tracing::instrument]
 pub async fn start(console: Arc<ConsoleLink>) {
-    let listener = TcpListener::bind(console.config.listen.clone()).unwrap();
+    let listener = TcpListener::bind(console.config.listen.clone())
+        .await
+        .unwrap();
 
     let app = Router::new()
         .route("/", get(root))
@@ -54,11 +56,7 @@ pub async fn start(console: Arc<ConsoleLink>) {
         .route("/logs", post(logs))
         .with_state(console);
 
-    axum::Server::from_tcp(listener)
-        .unwrap()
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn root(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {

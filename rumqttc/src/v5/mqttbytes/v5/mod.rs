@@ -1,9 +1,11 @@
 use std::slice::Iter;
 
 pub use self::{
+    auth::Auth,
+    codec::Codec,
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
     connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
-    disconnect::{Disconnect, DisconnectReasonCode},
+    disconnect::{Disconnect, DisconnectProperties, DisconnectReasonCode},
     ping::{PingReq, PingResp},
     puback::{PubAck, PubAckProperties, PubAckReason},
     pubcomp::{PubComp, PubCompProperties, PubCompReason},
@@ -19,6 +21,8 @@ pub use self::{
 use super::*;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+mod auth;
+mod codec;
 mod connack;
 mod connect;
 mod disconnect;
@@ -35,6 +39,7 @@ mod unsubscribe;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Packet {
+    Auth(Auth),
     Connect(Connect, Option<LastWill>, Option<Login>),
     ConnAck(ConnAck),
     Publish(Publish),
@@ -53,7 +58,7 @@ pub enum Packet {
 
 impl Packet {
     /// Reads a stream of bytes and extracts next MQTT packet out of it
-    pub fn read(stream: &mut BytesMut, max_size: Option<usize>) -> Result<Packet, Error> {
+    pub fn read(stream: &mut BytesMut, max_size: Option<u32>) -> Result<Packet, Error> {
         let fixed_header = check(stream.iter(), max_size)?;
 
         // Test with a stream with exactly the size to check border panics
@@ -126,8 +131,18 @@ impl Packet {
         Ok(packet)
     }
 
-    pub fn write(&self, write: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(&self, write: &mut BytesMut, max_size: Option<u32>) -> Result<usize, Error> {
+        if let Some(max_size) = max_size {
+            if self.size() > max_size as usize {
+                return Err(Error::OutgoingPacketTooLarge {
+                    pkt_size: self.size() as u32,
+                    max: max_size,
+                });
+            }
+        }
+
         match self {
+            Self::Auth(auth) => auth.write(write),
             Self::Publish(publish) => publish.write(write),
             Self::Subscribe(subscription) => subscription.write(write),
             Self::Unsubscribe(unsubscribe) => unsubscribe.write(write),
@@ -142,6 +157,26 @@ impl Packet {
             Self::PingReq(_) => PingReq::write(write),
             Self::PingResp(_) => PingResp::write(write),
             Self::Disconnect(disconnect) => disconnect.write(write),
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Auth(auth) => auth.size(),
+            Self::Publish(publish) => publish.size(),
+            Self::Subscribe(subscription) => subscription.size(),
+            Self::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Self::ConnAck(ack) => ack.size(),
+            Self::PubAck(ack) => ack.size(),
+            Self::SubAck(ack) => ack.size(),
+            Self::UnsubAck(unsuback) => unsuback.size(),
+            Self::PubRec(pubrec) => pubrec.size(),
+            Self::PubRel(pubrel) => pubrel.size(),
+            Self::PubComp(pubcomp) => pubcomp.size(),
+            Self::Connect(connect, will, login) => connect.size(will, login),
+            Self::PingReq(req) => req.size(),
+            Self::PingResp(resp) => resp.size(),
+            Self::Disconnect(disconnect) => disconnect.size(),
         }
     }
 }
@@ -301,7 +336,7 @@ fn property(num: u8) -> Result<PropertyType, Error> {
 /// The passed stream doesn't modify parent stream's cursor. If this function
 /// returned an error, next `check` on the same parent stream is forced start
 /// with cursor at 0 again (Iter is owned. Only Iter's cursor is changed internally)
-pub fn check(stream: Iter<u8>, max_packet_size: Option<usize>) -> Result<FixedHeader, Error> {
+pub fn check(stream: Iter<u8>, max_packet_size: Option<u32>) -> Result<FixedHeader, Error> {
     // Create fixed header if there are enough bytes in the stream
     // to frame full packet
     let stream_len = stream.len();
@@ -310,7 +345,7 @@ pub fn check(stream: Iter<u8>, max_packet_size: Option<usize>) -> Result<FixedHe
     // Don't let rogue connections attack with huge payloads.
     // Disconnect them before reading all that data
     if let Some(max_size) = max_packet_size {
-        if fixed_header.remaining_len > max_size {
+        if fixed_header.remaining_len > max_size as usize {
             return Err(Error::PayloadSizeLimitExceeded {
                 pkt_size: fixed_header.remaining_len,
                 max: max_size,

@@ -21,7 +21,7 @@ pub struct Broker {
 
 impl Broker {
     /// Create a new broker which accepts 1 mqtt connection
-    pub async fn new(port: u16, connack: u8) -> Broker {
+    pub async fn new(port: u16, connack: u8, session_saved: bool) -> Broker {
         let addr = format!("127.0.0.1:{port}");
         let listener = TcpListener::bind(&addr).await.unwrap();
 
@@ -32,9 +32,12 @@ impl Broker {
         framed.readb(&mut incoming).await.unwrap();
 
         match incoming.pop_front().unwrap() {
-            Packet::Connect(_) => {
+            Packet::Connect(connect) => {
                 let connack = match connack {
-                    0 => ConnAck::new(ConnectReturnCode::Success, false),
+                    0 => ConnAck::new(
+                        ConnectReturnCode::Success,
+                        !connect.clean_session && session_saved,
+                    ),
                     1 => ConnAck::new(ConnectReturnCode::BadUserNamePassword, false),
                     _ => {
                         return Broker {
@@ -232,7 +235,7 @@ impl Network {
     pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> io::Result<()> {
         let mut count = 0;
         loop {
-            match read(&mut self.read, self.max_incoming_size) {
+            match Packet::read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => {
                     incoming.push_back(packet);
                     count += 1;

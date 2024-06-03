@@ -112,7 +112,6 @@ pub struct Login {
 pub enum ConnectReturnCode {
     Success,
     RefusedProtocolVersion,
-    BadClientId,
     ServiceUnavailable,
     UnspecifiedError,
     MalformedPacket,

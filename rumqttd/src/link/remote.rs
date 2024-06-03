@@ -2,7 +2,7 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
-use crate::protocol::{Connect, Login, Packet, Protocol};
+use crate::protocol::{ConnAck, Connect, ConnectReturnCode, Login, Packet, Protocol};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio::time::error::Elapsed;
 use tokio::{select, time};
 use tracing::{trace, Span};
@@ -66,6 +67,7 @@ impl<P: Protocol> RemoteLink<P> {
         mut network: Network<P>,
         connect_packet: Packet,
         dynamic_filters: bool,
+        assigned_client_id: Option<String>,
     ) -> Result<RemoteLink<P>, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
             return Err(Error::NotConnectPacket(connect_packet));
@@ -73,7 +75,7 @@ impl<P: Protocol> RemoteLink<P> {
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
-        let client_id = &connect.client_id;
+        let client_id = assigned_client_id.as_ref().unwrap_or(&connect.client_id);
         let clean_session = connect.clean_session;
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
@@ -103,8 +105,13 @@ impl<P: Protocol> RemoteLink<P> {
         let id = link_rx.id();
         Span::current().record("connection_id", id);
 
-        if let Some(packet) = notification.into() {
-            network.write(packet).await?;
+        if let Some(mut packet) = notification.into() {
+            if let Packet::ConnAck(_ack, props) = &mut packet {
+                let mut new_props = props.clone().unwrap_or_default();
+                new_props.assigned_client_identifier = assigned_client_id;
+                *props = Some(new_props);
+                network.write(packet).await?;
+            }
         }
 
         Ok(RemoteLink {
@@ -188,7 +195,7 @@ where
 
     Span::current().record("client_id", &connect.client_id);
 
-    handle_auth(config.clone(), login.as_ref(), &connect.client_id)?;
+    handle_auth(config.clone(), login.as_ref(), &connect.client_id).await?;
 
     // When keep_alive feature is disabled client can live forever, which is not good in
     // distributed broker context so currenlty we don't allow it.
@@ -196,16 +203,18 @@ where
         return Err(Error::ZeroKeepAlive);
     }
 
-    // Register this connection with the router. Router replys with ack which if ok will
-    // start the link. Router can sometimes reject the connection (ex max connection limit)
     let empty_client_id = connect.client_id.is_empty();
     let clean_session = connect.clean_session;
 
-    if cfg!(feature = "allow-duplicate-clientid") {
-        if !clean_session && empty_client_id {
-            return Err(Error::InvalidClientId);
-        }
-    } else if empty_client_id {
+    if empty_client_id && !clean_session {
+        let ack = ConnAck {
+            session_present: false,
+            code: ConnectReturnCode::ClientIdentifierNotValid,
+        };
+
+        let packet = Packet::ConnAck(ack, None);
+        network.write(packet).await?;
+
         return Err(Error::InvalidClientId);
     }
 
@@ -213,7 +222,7 @@ where
     Ok(packet)
 }
 
-fn handle_auth(
+async fn handle_auth(
     config: Arc<ConnectionSettings>,
     login: Option<&Login>,
     client_id: &str,
@@ -236,7 +245,9 @@ fn handle_auth(
             client_id.to_owned(),
             username.to_owned(),
             password.to_owned(),
-        ) {
+        )
+        .await
+        {
             return Err(Error::InvalidAuth);
         }
 
@@ -244,15 +255,13 @@ fn handle_auth(
     }
 
     if let Some(pairs) = &config.auth {
-        let static_auth_verified = pairs
-            .iter()
-            .any(|(user, pass)| (user, pass) == (username, password));
-
-        if !static_auth_verified {
-            return Err(Error::InvalidAuth);
+        if let Some(stored_password) = pairs.get(username) {
+            if stored_password.as_bytes().ct_eq(password.as_bytes()).into() {
+                return Ok(());
+            }
         }
 
-        return Ok(());
+        return Err(Error::InvalidAuth);
     }
 
     Err(Error::InvalidAuth)
@@ -284,23 +293,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn no_login_no_auth() {
+    #[tokio::test]
+    async fn no_login_no_auth() {
         let cfg = Arc::new(config());
-        let r = handle_auth(cfg, None, "");
+        let r = handle_auth(cfg, None, "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn some_login_no_auth() {
+    #[tokio::test]
+    async fn some_login_no_auth() {
         let cfg = Arc::new(config());
         let login = login();
-        let r = handle_auth(cfg, Some(&login), "");
+        let r = handle_auth(cfg, Some(&login), "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn login_matches_static_auth() {
+    #[tokio::test]
+    async fn login_matches_static_auth() {
         let login = login();
         let mut map = HashMap::<String, String>::new();
         map.insert(login.username.clone(), login.password.clone());
@@ -308,12 +317,12 @@ mod tests {
         let mut cfg = config();
         cfg.auth = Some(map);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn login_fails_static_no_external() {
+    #[tokio::test]
+    async fn login_fails_static_no_external() {
         let login = login();
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
@@ -321,53 +330,53 @@ mod tests {
         let mut cfg = config();
         cfg.auth = Some(map);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_err());
     }
 
-    #[test]
-    fn login_fails_static_matches_external() {
+    #[tokio::test]
+    async fn login_fails_static_matches_external() {
         let login = login();
 
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
 
-        let dynamic = |_: String, _: String, _: String| -> bool { true };
+        let dynamic = |_: String, _: String, _: String| async { true };
 
         let mut cfg = config();
         cfg.auth = Some(map);
-        cfg.external_auth = Some(Arc::new(dynamic));
+        cfg.set_auth_handler(dynamic);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_ok());
     }
 
-    #[test]
-    fn login_fails_static_fails_external() {
+    #[tokio::test]
+    async fn login_fails_static_fails_external() {
         let login = login();
 
         let mut map = HashMap::<String, String>::new();
         map.insert("wrong".to_owned(), "wrong".to_owned());
 
-        let dynamic = |_: String, _: String, _: String| -> bool { false };
+        let dynamic = |_: String, _: String, _: String| async { false };
 
         let mut cfg = config();
         cfg.auth = Some(map);
-        cfg.external_auth = Some(Arc::new(dynamic));
+        cfg.set_auth_handler(dynamic);
 
-        let r = handle_auth(Arc::new(cfg), Some(&login), "");
+        let r = handle_auth(Arc::new(cfg), Some(&login), "").await;
         assert!(r.is_err());
     }
 
-    #[test]
-    fn external_auth_clousre_or_fnptr_type_check_or_fail_compile() {
-        let closure = |_: String, _: String, _: String| -> bool { false };
-        fn fnptr(_: String, _: String, _: String) -> bool {
+    #[tokio::test]
+    async fn external_auth_clousre_or_fnptr_type_check_or_fail_compile() {
+        let closure = |_: String, _: String, _: String| async { false };
+        async fn fnptr(_: String, _: String, _: String) -> bool {
             true
         }
 
         let mut cfg = config();
-        cfg.external_auth = Some(Arc::new(closure));
-        cfg.external_auth = Some(Arc::new(fnptr));
+        cfg.set_auth_handler(closure);
+        cfg.set_auth_handler(fnptr);
     }
 }

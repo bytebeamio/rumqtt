@@ -130,7 +130,14 @@ impl Connect {
 
         // update connect flags
         buffer[flags_index] = connect_flags;
-        Ok(len)
+        Ok(1 + count + len)
+    }
+
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
     }
 }
 

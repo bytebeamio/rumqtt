@@ -2,7 +2,7 @@ use crate::{framed::Network, Transport};
 use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
-use crate::framed::N;
+use crate::framed::AsyncReadWrite;
 use crate::mqttbytes::v4::*;
 use flume::{bounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
@@ -81,7 +81,7 @@ pub struct EventLoop {
     /// Pending packets from last session
     pub pending: VecDeque<Request>,
     /// Network connection to the broker
-    network: Option<Network>,
+    pub network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
     pub network_options: NetworkOptions,
@@ -104,11 +104,10 @@ impl EventLoop {
         let pending = VecDeque::new();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
-        let max_outgoing_packet_size = mqtt_options.max_outgoing_packet_size;
 
         EventLoop {
             mqtt_options,
-            state: MqttState::new(max_inflight, manual_acks, max_outgoing_packet_size),
+            state: MqttState::new(max_inflight, manual_acks),
             requests_tx,
             requests_rx,
             pending,
@@ -131,7 +130,15 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let requests_in_channel = self.requests_rx.drain();
+        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+
+        requests_in_channel.retain(|request| {
+            match request {
+                Request::PubAck(_) => false, // Wait for publish retransmission, else the broker could be confused by an unexpected ack
+                _ => true,
+            }
+        });
+
         self.pending.extend(requests_in_channel);
     }
 
@@ -150,18 +157,24 @@ impl EventLoop {
                 Ok(inner) => inner?,
                 Err(_) => return Err(ConnectionError::NetworkTimeout),
             };
+            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+            if !connack.session_present {
+                self.pending.clear();
+            }
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() && !self.mqtt_options.keep_alive.is_zero() {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(connack));
+            return Ok(Event::Incoming(Packet::ConnAck(connack)));
         }
 
         match self.select().await {
             Ok(v) => Ok(v),
             Err(e) => {
+                // MQTT requires that packets pending acknowledgement should be republished on session resume.
+                // Move pending messages from state to eventloop.
                 self.clean();
                 Err(e)
             }
@@ -189,7 +202,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                match time::timeout(network_timeout, network.flush()).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),
                 };
@@ -229,8 +242,10 @@ impl EventLoop {
                 self.mqtt_options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
-                    match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
+                        network.write(outgoing).await?;
+                    }
+                    match time::timeout(network_timeout, network.flush()).await {
                         Ok(inner) => inner?,
                         Err(_)=> return Err(ConnectionError::FlushTimeout),
                     };
@@ -245,8 +260,10 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq(PingReq))?;
-                match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
+                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq(PingReq))? {
+                    network.write(outgoing).await?;
+                }
+                match time::timeout(network_timeout, network.flush()).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),
                 };
@@ -291,14 +308,14 @@ impl EventLoop {
 async fn connect(
     mqtt_options: &MqttOptions,
     network_options: NetworkOptions,
-) -> Result<(Network, Incoming), ConnectionError> {
+) -> Result<(Network, ConnAck), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(mqtt_options, network_options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(mqtt_options, &mut network).await?;
+    let connack = mqtt_connect(mqtt_options, &mut network).await?;
 
-    Ok((network, packet))
+    Ok((network, connack))
 }
 
 pub(crate) async fn socket_connect(
@@ -313,6 +330,8 @@ pub(crate) async fn socket_connect(
             SocketAddr::V4(_) => TcpSocket::new_v4()?,
             SocketAddr::V6(_) => TcpSocket::new_v6()?,
         };
+
+        socket.set_nodelay(network_options.tcp_nodelay)?;
 
         if let Some(send_buff_size) = network_options.tcp_send_buffer_size {
             socket.set_send_buffer_size(send_buff_size).unwrap();
@@ -356,7 +375,11 @@ async fn network_connect(
     if matches!(options.transport(), Transport::Unix) {
         let file = options.broker_addr.as_str();
         let socket = UnixStream::connect(Path::new(file)).await?;
-        let network = Network::new(socket, options.max_incoming_packet_size);
+        let network = Network::new(
+            socket,
+            options.max_incoming_packet_size,
+            options.max_outgoing_packet_size,
+        );
         return Ok(network);
     }
 
@@ -369,7 +392,7 @@ async fn network_connect(
         _ => options.broker_address(),
     };
 
-    let tcp_stream: Box<dyn N> = {
+    let tcp_stream: Box<dyn AsyncReadWrite> = {
         #[cfg(feature = "proxy")]
         match options.proxy() {
             Some(proxy) => proxy.connect(&domain, port, network_options).await?,
@@ -388,13 +411,21 @@ async fn network_connect(
     };
 
     let network = match options.transport() {
-        Transport::Tcp => Network::new(tcp_stream, options.max_incoming_packet_size),
+        Transport::Tcp => Network::new(
+            tcp_stream,
+            options.max_incoming_packet_size,
+            options.max_outgoing_packet_size,
+        ),
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
                     .await?;
-            Network::new(socket, options.max_incoming_packet_size)
+            Network::new(
+                socket,
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+            )
         }
         #[cfg(unix)]
         Transport::Unix => unreachable!(),
@@ -413,7 +444,11 @@ async fn network_connect(
                 async_tungstenite::tokio::client_async(request, tcp_stream).await?;
             validate_response_headers(response)?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+            )
         }
         #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
@@ -436,7 +471,11 @@ async fn network_connect(
             .await?;
             validate_response_headers(response)?;
 
-            Network::new(WsStream::new(socket), options.max_incoming_packet_size)
+            Network::new(
+                WsStream::new(socket),
+                options.max_incoming_packet_size,
+                options.max_outgoing_packet_size,
+            )
         }
     };
 
@@ -446,29 +485,20 @@ async fn network_connect(
 async fn mqtt_connect(
     options: &MqttOptions,
     network: &mut Network,
-) -> Result<Incoming, ConnectionError> {
-    let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_session = options.clean_session();
-    let last_will = options.last_will();
-
+) -> Result<ConnAck, ConnectionError> {
     let mut connect = Connect::new(options.client_id());
-    connect.keep_alive = keep_alive;
-    connect.clean_session = clean_session;
-    connect.last_will = last_will;
-
-    if let Some((username, password)) = options.credentials() {
-        let login = Login::new(username, password);
-        connect.login = Some(login);
-    }
+    connect.keep_alive = options.keep_alive().as_secs() as u16;
+    connect.clean_session = options.clean_session();
+    connect.last_will = options.last_will();
+    connect.login = options.credentials();
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.write(Packet::Connect(connect)).await?;
+    network.flush().await?;
 
     // validate connack
     match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            Ok(Packet::ConnAck(connack))
-        }
+        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => Ok(connack),
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(packet)),
     }

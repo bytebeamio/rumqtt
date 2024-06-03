@@ -61,6 +61,13 @@ impl ConnAck {
 
         Ok(1 + count + len)
     }
+
+    pub fn size(&self) -> usize {
+        let len = self.len();
+        let remaining_len_size = len_len(len);
+
+        1 + remaining_len_size + len
+    }
 }
 
 /// Connection return code type

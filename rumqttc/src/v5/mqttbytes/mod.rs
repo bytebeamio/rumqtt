@@ -39,11 +39,8 @@ pub fn has_wildcards(s: &str) -> bool {
 
 /// Checks if a topic is valid
 pub fn valid_topic(topic: &str) -> bool {
-    if topic.contains('+') {
-        return false;
-    }
-
-    if topic.contains('#') {
+    // topic can't contain wildcards
+    if topic.contains('+') || topic.contains('#') {
         return false;
     }
 
@@ -58,30 +55,37 @@ pub fn valid_filter(filter: &str) -> bool {
         return false;
     }
 
-    let hirerarchy = filter.split('/').collect::<Vec<&str>>();
-    if let Some((last, remaining)) = hirerarchy.split_last() {
-        for entry in remaining.iter() {
-            // # is not allowed in filter except as a last entry
-            // invalid: sport/tennis#/player
-            // invalid: sport/tennis/#/ranking
-            if entry.contains('#') {
-                return false;
-            }
+    // rev() is used so we can easily get the last entry
+    let mut hirerarchy = filter.split('/').rev();
 
-            // + must occupy an entire level of the filter
-            // invalid: sport+
-            if entry.len() > 1 && entry.contains('+') {
-                return false;
-            }
+    // split will never return an empty iterator
+    // even if the pattern isn't matched, the original string will be there
+    // so it is safe to just unwrap here!
+    let last = hirerarchy.next().unwrap();
+
+    // only single '#" or '+' is allowed in last entry
+    // invalid: sport/tennis#
+    // invalid: sport/++
+    if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+        return false;
+    }
+
+    // remaining entries
+    for entry in hirerarchy {
+        // # is not allowed in filter except as a last entry
+        // invalid: sport/tennis#/player
+        // invalid: sport/tennis/#/ranking
+        if entry.contains('#') {
+            return false;
         }
 
-        // only single '#" or '+' is allowed in last entry
-        // invalid: sport/tennis#
-        // invalid: sport/++
-        if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+        // + must occupy an entire level of the filter
+        // invalid: sport+
+        if entry.len() > 1 && entry.contains('+') {
             return false;
         }
     }
+
     true
 }
 
@@ -126,7 +130,7 @@ pub fn matches(topic: &str, filter: &str) -> bool {
 }
 
 /// Error during serialization and deserialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Invalid return code received as response for connect = {0}")]
     InvalidConnectReturnCode(u8),
@@ -159,7 +163,7 @@ pub enum Error {
     #[error("Payload is too long")]
     PayloadTooLong,
     #[error("Max Payload size of {max:?} has been exceeded by packet of {pkt_size:?} bytes")]
-    PayloadSizeLimitExceeded { pkt_size: usize, max: usize },
+    PayloadSizeLimitExceeded { pkt_size: usize, max: u32 },
     #[error("Payload is required")]
     PayloadRequired,
     #[error("Payload is required = {0}")]
@@ -179,4 +183,8 @@ pub enum Error {
     /// proceed further
     #[error("Insufficient number of bytes to frame packet, {0} more bytes required")]
     InsufficientBytes(usize),
+    #[error("IO: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
+    OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
 }

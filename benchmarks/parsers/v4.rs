@@ -1,6 +1,7 @@
 use bytes::{Buf, BytesMut};
 use rumqttc::mqttbytes::v4;
 use rumqttc::mqttbytes::QoS;
+use rumqttc::Packet;
 use std::time::Instant;
 
 mod common;
@@ -31,7 +32,7 @@ fn main() {
     let start = Instant::now();
     let mut packets = Vec::with_capacity(count);
     while output.has_remaining() {
-        let packet = v4::read(&mut output, 10 * 1024).unwrap();
+        let packet = Packet::read(&mut output, 10 * 1024).unwrap();
         packets.push(packet);
     }
 

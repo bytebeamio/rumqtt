@@ -13,8 +13,10 @@ repository = "https://github.com/bytebeamio/rumqtt"
 license = "Apache-2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 
-[profile.dev.build-override]
-debug = true
+[profile.dev]
+# producing debug info in builds takes up a lot of space on runner, and we
+# are currently not using it.
+debug = false
 
 [profile.release]
 codegen-units = 1

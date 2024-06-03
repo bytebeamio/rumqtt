@@ -38,7 +38,7 @@
 //! use std::time::Duration;
 //! use std::error::Error;
 //!
-//! # #[tokio::main(worker_threads = 1)]
+//! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
 //! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
 //! mqttoptions.set_keep_alive(Duration::from_secs(5));
@@ -148,7 +148,7 @@ pub use tls::Error as TlsError;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
-use tokio_rustls::rustls::{Certificate, ClientConfig, RootCertStore};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 #[cfg(feature = "proxy")]
 pub use proxy::{Proxy, ProxyAuth, ProxyType};
@@ -198,25 +198,6 @@ pub enum Request {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
-}
-
-impl Request {
-    fn size(&self) -> usize {
-        match &self {
-            Request::Publish(publish) => publish.size(),
-            Request::PubAck(puback) => puback.size(),
-            Request::PubRec(pubrec) => pubrec.size(),
-            Request::PubComp(pubcomp) => pubcomp.size(),
-            Request::PubRel(pubrel) => pubrel.size(),
-            Request::PingReq(pingreq) => pingreq.size(),
-            Request::PingResp(pingresp) => pingresp.size(),
-            Request::Subscribe(subscribe) => subscribe.size(),
-            Request::SubAck(suback) => suback.size(),
-            Request::Unsubscribe(unsubscribe) => unsubscribe.size(),
-            Request::UnsubAck(unsuback) => unsuback.size(),
-            Request::Disconnect(disconn) => disconn.size(),
-        }
-    }
 }
 
 impl From<Publish> for Request {
@@ -366,10 +347,9 @@ impl Default for TlsConfiguration {
     fn default() -> Self {
         let mut root_cert_store = RootCertStore::empty();
         for cert in load_native_certs().expect("could not load platform certs") {
-            root_cert_store.add(&Certificate(cert.0)).unwrap();
+            root_cert_store.add(cert).unwrap();
         }
         let tls_config = ClientConfig::builder()
-            .with_safe_defaults()
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
 
@@ -389,6 +369,7 @@ impl From<ClientConfig> for TlsConfiguration {
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
+    tcp_nodelay: bool,
     conn_timeout: u64,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
@@ -399,10 +380,15 @@ impl NetworkOptions {
         NetworkOptions {
             tcp_send_buffer_size: None,
             tcp_recv_buffer_size: None,
+            tcp_nodelay: false,
             conn_timeout: 5,
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
         }
+    }
+
+    pub fn set_tcp_nodelay(&mut self, nodelay: bool) {
+        self.tcp_nodelay = nodelay;
     }
 
     pub fn set_tcp_send_buffer_size(&mut self, size: u32) {
@@ -455,7 +441,7 @@ pub struct MqttOptions {
     /// client identifier
     client_id: String,
     /// username and password
-    credentials: Option<(String, String)>,
+    credentials: Option<Login>,
     /// maximum incoming packet size (verifies remaining length of the packet)
     max_incoming_packet_size: usize,
     /// Maximum outgoing packet size (only verifies publish payload size)
@@ -491,25 +477,14 @@ impl MqttOptions {
     /// # use rumqttc::MqttOptions;
     /// let options = MqttOptions::new("123", "localhost", 1883);
     /// ```
-    /// NOTE: you are not allowed to use an id that starts with a whitespace or is empty.
-    /// for example, the following code would panic:
-    /// ```should_panic
-    /// # use rumqttc::MqttOptions;
-    /// let options = MqttOptions::new("", "localhost", 1883);
-    /// ```
     pub fn new<S: Into<String>, T: Into<String>>(id: S, host: T, port: u16) -> MqttOptions {
-        let id = id.into();
-        if id.starts_with(' ') || id.is_empty() {
-            panic!("Invalid client id");
-        }
-
         MqttOptions {
             broker_addr: host.into(),
             port,
             transport: Transport::tcp(),
             keep_alive: Duration::from_secs(60),
             clean_session: true,
-            client_id: id,
+            client_id: id.into(),
             credentials: None,
             max_incoming_packet_size: 10 * 1024,
             max_outgoing_packet_size: 10 * 1024,
@@ -547,7 +522,6 @@ impl MqttOptions {
     /// # use tokio_rustls::rustls::ClientConfig;
     /// # let root_cert_store = rustls::RootCertStore::empty();
     /// # let client_config = ClientConfig::builder()
-    /// #    .with_safe_defaults()
     /// #    .with_root_certificates(root_cert_store)
     /// #    .with_no_client_auth();
     /// let mut options = MqttOptions::parse_url("mqtts://example.com?client_id=123").unwrap();
@@ -624,7 +598,21 @@ impl MqttOptions {
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
+    ///
+    /// # Panic
+    ///
+    /// Panics if `clean_session` is false when `client_id` is empty.
+    ///
+    /// ```should_panic
+    /// # use rumqttc::MqttOptions;
+    /// let mut options = MqttOptions::new("", "localhost", 1883);
+    /// options.set_clean_session(false);
+    /// ```
     pub fn set_clean_session(&mut self, clean_session: bool) -> &mut Self {
+        assert!(
+            !self.client_id.is_empty() || clean_session,
+            "Cannot unset clean session when client id is empty"
+        );
         self.clean_session = clean_session;
         self
     }
@@ -640,12 +628,12 @@ impl MqttOptions {
         username: U,
         password: P,
     ) -> &mut Self {
-        self.credentials = Some((username.into(), password.into()));
+        self.credentials = Some(Login::new(username, password));
         self
     }
 
     /// Security options
-    pub fn credentials(&self) -> Option<(String, String)> {
+    pub fn credentials(&self) -> Option<Login> {
         self.credentials.clone()
     }
 
@@ -919,12 +907,6 @@ mod test {
     use super::*;
 
     #[test]
-    #[should_panic]
-    fn client_id_startswith_space() {
-        let _mqtt_opts = MqttOptions::new(" client_a", "127.0.0.1", 1883).set_clean_session(true);
-    }
-
-    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         let mut mqttoptions = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
@@ -1008,8 +990,14 @@ mod test {
     }
 
     #[test]
-    #[should_panic]
-    fn no_client_id() {
+    fn accept_empty_client_id() {
         let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
+    }
+
+    #[test]
+    fn set_clean_session_when_client_id_present() {
+        let mut options = MqttOptions::new("client_id", "127.0.0.1", 1883);
+        options.set_clean_session(false);
+        options.set_clean_session(true);
     }
 }

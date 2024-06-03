@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, warn, Instrument};
+use uuid::Uuid;
 
 #[cfg(feature = "websocket")]
 use async_tungstenite::tokio::accept_hdr_async;
@@ -27,7 +28,7 @@ use async_tungstenite::tungstenite::http::HeaderValue;
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
-use metrics::register_gauge;
+use metrics::gauge;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
 use std::{io, thread};
@@ -36,6 +37,7 @@ use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
 use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
@@ -282,9 +284,9 @@ impl Broker {
                 let builder = PrometheusBuilder::new().with_http_listener(addr);
                 builder.install().unwrap();
 
-                let total_publishes = register_gauge!("metrics.router.total_publishes");
-                let total_connections = register_gauge!("metrics.router.total_connections");
-                let failed_publishes = register_gauge!("metrics.router.failed_publishes");
+                let total_publishes = gauge!("metrics.router.total_publishes");
+                let total_connections = gauge!("metrics.router.total_connections");
+                let failed_publishes = gauge!("metrics.router.failed_publishes");
                 loop {
                     if let Ok(metrics) = meter_link.recv() {
                         for m in metrics {
@@ -519,6 +521,13 @@ async fn remote<P: Protocol>(
         _ => unreachable!(),
     };
 
+    let mut assigned_client_id = None;
+    if client_id.is_empty() {
+        let uuid = Uuid::new_v4().simple();
+        client_id = format!("rumqtt-{uuid}");
+        assigned_client_id = Some(client_id.clone());
+    }
+
     if let Some(tenant_id) = &tenant_id {
         // client_id is set to "tenant_id.client_id"
         // this is to make sure we are consistent,
@@ -548,6 +557,7 @@ async fn remote<P: Protocol>(
         network,
         connect_packet,
         dynamic_filters,
+        assigned_client_id,
     )
     .await
     {

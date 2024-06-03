@@ -102,7 +102,7 @@ pub(crate) mod connect {
 
             // update connect flags
             buffer[flags_index] = connect_flags;
-            Ok(len)
+            Ok(1 + count + len)
         }
     }
 
@@ -497,7 +497,6 @@ pub(crate) mod publish {
 
         buffer.extend_from_slice(payload);
 
-        // TODO: Returned length is wrong in other packets. Fix it
         Ok(1 + count + len)
     }
 }

@@ -23,7 +23,7 @@ impl Graveyard {
     }
 
     /// Save connection tracker
-    pub fn save(
+    pub fn save_state(
         &mut self,
         mut tracker: Tracker,
         subscriptions: HashSet<String>,
@@ -33,13 +33,28 @@ impl Graveyard {
         tracker.pause(PauseReason::Busy);
         let id = tracker.id.clone();
 
+        let session_state = SessionState {
+            tracker,
+            subscriptions,
+            unacked_pubrels,
+        };
+
         self.connections.insert(
             id,
             SavedState {
-                tracker,
-                subscriptions,
+                session_state: Some(session_state),
                 metrics,
-                unacked_pubrels,
+            },
+        );
+    }
+
+    /// Save only metrics for connection
+    pub fn save_metrics(&mut self, id: String, metrics: ConnectionEvents) {
+        self.connections.insert(
+            id,
+            SavedState {
+                session_state: None,
+                metrics,
             },
         );
     }
@@ -47,20 +62,14 @@ impl Graveyard {
 
 #[derive(Debug)]
 pub struct SavedState {
-    pub tracker: Tracker,
-    pub subscriptions: HashSet<String>,
+    pub session_state: Option<SessionState>,
     pub metrics: ConnectionEvents,
-    // used for pubrel in qos2
-    pub unacked_pubrels: VecDeque<u16>,
 }
 
-impl SavedState {
-    pub fn new(client_id: String) -> SavedState {
-        SavedState {
-            tracker: Tracker::new(client_id),
-            subscriptions: HashSet::new(),
-            metrics: ConnectionEvents::default(),
-            unacked_pubrels: VecDeque::new(),
-        }
-    }
+#[derive(Debug)]
+pub struct SessionState {
+    pub tracker: Tracker,
+    pub subscriptions: HashSet<String>,
+    // used for pubrel in qos2
+    pub unacked_pubrels: VecDeque<u16>,
 }

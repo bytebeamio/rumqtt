@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::{valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -150,16 +150,24 @@ impl AsyncClient {
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+        let topic = topic.into();
+        let subscribe = Subscribe::new(&topic, qos);
         let request = Request::Subscribe(subscribe);
+        if !valid_filter(&topic) {
+            return Err(ClientError::Request(request));
+        }
         self.request_tx.send_async(request).await?;
         Ok(())
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+        let topic = topic.into();
+        let subscribe = Subscribe::new(&topic, qos);
         let request = Request::Subscribe(subscribe);
+        if !valid_filter(&topic) {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(())
     }
@@ -169,8 +177,13 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter);
         let request = Request::Subscribe(subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::Request(request));
+        }
         self.request_tx.send_async(request).await?;
         Ok(())
     }
@@ -180,8 +193,13 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter);
         let request = Request::Subscribe(subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::TryRequest(request));
+        }
         self.request_tx.try_send(request)?;
         Ok(())
     }
@@ -323,8 +341,12 @@ impl Client {
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic.into(), qos);
+        let topic = topic.into();
+        let subscribe = Subscribe::new(&topic, qos);
         let request = Request::Subscribe(subscribe);
+        if !valid_filter(&topic) {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(())
     }
@@ -340,8 +362,13 @@ impl Client {
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let mut topics_iter = topics.into_iter();
+        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
+        let subscribe = Subscribe::new_many(topics_iter);
         let request = Request::Subscribe(subscribe);
+        if !is_valid_filters {
+            return Err(ClientError::Request(request));
+        }
         self.client.request_tx.send(request)?;
         Ok(())
     }

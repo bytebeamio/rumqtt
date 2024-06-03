@@ -8,10 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Assign random identifier to clients connecting with empty client id.
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
 - Peer initiated disconnects logged as info rather than error.
+- External authentication function must be async
+- Update `tokio-rustls` to `0.25.0`, `rustls-webpki` to `0.102.1`, `tokio-native-tls` to `0.3.1` and
+  `rust-pemfile` to `2.0.0`.
 
 ### Deprecated
 
@@ -20,9 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - MQTT keep alive interval
 - record client id for remote link's span
+- session present flag in connack
+- Make write method return the number of bytes written correctly everywhere
 
 ### Security
-
+- Implement constant-time password comparison in authentication logic
 ---
 
 ## [rumqttd 0.19.0] - 12-12-2023
