@@ -32,7 +32,7 @@ pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
-pub trait AuthManager: std::fmt::Debug {
+pub trait AuthManager: std::fmt::Debug + Send {
     /// Process authentication data received from the server and generate authentication data to be sent back.
     ///
     /// # Arguments
