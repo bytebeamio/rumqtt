@@ -176,6 +176,8 @@ pub enum NoticeError {
     V5PubRec(PubRecReason),
     #[error(" v5 Publish Comp Failure Reason Code: {0:?}")]
     V5PubComp(PubCompReason),
+    #[error(" Dropped due to session reconnect with previous state expire/lost")]
+    SessionReset,
 }
 
 impl From<oneshot::error::RecvError> for NoticeError {

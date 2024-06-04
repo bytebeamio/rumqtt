@@ -3,6 +3,7 @@ use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
+use crate::NoticeError;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -141,13 +142,22 @@ impl EventLoop {
                 connect(&mut self.options),
             )
             .await??;
+            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+            if !connack.session_present {
+                for request in self.pending.drain(..) {
+                    // If the request is a publish request, send an error to the future that is waiting for the ack.
+                    if let Request::Publish(Some(tx), _) = request {
+                        tx.error(NoticeError::SessionReset)
+                    }
+                }
+            }
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
-            self.state.handle_incoming_packet(connack)?;
+            self.state.handle_incoming_packet(Packet::ConnAck(connack))?;
         }
 
         match self.select().await {
@@ -263,19 +273,19 @@ impl EventLoop {
 /// the stream.
 /// This function (for convenience) includes internal delays for users to perform internal sleeps
 /// between re-connections so that cancel semantics can be used during this sleep
-async fn connect(options: &mut MqttOptions) -> Result<(Network, Incoming), ConnectionError> {
+async fn connect(options: &mut MqttOptions) -> Result<(Network, ConnAck), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(options, &mut network).await?;
+    let connack = mqtt_connect(options, &mut network).await?;
 
     // Last session might contain packets which aren't acked. MQTT says these packets should be
     // republished in the next session
     // move pending messages from state to eventloop
     // let pending = self.state.clean();
     // self.pending = pending.into_iter();
-    Ok((network, packet))
+    Ok((network, connack))
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
@@ -387,7 +397,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 async fn mqtt_connect(
     options: &mut MqttOptions,
     network: &mut Network,
-) -> Result<Incoming, ConnectionError> {
+) -> Result<ConnAck, ConnectionError> {
     let keep_alive = options.keep_alive().as_secs() as u16;
     let clean_start = options.clean_start();
     let client_id = options.client_id();
@@ -413,7 +423,7 @@ async fn mqtt_connect(
                 }
                 network.set_max_outgoing_size(props.max_packet_size);
             }
-            Ok(Packet::ConnAck(connack))
+            Ok(connack)
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(Box::new(packet))),

@@ -1,6 +1,7 @@
 use crate::{framed::Network, Transport};
 use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
 use crate::{MqttOptions, Outgoing};
+use crate::NoticeError;
 
 use crate::framed::AsyncReadWrite;
 use crate::mqttbytes::v4::*;
@@ -149,13 +150,22 @@ impl EventLoop {
                 Ok(inner) => inner?,
                 Err(_) => return Err(ConnectionError::NetworkTimeout),
             };
+            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+            if !connack.session_present {
+                for request in self.pending.drain(..) {
+                    // If the request is a publish request, send an error to the future that is waiting for the ack.
+                    if let Request::Publish(Some(tx), _) = request {
+                        tx.error(NoticeError::SessionReset)
+                    }
+                }
+            }
             self.network = Some(network);
 
             if self.keepalive_timeout.is_none() && !self.mqtt_options.keep_alive.is_zero() {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
             }
 
-            return Ok(Event::Incoming(connack));
+            return Ok(Event::Incoming(Packet::ConnAck(connack)));
         }
 
         match self.select().await {
@@ -294,14 +304,14 @@ impl EventLoop {
 async fn connect(
     mqtt_options: &MqttOptions,
     network_options: NetworkOptions,
-) -> Result<(Network, Incoming), ConnectionError> {
+) -> Result<(Network, ConnAck), ConnectionError> {
     // connect to the broker
     let mut network = network_connect(mqtt_options, network_options).await?;
 
     // make MQTT connection request (which internally awaits for ack)
-    let packet = mqtt_connect(mqtt_options, &mut network).await?;
+    let connack = mqtt_connect(mqtt_options, &mut network).await?;
 
-    Ok((network, packet))
+    Ok((network, connack))
 }
 
 pub(crate) async fn socket_connect(
@@ -469,7 +479,7 @@ async fn network_connect(
 async fn mqtt_connect(
     options: &MqttOptions,
     network: &mut Network,
-) -> Result<Incoming, ConnectionError> {
+) -> Result<ConnAck, ConnectionError> {
     let keep_alive = options.keep_alive().as_secs() as u16;
     let clean_session = options.clean_session();
     let last_will = options.last_will();
@@ -486,7 +496,7 @@ async fn mqtt_connect(
     // validate connack
     match network.read().await? {
         Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
-            Ok(Packet::ConnAck(connack))
+            Ok(connack)
         }
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(packet)),
