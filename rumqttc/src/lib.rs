@@ -102,7 +102,6 @@ use std::fmt::{self, Debug, Formatter};
 
 #[cfg(any(
     feature = "use-rustls",
-    feature = "use-native-tls",
     feature = "websocket"
 ))]
 use std::sync::Arc;
