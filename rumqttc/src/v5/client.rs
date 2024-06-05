@@ -932,10 +932,16 @@ mod test {
     fn test_reauth() {
         let (client, mut connection) =
             Client::new(MqttOptions::new("test-1", "localhost", 1883), 10);
-        let _ = client.reauth(None).expect("Should be able to reauth");
+        let props = AuthProperties {
+            method: Some("test".to_string()),
+            data: Some(Bytes::from("test")),
+            reason: None,
+            user_properties: vec![],
+        };
+        let _ = client.reauth(Some(props.clone())).expect("Should be able to reauth");
         let _ = connection.iter().next().expect("Should have event");
 
-        let _ = client.try_reauth(None).expect("Should be able to reauth");
+        let _ = client.try_reauth(Some(props.clone())).expect("Should be able to reauth");
         let _ = connection.iter().next().expect("Should have event");
     }
 }
