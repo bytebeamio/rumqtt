@@ -149,7 +149,7 @@ pub struct ConnectionSettings {
     pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
     #[serde(skip)]
-    external_auth: Option<AuthHandler>,
+    pub external_auth: Option<AuthHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
 }
