@@ -1,7 +1,9 @@
-use rumqttc::{AsyncClient, MqttOptions, QoS, Transport};
+use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::{error::Error, time::Duration};
 use tokio::{task, time};
 
+#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+use rumqttc::Transport;
 #[cfg(all(feature = "use-rustls", not(feature = "use-native-tls")))]
 use tokio_rustls::rustls::ClientConfig;
 
@@ -43,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .with_root_certificates(root_cert_store)
             .with_no_client_auth();
 
-        mqttoptions.set_transport(Transport::tls_with_config(client_config.into()));
+        mqttoptions.set_transport(Transport::wss_with_config(client_config.into()));
     }
 
     mqttoptions.set_keep_alive(Duration::from_secs(60));
