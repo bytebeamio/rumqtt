@@ -163,7 +163,7 @@ impl LinkTx {
     }
 
     /// Send raw device data
-    fn push(&mut self, data: Packet) -> Result<usize, LinkError> {
+    pub fn push(&mut self, data: Packet) -> Result<usize, LinkError> {
         let len = {
             let mut buffer = self.recv_buffer.lock();
             buffer.push_back(data);
@@ -185,7 +185,8 @@ impl LinkTx {
         };
 
         self.router_tx
-            .send((self.connection_id, Event::DeviceData))?;
+            .send_async((self.connection_id, Event::DeviceData))
+            .await?;
 
         Ok(len)
     }
