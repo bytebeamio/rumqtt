@@ -17,8 +17,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
-use-native-tls = ["dep:tokio-native-tls", "dep:native-tls"]
+use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs", "async-tungstenite/tokio-rustls-native-certs"]
+use-native-tls = ["dep:tokio-native-tls", "dep:native-tls", "async-tungstenite/tokio-native-tls"]
 websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 proxy = ["dep:async-http-proxy"]
 
@@ -38,7 +38,7 @@ rustls-webpki = { version = "0.102.2", optional = true }
 rustls-pemfile = { version = "2.1.0", optional = true }
 rustls-native-certs = { version = "0.7.0", optional = true }
 # websockets
-async-tungstenite = { version = "0.25.0", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
+async-tungstenite = { version = "0.25.0", default-features = false, optional = true }
 ws_stream_tungstenite = { version= "0.13.0", default-features = false, features = ["tokio_io"], optional = true }
 http = { version = "1.0.0", optional = true }
 # native-tls
@@ -83,3 +83,8 @@ required-features = ["websocket"]
 name = "websocket_proxy"
 path = "examples/websocket_proxy.rs"
 required-features = ["websocket", "proxy"]
+
+[[example]]
+name = "wss"
+path = "examples/wss.rs"
+required-features = ["websocket"]
