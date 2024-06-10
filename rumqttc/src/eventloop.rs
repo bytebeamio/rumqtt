@@ -486,18 +486,15 @@ async fn mqtt_connect(
     options: &MqttOptions,
     network: &mut Network,
 ) -> Result<ConnAck, ConnectionError> {
-    let keep_alive = options.keep_alive().as_secs() as u16;
-    let clean_session = options.clean_session();
-    let last_will = options.last_will();
-
     let mut connect = Connect::new(options.client_id());
-    connect.keep_alive = keep_alive;
-    connect.clean_session = clean_session;
-    connect.last_will = last_will;
+    connect.keep_alive = options.keep_alive().as_secs() as u16;
+    connect.clean_session = options.clean_session();
+    connect.last_will = options.last_will();
     connect.login = options.credentials();
 
     // send mqtt connect packet
-    network.connect(connect).await?;
+    network.write(Packet::Connect(connect)).await?;
+    network.flush().await?;
 
     // validate connack
     match network.read().await? {

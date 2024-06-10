@@ -84,12 +84,6 @@ impl Network {
             .map_err(StateError::Deserialization)
     }
 
-    pub async fn connect(&mut self, connect: Connect) -> Result<(), StateError> {
-        self.write(Packet::Connect(connect)).await?;
-
-        self.flush().await
-    }
-
     pub async fn flush(&mut self) -> Result<(), crate::state::StateError> {
         self.framed
             .flush()

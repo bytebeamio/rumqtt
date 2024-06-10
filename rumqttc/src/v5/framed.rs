@@ -5,8 +5,7 @@ use tokio_util::codec::Framed;
 use crate::framed::AsyncReadWrite;
 
 use super::mqttbytes::v5::Packet;
-use super::{mqttbytes, Codec, Connect, MqttOptions, MqttState};
-use super::{Incoming, StateError};
+use super::{mqttbytes, Codec, Incoming, MqttState, StateError};
 
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
@@ -84,19 +83,6 @@ impl Network {
             .feed(packet)
             .await
             .map_err(StateError::Deserialization)
-    }
-
-    pub async fn connect(
-        &mut self,
-        connect: Connect,
-        options: &MqttOptions,
-    ) -> Result<(), StateError> {
-        let last_will = options.last_will();
-        let login = options.credentials();
-        self.write(Packet::Connect(connect, last_will, login))
-            .await?;
-
-        self.flush().await
     }
 
     pub async fn flush(&mut self) -> Result<(), StateError> {
