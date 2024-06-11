@@ -9,10 +9,9 @@ use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, ConnectionSettings};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tracing::{error, field, info, warn, Instrument};
 use uuid::Uuid;
@@ -28,8 +27,6 @@ use async_tungstenite::tungstenite::http::HeaderValue;
 #[cfg(feature = "websocket")]
 use ws_stream_tungstenite::WsStream;
 
-use metrics::gauge;
-use metrics_exporter_prometheus::PrometheusBuilder;
 use std::time::Duration;
 use std::{io, thread};
 
@@ -263,7 +260,12 @@ impl Broker {
             }
         }
 
+        #[cfg(feature = "prometheus")]
         if let Some(prometheus_setting) = &self.config.prometheus {
+            use metrics::gauge;
+
+            use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
             let timeout = prometheus_setting.interval;
             // If port is specified use it instead of listen.
             // NOTE: This means listen is ignored when `port` is specified.
@@ -281,7 +283,8 @@ impl Broker {
             let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
             let meter_link = self.meters().unwrap();
             metrics_thread.spawn(move || {
-                let builder = PrometheusBuilder::new().with_http_listener(addr);
+                let builder =
+                    metrics_exporter_prometheus::PrometheusBuilder::new().with_http_listener(addr);
                 builder.install().unwrap();
 
                 let total_publishes = gauge!("metrics.router.total_publishes");
@@ -291,7 +294,7 @@ impl Broker {
                     if let Ok(metrics) = meter_link.recv() {
                         for m in metrics {
                             match m {
-                                Meter::Router(_, ref r) => {
+                                crate::Meter::Router(_, ref r) => {
                                     total_connections.set(r.total_connections as f64);
                                     total_publishes.set(r.total_publishes as f64);
                                     failed_publishes.set(r.failed_publishes as f64);
