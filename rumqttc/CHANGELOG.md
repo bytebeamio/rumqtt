@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Ordering of `State.events` related to `QoS > 0` publishes
 * Filter PUBACK in pending save requests to fix unexpected PUBACK sent to reconnected broker.
 * Resume session only if broker sends `CONNACK` with `session_present == 1`.
+* No disconnection on v5 PubAck/PubRec/PubRel/PubComp/Sub/Unsub failures.
 
 ### Security
 
