@@ -168,11 +168,12 @@ impl EventLoop {
             Err(e) => {
                 // MQTT requires that packets pending acknowledgement should be republished on session resume.
                 // Move pending messages from state to eventloop.
-                // The PubAckFail/PubRecFail/PubRelFail/SubFail/UnsubFail errors are not critical errors.
+                // The PubAckFail/PubRecFail/PubRelFail/PubCompFail/SubFail/UnsubFail errors are not critical errors.
                 match e {
                     ConnectionError::MqttState(StateError::PubAckFail { .. })
                     | ConnectionError::MqttState(StateError::PubRecFail { .. })
                     | ConnectionError::MqttState(StateError::PubRelFail { .. })
+                    | ConnectionError::MqttState(StateError::PubCompFail { .. })
                     | ConnectionError::MqttState(StateError::SubFail { .. })
                     | ConnectionError::MqttState(StateError::UnsubFail { .. }) => {}
                     _ => {
