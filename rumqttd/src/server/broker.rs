@@ -11,10 +11,10 @@ use crate::protocol::{Packet, Protocol};
 use crate::server::tls::{self, TLSAcceptor};
 use crate::{meters, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
-use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use tracing::{error, field, info, warn, Instrument};
+use std::{collections::HashMap, thread::JoinHandle};
+use tracing::{debug, error, field, info, warn, Instrument};
 use uuid::Uuid;
 
 #[cfg(feature = "websocket")]
@@ -39,6 +39,7 @@ use crate::router::{Event, Router};
 use crate::{Config, ConnectionId, ServerSettings};
 
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
 use tokio::time::error::Elapsed;
 use tokio::{task, time};
 
@@ -155,8 +156,12 @@ impl Broker {
         Ok((link_tx, link_rx))
     }
 
+    /// Starts the MQTT broker server and spawns various components like the router, cluster, metrics, and console.
+    ///
+    /// This function sets up the necessary components for the MQTT broker server to run. The function returns a
+    /// [`BrokerHandler`] that can be used to gracefully shut down the server.
     #[tracing::instrument(skip(self))]
-    pub fn start(&mut self) -> Result<(), Error> {
+    pub fn start(self) -> Result<BrokerHandler, Error> {
         if self.config.v4.is_none()
             && self.config.v5.is_none()
             && (cfg!(not(feature = "websocket")) || self.config.ws.is_none())
@@ -171,16 +176,18 @@ impl Broker {
         // we don't know which servers (v4/v5/ws) user will spawn
         // so we collect handles for all of the spawned servers
         let mut server_thread_handles = Vec::new();
+        let (shutdown_tx, shutdown_rx) = watch::channel(());
 
         if let Some(metrics_config) = self.config.metrics.clone() {
             let timer_thread = thread::Builder::new().name("timer".to_owned());
             let router_tx = self.router_tx.clone();
+            let shutdown_rx = shutdown_rx.clone();
             timer_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async move {
-                    timer::start(metrics_config, router_tx).await;
+                    timer::start(metrics_config, router_tx, shutdown_rx).await;
                 });
             })?;
         }
@@ -189,12 +196,13 @@ impl Broker {
         if let Some(bridge_config) = self.config.bridge.clone() {
             let bridge_thread = thread::Builder::new().name(bridge_config.name.clone());
             let router_tx = self.router_tx.clone();
+            let shutdown_rx = shutdown_rx.clone();
             bridge_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async move {
-                    if let Err(e) = bridge::start(bridge_config, router_tx, V4).await {
+                    if let Err(e) = bridge::start(bridge_config, router_tx, V4, shutdown_rx).await {
                         error!(error=?e, "Bridge Link error");
                     };
                 });
@@ -206,13 +214,16 @@ impl Broker {
             for (_, config) in v4_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
+                let shutdown_rx = shutdown_rx.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Remote).await {
+                        if let Err(e) = server.start(LinkType::Remote, shutdown_rx).await {
                             error!(error=?e, "Server error - V4");
+                        } else {
+                            debug!("Shutting down v4 server");
                         }
                     });
                 })?;
@@ -224,13 +235,16 @@ impl Broker {
             for (_, config) in v5_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 let mut server = Server::new(config, self.router_tx.clone(), V5);
+                let shutdown_rx = shutdown_rx.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Remote).await {
+                        if let Err(e) = server.start(LinkType::Remote, shutdown_rx).await {
                             error!(error=?e, "Server error - V5");
+                        } else {
+                            debug!("Shutting down v5 server");
                         }
                     });
                 })?;
@@ -249,13 +263,16 @@ impl Broker {
                 let server_thread = thread::Builder::new().name(config.name.clone());
                 //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
                 let mut server = Server::new(config, self.router_tx.clone(), V4);
+                let shutdown_rx = shutdown_rx.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Websocket).await {
+                        if let Err(e) = server.start(LinkType::Websocket, shutdown_rx).await {
                             error!(error=?e, "Server error - WS");
+                        } else {
+                            debug!("Shutting down websocket server");
                         }
                     });
                 })?;
@@ -280,6 +297,7 @@ impl Broker {
             };
             let metrics_thread = thread::Builder::new().name("Metrics".to_owned());
             let meter_link = self.meters().unwrap();
+            let shutdown_rx = shutdown_rx.clone();
             metrics_thread.spawn(move || {
                 let builder = PrometheusBuilder::new().with_http_listener(addr);
                 builder.install().unwrap();
@@ -301,6 +319,11 @@ impl Broker {
                         }
                     }
 
+                    if shutdown_rx.has_changed().is_ok_and(|flag| flag) {
+                        debug!("Shutting down metrics");
+                        break;
+                    }
+
                     std::thread::sleep(Duration::from_secs(timeout));
                 }
             })?;
@@ -311,23 +334,21 @@ impl Broker {
 
             let console_link = Arc::new(console_link);
             let console_thread = thread::Builder::new().name("Console".to_string());
+            let shutdown_rx = shutdown_rx.clone();
             console_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
-                runtime.block_on(console::start(console_link));
+                runtime.block_on(console::start(console_link, shutdown_rx));
             })?;
         }
 
-        // in ideal case, where server doesn't crash, join() will never resolve
-        // we still try to join threads so that we don't return from function
-        // unless everything crashes.
-        server_thread_handles.into_iter().for_each(|handle| {
-            // join() might panic in case the thread panics
-            // we just ignore it
-            let _ = handle.join();
-        });
-
-        Ok(())
+        Ok(BrokerHandler {
+            inner: InnerHandler {
+                threads: server_thread_handles,
+                shutdown_tx,
+            }
+            .into(),
+        })
     }
 }
 
@@ -379,7 +400,11 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
+    async fn start(
+        &mut self,
+        link_type: LinkType,
+        mut shutdown_rx: watch::Receiver<()>,
+    ) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -392,19 +417,33 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         );
         loop {
             // Await new network connection.
-            let (stream, addr) = match listener.accept().await {
-                Ok((s, r)) => (s, r),
-                Err(e) => {
-                    error!(error=?e, "Unable to accept socket.");
-                    continue;
+            let (stream, addr) = tokio::select! {
+                accept = listener.accept() => {
+                    match accept {
+                        Ok((s, r)) => (s, r),
+                        Err(e) => {
+                            error!(error=?e, "Unable to accept socket.");
+                            continue;
+                        }
+                    }
+                }
+                _ = shutdown_rx.changed() => {
+                    return Ok(());
                 }
             };
 
-            let (network, tenant_id) = match self.tls_accept(stream).await {
-                Ok(o) => o,
-                Err(e) => {
-                    error!(error=?e, "Tls accept error");
-                    continue;
+            let (network, tenant_id) = tokio::select! {
+                accept = self.tls_accept(stream) => {
+                    match accept {
+                        Ok(o) => o,
+                        Err(e) => {
+                            error!(error=?e, "Tls accept error");
+                            continue;
+                        }
+                    }
+                }
+                _ = shutdown_rx.changed() => {
+                    return Ok(());
                 }
             };
 
@@ -420,11 +459,18 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             match link_type {
                 #[cfg(feature = "websocket")]
                 LinkType::Websocket => {
-                    let stream = match accept_hdr_async(network, WSCallback).await {
-                        Ok(s) => Box::new(WsStream::new(s)),
-                        Err(e) => {
-                            error!(error=?e, "Websocket failed handshake");
-                            continue;
+                    let stream = tokio::select! {
+                        hdr_accept = accept_hdr_async(network, WSCallback) => {
+                            match hdr_accept {
+                                Ok(s) => Box::new(WsStream::new(s)),
+                                Err(e) => {
+                                    error!(error=?e, "Websocket failed handshake");
+                                    continue;
+                                }
+                            }
+                        }
+                        _ = shutdown_rx.changed() => {
+                            return Ok(());
                         }
                     };
                     task::spawn(
@@ -461,7 +507,12 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                 ),
             };
 
-            time::sleep(delay).await;
+            tokio::select! {
+                _ = time::sleep(delay) => {}
+                _ = shutdown_rx.changed() => {
+                    return Ok(());
+                }
+            };
         }
     }
 }
@@ -625,5 +676,102 @@ async fn remote<P: Protocol>(
         // It won't matter in this case as we don't use it
         // but might affect logs?
         router_tx.send((connection_id, message)).ok();
+    }
+}
+
+/// An internal handler that manages the shutdown process for a broker.
+///
+/// The `InnerHandler` struct is responsible for coordinating the shutdown of a broker by maintaining a list of running
+/// threads and a channel for sending a shutdown signal. It is used internally by the `ShutdownHandler` to manage the
+/// shutdown process.
+#[derive(Debug)]
+struct InnerHandler {
+    threads: Vec<JoinHandle<()>>,
+    shutdown_tx: watch::Sender<()>,
+}
+
+/// A struct that handles the shutdown process for a broker.
+///
+/// The `ShutdownHandler` struct is responsible for coordinating the shutdown of a broker by sending a shutdown signal to
+/// all running threads and waiting for them to join.
+#[derive(Debug)]
+pub struct BrokerHandler {
+    inner: Option<InnerHandler>,
+}
+
+impl BrokerHandler {
+    /// Shuts down the server by sending a shutdown signal to all running threads and waiting for them to join.
+    ///
+    /// This method is responsible for coordinating the shutdown of the broker by taking ownership of the `BrokerHandler`
+    /// and sending a shutdown signal to all running threads. It then waits for each thread to join before returning.
+    /// This ensures that all broker resources are properly cleaned up and the broker can be safely shut down.
+    pub fn shutdown(mut self) {
+        if let Some(handler) = self.inner.take() {
+            let _ = handler.shutdown_tx.send(());
+            for thread in handler.threads {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// Joins all running threads associated with the `BrokerHandler`.
+    ///
+    /// This method takes ownership of the `BrokerHandler` and waits for all running threads to join. This ensures that all
+    /// broker resources are properly cleaned up and the broker can be safely shut down.
+    pub fn join(mut self) {
+        if let Some(handler) = self.inner.take() {
+            for thread in handler.threads {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// Creates a `ShutdownDropGuard` that will automatically handle the shutdown process when the guard is dropped.
+    ///
+    /// The `drop_guard()` method takes ownership of the `BrokerHandler` and returns a [`ShutdownDropGuard`] that will
+    /// automatically send a shutdown signal to all running threads and wait for them to join when the guard is dropped.
+    /// This is useful for ensuring that the server is properly shut down, even in the event of an unexpected error or
+    /// early exit from the program.
+    #[inline]
+    pub fn drop_guard(mut self) -> ShutdownDropGuard {
+        ShutdownDropGuard {
+            inner: self.inner.take(),
+        }
+    }
+}
+
+/// A guard that automatically handles the shutdown process for a broker when dropped.
+///
+/// The `ShutdownDropGuard` struct is responsible for coordinating the shutdown of a broker by sending a shutdown signal to
+/// all running threads and waiting for them to join when the guard is dropped. This ensures that the broker is properly
+/// shut down, even in the event of an unexpected error or early exit from the program.
+#[derive(Debug)]
+pub struct ShutdownDropGuard {
+    inner: Option<InnerHandler>,
+}
+
+impl ShutdownDropGuard {
+    /// Disarms the `ShutdownDropGuard` and returns a [`BrokerHandler`] that can be used to manually shut down the broker.
+    ///
+    /// This method takes ownership of the `ShutdownDropGuard` and returns a new [`BrokerHandler`] that contains the same
+    /// internal state as the `ShutdownDropGuard`. This allows the caller to take control of the shutdown process and
+    /// manually shut down the server when needed, rather than relying on the automatic shutdown when the `ShutdownDropGuard`
+    /// is dropped.
+    #[inline]
+    pub fn disarm(mut self) -> BrokerHandler {
+        BrokerHandler {
+            inner: self.inner.take(),
+        }
+    }
+}
+
+impl Drop for ShutdownDropGuard {
+    fn drop(&mut self) {
+        if let Some(handler) = self.inner.take() {
+            let _ = handler.shutdown_tx.send(());
+            for thread in handler.threads {
+                let _ = thread.join();
+            }
+        }
     }
 }

@@ -5,7 +5,8 @@ use crate::{router::Event, MetricType};
 use crate::{ConnectionId, MetricSettings};
 use flume::{SendError, Sender};
 use tokio::select;
-use tracing::error;
+use tokio::sync::watch;
+use tracing::{debug, error};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -18,6 +19,7 @@ pub enum Error {
 pub async fn start(
     config: HashMap<MetricType, MetricSettings>,
     router_tx: Sender<(ConnectionId, Event)>,
+    mut shutdown_rx: watch::Receiver<()>,
 ) {
     let span = tracing::info_span!("metrics_timer");
     let _guard = span.enter();
@@ -41,6 +43,10 @@ pub async fn start(
                 if let Err(e) = router_tx.send_async((0, Event::SendMeters)).await {
                     error!("Failed to push alerts: {e}");
                 }
+            }
+            _ = shutdown_rx.changed() => {
+                debug!("Shutting down metrics timer");
+                break;
             }
         }
     }

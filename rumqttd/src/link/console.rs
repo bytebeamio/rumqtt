@@ -9,8 +9,8 @@ use axum::Json;
 use axum::{routing::get, Router};
 use flume::Sender;
 use std::sync::Arc;
-use tokio::net::TcpListener;
-use tracing::info;
+use tokio::{net::TcpListener, sync::watch};
+use tracing::{debug, info};
 
 #[derive(Debug)]
 pub struct ConsoleLink {
@@ -39,7 +39,7 @@ impl ConsoleLink {
 }
 
 #[tracing::instrument]
-pub async fn start(console: Arc<ConsoleLink>) {
+pub async fn start(console: Arc<ConsoleLink>, mut shutdown_rx: watch::Receiver<()>) {
     let listener = TcpListener::bind(console.config.listen.clone())
         .await
         .unwrap();
@@ -56,7 +56,13 @@ pub async fn start(console: Arc<ConsoleLink>) {
         .route("/logs", post(logs))
         .with_state(console);
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            debug!("Shutting down console");
+            let _ = shutdown_rx.changed().await;
+        })
+        .await
+        .unwrap();
 }
 
 async fn root(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
