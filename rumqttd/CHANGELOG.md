@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Assign random identifier to clients connecting with empty client id.
+- Ability to gracefully shut down the broker.
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
