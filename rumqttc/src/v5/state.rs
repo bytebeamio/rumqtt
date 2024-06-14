@@ -513,7 +513,7 @@ impl MqttState {
 
                 self.outgoing_auth(client_auth)
             }
-            _ => return Err(StateError::AuthError("Authentication Failed!".to_string())),
+            _ => Err(StateError::AuthError("Authentication Failed!".to_string())),
         }
     }
 
