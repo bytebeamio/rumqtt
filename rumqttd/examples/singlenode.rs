@@ -1,7 +1,5 @@
 use rumqttd::{Broker, Config, Notification};
 
-use std::thread;
-
 fn main() {
     let builder = tracing_subscriber::fmt()
         .pretty()
@@ -25,11 +23,9 @@ fn main() {
 
     dbg!(&config);
 
-    let mut broker = Broker::new(config);
+    let broker = Broker::new(config);
     let (mut link_tx, mut link_rx) = broker.link("singlenode").unwrap();
-    thread::spawn(move || {
-        broker.start().unwrap();
-    });
+    let _guard = broker.start().unwrap().drop_guard();
 
     link_tx.subscribe("#").unwrap();
 

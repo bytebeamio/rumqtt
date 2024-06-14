@@ -15,7 +15,7 @@ fn main() {
 
     dbg!(&config);
 
-    let mut broker = Broker::new(config);
+    let broker = Broker::new(config);
     let meters = broker.meters().unwrap();
 
     let (mut link_tx, mut link_rx) = broker.link("consumer").unwrap();
@@ -59,11 +59,7 @@ fn main() {
         });
     }
 
-    thread::spawn(move || {
-        if let Err(e) = broker.start() {
-            println!("Broker stopped: {e}");
-        }
-    });
+    let _guard = broker.start().unwrap().drop_guard();
     thread::sleep(Duration::from_secs(2));
 
     loop {
