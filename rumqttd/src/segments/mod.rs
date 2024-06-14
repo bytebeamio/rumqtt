@@ -259,10 +259,17 @@ where
             }
             SegmentPosition::Done(absolute_offset) => {
                 // debug!("start: {:?}, end: ({}, {}) done", orig_cursor, cursor.0, absolute_offset);
-                Ok(Position::Done {
-                    start,
-                    end: (cursor.0, absolute_offset),
-                })
+                if self.active_segment().size() < self.max_segment_size as u64 {
+                    Ok(Position::Done {
+                        start,
+                        end: (cursor.0, absolute_offset),
+                    })
+                } else {
+                    Ok(Position::Done {
+                        start,
+                        end: (cursor.0 + 1, absolute_offset),
+                    })
+                }
             }
         }
     }
@@ -345,6 +352,58 @@ mod tests {
         assert_eq!(log.head, 1);
         assert_eq!(log.tail, 2);
         assert_eq!(log.len(), 2);
+    }
+
+    #[test]
+    fn should_not_fail() {
+        let max_segment_size = 1024 * 100; // 100K
+        let packet_size: u64 = 1024;
+        // 1 as active only
+        let mut log = CommitLog::new(max_segment_size, 1).unwrap();
+
+        for i in 0..10 {
+            log.append(random_payload(i, packet_size));
+        }
+
+        assert_eq!(log.active_segment().len(), 10);
+        assert_eq!(log.active_segment().size(), packet_size * 10);
+
+        // Read one by one
+        let mut out = Vec::new();
+        let mut last_read_cursor = (0, 0);
+        for i in 0..10 {
+            let offset = i as u64;
+            let next = log.readv((0, offset), 1, &mut out).unwrap();
+            let data = out.pop().unwrap();
+            verify(i, packet_size, data);
+
+            if i == 9 {
+                if let Done { start: _, end } = next {
+                    last_read_cursor = end;
+                };
+                assert_eq!(
+                    next,
+                    Done {
+                        start: (0, 9),
+                        end: (0, 10)
+                    }
+                );
+                continue;
+            }
+
+            assert_eq!(
+                next,
+                Next {
+                    start: (0, i as u64),
+                    end: (0, i as u64 + 1)
+                }
+            );
+        }
+
+        log.append(random_payload(10, packet_size));
+        log.readv(last_read_cursor, 1, &mut out).unwrap();
+        let data = out.pop().unwrap();
+        verify(10, packet_size, data);
     }
 
     #[test]
@@ -536,7 +595,7 @@ mod tests {
             next,
             Done {
                 start: (2, 200),
-                end: (2, 300)
+                end: (3, 300)
             }
         );
     }
@@ -582,6 +641,7 @@ mod tests {
                 end: (3, 35)
             }
         );
+        // This should have end: (4, 40) as well
         let next = log.readv((3, 40), 5, &mut out).unwrap();
         assert_eq!(
             next,
@@ -630,7 +690,7 @@ mod tests {
             next,
             Done {
                 start: (3, 30),
-                end: (3, 40)
+                end: (4, 40)
             }
         );
     }
@@ -672,6 +732,42 @@ mod tests {
             Next {
                 start: (10, 100),
                 end: (10, 105)
+            }
+        );
+    }
+
+    #[test]
+    fn reads_which_end_exactly_at_active_segments_end() {
+        let max_segment_size = 1024;
+        let packet_size: u64 = 1024;
+        let mut log = CommitLog::new(max_segment_size, 2).unwrap();
+
+        log.append(random_payload(0, packet_size));
+        assert_eq!(log.head, 0);
+        assert_eq!(log.tail, 0);
+
+        let mut out = Vec::new();
+        let next = log.readv((0, 0), 1, &mut out).unwrap();
+        assert_eq!(
+            next,
+            Done {
+                start: (0, 0),
+                end: (1, 1)
+            }
+        );
+
+        log.append(random_payload(1, packet_size));
+        assert_eq!(log.head, 0);
+        assert_eq!(log.tail, 1);
+
+        let mut out = Vec::new();
+
+        let next = log.readv((1, 1), 1, &mut out).unwrap();
+        assert_eq!(
+            next,
+            Done {
+                start: (1, 1),
+                end: (2, 2)
             }
         );
     }
