@@ -577,9 +577,7 @@ impl MqttOptions {
     }
 
     pub fn auth_manager(&self) -> Option<Arc<Mutex<dyn AuthManager>>> {
-        if self.auth_manager.is_none() {
-            return None;
-        }
+        self.auth_manager.as_ref()?;
 
         self.auth_manager.clone()
     }
