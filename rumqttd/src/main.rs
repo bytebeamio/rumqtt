@@ -84,10 +84,15 @@ fn main() {
 
     validate_config(&configs);
 
-    // println!("{:#?}", configs);
+    let _guard = Broker::new(configs).start().unwrap().drop_guard();
 
-    let mut broker = Broker::new(configs);
-    broker.start().unwrap();
+    let (tx, rx) = flume::bounded::<()>(1);
+    ctrlc::set_handler(move || {
+        let _ = tx.send(());
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    rx.recv().expect("Could not receive Ctrl-C signal");
 }
 
 // Do any extra validation that needs to be done before starting the broker here.
