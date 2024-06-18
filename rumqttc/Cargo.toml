@@ -83,8 +83,3 @@ required-features = ["websocket"]
 name = "websocket_proxy"
 path = "examples/websocket_proxy.rs"
 required-features = ["websocket", "proxy"]
-
-[[example]]
-name = "wss"
-path = "examples/wss.rs"
-required-features = ["websocket"]
