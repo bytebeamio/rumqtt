@@ -377,11 +377,6 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 request = request_modifier(request).await;
             }
 
-            #[cfg(feature = "use-native-tls")]
-            let connector = tls::native_tls_connector(&tls_config).await?;
-
-            // cfg: "use-native-tls" overwrites "use-rustls"
-            #[cfg(all(feature = "use-rustls", not(feature = "use-native-tls")))]
             let connector = tls::rustls_connector(&tls_config).await?;
 
             let (socket, response) = async_tungstenite::tokio::client_async_tls_with_connector(
