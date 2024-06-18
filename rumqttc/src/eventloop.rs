@@ -450,7 +450,7 @@ async fn network_connect(
                 options.max_outgoing_packet_size,
             )
         }
-        #[cfg(all(any(feature = "use-rustls", feature = "use-native-tls"), feature = "websocket"))]
+        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
         Transport::Wss(tls_config) => {
             let mut request = options.broker_addr.as_str().into_client_request()?;
             request
