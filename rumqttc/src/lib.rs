@@ -100,10 +100,7 @@ extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
 
-#[cfg(any(
-    feature = "use-rustls",
-    feature = "websocket"
-))]
+#[cfg(any(feature = "use-rustls", feature = "websocket"))]
 use std::sync::Arc;
 
 use std::time::Duration;
@@ -236,8 +233,8 @@ pub enum Transport {
     #[cfg(feature = "websocket")]
     #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
     Ws,
-    #[cfg(all(any(feature = "use-rustls", feature = "use-native-tls"), feature = "websocket"))]
-    #[cfg_attr(docsrs, doc(cfg(all(any(feature = "use-rustls", feature = "use-native-tls"), feature = "websocket"))))]
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     Wss(TlsConfiguration),
 }
 
@@ -308,8 +305,8 @@ impl Transport {
         Self::wss_with_config(config)
     }
 
-    #[cfg(all(any(feature = "use-rustls", feature = "use-native-tls"), feature = "websocket"))]
-    #[cfg_attr(docsrs, doc(cfg(all(any(feature = "use-rustls", feature = "use-native-tls"), feature = "websocket"))))]
+    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     pub fn wss_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Wss(tls_config)
     }
