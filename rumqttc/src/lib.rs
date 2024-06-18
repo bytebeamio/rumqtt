@@ -145,6 +145,10 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
+#[cfg(feature = "use-native-tls")]
+pub use tokio_native_tls;
+#[cfg(feature = "use-native-tls")]
+use tokio_native_tls::native_tls::TlsConnector;
 #[cfg(feature = "use-rustls")]
 pub use tokio_rustls;
 #[cfg(feature = "use-rustls")]
@@ -339,7 +343,11 @@ pub enum TlsConfiguration {
     /// Injected rustls ClientConfig for TLS, to allow more customisation.
     Rustls(Arc<ClientConfig>),
     #[cfg(feature = "use-native-tls")]
+    /// Use default native-tls configuration
     Native,
+    #[cfg(feature = "use-native-tls")]
+    /// Injected native-tls TlsConnector for TLS, to allow more customisation.
+    NativeConnector(TlsConnector),
 }
 
 #[cfg(feature = "use-rustls")]
@@ -361,6 +369,13 @@ impl Default for TlsConfiguration {
 impl From<ClientConfig> for TlsConfiguration {
     fn from(config: ClientConfig) -> Self {
         TlsConfiguration::Rustls(Arc::new(config))
+    }
+}
+
+#[cfg(feature = "use-native-tls")]
+impl From<TlsConnector> for TlsConfiguration {
+    fn from(connector: TlsConnector) -> Self {
+        TlsConfiguration::NativeConnector(connector)
     }
 }
 

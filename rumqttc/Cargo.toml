@@ -65,6 +65,11 @@ path = "examples/tls.rs"
 required-features = ["use-rustls"]
 
 [[example]]
+name = "tls_native"
+path = "examples/tls_native.rs"
+required-features = ["use-native-tls"]
+
+[[example]]
 name = "tls2"
 path = "examples/tls2.rs"
 required-features = ["use-rustls"]
