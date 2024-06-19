@@ -258,12 +258,10 @@ impl AsyncClient {
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(Request::Subscribe(subscribe)));
+            return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.request_tx
-            .send_async(Request::Subscribe(subscribe))
-            .await?;
+        self.request_tx.send_async(subscribe.into()).await?;
         Ok(())
     }
 
@@ -290,10 +288,10 @@ impl AsyncClient {
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::TryRequest(Request::Subscribe(subscribe)));
+            return Err(ClientError::TryRequest(subscribe.into()));
         }
 
-        self.request_tx.try_send(Request::Subscribe(subscribe))?;
+        self.request_tx.try_send(subscribe.into())?;
         Ok(())
     }
 
@@ -321,12 +319,10 @@ impl AsyncClient {
     {
         let subscribe = Subscribe::new_many(topics, properties);
         if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(Request::Subscribe(subscribe)));
+            return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.request_tx
-            .send_async(Request::Subscribe(subscribe))
-            .await?;
+        self.request_tx.send_async(subscribe.into()).await?;
 
         Ok(())
     }
@@ -360,10 +356,10 @@ impl AsyncClient {
     {
         let subscribe = Subscribe::new_many(topics, properties);
         if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::TryRequest(Request::Subscribe(subscribe)));
+            return Err(ClientError::TryRequest(subscribe.into()));
         }
 
-        self.request_tx.try_send(Request::Subscribe(subscribe))?;
+        self.request_tx.try_send(subscribe.into())?;
         Ok(())
     }
 
@@ -608,10 +604,10 @@ impl Client {
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(Request::Subscribe(subscribe)));
+            return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.client.request_tx.send(Request::Subscribe(subscribe))?;
+        self.client.request_tx.send(subscribe.into())?;
         Ok(())
     }
 
@@ -654,10 +650,10 @@ impl Client {
     {
         let subscribe = Subscribe::new_many(topics, properties);
         if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(Request::Subscribe(subscribe)));
+            return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.client.request_tx.send(Request::Subscribe(subscribe))?;
+        self.client.request_tx.send(subscribe.into())?;
         Ok(())
     }
 
