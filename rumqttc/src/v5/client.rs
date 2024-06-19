@@ -6,9 +6,9 @@ use super::mqttbytes::v5::{
     Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
     Unsubscribe, UnsubscribeProperties,
 };
-use super::mqttbytes::{valid_filter, QoS};
+use super::mqttbytes::QoS;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::valid_topic;
+use crate::{valid_filter, valid_topic};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -256,13 +256,14 @@ impl AsyncClient {
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
         let filter = Filter::new(topic, qos);
-        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let request: Request = Request::Subscribe(subscribe);
-        if !is_filter_valid {
-            return Err(ClientError::Request(request));
+        if !subscribe_has_valid_filters(&subscribe) {
+            return Err(ClientError::Request(Request::Subscribe(subscribe)));
         }
-        self.request_tx.send_async(request).await?;
+
+        self.request_tx
+            .send_async(Request::Subscribe(subscribe))
+            .await?;
         Ok(())
     }
 
@@ -287,13 +288,12 @@ impl AsyncClient {
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
         let filter = Filter::new(topic, qos);
-        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let request = Request::Subscribe(subscribe);
-        if !is_filter_valid {
-            return Err(ClientError::TryRequest(request));
+        if !subscribe_has_valid_filters(&subscribe) {
+            return Err(ClientError::TryRequest(Request::Subscribe(subscribe)));
         }
-        self.request_tx.try_send(request)?;
+
+        self.request_tx.try_send(Request::Subscribe(subscribe))?;
         Ok(())
     }
 
@@ -319,15 +319,15 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
-        let request = Request::Subscribe(subscribe);
-        if !is_valid_filters {
-            return Err(ClientError::Request(request));
+        let subscribe = Subscribe::new_many(topics, properties);
+        if !subscribe_has_valid_filters(&subscribe) {
+            return Err(ClientError::Request(Request::Subscribe(subscribe)));
         }
 
-        self.request_tx.send_async(request).await?;
+        self.request_tx
+            .send_async(Request::Subscribe(subscribe))
+            .await?;
+
         Ok(())
     }
 
@@ -358,14 +358,12 @@ impl AsyncClient {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
-        let request = Request::Subscribe(subscribe);
-        if !is_valid_filters {
-            return Err(ClientError::TryRequest(request));
+        let subscribe = Subscribe::new_many(topics, properties);
+        if !subscribe_has_valid_filters(&subscribe) {
+            return Err(ClientError::TryRequest(Request::Subscribe(subscribe)));
         }
-        self.request_tx.try_send(request)?;
+
+        self.request_tx.try_send(Request::Subscribe(subscribe))?;
         Ok(())
     }
 
@@ -608,13 +606,12 @@ impl Client {
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
         let filter = Filter::new(topic, qos);
-        let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let request = Request::Subscribe(subscribe);
-        if !is_filter_valid {
-            return Err(ClientError::Request(request));
+        if !subscribe_has_valid_filters(&subscribe) {
+            return Err(ClientError::Request(Request::Subscribe(subscribe)));
         }
-        self.client.request_tx.send(request)?;
+
+        self.client.request_tx.send(Request::Subscribe(subscribe))?;
         Ok(())
     }
 
@@ -655,14 +652,12 @@ impl Client {
     where
         T: IntoIterator<Item = Filter>,
     {
-        let mut topics_iter = topics.into_iter();
-        let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
-        let subscribe = Subscribe::new_many(topics_iter, properties);
-        let request = Request::Subscribe(subscribe);
-        if !is_valid_filters {
-            return Err(ClientError::Request(request));
+        let subscribe = Subscribe::new_many(topics, properties);
+        if !subscribe_has_valid_filters(&subscribe) {
+            return Err(ClientError::Request(Request::Subscribe(subscribe)));
         }
-        self.client.request_tx.send(request)?;
+
+        self.client.request_tx.send(Request::Subscribe(subscribe))?;
         Ok(())
     }
 
@@ -753,6 +748,15 @@ impl Client {
         self.client.try_disconnect()?;
         Ok(())
     }
+}
+
+#[must_use]
+fn subscribe_has_valid_filters(subscribe: &Subscribe) -> bool {
+    !subscribe.filters.is_empty()
+        && subscribe
+            .filters
+            .iter()
+            .all(|filter| valid_filter(&filter.path))
 }
 
 /// Error type returned by [`Connection::recv`]
