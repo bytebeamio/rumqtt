@@ -19,7 +19,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["use-rustls"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
 use-native-tls = ["dep:tokio-native-tls", "dep:native-tls", "async-tungstenite/tokio-native-tls"]
-websocket = ["async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
+websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 proxy = ["dep:async-http-proxy"]
 
 [dependencies]
