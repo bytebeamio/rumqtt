@@ -461,10 +461,11 @@ async fn network_connect(
                 request = request_modifier(request).await;
             }
 
-            // Ensure only one of the tls features is enabled to avoid conflicts
+            // Accept only one of tls features to avoid conflicts.
+            // When native-tls is enabled, rustls is as disabled.
             #[cfg(feature = "use-native-tls")]
             let connector = tls::native_tls_connector(&tls_config).await?;
-            #[cfg(feature = "use-rustls")]
+            #[cfg(all(feature = "use-rustls", not(feature = "use-native-tls")))]
             let connector = tls::rustls_connector(&tls_config).await?;
 
             let (socket, response) = async_tungstenite::tokio::client_async_tls_with_connector(
