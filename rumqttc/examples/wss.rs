@@ -25,9 +25,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Use native-tls to load root certificates from the operating system.
         println!("Using native-tls to load root certificates from the operating system.");
         let mut builder = native_tls::TlsConnector::builder();
-        let pem = &vec![1, 2, 3];
-        // let pem = include_bytes!("native-tls-cert.pem");
-        let cert = native_tls::Certificate::from_pem(pem)?;
+        let _pem = &vec![1, 2, 3];
+        // let _pem = include_bytes!("native-tls-cert.pem");
+        let cert = native_tls::Certificate::from_pem(_pem)?;
         builder.add_root_certificate(cert);
         let connector = builder.build()?;
         mqttoptions.set_transport(Transport::wss_with_config(connector.into()));
