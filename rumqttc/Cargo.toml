@@ -88,3 +88,8 @@ required-features = ["websocket", "proxy"]
 name = "wss"
 path = "examples/wss.rs"
 required-features = ["websocket"]
+
+[[example]]
+name = "wss_v5"
+path = "examples/wss_v5.rs"
+required-features = ["websocket"]
