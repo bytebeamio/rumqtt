@@ -1,8 +1,9 @@
-use super::*;
 use bytes::{Buf, Bytes};
 
+use super::*;
+
 /// Unsubscribe packet
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Unsubscribe {
     pub pkid: u16,
     pub filters: Vec<String>,

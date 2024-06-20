@@ -109,6 +109,7 @@ mod client;
 mod eventloop;
 mod framed;
 pub mod mqttbytes;
+mod notice;
 mod state;
 pub mod v5;
 
@@ -140,11 +141,14 @@ pub use client::{
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
+use notice::NoticeTx;
+pub use notice::{NoticeError, NoticeFuture};
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
+use tokio::sync::oneshot;
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
 #[cfg(feature = "use-native-tls")]
@@ -188,7 +192,7 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Request {
     Publish(Publish),
     PubAck(PubAck),
@@ -202,6 +206,25 @@ pub enum Request {
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
+}
+
+impl Request {
+    fn size(&self) -> usize {
+        match &self {
+            Request::Publish(publish) => publish.size(),
+            Request::PubAck(puback) => puback.size(),
+            Request::PubRec(pubrec) => pubrec.size(),
+            Request::PubComp(pubcomp) => pubcomp.size(),
+            Request::PubRel(pubrel) => pubrel.size(),
+            Request::PingReq(pingreq) => pingreq.size(),
+            Request::PingResp(pingresp) => pingresp.size(),
+            Request::Subscribe(subscribe) => subscribe.size(),
+            Request::SubAck(suback) => suback.size(),
+            Request::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Request::UnsubAck(unsuback) => unsuback.size(),
+            Request::Disconnect(disconn) => disconn.size(),
+        }
+    }
 }
 
 impl From<Publish> for Request {

@@ -65,6 +65,7 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
   `rusttls-pemfile` to `2.0.0`, `async-tungstenite` to `0.24.0`, `ws_stream_tungstenite` to `0.12.0`
   and `http` to `1.0.0`. This is a breaking change as types from some of these crates are part of
   the public API.
+- `publish` / `subscribe` / `unsubscribe` methods on `AsyncClient` and `Client` now return a `PkidPromise` which resolves into the identifier value chosen by the `EventLoop` when handling the packet. 
 
 ### Deprecated
 
