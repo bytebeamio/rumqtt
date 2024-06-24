@@ -51,18 +51,6 @@ pub enum StateError {
         reason_code: DisconnectReasonCode,
         reason_string: Option<String>,
     },
-    #[error("Unsubscribe failed with reason '{reason:?}' ")]
-    UnsubFail { reason: UnsubAckReason },
-    #[error("Subscribe failed with reason '{reason:?}' ")]
-    SubFail { reason: SubscribeReasonCode },
-    #[error("Publish acknowledgement failed with reason '{reason:?}' ")]
-    PubAckFail { reason: PubAckReason },
-    #[error("Publish receive failed with reason '{reason:?}' ")]
-    PubRecFail { reason: PubRecReason },
-    #[error("Publish release failed with reason '{reason:?}' ")]
-    PubRelFail { reason: PubRelReason },
-    #[error("Publish completion failed with reason '{reason:?}' ")]
-    PubCompFail { reason: PubCompReason },
     #[error("Connection failed with reason '{reason:?}' ")]
     ConnFail { reason: ConnectReturnCode },
     #[error("Connection closed by peer abruptly")]
@@ -252,7 +240,9 @@ impl MqttState {
                 SubscribeReasonCode::Success(qos) => {
                     debug!("SubAck Pkid = {:?}, QoS = {:?}", suback.pkid, qos);
                 }
-                _ => return Err(StateError::SubFail { reason: *reason }),
+                _ => {
+                    warn!("SubAck Pkid = {:?}, Reason = {:?}", suback.pkid, reason);
+                },
             }
         }
         Ok(None)
@@ -264,7 +254,7 @@ impl MqttState {
     ) -> Result<Option<Packet>, StateError> {
         for reason in unsuback.reasons.iter() {
             if reason != &UnsubAckReason::Success {
-                return Err(StateError::UnsubFail { reason: *reason });
+                warn!("UnsubAck Pkid = {:?}, Reason = {:?}", unsuback.pkid, reason);
             }
         }
         Ok(None)
@@ -374,9 +364,8 @@ impl MqttState {
         if puback.reason != PubAckReason::Success
             && puback.reason != PubAckReason::NoMatchingSubscribers
         {
-            return Err(StateError::PubAckFail {
-                reason: puback.reason,
-            });
+            warn!("PubAck Pkid = {:?}, reason: {:?}", puback.pkid, puback.reason);
+            return Ok(None);
         }
 
         if let Some(publish) = self.check_collision(puback.pkid) {
@@ -408,9 +397,8 @@ impl MqttState {
         if pubrec.reason != PubRecReason::Success
             && pubrec.reason != PubRecReason::NoMatchingSubscribers
         {
-            return Err(StateError::PubRecFail {
-                reason: pubrec.reason,
-            });
+            warn!("PubRec Pkid = {:?}, reason: {:?}", pubrec.pkid, pubrec.reason);
+            return Ok(None);
         }
 
         // NOTE: Inflight - 1 for qos2 in comp
@@ -429,9 +417,8 @@ impl MqttState {
         self.incoming_pub.set(pubrel.pkid as usize, false);
 
         if pubrel.reason != PubRelReason::Success {
-            return Err(StateError::PubRelFail {
-                reason: pubrel.reason,
-            });
+            warn!("PubRel Pkid = {:?}, reason: {:?}", pubrel.pkid, pubrel.reason);
+            return Ok(None);
         }
 
         let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
@@ -457,9 +444,8 @@ impl MqttState {
         self.outgoing_rel.set(pubcomp.pkid as usize, false);
 
         if pubcomp.reason != PubCompReason::Success {
-            return Err(StateError::PubCompFail {
-                reason: pubcomp.reason,
-            });
+            warn!("PubComp Pkid = {:?}, reason: {:?}", pubcomp.pkid, pubcomp.reason);
+            return Ok(None);
         }
 
         self.inflight -= 1;
