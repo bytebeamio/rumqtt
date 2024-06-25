@@ -170,12 +170,15 @@ dependencies = [
  "futures-io",
  "futures-util",
  "log",
+ "native-tls",
  "pin-project-lite",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls",
  "tungstenite",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -2705,6 +2708,7 @@ dependencies = [
  "http 1.0.0",
  "httparse",
  "log",
+ "native-tls",
  "rand",
  "rustls",
  "rustls-pki-types",
@@ -2894,6 +2898,12 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "webpki-roots"
+version = "0.25.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1778a42e8b3b90bff8d0f5032bf22250792889a5cdc752aa0020c84abe3aaf10"
 
 [[package]]
 name = "which"
