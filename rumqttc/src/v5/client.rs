@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use super::mqttbytes::v5::{
-    Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
-    Unsubscribe, UnsubscribeProperties,
+    Auth, AuthProperties, AuthReasonCode, Filter, PubAck, PubRec, Publish, PublishProperties,
+    Subscribe, SubscribeProperties, Unsubscribe, UnsubscribeProperties,
 };
 use super::mqttbytes::QoS;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
@@ -56,7 +56,6 @@ impl AsyncClient {
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
-
         let client = AsyncClient { request_tx };
 
         (client, eventloop)
@@ -193,6 +192,22 @@ impl AsyncClient {
         if let Some(ack) = ack {
             self.request_tx.try_send(ack)?;
         }
+        Ok(())
+    }
+
+    /// Sends a MQTT AUTH to `EventLoop` for authentication.
+    pub async fn reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
+        let auth = Request::Auth(auth);
+        self.request_tx.send_async(auth).await?;
+        Ok(())
+    }
+
+    /// Attempts to send a MQTT AUTH to `EventLoop` for authentication.
+    pub fn try_reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
+        let auth = Request::Auth(auth);
+        self.request_tx.try_send(auth)?;
         Ok(())
     }
 
@@ -594,6 +609,22 @@ impl Client {
         Ok(())
     }
 
+    /// Sends a MQTT AUTH to `EventLoop` for authentication.
+    pub fn reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
+        let auth = Request::Auth(auth);
+        self.client.request_tx.send(auth)?;
+        Ok(())
+    }
+
+    /// Attempts to send a MQTT AUTH to `EventLoop` for authentication.
+    pub fn try_reauth(&self, properties: Option<AuthProperties>) -> Result<(), ClientError> {
+        let auth = Auth::new(AuthReasonCode::ReAuthenticate, properties);
+        let auth = Request::Auth(auth);
+        self.client.request_tx.try_send(auth)?;
+        Ok(())
+    }
+
     /// Sends a MQTT Subscribe to the `EventLoop`
     fn handle_subscribe<S: Into<String>>(
         &self,
@@ -895,5 +926,22 @@ mod test {
             .publish("hello/world", QoS::ExactlyOnce, false, "good bye")
             .expect("Should be able to publish");
         let _ = rx.try_recv().expect("Should have message");
+    }
+
+    #[test]
+    fn test_reauth() {
+        let (client, mut connection) =
+            Client::new(MqttOptions::new("test-1", "localhost", 1883), 10);
+        let props = AuthProperties {
+            method: Some("test".to_string()),
+            data: Some(Bytes::from("test")),
+            reason: None,
+            user_properties: vec![],
+        };
+        let _ = client.reauth(Some(props.clone())).expect("Should be able to reauth");
+        let _ = connection.iter().next().expect("Should have event");
+
+        let _ = client.try_reauth(Some(props.clone())).expect("Should be able to reauth");
+        let _ = connection.iter().next().expect("Should have event");
     }
 }
