@@ -168,8 +168,6 @@ impl EventLoop {
             Err(e) => {
                 // MQTT requires that packets pending acknowledgement should be republished on session resume.
                 // Move pending messages from state to eventloop.
-                // The PubAckFail/PubRecFail/PubRelFail/PubCompFail/SubFail/UnsubFail errors are not critical errors.
-                warn!("Disconnect due to a critical error: {:?}", e);
                 self.clean();
                 Err(e)
             }
