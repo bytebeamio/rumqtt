@@ -12,6 +12,7 @@ use std::{io, net::AddrParseError, time::Duration};
 
 use tokio::{
     net::TcpStream,
+    sync::watch,
     time::{sleep, sleep_until, Instant},
 };
 
@@ -48,6 +49,7 @@ pub async fn start<P>(
     config: BridgeConfig,
     router_tx: Sender<(ConnectionId, Event)>,
     protocol: P,
+    mut shutdown_rx: watch::Receiver<()>,
 ) -> Result<(), BridgeError>
 where
     P: Protocol + Clone + Send + 'static,
@@ -153,6 +155,10 @@ where
                     ping_time = Instant::now();
                     // resetting timeout because tokio::select! consumes the old timeout future
                     timeout = sleep_until(ping_time + Duration::from_secs(config.ping_delay));
+                }
+                _ = shutdown_rx.changed() => {
+                    debug!("Shutting down bridge");
+                    break 'outer Ok(());
                 }
             }
         }

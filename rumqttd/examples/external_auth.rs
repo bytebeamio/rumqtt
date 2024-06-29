@@ -32,9 +32,15 @@ fn main() {
     //     true
     // });
 
-    let mut broker = Broker::new(config);
+    let _guard = Broker::new(config).start().unwrap().drop_guard();
 
-    broker.start().unwrap();
+    let (tx, rx) = flume::bounded::<()>(1);
+    ctrlc::set_handler(move || {
+        let _ = tx.send(());
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    rx.recv().expect("Could not receive Ctrl-C signal");
 }
 
 async fn auth(_client_id: String, _username: String, _password: String) -> bool {
