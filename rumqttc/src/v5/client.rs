@@ -25,15 +25,15 @@ pub enum ClientError {
     TryRequest(Request),
 }
 
-impl From<SendError<Request>> for ClientError {
-    fn from(e: SendError<Request>) -> Self {
-        Self::Request(e.into_inner())
+impl From<SendError<(NoticeTx, Request)>> for ClientError {
+    fn from(e: SendError<(NoticeTx, Request)>) -> Self {
+        Self::Request(e.into_inner().1)
     }
 }
 
-impl From<TrySendError<Request>> for ClientError {
-    fn from(e: TrySendError<Request>) -> Self {
-        Self::TryRequest(e.into_inner())
+impl From<TrySendError<(NoticeTx, Request)>> for ClientError {
+    fn from(e: TrySendError<(NoticeTx, Request)>) -> Self {
+        Self::TryRequest(e.into_inner().1)
     }
 }
 
@@ -46,7 +46,7 @@ impl From<TrySendError<Request>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<Request>,
+    request_tx: Sender<(NoticeTx, Request)>,
 }
 
 impl AsyncClient {
@@ -66,7 +66,7 @@ impl AsyncClient {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
+    pub fn from_senders(request_tx: Sender<(NoticeTx, Request)>) -> AsyncClient {
         AsyncClient { request_tx }
     }
 
@@ -86,17 +86,15 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(notice_tx, publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
-        self.request_tx.send_async(publish).await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn publish_with_properties<S, P>(
@@ -145,17 +143,15 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(notice_tx, publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.try_send(publish)?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_publish_with_properties<S, P>(
@@ -188,22 +184,27 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub async fn ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
         let ack = get_ack_req(publish);
 
+        let (notice_tx, future) = NoticeTx::new();
         if let Some(ack) = ack {
-            self.request_tx.send_async(ack).await?;
+            self.request_tx.send_async((notice_tx, ack)).await?;
         }
-        Ok(())
+
+        Ok(future)
     }
 
     /// Attempts to send a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn try_ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
         let ack = get_ack_req(publish);
+
+        let (notice_tx, future) = NoticeTx::new();
         if let Some(ack) = ack {
-            self.request_tx.try_send(ack)?;
+            self.request_tx.try_send((notice_tx, ack))?;
         }
-        Ok(())
+
+        Ok(future)
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
@@ -221,17 +222,15 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(notice_tx, publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.send_async(publish).await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn publish_bytes_with_properties<S>(
@@ -273,13 +272,15 @@ impl AsyncClient {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let request = Request::Subscribe(Some(NoticeTx(notice_tx)), subscribe);
+        let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
-        self.request_tx.send_async(request).await?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn subscribe_with_properties<S: Into<String>>(
@@ -309,13 +310,15 @@ impl AsyncClient {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let request = Request::Subscribe(Some(NoticeTx(notice_tx)), subscribe);
+        let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.try_send(request)?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_subscribe_with_properties<S: Into<String>>(
@@ -347,14 +350,15 @@ impl AsyncClient {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
         let subscribe = Subscribe::new_many(topics_iter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let request = Request::Subscribe(Some(NoticeTx(notice_tx)), subscribe);
+        let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
 
-        self.request_tx.send_async(request).await?;
-        Ok(NoticeFuture(notice_rx))
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     pub async fn subscribe_many_with_properties<T>(
@@ -387,13 +391,15 @@ impl AsyncClient {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
         let subscribe = Subscribe::new_many(topics_iter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let request = Request::Subscribe(Some(NoticeTx(notice_tx)), subscribe);
+        let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.try_send(request)?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn try_subscribe_many_with_properties<T>(
@@ -421,12 +427,12 @@ impl AsyncClient {
         properties: Option<UnsubscribeProperties>,
     ) -> Result<NoticeFuture, ClientError> {
         let unsubscribe = Unsubscribe::new(topic, properties);
+        let request = Request::Unsubscribe(unsubscribe);
 
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
 
-        let request = Request::Unsubscribe(Some(NoticeTx(notice_tx)), unsubscribe);
-        self.request_tx.send_async(request).await?;
-        Ok(NoticeFuture(notice_rx))
+        Ok(future)
     }
 
     pub async fn unsubscribe_with_properties<S: Into<String>>(
@@ -451,12 +457,12 @@ impl AsyncClient {
         properties: Option<UnsubscribeProperties>,
     ) -> Result<NoticeFuture, ClientError> {
         let unsubscribe = Unsubscribe::new(topic, properties);
+        let request = Request::Unsubscribe(unsubscribe);
 
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
 
-        let request = Request::Unsubscribe(Some(NoticeTx(notice_tx)), unsubscribe);
-        self.request_tx.try_send(request)?;
-        Ok(NoticeFuture(notice_rx))
+        Ok(future)
     }
 
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
@@ -472,17 +478,23 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub async fn disconnect(&self) -> Result<(), ClientError> {
+    pub async fn disconnect(&self) -> Result<NoticeFuture, ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.send_async(request).await?;
-        Ok(())
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.send_async((notice_tx, request)).await?;
+
+        Ok(future)
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
+    pub fn try_disconnect(&self) -> Result<NoticeFuture, ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.try_send(request)?;
-        Ok(())
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 }
 
@@ -531,7 +543,7 @@ impl Client {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<Request>) -> Client {
+    pub fn from_sender(request_tx: Sender<(NoticeTx, Request)>) -> Client {
         Client {
             client: AsyncClient::from_senders(request_tx),
         }
@@ -553,17 +565,15 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        // Fulfill instantly for QoS 0
-        let notice_tx = Some(NoticeTx(notice_tx));
-
-        let publish = Request::Publish(notice_tx, publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send(publish)?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.client.request_tx.send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn publish_with_properties<S, P>(
@@ -626,19 +636,20 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
         let ack = get_ack_req(publish);
 
+        let (notice_tx, future) = NoticeTx::new();
         if let Some(ack) = ack {
-            self.client.request_tx.send(ack)?;
+            self.client.request_tx.send((notice_tx, ack))?;
         }
-        Ok(())
+
+        Ok(future)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        self.client.try_ack(publish)?;
-        Ok(())
+    pub fn try_ack(&self, publish: &Publish) -> Result<NoticeFuture, ClientError> {
+        self.client.try_ack(publish)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -651,13 +662,15 @@ impl Client {
         let filter = Filter::new(topic, qos);
         let is_filter_valid = valid_filter(&filter.path);
         let subscribe = Subscribe::new(filter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let request = Request::Subscribe(Some(NoticeTx(notice_tx)), subscribe);
+        let request = Request::Subscribe(subscribe);
         if !is_filter_valid {
             return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send(request)?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.client.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn subscribe_with_properties<S: Into<String>>(
@@ -708,13 +721,15 @@ impl Client {
         let mut topics_iter = topics.into_iter();
         let is_valid_filters = topics_iter.all(|filter| valid_filter(&filter.path));
         let subscribe = Subscribe::new_many(topics_iter, properties);
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
-        let request = Request::Subscribe(Some(NoticeTx(notice_tx)), subscribe);
+        let request = Request::Subscribe(subscribe);
         if !is_valid_filters {
             return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send(request)?;
-        Ok(NoticeFuture(notice_rx))
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.client.request_tx.try_send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     pub fn subscribe_many_with_properties<T>(
@@ -761,12 +776,12 @@ impl Client {
         properties: Option<UnsubscribeProperties>,
     ) -> Result<NoticeFuture, ClientError> {
         let unsubscribe = Unsubscribe::new(topic, properties);
+        let request = Request::Unsubscribe(unsubscribe);
 
-        let (notice_tx, notice_rx) = tokio::sync::oneshot::channel();
+        let (notice_tx, future) = NoticeTx::new();
+        self.client.request_tx.try_send((notice_tx, request))?;
 
-        let request = Request::Unsubscribe(Some(NoticeTx(notice_tx)), unsubscribe);
-        self.client.request_tx.send(request)?;
-        Ok(NoticeFuture(notice_rx))
+        Ok(future)
     }
 
     pub fn unsubscribe_with_properties<S: Into<String>>(
@@ -796,16 +811,18 @@ impl Client {
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn disconnect(&self) -> Result<(), ClientError> {
+    pub fn disconnect(&self) -> Result<NoticeFuture, ClientError> {
         let request = Request::Disconnect;
-        self.client.request_tx.send(request)?;
-        Ok(())
+
+        let (notice_tx, future) = NoticeTx::new();
+        self.client.request_tx.send((notice_tx, request))?;
+
+        Ok(future)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        self.client.try_disconnect()?;
-        Ok(())
+    pub fn try_disconnect(&self) -> Result<NoticeFuture, ClientError> {
+        self.client.try_disconnect()
     }
 }
 

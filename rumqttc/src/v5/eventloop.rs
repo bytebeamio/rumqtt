@@ -3,7 +3,7 @@ use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
-use crate::NoticeError;
+use crate::notice::{NoticeTx, NoticeError};
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -74,11 +74,11 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<Request>,
+    requests_rx: Receiver<(NoticeTx, Request)>,
     /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<Request>,
+    pub(crate) requests_tx: Sender<(NoticeTx, Request)>,
     /// Pending packets from last session
-    pub(crate) pending: VecDeque<Request>,
+    pub(crate) pending: VecDeque<(NoticeTx, Request)>,
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time
@@ -144,9 +144,9 @@ impl EventLoop {
             .await??;
             // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
             if !connack.session_present {
-                for request in self.pending.drain(..) {
+                for (tx, request) in self.pending.drain(..) {
                     // If the request is a publish request, send an error to the future that is waiting for the ack.
-                    if let Request::Publish(Some(tx), _) = request {
+                    if let Request::Publish(_) = request {
                         tx.error(NoticeError::SessionReset)
                     }
                 }
@@ -218,8 +218,8 @@ impl EventLoop {
                 &self.requests_rx,
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
-                Ok(request) => {
-                    if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
+                Ok((tx, request)) => {
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(tx, request)? {
                         network.write(outgoing).await?;
                     }
                     network.flush().await?;
@@ -240,7 +240,8 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
+                let (tx, _) = NoticeTx::new();
+                if let Some(outgoing) = self.state.handle_outgoing_packet(tx, Request::PingReq)? {
                     network.write(outgoing).await?;
                 }
                 network.flush().await?;
@@ -250,10 +251,10 @@ impl EventLoop {
     }
 
     async fn next_request(
-        pending: &mut VecDeque<Request>,
-        rx: &Receiver<Request>,
+        pending: &mut VecDeque<(NoticeTx, Request)>,
+        rx: &Receiver<(NoticeTx, Request)>,
         pending_throttle: Duration,
-    ) -> Result<Request, ConnectionError> {
+    ) -> Result<(NoticeTx, Request), ConnectionError> {
         if !pending.is_empty() {
             time::sleep(pending_throttle).await;
             // We must call .next() AFTER sleep() otherwise .next() would
