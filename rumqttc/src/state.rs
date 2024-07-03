@@ -312,10 +312,6 @@ impl MqttState {
             .remove(&pubrec.pkid)
             .ok_or(StateError::Unsolicited(pubrec.pkid))?;
 
-        // TODO: deprecated
-        // Notify user about the publish, pubrel and pubcomp will be handled in background
-        // tx.success();
-
         // NOTE: Inflight - 1 for qos2 in comp
         self.outgoing_rel.insert(pubrec.pkid, tx);
         let pubrel = PubRel { pkid: pubrec.pkid };

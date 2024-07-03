@@ -448,11 +448,6 @@ impl MqttState {
             return Err(StateError::PubRecFail {
                 reason: pubrec.reason,
             });
-        } else {
-
-            // TODO: deprecated
-            // Notifying the PUBREC from broker, PUBREL and PUBCOMP will be in backgroud
-            // tx.success();
         }
 
         // NOTE: Inflight - 1 for qos2 in comp
