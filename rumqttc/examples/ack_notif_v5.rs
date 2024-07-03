@@ -1,4 +1,4 @@
-use tokio::task::{self, JoinSet};
+use tokio::{task::{self, JoinSet}, time};
 
 use rumqttc::v5::{AsyncClient, MqttOptions, mqttbytes::QoS};
 use std::error::Error;
@@ -35,24 +35,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .wait_async()
         .await
         .unwrap();
+    client
+        .subscribe("hello/world", QoS::AtLeastOnce)
+        .await
+        .unwrap()
+        .wait_async()
+        .await
+        .unwrap();
+    client
+        .subscribe("hello/world", QoS::ExactlyOnce)
+        .await
+        .unwrap()
+        .wait_async()
+        .await
+        .unwrap();
 
     // Publish and spawn wait for notification
     let mut set = JoinSet::new();
 
     let future = client
-        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1024])
+        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .await
         .unwrap();
     set.spawn(future.wait_async());
 
     let future = client
-        .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 1024])
+        .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .await
         .unwrap();
     set.spawn(future.wait_async());
 
     let future = client
-        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 1024])
+        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .await
         .unwrap();
     set.spawn(future.wait_async());
@@ -61,5 +75,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Acknoledged = {:?}", res?);
     }
 
+    time::sleep(Duration::from_secs(6)).await;
     Ok(())
 }
