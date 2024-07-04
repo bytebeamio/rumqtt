@@ -141,8 +141,7 @@ pub use client::{
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
-use notice::NoticeTx;
-pub use notice::{NoticeError, NoticeFuture};
+pub use notice::{NoticeTx, NoticeError, NoticeFuture};
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};

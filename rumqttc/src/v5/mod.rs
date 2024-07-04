@@ -33,7 +33,7 @@ pub type Incoming = Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum Request {
     Publish(Publish),
     PubAck(PubAck),
@@ -48,6 +48,47 @@ pub enum Request {
     UnsubAck(UnsubAck),
     Disconnect,
 }
+
+impl Clone for Request {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Publish(p) => Self::Publish(p.clone()),
+            Self::PubAck(p) => Self::PubAck(p.clone()),
+            Self::PubRec(p) => Self::PubRec(p.clone()),
+            Self::PubRel(p) => Self::PubRel(p.clone()),
+            Self::PubComp(p) => Self::PubComp(p.clone()),
+            Self::Subscribe(p) => Self::Subscribe(p.clone()),
+            Self::SubAck(p) => Self::SubAck(p.clone()),
+            Self::PingReq => Self::PingReq,
+            Self::PingResp => Self::PingResp,
+            Self::Disconnect => Self::Disconnect,
+            Self::Unsubscribe(p) => Self::Unsubscribe(p.clone()),
+            Self::UnsubAck(p) => Self::UnsubAck(p.clone()),
+        }
+    }
+}
+
+impl PartialEq for Request {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Publish(p1), Self::Publish(p2)) => p1 == p2,
+            (Self::PubAck(p1), Self::PubAck(p2)) => p1 == p2,
+            (Self::PubRec(p1), Self::PubRec(p2)) => p1 == p2,
+            (Self::PubRel(p1), Self::PubRel(p2)) => p1 == p2,
+            (Self::PubComp(p1), Self::PubComp(p2)) => p1 == p2,
+            (Self::Subscribe(p1), Self::Subscribe(p2)) => p1 == p2,
+            (Self::SubAck(p1), Self::SubAck(p2)) => p1 == p2,
+            (Self::PingReq, Self::PingReq)
+            | (Self::PingResp, Self::PingResp)
+            | (Self::Disconnect, Self::Disconnect) => true,
+            (Self::Unsubscribe(p1), Self::Unsubscribe(p2)) => p1 == p2,
+            (Self::UnsubAck(p1), Self::UnsubAck(p2)) => p1 == p2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Request {}
 
 #[cfg(feature = "websocket")]
 type RequestModifierFn = Arc<
@@ -310,6 +351,27 @@ impl MqttOptions {
     /// get connection properties
     pub fn connect_properties(&self) -> Option<ConnectProperties> {
         self.connect_properties.clone()
+    }
+
+    /// set session expiry interval on connection properties
+    pub fn set_session_expiry_interval(&mut self, interval: Option<u32>) -> &mut Self {
+        if let Some(conn_props) = &mut self.connect_properties {
+            conn_props.session_expiry_interval = interval;
+            self
+        } else {
+            let mut conn_props = ConnectProperties::new();
+            conn_props.session_expiry_interval = interval;
+            self.set_connect_properties(conn_props)
+        }
+    }
+
+    /// get session expiry interval on connection properties
+    pub fn session_expiry_interval(&self) -> Option<u32> {
+        if let Some(conn_props) = &self.connect_properties {
+            conn_props.session_expiry_interval
+        } else {
+            None
+        }
     }
 
     /// set receive maximum on connection properties

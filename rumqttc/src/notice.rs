@@ -1,7 +1,8 @@
 use tokio::sync::oneshot;
 
 use crate::{
-    v5::mqttbytes::v5::{SubscribeReasonCode as V5SubscribeReasonCode, UnsubAckReason},
+    v5::mqttbytes::v5::{SubscribeReasonCode as V5SubscribeReasonCode, UnsubAckReason,
+                        PubAckReason, PubRecReason, PubCompReason},
     SubscribeReasonCode,
 };
 
@@ -15,6 +16,14 @@ pub enum NoticeError {
     V5Subscribe(V5SubscribeReasonCode),
     #[error(" v5 Unsubscription Failure Reason: {0:?}")]
     V5Unsubscribe(UnsubAckReason),
+    #[error(" v5 Publish Ack Failure Reason Code: {0:?}")]
+    V5PubAck(PubAckReason),
+    #[error(" v5 Publish Rec Failure Reason Code: {0:?}")]
+    V5PubRec(PubRecReason),
+    #[error(" v5 Publish Comp Failure Reason Code: {0:?}")]
+    V5PubComp(PubCompReason),
+    #[error(" Dropped due to session reconnect with previous state expire/lost")]
+    SessionReset,
 }
 
 impl From<oneshot::error::RecvError> for NoticeError {

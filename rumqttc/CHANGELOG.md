@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `size()` method on `Packet` calculates size once serialized.
 * `read()` and `write()` methods on `Packet`.
 * `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
+* `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`.
 
 ### Changed
 
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Validate filters while creating subscription requests.
 * Make v4::Connect::write return correct value
+* Resume session only if broker sends `CONNACK` with `session_present == 1`.
 
 ### Security
 
@@ -56,7 +58,7 @@ To update your code simply remove `Key::ECC()` or `Key::RSA()` from the initiali
   `rusttls-pemfile` to `2.0.0`, `async-tungstenite` to `0.24.0`, `ws_stream_tungstenite` to `0.12.0`
   and `http` to `1.0.0`. This is a breaking change as types from some of these crates are part of
   the public API.
-- `publish` / `subscribe` / `unsubscribe` methods on `AsyncClient` and `Client` now return a `PkidPromise` which resolves into the identifier value chosen by the `EventLoop` when handling the packet. 
+- `publish` / `subscribe` / `unsubscribe` methods on `AsyncClient` and `Client` now return a `NoticeFuture` which is noticed after the packet is released (sent in QoS0, ACKed in QoS1, COMPed in QoS2). 
 
 ### Deprecated
 

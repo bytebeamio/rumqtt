@@ -402,17 +402,18 @@ impl MqttState {
             .outgoing_pub
             .remove(&puback.pkid)
             .ok_or(StateError::Unsolicited(puback.pkid))?;
-        tx.success();
 
         self.inflight -= 1;
 
         if puback.reason != PubAckReason::Success
             && puback.reason != PubAckReason::NoMatchingSubscribers
         {
+            tx.error(NoticeError::V5PubAck(puback.reason));
             return Err(StateError::PubAckFail {
                 reason: puback.reason,
             });
         }
+        tx.success();
 
         let packet = self.check_collision(puback.pkid).map(|(publish, tx)| {
             self.outgoing_pub
@@ -443,6 +444,7 @@ impl MqttState {
         if pubrec.reason != PubRecReason::Success
             && pubrec.reason != PubRecReason::NoMatchingSubscribers
         {
+            tx.error(NoticeError::V5PubRec(pubrec.reason));
             return Err(StateError::PubRecFail {
                 reason: pubrec.reason,
             });
@@ -484,12 +486,23 @@ impl MqttState {
             error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
             return Err(StateError::Unsolicited(pubcomp.pkid));
         }
-        self.outgoing_rel
+        
+        let tx = self
+            .outgoing_rel
             .remove(&pubcomp.pkid)
-            .ok_or(StateError::Unsolicited(pubcomp.pkid))?
-            .success();
+            .ok_or(StateError::Unsolicited(pubcomp.pkid))?;
 
         self.inflight -= 1;
+
+        if pubcomp.reason != PubCompReason::Success
+        {
+            tx.error(NoticeError::V5PubComp(pubcomp.reason));
+            return Err(StateError::PubCompFail {
+                reason: pubcomp.reason,
+            });
+        }
+        tx.success();
+
         let packet = self.check_collision(pubcomp.pkid).map(|(publish, tx)| {
             self.outgoing_pub
                 .insert(pubcomp.pkid, (publish.clone(), tx));
