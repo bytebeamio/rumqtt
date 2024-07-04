@@ -5,7 +5,6 @@ use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
 use std::collections::VecDeque;
 use std::{io, time::Instant};
-use linked_hash_map::LinkedHashMap;
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -64,15 +63,16 @@ pub struct MqttState {
     /// Maximum number of allowed inflight
     pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub(crate) outgoing_pub: LinkedHashMap<u16, (Publish, NoticeTx)>,
+    pub(crate) outgoing_pub1: VecDeque<(Publish, NoticeTx)>,
+    pub(crate) outgoing_pub2: VecDeque<(Publish, NoticeTx)>,
     /// Packet ids of released QoS 2 publishes
-    pub(crate) outgoing_rel: LinkedHashMap<u16, NoticeTx>,
+    pub(crate) outgoing_rel: VecDeque<(u16, NoticeTx)>,
     /// Packet ids on incoming QoS 2 publishes
     pub(crate) incoming_pub: Vec<Option<u16>>,
     /// Outgoing subscribes
-    pub(crate) outgoing_sub: LinkedHashMap<u16, NoticeTx>,
+    pub(crate) outgoing_sub: VecDeque<(u16, NoticeTx)>,
     /// Outgoing unsubscribes
-    pub(crate) outgoing_unsub: LinkedHashMap<u16, NoticeTx>,
+    pub(crate) outgoing_unsub: VecDeque<(u16, NoticeTx)>,
 
     /// Last collision due to broker not acking in order
     pub(crate) collision: Option<(Publish, NoticeTx)>,
@@ -97,11 +97,12 @@ impl MqttState {
             inflight: 0,
             max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
-            outgoing_pub: LinkedHashMap::new(),
-            outgoing_rel: LinkedHashMap::new(),
+            outgoing_pub1: VecDeque::with_capacity(10),
+            outgoing_pub2: VecDeque::with_capacity(10),
+            outgoing_rel: VecDeque::with_capacity(10),
             incoming_pub: vec![None; u16::MAX as usize + 1],
-            outgoing_sub: LinkedHashMap::new(),
-            outgoing_unsub: LinkedHashMap::new(),
+            outgoing_sub: VecDeque::with_capacity(10),
+            outgoing_unsub: VecDeque::with_capacity(10),
             collision: None,
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
@@ -113,24 +114,27 @@ impl MqttState {
     pub fn clean(&mut self) -> Vec<(NoticeTx, Request)> {
         let mut pending = Vec::with_capacity(100);
 
-        let mut second_half = Vec::with_capacity(100);
-        let mut last_pkid_found = false;
-        for (_, (publish, tx)) in self.outgoing_pub.drain() {
-            let this_pkid = publish.pkid;
-            let request = Request::Publish(publish);
-            if !last_pkid_found {
-                second_half.push((tx, request));
-                if this_pkid == self.last_puback {
-                    last_pkid_found = true;
+        for outgoing_pub in [&mut self.outgoing_pub1, &mut self.outgoing_pub2] {
+            let mut second_half = Vec::with_capacity(100);
+            let mut last_pkid_found = false;
+            for (publish, tx) in outgoing_pub.drain(..) {
+                let this_pkid = publish.pkid;
+                let request = Request::Publish(publish);
+                if !last_pkid_found {
+                    second_half.push((tx, request));
+                    if this_pkid == self.last_puback {
+                        last_pkid_found = true;
+                    }
+                } else {
+                    pending.push((tx, request));
                 }
-            } else {
-                pending.push((tx, request));
             }
+            pending.extend(second_half);
         }
-        pending.extend(second_half);
+        println!("pending = {:?}", pending.len());
 
         // remove and collect pending releases
-        for (pkid, tx) in self.outgoing_rel.drain() {
+        for (pkid, tx) in self.outgoing_rel.drain(..) {
             let request = Request::PubRel(PubRel::new(pkid));
             pending.push((tx, request));
         }
@@ -206,11 +210,14 @@ impl MqttState {
             error!("Unsolicited suback packet: {:?}", suback.pkid);
             return Err(StateError::Unsolicited(suback.pkid));
         }
-
-        let tx = self
+        // No expecting ordered acks for suback
+        // Search outgoing_sub to find the right suback.pkid
+        let pos = self
             .outgoing_sub
-            .remove(&suback.pkid)
+            .iter()
+            .position(|(pkid, _)| *pkid == suback.pkid)
             .ok_or(StateError::Unsolicited(suback.pkid))?;
+        let (_, tx) = self.outgoing_sub.remove(pos).unwrap();
 
         for reason in suback.return_codes.iter() {
             match reason {
@@ -236,10 +243,15 @@ impl MqttState {
             error!("Unsolicited unsuback packet: {:?}", unsuback.pkid);
             return Err(StateError::Unsolicited(unsuback.pkid));
         }
-        self.outgoing_sub
-            .remove(&unsuback.pkid)
-            .ok_or(StateError::Unsolicited(unsuback.pkid))?
-            .success();
+        // No expecting ordered acks for unsuback
+        // Search outgoing_unsub to find the right suback.pkid
+        let pos = self
+            .outgoing_unsub
+            .iter()
+            .position(|(pkid, _)| *pkid == unsuback.pkid)
+            .ok_or(StateError::Unsolicited(unsuback.pkid))?;
+        let (_, tx) = self.outgoing_unsub.remove(pos).unwrap();
+        tx.success();
 
         Ok(None)
     }
@@ -276,10 +288,11 @@ impl MqttState {
             error!("Unsolicited puback packet: {:?}", puback.pkid);
             return Err(StateError::Unsolicited(puback.pkid));
         }
-
+        // Expecting ordered acks for puback
+        // Check front of outgoing_pub to see if it's in order
         let (_, tx) = self
-            .outgoing_pub
-            .remove(&puback.pkid)
+            .outgoing_pub1
+            .pop_front()
             .ok_or(StateError::Unsolicited(puback.pkid))?;
         tx.success();
 
@@ -287,8 +300,11 @@ impl MqttState {
 
         self.inflight -= 1;
         let packet = self.check_collision(puback.pkid).map(|(publish, tx)| {
-            self.outgoing_pub
-                .insert(publish.pkid, (publish.clone(), tx));
+            if publish.qos == QoS::AtLeastOnce {
+                self.outgoing_pub1.push_back((publish.clone(), tx));
+            } else if publish.qos == QoS::AtMostOnce {
+                self.outgoing_pub2.push_back((publish.clone(), tx));
+            }
             self.inflight += 1;
 
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
@@ -307,13 +323,19 @@ impl MqttState {
             return Err(StateError::Unsolicited(pubrec.pkid));
         }
 
-        let (_, tx) = self
-            .outgoing_pub
-            .remove(&pubrec.pkid)
+        // Expecting ordered acks for pubrec
+        // Check front of outgoing_pub to see if it's in order
+        let (publish, tx) = self
+            .outgoing_pub2
+            .pop_front()
             .ok_or(StateError::Unsolicited(pubrec.pkid))?;
+        if publish.pkid != pubrec.pkid {
+            error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
+            return Err(StateError::Unsolicited(pubrec.pkid));
+        }
 
         // NOTE: Inflight - 1 for qos2 in comp
-        self.outgoing_rel.insert(pubrec.pkid, tx);
+        self.outgoing_rel.push_back((pubrec.pkid, tx));
         let pubrel = PubRel { pkid: pubrec.pkid };
         let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
         self.events.push_back(event);
@@ -344,15 +366,25 @@ impl MqttState {
             error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
             return Err(StateError::Unsolicited(pubcomp.pkid));
         }
-        self.outgoing_rel
-            .remove(&pubcomp.pkid)
-            .ok_or(StateError::Unsolicited(pubcomp.pkid))?
-            .success();
+        // Expecting ordered acks for pubcomp
+        // Check front of outgoing_pub to see if it's in order
+        let (pkid, tx) = self
+            .outgoing_rel
+            .pop_front()
+            .ok_or(StateError::Unsolicited(pubcomp.pkid))?;
+        if pkid != pubcomp.pkid {
+            error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
+            return Err(StateError::Unsolicited(pubcomp.pkid));
+        }
+        tx.success();
 
         self.inflight -= 1;
         let packet = self.check_collision(pubcomp.pkid).map(|(publish, tx)| {
-            self.outgoing_pub
-                .insert(pubcomp.pkid, (publish.clone(), tx));
+            if publish.qos == QoS::AtLeastOnce {
+                self.outgoing_pub1.push_back((publish.clone(), tx));
+            } else if publish.qos == QoS::AtMostOnce {
+                self.outgoing_pub2.push_back((publish.clone(), tx));
+            }
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
             self.events.push_back(event);
             self.collision_ping_count = 0;
@@ -383,7 +415,13 @@ impl MqttState {
 
             let pkid = publish.pkid;
 
-            if self.outgoing_pub.get(&publish.pkid).is_some() {
+            let outgoing_pub = match publish.qos {
+                QoS::AtLeastOnce => &mut self.outgoing_pub1,
+                QoS::ExactlyOnce => &mut self.outgoing_pub2,
+                _ => unreachable!(),
+            };
+            if let Some(pos) = outgoing_pub.iter().position(|(publish, _)| publish.pkid == pkid) {
+                outgoing_pub.get(pos);
                 info!("Collision on packet id = {:?}", publish.pkid);
                 self.collision = Some((publish, notice_tx));
                 let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
@@ -393,7 +431,7 @@ impl MqttState {
 
             // if there is an existing publish at this pkid, this implies that broker hasn't acked this
             // packet yet. This error is possible only when broker isn't acking sequentially
-            self.outgoing_pub.insert(pkid, (publish.clone(), notice_tx));
+            outgoing_pub.push_back((publish.clone(), notice_tx));
             self.inflight += 1;
         } else {
             notice_tx.success()
@@ -492,7 +530,7 @@ impl MqttState {
             subscription.filters, subscription.pkid
         );
 
-        self.outgoing_sub.insert(pkid, notice_tx);
+        self.outgoing_sub.push_back((pkid, notice_tx));
         let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
         self.events.push_back(event);
 
@@ -512,7 +550,7 @@ impl MqttState {
             unsub.topics, unsub.pkid
         );
 
-        self.outgoing_unsub.insert(pkid, notice_tx);
+        self.outgoing_unsub.push_back((pkid, notice_tx));
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
         self.events.push_back(event);
 
@@ -552,8 +590,7 @@ impl MqttState {
             _ => pubrel,
         };
 
-        self.outgoing_rel.insert(pubrel.pkid, notice_tx);
-        self.inflight += 1;
+        self.outgoing_rel.push_back((pubrel.pkid, notice_tx));
         Ok(pubrel)
     }
 
@@ -579,7 +616,7 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use linked_hash_map::LinkedHashMap;
+    use std::collections::VecDeque;
 
     use super::{MqttState, StateError};
     use crate::mqttbytes::v4::*;
@@ -763,11 +800,18 @@ mod test {
         mqtt.handle_incoming_puback(&PubAck::new(1)).unwrap();
         assert_eq!(mqtt.inflight, 1);
 
-        mqtt.handle_incoming_puback(&PubAck::new(2)).unwrap();
+        mqtt.handle_incoming_pubrec(&PubRec::new(2)).unwrap();
+        assert_eq!(mqtt.inflight, 1);
+
+        let (tx, _) = NoticeTx::new();
+        mqtt.outgoing_pubrel(PubRel::new(2), tx).unwrap();
+        assert_eq!(mqtt.inflight, 1);
+
+        mqtt.handle_incoming_pubcomp(&PubComp::new(2)).unwrap();
         assert_eq!(mqtt.inflight, 0);
 
-        assert!(mqtt.outgoing_pub.get(&1).is_none());
-        assert!(mqtt.outgoing_pub.get(&2).is_none());
+        assert!(mqtt.outgoing_pub1.get(0).is_none());
+        assert!(mqtt.outgoing_pub2.get(0).is_none());
     }
 
     #[test]
@@ -798,11 +842,11 @@ mod test {
         assert_eq!(mqtt.inflight, 2);
 
         // check if the remaining element's pkid is 1
-        let (backup, _) = mqtt.outgoing_pub.get(&1).unwrap();
+        let (backup, _) = mqtt.outgoing_pub1.get(0).unwrap();
         assert_eq!(backup.pkid, 1);
 
         // check if the qos2 element's release pkik has been set
-        assert!(mqtt.outgoing_rel.get(&2).is_some());
+        assert!(mqtt.outgoing_rel.get(0).is_some());
     }
 
     #[test]
@@ -898,11 +942,11 @@ mod test {
     fn clean_is_calculating_pending_correctly() {
         let mut mqtt = build_mqttstate();
 
-        fn build_outgoing_pub() -> LinkedHashMap<u16, (Publish, NoticeTx)> {
-            let mut outgoing_pub = LinkedHashMap::new();
+        fn build_outgoing_pub() -> VecDeque<(Publish, NoticeTx)> {
+            let mut outgoing_pub = VecDeque::new();
             let (tx, _) = NoticeTx::new();
-            outgoing_pub.insert(
-                2,
+            outgoing_pub.push_back(
+                // 2,
                 (
                     Publish {
                         dup: false,
@@ -916,8 +960,8 @@ mod test {
                 ),
             );
             let (tx, _) = NoticeTx::new();
-            outgoing_pub.insert(
-                3,
+            outgoing_pub.push_back(
+                // 3,
                 (
                     Publish {
                         dup: false,
@@ -931,8 +975,8 @@ mod test {
                 ),
             );
             let (tx, _) = NoticeTx::new();
-            outgoing_pub.insert(
-                4,
+            outgoing_pub.push_back(
+                // 4,
                 (
                     Publish {
                         dup: false,
@@ -946,8 +990,8 @@ mod test {
                 ),
             );
             let (tx, _) = NoticeTx::new();
-            outgoing_pub.insert(
-                7,
+            outgoing_pub.push_back(
+                // 7,
                 (
                     Publish {
                         dup: false,
@@ -964,7 +1008,7 @@ mod test {
             outgoing_pub
         }
 
-        mqtt.outgoing_pub = build_outgoing_pub();
+        mqtt.outgoing_pub1 = build_outgoing_pub();
         mqtt.last_puback = 3;
         let requests = mqtt.clean();
         let res = vec![6, 1, 2, 3];
@@ -976,7 +1020,7 @@ mod test {
             }
         }
 
-        mqtt.outgoing_pub = build_outgoing_pub();
+        mqtt.outgoing_pub1 = build_outgoing_pub();
         mqtt.last_puback = 0;
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
@@ -988,7 +1032,7 @@ mod test {
             }
         }
 
-        mqtt.outgoing_pub = build_outgoing_pub();
+        mqtt.outgoing_pub1 = build_outgoing_pub();
         mqtt.last_puback = 6;
         let requests = mqtt.clean();
         let res = vec![1, 2, 3, 6];
