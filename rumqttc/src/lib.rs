@@ -33,7 +33,7 @@
 //! ------------------------------
 //!
 //! ```no_run
-//! use rumqttc::{MqttOptions, AsyncClient, QoS};
+//! use rumqttc::{MqttOptions, AsyncClient, QoS, PollableEventLoop};
 //! use tokio::{task, time};
 //! use std::time::Duration;
 //! use std::error::Error;
