@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
+use crate::PollableEventLoop;
 use crate::{valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
 use bytes::Bytes;

@@ -917,6 +917,15 @@ impl Debug for MqttOptions {
     }
 }
 
+pub trait PollableEventLoop {
+    type Event;
+    type ConnectionError;
+
+    fn poll(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Self::Event, Self::ConnectionError>> + Send;
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
