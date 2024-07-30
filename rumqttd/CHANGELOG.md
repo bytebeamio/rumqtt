@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - session present flag in connack
 - Make write method return the number of bytes written correctly everywhere
 - `ConnectionSettings` can be manually created
+- Clippy error from time for toolchain >1.80.0
 
 ### Security
 - Implement constant-time password comparison in authentication logic
@@ -178,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [rumqttd 0.12.4] - 01-02-2023
 
 ### Fixed
-- Client id with tenant prefix should be set globally (#564) 
+- Client id with tenant prefix should be set globally (#564)
 
 ## [rumqttd 0.12.3] - 23-01-2023
 
