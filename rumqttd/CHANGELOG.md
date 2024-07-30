@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - External authentication function must be async
 - Update `tokio-rustls` to `0.25.0`, `rustls-webpki` to `0.102.1`, `tokio-native-tls` to `0.3.1` and
   `rust-pemfile` to `2.0.0`.
+- Export `Forward` from root.
 
 ### Deprecated
 
@@ -178,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [rumqttd 0.12.4] - 01-02-2023
 
 ### Fixed
-- Client id with tenant prefix should be set globally (#564) 
+- Client id with tenant prefix should be set globally (#564)
 
 ## [rumqttd 0.12.3] - 23-01-2023
 
