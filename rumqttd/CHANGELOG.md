@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Assign random identifier to clients connecting with empty client id.
+- `Unsubscribe` with `local::LinkTx`.
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
@@ -178,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [rumqttd 0.12.4] - 01-02-2023
 
 ### Fixed
-- Client id with tenant prefix should be set globally (#564) 
+- Client id with tenant prefix should be set globally (#564)
 
 ## [rumqttd 0.12.3] - 23-01-2023
 
