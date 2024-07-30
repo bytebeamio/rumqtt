@@ -293,6 +293,17 @@ impl LinkTx {
         Ok(len)
     }
 
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub fn try_unsubscribe<S: Into<String>>(&mut self, filter: S) -> Result<usize, LinkError> {
+        let unsubscribe = Unsubscribe {
+            pkid: 0,
+            filters: vec![filter.into()],
+        };
+
+        let len = self.try_push(Packet::Unsubscribe(unsubscribe, None))?;
+        Ok(len)
+    }
+
     /// Request to get device shadow
     pub fn shadow<S: Into<String>>(&mut self, filter: S) -> Result<(), LinkError> {
         let message = Event::Shadow(ShadowRequest {
