@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Made `DisconnectProperties` struct public.
 * Replace `Vec<Option<u16>>` with `FixedBitSet` for managing packet ids of released QoS 2 publishes and incoming QoS 2 publishes in `MqttState`.
 * Accept `native_tls::TlsConnector` as input for `Transport::tls_with_config`.
+* put `EventLoop::poll` behind a new trait: `PollableEventLoop`, to make it mockable. When using an EventLoop you now have to make the trait known to the compiler: `use rumqttc::PollableEventLoop`.
 
 ### Deprecated
 

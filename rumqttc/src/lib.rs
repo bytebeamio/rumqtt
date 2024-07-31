@@ -33,7 +33,7 @@
 //! ------------------------------
 //!
 //! ```no_run
-//! use rumqttc::{MqttOptions, AsyncClient, QoS};
+//! use rumqttc::{MqttOptions, AsyncClient, QoS, PollableEventLoop};
 //! use tokio::{task, time};
 //! use std::time::Duration;
 //! use std::error::Error;
@@ -915,6 +915,15 @@ impl Debug for MqttOptions {
             .field("manual_acks", &self.manual_acks)
             .finish()
     }
+}
+
+pub trait PollableEventLoop {
+    type Event;
+    type ConnectionError;
+
+    fn poll(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Self::Event, Self::ConnectionError>> + Send;
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
 use rumqttc::v5::{AsyncClient, MqttOptions};
+use rumqttc::PollableEventLoop;
 use std::error::Error;
 use std::time::Duration;
 

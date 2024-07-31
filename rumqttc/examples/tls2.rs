@@ -1,7 +1,7 @@
 //! Example of how to configure rumqttd to connect to a server using TLS and authentication.
 use std::error::Error;
 
-use rumqttc::{AsyncClient, MqttOptions, TlsConfiguration, Transport};
+use rumqttc::{AsyncClient, MqttOptions, PollableEventLoop, TlsConfiguration, Transport};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {

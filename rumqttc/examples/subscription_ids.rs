@@ -1,5 +1,6 @@
 use rumqttc::v5::mqttbytes::v5::SubscribeProperties;
 use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::PollableEventLoop;
 use tokio::{task, time};
 
 use rumqttc::v5::{AsyncClient, MqttOptions};

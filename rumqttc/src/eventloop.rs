@@ -1,5 +1,5 @@
 use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
+use crate::{Incoming, MqttState, NetworkOptions, Packet, PollableEventLoop, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use crate::framed::AsyncReadWrite;
@@ -142,45 +142,6 @@ impl EventLoop {
         self.pending.extend(requests_in_channel);
     }
 
-    /// Yields Next notification or outgoing request and periodically pings
-    /// the broker. Continuing to poll will reconnect to the broker if there is
-    /// a disconnection.
-    /// **NOTE** Don't block this while iterating
-    pub async fn poll(&mut self) -> Result<Event, ConnectionError> {
-        if self.network.is_none() {
-            let (network, connack) = match time::timeout(
-                Duration::from_secs(self.network_options.connection_timeout()),
-                connect(&self.mqtt_options, self.network_options.clone()),
-            )
-            .await
-            {
-                Ok(inner) => inner?,
-                Err(_) => return Err(ConnectionError::NetworkTimeout),
-            };
-            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
-            if !connack.session_present {
-                self.pending.clear();
-            }
-            self.network = Some(network);
-
-            if self.keepalive_timeout.is_none() && !self.mqtt_options.keep_alive.is_zero() {
-                self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
-            }
-
-            return Ok(Event::Incoming(Packet::ConnAck(connack)));
-        }
-
-        match self.select().await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                // MQTT requires that packets pending acknowledgement should be republished on session resume.
-                // Move pending messages from state to eventloop.
-                self.clean();
-                Err(e)
-            }
-        }
-    }
-
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
@@ -295,6 +256,51 @@ impl EventLoop {
             match rx.recv_async().await {
                 Ok(r) => Ok(r),
                 Err(_) => Err(ConnectionError::RequestsDone),
+            }
+        }
+    }
+}
+
+#[allow(refining_impl_trait)]
+impl PollableEventLoop for EventLoop {
+    type Event = Event;
+    type ConnectionError = ConnectionError;
+
+    /// Yields Next notification or outgoing request and periodically pings
+    /// the broker. Continuing to poll will reconnect to the broker if there is
+    /// a disconnection.
+    /// **NOTE** Don't block this while iterating
+    async fn poll(&mut self) -> Result<Event, ConnectionError> {
+        if self.network.is_none() {
+            let (network, connack) = match time::timeout(
+                Duration::from_secs(self.network_options.connection_timeout()),
+                connect(&self.mqtt_options, self.network_options.clone()),
+            )
+            .await
+            {
+                Ok(inner) => inner?,
+                Err(_) => return Err(ConnectionError::NetworkTimeout),
+            };
+            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+            if !connack.session_present {
+                self.pending.clear();
+            }
+            self.network = Some(network);
+
+            if self.keepalive_timeout.is_none() && !self.mqtt_options.keep_alive.is_zero() {
+                self.keepalive_timeout = Some(Box::pin(time::sleep(self.mqtt_options.keep_alive)));
+            }
+
+            return Ok(Event::Incoming(Packet::ConnAck(connack)));
+        }
+
+        match self.select().await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                // MQTT requires that packets pending acknowledgement should be republished on session resume.
+                // Move pending messages from state to eventloop.
+                self.clean();
+                Err(e)
             }
         }
     }
