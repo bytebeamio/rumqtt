@@ -10,7 +10,7 @@ use super::{
 pub enum AuthReasonCode {
     Success,
     Continue,
-    ReAuthentivate,
+    ReAuthenticate,
 }
 
 impl AuthReasonCode {
@@ -19,7 +19,7 @@ impl AuthReasonCode {
         let code = match reason_code {
             0x00 => AuthReasonCode::Success,
             0x18 => AuthReasonCode::Continue,
-            0x19 => AuthReasonCode::ReAuthentivate,
+            0x19 => AuthReasonCode::ReAuthenticate,
             _ => return Err(Error::MalformedPacket),
         };
 
@@ -30,7 +30,7 @@ impl AuthReasonCode {
         let reason_code = match self {
             AuthReasonCode::Success => 0x00,
             AuthReasonCode::Continue => 0x18,
-            AuthReasonCode::ReAuthentivate => 0x19,
+            AuthReasonCode::ReAuthenticate => 0x19,
         };
 
         buffer.put_u8(reason_code);
@@ -47,12 +47,20 @@ pub struct Auth {
 }
 
 impl Auth {
-    fn len(&self) -> usize {
-        let mut len = 1  // reason code
-                    + 1; // property len
+    pub fn new(code: AuthReasonCode, properties: Option<AuthProperties>) -> Self {
+        Self { code, properties }
+    }
 
-        if let Some(properties) = &self.properties {
-            len += properties.len();
+    fn len(&self) -> usize {
+        let mut len = 1;
+
+        if let Some(p) = &self.properties {
+            let properties_len = p.len();
+            let properties_len_len = len_len(properties_len);
+            len += properties_len_len + properties_len;
+        } else {
+            // just 1 byte representing 0 len
+            len += 1;
         }
 
         len
@@ -107,22 +115,22 @@ impl AuthProperties {
 
         if let Some(method) = &self.method {
             let m_len = method.len();
-            len += 1 + m_len;
+            len += 1 + 2 + m_len;
         }
 
         if let Some(data) = &self.data {
             let d_len = data.len();
-            len += 1 + len_len(d_len) + d_len;
+            len += 1 + 2 + d_len;
         }
 
         if let Some(reason) = &self.reason {
             let r_len = reason.len();
-            len += 1 + r_len;
+            len += 1 + 2 + r_len;
         }
 
         for (key, value) in self.user_properties.iter() {
             let p_len = key.len() + value.len();
-            len += 1 + p_len;
+            len += 1 + 4 + p_len;
         }
 
         len
@@ -146,7 +154,7 @@ impl AuthProperties {
             match property(prop)? {
                 PropertyType::AuthenticationMethod => {
                     let method = read_mqtt_string(bytes)?;
-                    cursor += method.len();
+                    cursor += 2 + method.len();
                     props.method = Some(method);
                 }
                 PropertyType::AuthenticationData => {
@@ -156,7 +164,7 @@ impl AuthProperties {
                 }
                 PropertyType::ReasonString => {
                     let reason = read_mqtt_string(bytes)?;
-                    cursor += reason.len();
+                    cursor += 2 + reason.len();
                     props.reason = Some(reason);
                 }
                 PropertyType::UserProperty => {
@@ -198,5 +206,35 @@ impl AuthProperties {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::test::{USER_PROP_KEY, USER_PROP_VAL};
+    use super::*;
+    use bytes::BytesMut;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn length_calculation() {
+        let mut dummy_bytes = BytesMut::new();
+        // Use user_properties to pad the size to exceed ~128 bytes to make the
+        // remaining_length field in the packet be 2 bytes long.
+        let auth_props = AuthProperties {
+            method: Some("Authentication Method".into()),
+            data: Some("Authentication Data".into()),
+            reason: None,
+            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
+        };
+
+        let auth_pkt = Auth::new(AuthReasonCode::Continue, Some(auth_props));
+
+        let size_from_size = auth_pkt.size();
+        let size_from_write = auth_pkt.write(&mut dummy_bytes).unwrap();
+        let size_from_bytes = dummy_bytes.len();
+
+        assert_eq!(size_from_write, size_from_bytes);
+        assert_eq!(size_from_size, size_from_bytes);
     }
 }

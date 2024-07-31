@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`.
 * `Auth` packet as per MQTT5 standards
 * Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`
+* `MqttOptions::set_auth_manager` that allows users to set their own authentication manager that implements the `AuthManager` trait.
+* `Client::reauth` that enables users to send `AUTH` packet for re-authentication purposes.
+
 
 ### Changed
 
