@@ -21,7 +21,7 @@ use tracing_subscriber::{
 pub use link::alerts;
 pub use link::local;
 pub use link::meters;
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+pub use router::{Alert, Forward, IncomingMeter, Meter, Notification, OutgoingMeter};
 use segments::Storage;
 pub use server::Broker;
 
