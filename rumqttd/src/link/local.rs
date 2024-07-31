@@ -1,5 +1,6 @@
 use crate::protocol::{
     Filter, LastWill, LastWillProperties, Packet, Publish, QoS, RetainForwardRule, Subscribe,
+    Unsubscribe,
 };
 use crate::router::Ack;
 use crate::router::{
@@ -278,6 +279,28 @@ impl LinkTx {
         let subscribe = Subscribe { pkid: 0, filters };
 
         let len = self.try_push(Packet::Subscribe(subscribe, None))?;
+        Ok(len)
+    }
+
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub fn unsubscribe<S: Into<String>>(&mut self, filter: S) -> Result<usize, LinkError> {
+        let unsubscribe = Unsubscribe {
+            pkid: 0,
+            filters: vec![filter.into()],
+        };
+
+        let len = self.push(Packet::Unsubscribe(unsubscribe, None))?;
+        Ok(len)
+    }
+
+    /// Sends a MQTT Unsubscribe to the eventloop
+    pub fn try_unsubscribe<S: Into<String>>(&mut self, filter: S) -> Result<usize, LinkError> {
+        let unsubscribe = Unsubscribe {
+            pkid: 0,
+            filters: vec![filter.into()],
+        };
+
+        let len = self.try_push(Packet::Unsubscribe(unsubscribe, None))?;
         Ok(len)
     }
 
