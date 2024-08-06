@@ -1679,7 +1679,7 @@ fn print_status(router: &mut Router, metrics: Print) {
             println!("{metrics:#?}");
         }
         Print::Subscriptions(tx) => {
-            let metrics: HashMap<Filter, Vec<String>> = router
+            let subscriptions: HashMap<Filter, Vec<String>> = router
                 .subscription_map
                 .iter()
                 .map(|(filter, connections)| {
@@ -1692,9 +1692,9 @@ fn print_status(router: &mut Router, metrics: Print) {
                 })
                 .collect();
 
-            println!("{metrics:#?}");
-            if let Err(e) = tx.try_send(metrics) {
-                error!("Metrics send failed: {e}");
+            println!("{subscriptions:#?}");
+            if tx.send(subscriptions).is_err() {
+                error!("Send failed");
             }
         }
         Print::Subscription(filter) => {

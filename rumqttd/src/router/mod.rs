@@ -4,8 +4,8 @@ use std::{
 };
 
 use bytes::Bytes;
-use flume::Sender;
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
 
 use crate::{
     protocol::{
@@ -402,13 +402,13 @@ pub enum Meter {
     Subscription(String, SubscriptionMeter),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Print {
     Config,
     Router,
     ReadyQueue,
     Connection(String),
-    Subscriptions(Sender<HashMap<Filter, Vec<String>>>),
+    Subscriptions(oneshot::Sender<HashMap<Filter, Vec<String>>>),
     Subscription(Filter),
     Waiters(Filter),
 }

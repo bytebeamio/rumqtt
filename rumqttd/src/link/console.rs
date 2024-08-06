@@ -7,9 +7,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::Json;
 use axum::{routing::get, Router};
-use flume::{bounded, Sender};
+use flume::Sender;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 use tracing::info;
 
 #[derive(Debug)]
@@ -97,7 +98,7 @@ async fn device_with_id(
 }
 
 async fn subscriptions(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
-    let (tx, rx) = bounded(1);
+    let (tx, rx) = oneshot::channel();
     let event = Event::PrintStatus(Print::Subscriptions(tx));
     let message = (console.connection_id, event);
     let response_404 = Response::builder().status(404).body("".to_owned()).unwrap();
@@ -105,7 +106,7 @@ async fn subscriptions(State(console): State<Arc<ConsoleLink>>) -> impl IntoResp
         return response_404;
     }
 
-    let Ok(subscriptions) = rx.recv_async().await else {
+    let Ok(subscriptions) = rx.await else {
         return response_404;
     };
 
