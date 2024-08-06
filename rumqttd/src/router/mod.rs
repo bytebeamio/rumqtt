@@ -4,6 +4,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use flume::Sender;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -407,7 +408,7 @@ pub enum Print {
     Router,
     ReadyQueue,
     Connection(String),
-    Subscriptions,
+    Subscriptions(Sender<HashMap<Filter, Vec<String>>>),
     Subscription(Filter),
     Waiters(Filter),
 }
