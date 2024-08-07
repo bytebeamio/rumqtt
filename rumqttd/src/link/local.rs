@@ -2,16 +2,17 @@ use crate::protocol::{
     Filter, LastWill, LastWillProperties, Packet, Publish, QoS, RetainForwardRule, Subscribe,
     Unsubscribe,
 };
-use crate::router::Ack;
 use crate::router::{
     iobufs::{Incoming, Outgoing},
     Connection, Event, Notification, ShadowRequest,
 };
+use crate::router::{Ack, Print, Subscriptions};
 use crate::ConnectionId;
 use bytes::Bytes;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 use parking_lot::lock_api::MutexGuard;
 use parking_lot::{Mutex, RawMutex};
+use tokio::sync::oneshot;
 
 use std::collections::VecDeque;
 use std::mem;
@@ -189,6 +190,20 @@ impl LinkTx {
             .send((self.connection_id, Event::DeviceData))?;
 
         Ok(len)
+    }
+
+    /// Request list of subscriptions from router
+    pub async fn list_subscriptions(
+        &mut self,
+    ) -> Result<oneshot::Receiver<Subscriptions>, LinkError> {
+        let (tx, rx) = oneshot::channel();
+
+        self.router_tx.send((
+            self.connection_id,
+            Event::PrintStatus(Print::Subscriptions(tx)),
+        ))?;
+
+        Ok(rx)
     }
 
     fn try_push(&mut self, data: Packet) -> Result<usize, LinkError> {

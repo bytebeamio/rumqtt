@@ -35,6 +35,7 @@ pub const MAX_SCHEDULE_ITERATIONS: usize = 100;
 pub const MAX_CHANNEL_CAPACITY: usize = 200;
 
 pub(crate) type FilterIdx = usize;
+pub type Subscriptions = HashMap<Filter, Vec<String>>;
 
 #[derive(Debug)]
 // TODO: Fix this
@@ -408,7 +409,7 @@ pub enum Print {
     Router,
     ReadyQueue,
     Connection(String),
-    Subscriptions(oneshot::Sender<HashMap<Filter, Vec<String>>>),
+    Subscriptions(oneshot::Sender<Subscriptions>),
     Subscription(Filter),
     Waiters(Filter),
 }

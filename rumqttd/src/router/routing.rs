@@ -10,6 +10,7 @@ use crate::router::{ConnectionEvents, Forward};
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
+use router::Subscriptions;
 use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
@@ -1679,7 +1680,7 @@ fn print_status(router: &mut Router, metrics: Print) {
             println!("{metrics:#?}");
         }
         Print::Subscriptions(tx) => {
-            let subscriptions: HashMap<Filter, Vec<String>> = router
+            let subscriptions: Subscriptions = router
                 .subscription_map
                 .iter()
                 .map(|(filter, connections)| {
