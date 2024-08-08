@@ -92,5 +92,5 @@ impl Network {
     }
 }
 
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
