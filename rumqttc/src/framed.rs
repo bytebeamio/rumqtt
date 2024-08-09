@@ -92,6 +92,8 @@ impl Network {
     }
 }
 
+// NOTE: WsStream currently doesn't support Sync, so we disable Sync enforcement for websocket builds
+
 #[cfg(not(feature = "websocket"))]
 pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 #[cfg(not(feature = "websocket"))]
