@@ -18,7 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = ["use-rustls"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
-use-native-tls = ["dep:tokio-native-tls", "dep:native-tls"]
+use-native-tls = ["dep:tokio-native-tls", "dep:native-tls", "async-tungstenite?/tokio-native-tls"]
 websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 proxy = ["dep:async-http-proxy"]
 
@@ -83,3 +83,13 @@ required-features = ["websocket"]
 name = "websocket_proxy"
 path = "examples/websocket_proxy.rs"
 required-features = ["websocket", "proxy"]
+
+[[example]]
+name = "wss"
+path = "examples/wss.rs"
+required-features = ["websocket"]
+
+[[example]]
+name = "wss_v5"
+path = "examples/wss_v5.rs"
+required-features = ["websocket"]
