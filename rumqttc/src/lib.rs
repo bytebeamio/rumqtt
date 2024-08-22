@@ -233,7 +233,10 @@ pub enum Transport {
     #[cfg(feature = "websocket")]
     #[cfg_attr(docsrs, doc(cfg(feature = "websocket")))]
     Ws,
-    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg(all(
+        any(feature = "use-rustls", feature = "use-native-tls"),
+        feature = "websocket"
+    ))]
     #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
     Wss(TlsConfiguration),
 }
@@ -305,14 +308,32 @@ impl Transport {
         Self::wss_with_config(config)
     }
 
-    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
+    #[cfg(all(
+        any(feature = "use-rustls", feature = "use-native-tls"),
+        feature = "websocket"
+    ))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(all(
+            any(feature = "use-rustls", feature = "use-native-tls"),
+            feature = "websocket"
+        )))
+    )]
     pub fn wss_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Wss(tls_config)
     }
 
-    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
+    #[cfg(all(
+        any(feature = "use-rustls", feature = "use-native-tls"),
+        feature = "websocket"
+    ))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(all(
+            any(feature = "use-rustls", feature = "use-native-tls"),
+            feature = "websocket"
+        )))
+    )]
     pub fn wss_with_default_config() -> Self {
         Self::Wss(Default::default())
     }
@@ -362,6 +383,13 @@ impl Default for TlsConfiguration {
             .with_no_client_auth();
 
         Self::Rustls(Arc::new(tls_config))
+    }
+}
+
+#[cfg(feature = "use-native-tls")]
+impl Default for TlsConfiguration {
+    fn default() -> Self {
+        Self::Native
     }
 }
 
