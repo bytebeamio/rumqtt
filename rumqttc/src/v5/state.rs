@@ -1,15 +1,17 @@
 use super::mqttbytes::v5::{
-    ConnAck, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
-    PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel, PubRelReason, Publish,
-    SubAck, Subscribe, SubscribeReasonCode, UnsubAck, UnsubAckReason, Unsubscribe,
+    Auth, AuthReasonCode, ConnAck, ConnectReturnCode, Disconnect,
+    DisconnectReasonCode, Packet, PingReq, PubAck, PubAckReason, PubComp, PubCompReason, PubRec,
+    PubRecReason, PubRel, PubRelReason, Publish, SubAck, Subscribe, SubscribeReasonCode, UnsubAck,
+    UnsubAckReason, Unsubscribe,
 };
 use super::mqttbytes::{self, Error as MqttError, QoS};
 
-use super::{Event, Incoming, Outgoing, Request};
+use super::{AuthManager, Event, Incoming, Outgoing, Request};
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::{io, time::Instant};
 
 /// Errors during state handling
@@ -55,6 +57,10 @@ pub enum StateError {
     ConnFail { reason: ConnectReturnCode },
     #[error("Connection closed by peer abruptly")]
     ConnectionAborted,
+    #[error("Authentication error: {0}")]
+    AuthError(String),
+    #[error("Auth Manager not set")]
+    AuthManagerNotSet,
 }
 
 impl From<mqttbytes::Error> for StateError {
@@ -110,13 +116,19 @@ pub struct MqttState {
     pub(crate) max_outgoing_inflight: u16,
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
+    /// Authentication manager
+    auth_manager: Option<Arc<Mutex<dyn AuthManager>>>,
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
+    pub fn new(
+        max_inflight: u16,
+        manual_acks: bool,
+        auth_manager: Option<Arc<Mutex<dyn AuthManager>>>,
+    ) -> Self {
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
@@ -137,6 +149,7 @@ impl MqttState {
             broker_topic_alias_max: 0,
             max_outgoing_inflight: max_inflight,
             max_outgoing_inflight_upper_limit: max_inflight,
+            auth_manager,
         }
     }
 
@@ -188,6 +201,7 @@ impl MqttState {
             }
             Request::PubAck(puback) => self.outgoing_puback(puback)?,
             Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec)?,
+            Request::Auth(auth) => self.outgoing_auth(auth)?,
             _ => unimplemented!(),
         };
 
@@ -216,6 +230,7 @@ impl MqttState {
             Incoming::PubComp(pubcomp) => self.handle_incoming_pubcomp(pubcomp)?,
             Incoming::ConnAck(connack) => self.handle_incoming_connack(connack)?,
             Incoming::Disconnect(disconn) => self.handle_incoming_disconn(disconn)?,
+            Incoming::Auth(auth) => self.handle_incoming_auth(auth)?,
             _ => {
                 error!("Invalid incoming packet = {:?}", packet);
                 return Err(StateError::WrongPacket);
@@ -457,6 +472,37 @@ impl MqttState {
         Ok(None)
     }
 
+    fn handle_incoming_auth(&mut self, auth: &mut Auth) -> Result<Option<Packet>, StateError> {
+        match auth.code {
+            AuthReasonCode::Success => Ok(None),
+            AuthReasonCode::Continue => {
+                let props = auth.properties.clone();
+
+                // Check if auth manager is set
+                if self.auth_manager.is_none() {
+                    return Err(StateError::AuthManagerNotSet);
+                }
+
+                let auth_manager = self.auth_manager.clone().unwrap();
+
+                // Call auth_continue method of auth manager
+                let out_auth_props = match auth_manager
+                    .lock()
+                    .unwrap()
+                    .auth_continue(props)
+                {
+                    Ok(data) => data,
+                    Err(err) => return Err(StateError::AuthError(err)),
+                };
+
+                let client_auth = Auth::new(AuthReasonCode::Continue, out_auth_props);
+
+                self.outgoing_auth(client_auth)
+            }
+            _ => Err(StateError::AuthError("Authentication Failed!".to_string())),
+        }
+    }
+
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<Option<Packet>, StateError> {
@@ -625,6 +671,17 @@ impl MqttState {
         Ok(Some(Packet::Disconnect(Disconnect::new(reason))))
     }
 
+    fn outgoing_auth(&mut self, auth: Auth) -> Result<Option<Packet>, StateError> {
+        let props = auth.properties.as_ref().unwrap();
+        debug!(
+            "Auth packet sent. Auth Method: {:?}. Auth Data: {:?}",
+            props.method, props.data
+        );
+        let event = Event::Outgoing(Outgoing::Auth);
+        self.events.push_back(event);
+        Ok(Some(Packet::Auth(auth)))
+    }
+
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
         if let Some(publish) = &self.collision {
             if publish.pkid == pkid {
@@ -697,7 +754,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(u16::MAX, false)
+        MqttState::new(u16::MAX, false, None)
     }
 
     #[test]
@@ -758,7 +815,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_with_max_inflight_is_ok() {
-        let mut mqtt = MqttState::new(2, false);
+        let mut mqtt = MqttState::new(2, false, None);
 
         // QoS2 publish
         let publish = build_outgoing_publish(QoS::ExactlyOnce);

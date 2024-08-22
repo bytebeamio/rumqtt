@@ -1,7 +1,7 @@
 use std::slice::Iter;
 
 pub use self::{
-    auth::Auth,
+    auth::{Auth, AuthProperties, AuthReasonCode},
     codec::Codec,
     connack::{ConnAck, ConnAckProperties, ConnectReturnCode},
     connect::{Connect, ConnectProperties, LastWill, LastWillProperties, Login},
@@ -126,6 +126,10 @@ impl Packet {
                 let disconnect = Disconnect::read(fixed_header, packet)?;
                 Packet::Disconnect(disconnect)
             }
+            PacketType::Auth => {
+                let auth = Auth::read(fixed_header, packet)?;
+                Packet::Auth(auth)
+            }
         };
 
         Ok(packet)
@@ -199,6 +203,7 @@ pub enum PacketType {
     PingReq,
     PingResp,
     Disconnect,
+    Auth,
 }
 
 #[repr(u8)]
@@ -285,6 +290,7 @@ impl FixedHeader {
             12 => Ok(PacketType::PingReq),
             13 => Ok(PacketType::PingResp),
             14 => Ok(PacketType::Disconnect),
+            15 => Ok(PacketType::Auth),
             _ => Err(Error::InvalidPacketType(num)),
         }
     }
