@@ -324,7 +324,7 @@ impl Transport {
 pub enum TlsConfiguration {
     #[cfg(feature = "use-rustls")]
     Simple {
-        /// connection method
+        /// ca certificate
         ca: Vec<u8>,
         /// alpn settings
         alpn: Option<Vec<Vec<u8>>>,
