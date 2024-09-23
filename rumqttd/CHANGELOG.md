@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public re-export `Strategy` for shared subscriptions
 - Peer initiated disconnects logged as info rather than error.
 - External authentication function must be async
-- Update `tokio-rustls` to `0.25.0`, `rustls-webpki` to `0.102.1`, `tokio-native-tls` to `0.3.1` and
-  `rust-pemfile` to `2.0.0`.
+- Update `tokio-rustls` to `0.26.0`, `rustls-webpki` to `0.102.8`, `tokio-native-tls` to `0.3.1` and
+  `rust-pemfile` to `2.1.0`.
 - Export `Forward` from root.
 
 ### Deprecated
