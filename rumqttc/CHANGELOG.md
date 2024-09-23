@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Made `DisconnectProperties` struct public.
 * Replace `Vec<Option<u16>>` with `FixedBitSet` for managing packet ids of released QoS 2 publishes and incoming QoS 2 publishes in `MqttState`.
 * Accept `native_tls::TlsConnector` as input for `Transport::tls_with_config`.
+* Update `tokio-rustls` to `0.26.0`, `rustls-webpki` to `0.102.8`, `rustls-native-certs` to `0.8.0`, `async-tungstenite` to `0.28.0` and `ws_stream_tungstenite` to `0.14.0`.
 
 ### Deprecated
 
