@@ -625,16 +625,16 @@ impl MqttState {
         Ok(Some(Packet::Unsubscribe(unsub)))
     }
 
+    /// Send Disconnect packet to broker
     fn outgoing_disconnect(
         &mut self,
         disconnect: Disconnect,
     ) -> Result<Option<Packet>, StateError> {
-        let reason = disconnect.reason_code;
-        debug!("Disconnect with {:?}", reason);
+        debug!("Disconnect with {:?}", disconnect.reason_code);
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
 
-        Ok(Some(Packet::Disconnect(Disconnect::new(reason))))
+        Ok(Some(Packet::Disconnect(disconnect)))
     }
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
