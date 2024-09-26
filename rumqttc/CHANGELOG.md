@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-* `size()` method on `Packet` calculates size once serialized.
-* `read()` and `write()` methods on `Packet`.
-* `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection
-* `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`.
-* `Auth` packet as per MQTT5 standards
-* Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`
+* `size()` method on `Packet` calculates size once serialized;
+* `read()` and `write()` methods on `Packet`;
+* `ConnectionAborted` variant on `StateError` type to denote abrupt end to a connection;
+* `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`;
+* `Auth` packet as per MQTT5 standards;
+* Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`;
+* `disconnect_with_properties` and `try_disconnect_with_properties` methods on `Client` and `AsyncClient`, allowing disconnection from the broker with custom properties and reason.
 
 ### Changed
 
@@ -23,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * use `Login` to store credentials
 * Made `DisconnectProperties` struct public.
 * Replace `Vec<Option<u16>>` with `FixedBitSet` for managing packet ids of released QoS 2 publishes and incoming QoS 2 publishes in `MqttState`.
-* Accept `native_tls::TlsConnector` as input for `Transport::tls_with_config`.
+* Accept `native_tls::TlsConnector` as input for `Transport::tls_with_config`;
+* Updated `Request::Disconnect` to include a Disconnect struct.
 
 ### Deprecated
 
