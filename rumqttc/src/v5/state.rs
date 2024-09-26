@@ -183,9 +183,7 @@ impl MqttState {
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq => self.outgoing_ping()?,
-            Request::Disconnect => {
-                self.outgoing_disconnect(DisconnectReasonCode::NormalDisconnection)?
-            }
+            Request::Disconnect(disconnect) => self.outgoing_disconnect(disconnect)?,
             Request::PubAck(puback) => self.outgoing_puback(puback)?,
             Request::PubRec(pubrec) => self.outgoing_pubrec(pubrec)?,
             _ => unimplemented!(),
@@ -228,7 +226,8 @@ impl MqttState {
 
     pub fn handle_protocol_error(&mut self) -> Result<Option<Packet>, StateError> {
         // send DISCONNECT packet with REASON_CODE 0x82
-        self.outgoing_disconnect(DisconnectReasonCode::ProtocolError)
+        let disconnect = Disconnect::new(DisconnectReasonCode::ProtocolError);
+        self.outgoing_disconnect(disconnect)
     }
 
     fn handle_incoming_suback(
@@ -242,7 +241,7 @@ impl MqttState {
                 }
                 _ => {
                     warn!("SubAck Pkid = {:?}, Reason = {:?}", suback.pkid, reason);
-                },
+                }
             }
         }
         Ok(None)
@@ -364,7 +363,10 @@ impl MqttState {
         if puback.reason != PubAckReason::Success
             && puback.reason != PubAckReason::NoMatchingSubscribers
         {
-            warn!("PubAck Pkid = {:?}, reason: {:?}", puback.pkid, puback.reason);
+            warn!(
+                "PubAck Pkid = {:?}, reason: {:?}",
+                puback.pkid, puback.reason
+            );
             return Ok(None);
         }
 
@@ -397,7 +399,10 @@ impl MqttState {
         if pubrec.reason != PubRecReason::Success
             && pubrec.reason != PubRecReason::NoMatchingSubscribers
         {
-            warn!("PubRec Pkid = {:?}, reason: {:?}", pubrec.pkid, pubrec.reason);
+            warn!(
+                "PubRec Pkid = {:?}, reason: {:?}",
+                pubrec.pkid, pubrec.reason
+            );
             return Ok(None);
         }
 
@@ -417,7 +422,10 @@ impl MqttState {
         self.incoming_pub.set(pubrel.pkid as usize, false);
 
         if pubrel.reason != PubRelReason::Success {
-            warn!("PubRel Pkid = {:?}, reason: {:?}", pubrel.pkid, pubrel.reason);
+            warn!(
+                "PubRel Pkid = {:?}, reason: {:?}",
+                pubrel.pkid, pubrel.reason
+            );
             return Ok(None);
         }
 
@@ -444,7 +452,10 @@ impl MqttState {
         self.outgoing_rel.set(pubcomp.pkid as usize, false);
 
         if pubcomp.reason != PubCompReason::Success {
-            warn!("PubComp Pkid = {:?}, reason: {:?}", pubcomp.pkid, pubcomp.reason);
+            warn!(
+                "PubComp Pkid = {:?}, reason: {:?}",
+                pubcomp.pkid, pubcomp.reason
+            );
             return Ok(None);
         }
 
@@ -616,8 +627,9 @@ impl MqttState {
 
     fn outgoing_disconnect(
         &mut self,
-        reason: DisconnectReasonCode,
+        disconnect: Disconnect,
     ) -> Result<Option<Packet>, StateError> {
+        let reason = disconnect.reason_code;
         debug!("Disconnect with {:?}", reason);
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
