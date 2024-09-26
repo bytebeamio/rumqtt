@@ -7,7 +7,10 @@ use super::mqttbytes::v5::{
     Unsubscribe, UnsubscribeProperties,
 };
 use super::mqttbytes::QoS;
-use super::{ConnectionError, Disconnect, DisconnectProperties, DisconnectReasonCode, Event, EventLoop, MqttOptions, Request};
+use super::{
+    ConnectionError, Disconnect, DisconnectProperties, DisconnectReasonCode, Event, EventLoop,
+    MqttOptions, Request,
+};
 use crate::{valid_filter, valid_topic};
 
 use bytes::Bytes;
@@ -431,16 +434,25 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the `EventLoop` with default DisconnectReasonCode::NormalDisconnection
     pub async fn disconnect(&self) -> Result<(), ClientError> {
-        self.handle_disconnect(DisconnectReasonCode::NormalDisconnection, None).await
+        self.handle_disconnect(DisconnectReasonCode::NormalDisconnection, None)
+            .await
     }
 
     /// Sends a MQTT disconnect to the `EventLoop` with properties
-    pub async fn disconnect_with_properties(&self, reason: DisconnectReasonCode, properties: DisconnectProperties) -> Result<(), ClientError> {
+    pub async fn disconnect_with_properties(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: DisconnectProperties,
+    ) -> Result<(), ClientError> {
         self.handle_disconnect(reason, Some(properties)).await
     }
-    
+
     // Handle disconnect interface which can have properties or not
-    async fn handle_disconnect(&self, reason: DisconnectReasonCode, properties: Option<DisconnectProperties>) -> Result<(), ClientError> {
+    async fn handle_disconnect(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: Option<DisconnectProperties>,
+    ) -> Result<(), ClientError> {
         let request = self.build_disconnect_request(reason, properties);
         self.request_tx.send_async(request).await?;
         Ok(())
@@ -452,19 +464,31 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT disconnect to the `EventLoop` with properties
-    pub fn try_disconnect_with_properties(&self, reason: DisconnectReasonCode, properties: DisconnectProperties) -> Result<(), ClientError> {
+    pub fn try_disconnect_with_properties(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: DisconnectProperties,
+    ) -> Result<(), ClientError> {
         self.handle_try_disconnect(reason, Some(properties))
     }
-    
+
     // Handle disconnect interface which can have properties or not
-    fn handle_try_disconnect(&self, reason: DisconnectReasonCode, properties: Option<DisconnectProperties>) -> Result<(), ClientError> {
+    fn handle_try_disconnect(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: Option<DisconnectProperties>,
+    ) -> Result<(), ClientError> {
         let request = self.build_disconnect_request(reason, properties);
         self.request_tx.try_send(request)?;
         Ok(())
     }
-    
+
     // Helper function to build disconnect request
-    fn build_disconnect_request(&self, reason: DisconnectReasonCode, properties: Option<DisconnectProperties>) -> Request {
+    fn build_disconnect_request(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: Option<DisconnectProperties>,
+    ) -> Request {
         match properties {
             Some(p) => Request::Disconnect(Disconnect::new_with_properties(reason, p)),
             None => Request::Disconnect(Disconnect::new(reason)),
@@ -764,13 +788,21 @@ impl Client {
     pub fn disconnect(&self) -> Result<(), ClientError> {
         self.handle_disconnect(DisconnectReasonCode::NormalDisconnection, None)
     }
-    
+
     /// Sends a MQTT disconnect to the `EventLoop` with properties
-    pub fn disconnect_with_properties(&self, reason: DisconnectReasonCode, properties: DisconnectProperties) -> Result<(), ClientError> {
+    pub fn disconnect_with_properties(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: DisconnectProperties,
+    ) -> Result<(), ClientError> {
         self.handle_disconnect(reason, Some(properties))
     }
 
-    fn handle_disconnect(&self, reason: DisconnectReasonCode, properties: Option<DisconnectProperties>) -> Result<(), ClientError> {
+    fn handle_disconnect(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: Option<DisconnectProperties>,
+    ) -> Result<(), ClientError> {
         let request = self.client.build_disconnect_request(reason, properties);
         self.client.request_tx.send(request)?;
         Ok(())
@@ -781,8 +813,12 @@ impl Client {
         self.client.try_disconnect()
     }
 
-    /// Try to sends a MQTT disconnect to the `EventLoop` with properties 
-    pub fn try_disconnect_with_properties(&self, reason: DisconnectReasonCode, properties: DisconnectProperties) -> Result<(), ClientError> {
+    /// Try to sends a MQTT disconnect to the `EventLoop` with properties
+    pub fn try_disconnect_with_properties(
+        &self,
+        reason: DisconnectReasonCode,
+        properties: DisconnectProperties,
+    ) -> Result<(), ClientError> {
         self.client.handle_try_disconnect(reason, Some(properties))
     }
 }

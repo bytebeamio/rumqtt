@@ -259,7 +259,10 @@ impl Disconnect {
         }
     }
 
-    pub fn new_with_properties(reason: DisconnectReasonCode, properties: DisconnectProperties) -> Self {
+    pub fn new_with_properties(
+        reason: DisconnectReasonCode,
+        properties: DisconnectProperties,
+    ) -> Self {
         Self {
             reason_code: reason,
             properties: Some(properties),
