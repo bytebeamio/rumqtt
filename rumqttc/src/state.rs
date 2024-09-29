@@ -174,8 +174,8 @@ impl MqttState {
         let outgoing = match &packet {
             Incoming::PingResp => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
-            Incoming::SubAck(_suback) => self.handle_incoming_suback()?,
-            Incoming::UnsubAck(_unsuback) => self.handle_incoming_unsuback()?,
+            Incoming::SubAck(suback) => self.handle_incoming_suback(suback)?,
+            Incoming::UnsubAck(unsuback) => self.handle_incoming_unsuback(unsuback)?,
             Incoming::PubAck(puback) => self.handle_incoming_puback(puback)?,
             Incoming::PubRec(pubrec) => self.handle_incoming_pubrec(pubrec)?,
             Incoming::PubRel(pubrel) => self.handle_incoming_pubrel(pubrel)?,
@@ -190,11 +190,44 @@ impl MqttState {
         Ok(outgoing)
     }
 
-    fn handle_incoming_suback(&mut self) -> Result<Option<Packet>, StateError> {
+    fn is_pkid_of_publish(&self, pkid: u16) -> bool {
+        self.outgoing_pub[pkid as usize].is_some() || self.outgoing_rel.contains(pkid as usize)
+    }
+
+    fn handle_incoming_suback(
+        &mut self,
+        SubAck { pkid, return_codes }: &SubAck,
+    ) -> Result<Option<Packet>, StateError> {
+        // Expected ack for a subscribe packet, not a publish packet
+        if self.is_pkid_of_publish(*pkid) {
+            return Err(StateError::Unsolicited(*pkid));
+        }
+
+        if return_codes
+            .iter()
+            .any(|x| matches!(x, SubscribeReasonCode::Success(_)))
+        {
+            if let Some(tx) = self.ack_waiter[*pkid as usize].take() {
+                tx.resolve();
+            }
+        }
+
         Ok(None)
     }
 
-    fn handle_incoming_unsuback(&mut self) -> Result<Option<Packet>, StateError> {
+    fn handle_incoming_unsuback(
+        &mut self,
+        UnsubAck { pkid }: &UnsubAck,
+    ) -> Result<Option<Packet>, StateError> {
+        // Expected ack for a unsubscribe packet, not a publish packet
+        if self.is_pkid_of_publish(*pkid) {
+            return Err(StateError::Unsolicited(*pkid));
+        }
+
+        if let Some(tx) = self.ack_waiter[*pkid as usize].take() {
+            tx.resolve();
+        }
+
         Ok(None)
     }
 
