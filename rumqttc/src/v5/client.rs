@@ -8,7 +8,7 @@ use super::mqttbytes::v5::{
 };
 use super::mqttbytes::QoS;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::{valid_filter, valid_topic};
+use crate::{valid_filter, valid_topic, AckPromise, PromiseTx};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -25,19 +25,19 @@ pub enum ClientError {
     TryRequest(Request),
 }
 
-impl From<SendError<Request>> for ClientError {
-    fn from(e: SendError<Request>) -> Self {
-        Self::Request(e.into_inner())
+impl From<SendError<(Request, Option<PromiseTx>)>> for ClientError {
+    fn from(e: SendError<(Request, Option<PromiseTx>)>) -> Self {
+        Self::Request(e.into_inner().0)
     }
 }
 
-impl From<TrySendError<Request>> for ClientError {
-    fn from(e: TrySendError<Request>) -> Self {
-        Self::TryRequest(e.into_inner())
+impl From<TrySendError<(Request, Option<PromiseTx>)>> for ClientError {
+    fn from(e: TrySendError<(Request, Option<PromiseTx>)>) -> Self {
+        Self::TryRequest(e.into_inner().0)
     }
 }
 
-/// An asynchronous client, communicates with MQTT `EventLoop`.
+// An asynchronous client, communicates with MQTT `EventLoop`.
 ///
 /// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
 /// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
@@ -46,7 +46,7 @@ impl From<TrySendError<Request>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<Request>,
+    request_tx: Sender<(Request, Option<PromiseTx>)>,
 }
 
 impl AsyncClient {
@@ -66,7 +66,7 @@ impl AsyncClient {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
+    pub fn from_senders(request_tx: Sender<(Request, Option<PromiseTx>)>) -> AsyncClient {
         AsyncClient { request_tx }
     }
 
@@ -78,11 +78,12 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
@@ -90,8 +91,11 @@ impl AsyncClient {
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.request_tx.send_async(publish).await?;
-        Ok(())
+        self.request_tx
+            .send_async((publish, Some(promise_tx)))
+            .await?;
+
+        Ok(promise)
     }
 
     pub async fn publish_with_properties<S, P>(
@@ -101,7 +105,7 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -116,7 +120,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -132,11 +136,12 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
@@ -144,8 +149,9 @@ impl AsyncClient {
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
-        self.request_tx.try_send(publish)?;
-        Ok(())
+        self.request_tx.try_send((publish, Some(promise_tx)))?;
+
+        Ok(promise)
     }
 
     pub fn try_publish_with_properties<S, P>(
@@ -155,7 +161,7 @@ impl AsyncClient {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -169,7 +175,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -182,8 +188,9 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_tx.send_async(ack).await?;
+            self.request_tx.send_async((ack, None)).await?;
         }
+
         Ok(())
     }
 
@@ -191,8 +198,9 @@ impl AsyncClient {
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
         if let Some(ack) = ack {
-            self.request_tx.try_send(ack)?;
+            self.request_tx.try_send((ack, None))?;
         }
+
         Ok(())
     }
 
@@ -204,19 +212,20 @@ impl AsyncClient {
         retain: bool,
         payload: Bytes,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
-        }
-        self.request_tx.send_async(publish).await?;
-        Ok(())
+        self.request_tx
+            .send_async((publish, Some(promise_tx)))
+            .await?;
+
+        Ok(promise)
     }
 
     pub async fn publish_bytes_with_properties<S>(
@@ -226,7 +235,7 @@ impl AsyncClient {
         retain: bool,
         payload: Bytes,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
     {
@@ -240,7 +249,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
     {
@@ -254,15 +263,18 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
+        self.request_tx
+            .send_async((subscribe.into(), Some(promise_tx)))
+            .await?;
 
-        self.request_tx.send_async(subscribe.into()).await?;
-        Ok(())
+        Ok(promise)
     }
 
     pub async fn subscribe_with_properties<S: Into<String>>(
@@ -270,11 +282,15 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.handle_subscribe(topic, qos, Some(properties)).await
     }
 
-    pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub async fn subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<AckPromise, ClientError> {
         self.handle_subscribe(topic, qos, None).await
     }
 
@@ -284,15 +300,17 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::TryRequest(subscribe.into()));
         }
+        self.request_tx
+            .try_send((subscribe.into(), Some(promise_tx)))?;
 
-        self.request_tx.try_send(subscribe.into())?;
-        Ok(())
+        Ok(promise)
     }
 
     pub fn try_subscribe_with_properties<S: Into<String>>(
@@ -300,11 +318,15 @@ impl AsyncClient {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.handle_try_subscribe(topic, qos, Some(properties))
     }
 
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn try_subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<AckPromise, ClientError> {
         self.handle_try_subscribe(topic, qos, None)
     }
 
@@ -313,32 +335,34 @@ impl AsyncClient {
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let subscribe = Subscribe::new_many(topics, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
+        self.request_tx
+            .send_async((subscribe.into(), Some(promise_tx)))
+            .await?;
 
-        self.request_tx.send_async(subscribe.into()).await?;
-
-        Ok(())
+        Ok(promise)
     }
 
     pub async fn subscribe_many_with_properties<T>(
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, Some(properties)).await
     }
 
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -350,31 +374,33 @@ impl AsyncClient {
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let subscribe = Subscribe::new_many(topics, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::TryRequest(subscribe.into()));
         }
+        self.request_tx
+            .try_send((subscribe.into(), Some(promise_tx)))?;
 
-        self.request_tx.try_send(subscribe.into())?;
-        Ok(())
+        Ok(promise)
     }
 
     pub fn try_subscribe_many_with_properties<T>(
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         self.handle_try_subscribe_many(topics, Some(properties))
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -386,22 +412,26 @@ impl AsyncClient {
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let unsubscribe = Unsubscribe::new(topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.send_async(request).await?;
-        Ok(())
+        self.request_tx
+            .send_async((request, Some(promise_tx)))
+            .await?;
+
+        Ok(promise)
     }
 
     pub async fn unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.handle_unsubscribe(topic, Some(properties)).await
     }
 
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
         self.handle_unsubscribe(topic, None).await
     }
 
@@ -410,36 +440,40 @@ impl AsyncClient {
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let unsubscribe = Unsubscribe::new(topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.try_send(request)?;
-        Ok(())
+        self.request_tx.try_send((request, Some(promise_tx)))?;
+
+        Ok(promise)
     }
 
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.handle_try_unsubscribe(topic, Some(properties))
     }
 
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
         self.handle_try_unsubscribe(topic, None)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send_async((request, None)).await?;
+
         Ok(())
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.try_send(request)?;
+        self.request_tx.try_send((request, None))?;
+
         Ok(())
     }
 }
@@ -489,7 +523,7 @@ impl Client {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<Request>) -> Client {
+    pub fn from_sender(request_tx: Sender<(Request, Option<PromiseTx>)>) -> Client {
         Client {
             client: AsyncClient::from_senders(request_tx),
         }
@@ -503,11 +537,12 @@ impl Client {
         retain: bool,
         payload: P,
         properties: Option<PublishProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
@@ -515,8 +550,9 @@ impl Client {
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.client.request_tx.send(publish)?;
-        Ok(())
+        self.client.request_tx.send((publish, Some(promise_tx)))?;
+
+        Ok(promise)
     }
 
     pub fn publish_with_properties<S, P>(
@@ -526,7 +562,7 @@ impl Client {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -540,7 +576,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -555,7 +591,7 @@ impl Client {
         retain: bool,
         payload: P,
         properties: PublishProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -570,7 +606,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: P,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         S: Into<String>,
         P: Into<Bytes>,
@@ -583,15 +619,15 @@ impl Client {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.client.request_tx.send(ack)?;
+            self.client.request_tx.send((ack, None))?;
         }
+
         Ok(())
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        self.client.try_ack(publish)?;
-        Ok(())
+        self.client.try_ack(publish)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -600,15 +636,18 @@ impl Client {
         topic: S,
         qos: QoS,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let filter = Filter::new(topic, qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
+        self.client
+            .request_tx
+            .send((subscribe.into(), Some(promise_tx)))?;
 
-        self.client.request_tx.send(subscribe.into())?;
-        Ok(())
+        Ok(promise)
     }
 
     pub fn subscribe_with_properties<S: Into<String>>(
@@ -616,11 +655,15 @@ impl Client {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.handle_subscribe(topic, qos, Some(properties))
     }
 
-    pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<AckPromise, ClientError> {
         self.handle_subscribe(topic, qos, None)
     }
 
@@ -630,12 +673,16 @@ impl Client {
         topic: S,
         qos: QoS,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.client
             .try_subscribe_with_properties(topic, qos, properties)
     }
 
-    pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
+    pub fn try_subscribe<S: Into<String>>(
+        &self,
+        topic: S,
+        qos: QoS,
+    ) -> Result<AckPromise, ClientError> {
         self.client.try_subscribe(topic, qos)
     }
 
@@ -644,31 +691,34 @@ impl Client {
         &self,
         topics: T,
         properties: Option<SubscribeProperties>,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
+        let (promise_tx, promise) = PromiseTx::new();
         let subscribe = Subscribe::new_many(topics, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
+        self.client
+            .request_tx
+            .send((subscribe.into(), Some(promise_tx)))?;
 
-        self.client.request_tx.send(subscribe.into())?;
-        Ok(())
+        Ok(promise)
     }
 
     pub fn subscribe_many_with_properties<T>(
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
         self.handle_subscribe_many(topics, Some(properties))
     }
 
-    pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -679,7 +729,7 @@ impl Client {
         &self,
         topics: T,
         properties: SubscribeProperties,
-    ) -> Result<(), ClientError>
+    ) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -687,7 +737,7 @@ impl Client {
             .try_subscribe_many_with_properties(topics, properties)
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
     where
         T: IntoIterator<Item = Filter>,
     {
@@ -699,22 +749,24 @@ impl Client {
         &self,
         topic: S,
         properties: Option<UnsubscribeProperties>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let unsubscribe = Unsubscribe::new(topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
-        self.client.request_tx.send(request)?;
-        Ok(())
+        self.client.request_tx.send((request, Some(promise_tx)))?;
+
+        Ok(promise)
     }
 
     pub fn unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.handle_unsubscribe(topic, Some(properties))
     }
 
-    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
         self.handle_unsubscribe(topic, None)
     }
 
@@ -723,26 +775,27 @@ impl Client {
         &self,
         topic: S,
         properties: UnsubscribeProperties,
-    ) -> Result<(), ClientError> {
+    ) -> Result<AckPromise, ClientError> {
         self.client
             .try_unsubscribe_with_properties(topic, properties)
     }
 
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
         self.client.try_unsubscribe(topic)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn disconnect(&self) -> Result<(), ClientError> {
+    pub fn disconnect(&self) -> Result<AckPromise, ClientError> {
+        let (promise_tx, promise) = PromiseTx::new();
         let request = Request::Disconnect;
-        self.client.request_tx.send(request)?;
-        Ok(())
+        self.client.request_tx.send((request, Some(promise_tx)))?;
+
+        Ok(promise)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        self.client.try_disconnect()?;
-        Ok(())
+        self.client.try_disconnect()
     }
 }
 
