@@ -238,7 +238,9 @@ impl PromiseTx {
     }
 
     fn resolve(self) {
-        self.inner.send(()).unwrap()
+        if self.inner.send(()).is_err() {
+            trace!("Promise was drpped")
+        }
     }
 }
 
