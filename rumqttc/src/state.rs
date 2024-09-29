@@ -194,20 +194,18 @@ impl MqttState {
         self.outgoing_pub[pkid as usize].is_some() || self.outgoing_rel.contains(pkid as usize)
     }
 
-    fn handle_incoming_suback(
-        &mut self,
-        SubAck { pkid, return_codes }: &SubAck,
-    ) -> Result<Option<Packet>, StateError> {
+    fn handle_incoming_suback(&mut self, suback: &SubAck) -> Result<Option<Packet>, StateError> {
         // Expected ack for a subscribe packet, not a publish packet
-        if self.is_pkid_of_publish(*pkid) {
-            return Err(StateError::Unsolicited(*pkid));
+        if self.is_pkid_of_publish(suback.pkid) {
+            return Err(StateError::Unsolicited(suback.pkid));
         }
 
-        if return_codes
+        if suback
+            .return_codes
             .iter()
             .any(|x| matches!(x, SubscribeReasonCode::Success(_)))
         {
-            if let Some(tx) = self.ack_waiter[*pkid as usize].take() {
+            if let Some(tx) = self.ack_waiter[suback.pkid as usize].take() {
                 tx.resolve();
             }
         }
@@ -217,14 +215,14 @@ impl MqttState {
 
     fn handle_incoming_unsuback(
         &mut self,
-        UnsubAck { pkid }: &UnsubAck,
+        unsuback: &UnsubAck,
     ) -> Result<Option<Packet>, StateError> {
         // Expected ack for a unsubscribe packet, not a publish packet
-        if self.is_pkid_of_publish(*pkid) {
-            return Err(StateError::Unsolicited(*pkid));
+        if self.is_pkid_of_publish(unsuback.pkid) {
+            return Err(StateError::Unsolicited(unsuback.pkid));
         }
 
-        if let Some(tx) = self.ack_waiter[*pkid as usize].take() {
+        if let Some(tx) = self.ack_waiter[unsuback.pkid as usize].take() {
             tx.resolve();
         }
 
