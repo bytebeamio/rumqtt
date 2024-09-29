@@ -3,6 +3,7 @@ use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
+use crate::PromiseTx;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -73,9 +74,9 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<Request>,
+    requests_rx: Receiver<(Request, Option<PromiseTx>)>,
     /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<Request>,
+    pub(crate) requests_tx: Sender<(Request, Option<PromiseTx>)>,
     /// Pending packets from last session
     pub pending: VecDeque<Request>,
     /// Network connection to the broker
