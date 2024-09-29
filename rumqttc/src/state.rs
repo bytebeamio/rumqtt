@@ -98,7 +98,7 @@ impl MqttState {
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
             manual_acks,
-            ack_waiter: (0..max_inflight + 1).map(|_| None).collect(),
+            ack_waiter: (0..max_inflight as usize + 1).map(|_| None).collect(),
         }
     }
 
