@@ -338,6 +338,7 @@ impl MqttState {
             tx.resolve();
         }
 
+        self.outgoing_rel.set(pubcomp.pkid as usize, false);
         self.inflight -= 1;
         let packet = self.check_collision(pubcomp.pkid).map(|(publish, tx)| {
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
