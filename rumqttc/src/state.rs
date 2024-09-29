@@ -111,7 +111,7 @@ impl MqttState {
 
         for publish in second_half.iter_mut().chain(first_half) {
             if let Some(publish) = publish.take() {
-                let tx = self.ack_waiter.remove(publish.pkid as usize);
+                let tx = self.ack_waiter[publish.pkid as usize].take();
                 let request = Request::Publish(publish);
                 pending.push((request, tx));
             }
@@ -119,7 +119,7 @@ impl MqttState {
 
         // remove and collect pending releases
         for pkid in self.outgoing_rel.ones() {
-            let tx = self.ack_waiter.remove(pkid);
+            let tx = self.ack_waiter[pkid].take();
             let request = Request::PubRel(PubRel::new(pkid as u16));
             pending.push((request, tx));
         }
@@ -238,7 +238,7 @@ impl MqttState {
             return Err(StateError::Unsolicited(puback.pkid));
         }
 
-        if let Some(tx) = self.ack_waiter.remove(puback.pkid as usize) {
+        if let Some(tx) = self.ack_waiter[puback.pkid as usize].take() {
             // Resolve promise for QoS 1
             tx.resolve();
         }
@@ -300,7 +300,7 @@ impl MqttState {
             return Err(StateError::Unsolicited(pubcomp.pkid));
         }
 
-        if let Some(tx) = self.ack_waiter.remove(pubcomp.pkid as usize) {
+        if let Some(tx) = self.ack_waiter[pubcomp.pkid as usize].take() {
             // Resolve promise for QoS 2
             tx.resolve();
         }
