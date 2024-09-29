@@ -365,7 +365,10 @@ impl MqttState {
 
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
         self.events.push_back(event);
-        self.ack_waiter[publish.pkid as usize] = tx;
+        match (publish.qos, tx) {
+            (QoS::AtMostOnce, Some(tx)) => tx.resolve(),
+            (_, tx) => self.ack_waiter[publish.pkid as usize] = tx,
+        }
 
         Ok(Some(Packet::Publish(publish)))
     }
