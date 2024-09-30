@@ -98,7 +98,12 @@
 #[macro_use]
 extern crate log;
 
-use std::fmt::{self, Debug, Formatter};
+use std::{
+    fmt::{self, Debug, Formatter},
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 #[cfg(any(feature = "use-rustls", feature = "websocket"))]
 use std::sync::Arc;
@@ -224,23 +229,66 @@ impl From<Unsubscribe> for Request {
 }
 
 pub type Pkid = u16;
-pub type AckPromise = oneshot::Receiver<Pkid>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum PromiseError {
+    #[error("Sender side of channel was dropped")]
+    Disconnected,
+    #[error("Broker rejected the request, reason: {reason}")]
+    Rejected { reason: String },
+}
+
+pub struct AckPromise {
+    rx: oneshot::Receiver<Result<Pkid, PromiseError>>,
+}
+
+impl Future for AckPromise {
+    type Output = Result<Pkid, PromiseError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let polled = unsafe { self.map_unchecked_mut(|s| &mut s.rx) }.poll(cx);
+
+        match polled {
+            Poll::Ready(Ok(p)) => Poll::Ready(p),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(PromiseError::Disconnected)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl AckPromise {
+    pub fn blocking_wait(self) -> Result<Pkid, PromiseError> {
+        self.rx
+            .blocking_recv()
+            .map_err(|_| PromiseError::Disconnected)?
+    }
+}
 
 #[derive(Debug)]
 pub struct PromiseTx {
-    inner: oneshot::Sender<Pkid>,
+    tx: oneshot::Sender<Result<Pkid, PromiseError>>,
 }
 
 impl PromiseTx {
     fn new() -> (PromiseTx, AckPromise) {
-        let (inner, promise) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
 
-        (PromiseTx { inner }, promise)
+        (PromiseTx { tx }, AckPromise { rx })
     }
 
     fn resolve(self, pkid: Pkid) {
-        if self.inner.send(pkid).is_err() {
-            trace!("Promise was drpped")
+        if self.tx.send(Ok(pkid)).is_err() {
+            trace!("Promise was dropped")
+        }
+    }
+
+    fn fail(self, reason: String) {
+        if self
+            .tx
+            .send(Err(PromiseError::Rejected { reason }))
+            .is_err()
+        {
+            trace!("Promise was dropped")
         }
     }
 }

@@ -28,38 +28,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Subscribe and wait for broker acknowledgement
-    let pkid = client
+    match client
         .subscribe("hello/world", QoS::AtMostOnce)
         .await
         .unwrap()
         .await
-        .unwrap();
-    println!("Acknowledged Subscribe({pkid})");
+    {
+        Ok(pkid) => println!("Acknowledged Sub({pkid})"),
+        Err(e) => println!("Subscription failed: {e:?}"),
+    }
 
     // Publish at all QoS levels and wait for broker acknowledgement
-    let pkid = client
+    match client
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .await
         .unwrap()
         .await
-        .unwrap();
-    println!("Acknowledged Pub({pkid})");
+    {
+        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+        Err(e) => println!("Publish failed: {e:?}"),
+    }
 
-    let pkid = client
+    match client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .await
         .unwrap()
         .await
-        .unwrap();
-    println!("Acknowledged Pub({pkid})");
+    {
+        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+        Err(e) => println!("Publish failed: {e:?}"),
+    }
 
-    let pkid = client
+    match client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .await
         .unwrap()
         .await
-        .unwrap();
-    println!("Acknowledged Pub({pkid})");
+    {
+        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+        Err(e) => println!("Publish failed: {e:?}"),
+    }
 
     // Publish and spawn wait for notification
     let mut set = JoinSet::new();
@@ -82,8 +90,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     set.spawn(async { future.await });
 
-    while let Some(Ok(Ok(pkid))) = set.join_next().await {
-        println!("Acknowledged Pub({pkid})");
+    while let Some(Ok(res)) = set.join_next().await {
+        match res {
+            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Err(e) => println!("Publish failed: {e:?}"),
+        }
+    }
+
+    // Unsubscribe and wait for broker acknowledgement
+    match client.unsubscribe("hello/world").await.unwrap().await {
+        Ok(pkid) => println!("Acknowledged Unsub({pkid})"),
+        Err(e) => println!("Unsubscription failed: {e:?}"),
     }
 
     Ok(())

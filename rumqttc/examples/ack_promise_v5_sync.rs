@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pkid = client
         .subscribe("hello/world", QoS::AtMostOnce)
         .unwrap()
-        .blocking_recv()
+        .blocking_wait()
         .unwrap();
     println!("Acknowledged Subscribe({pkid})");
 
@@ -37,21 +37,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pkid = client
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .unwrap()
-        .blocking_recv()
+        .blocking_wait()
         .unwrap();
     println!("Acknowledged Pub({pkid})");
 
     let pkid = client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .unwrap()
-        .blocking_recv()
+        .blocking_wait()
         .unwrap();
     println!("Acknowledged Pub({pkid})");
 
     let pkid = client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap()
-        .blocking_recv()
+        .blocking_wait()
         .unwrap();
     println!("Acknowledged Pub({pkid})");
 
@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let tx_clone = tx.clone();
     thread::spawn(move || {
-        let res = future.blocking_recv();
+        let res = future.blocking_wait();
         tx_clone.send(res).unwrap()
     });
 
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let tx_clone = tx.clone();
     thread::spawn(move || {
-        let res = future.blocking_recv();
+        let res = future.blocking_wait();
         tx_clone.send(res).unwrap()
     });
 
@@ -80,12 +80,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap();
     thread::spawn(move || {
-        let res = future.blocking_recv();
+        let res = future.blocking_wait();
         tx.send(res).unwrap()
     });
 
-    while let Ok(Ok(pkid)) = rx.recv() {
-        println!("Acknowledged Pub({:?})", pkid);
+    while let Ok(res) = rx.recv() {
+        match res {
+            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Err(e) => println!("Publish failed: {e:?}"),
+        }
+    }
+
+    // Unsubscribe and wait for broker acknowledgement
+    match client.unsubscribe("hello/world").unwrap().blocking_wait() {
+        Ok(pkid) => println!("Acknowledged Unsub({pkid})"),
+        Err(e) => println!("Unsubscription failed: {e:?}"),
     }
 
     Ok(())

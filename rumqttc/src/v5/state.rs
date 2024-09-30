@@ -263,13 +263,15 @@ impl MqttState {
             }
         }
 
-        if suback
-            .return_codes
-            .iter()
-            .any(|x| matches!(x, SubscribeReasonCode::Success(_)))
-        {
-            if let Some(tx) = self.ack_waiter[suback.pkid as usize].take() {
+        if let Some(tx) = self.ack_waiter[suback.pkid as usize].take() {
+            if suback
+                .return_codes
+                .iter()
+                .all(|r| matches!(r, SubscribeReasonCode::Success(_)))
+            {
                 tx.resolve(suback.pkid);
+            } else {
+                tx.fail(format!("{:?}", suback.return_codes));
             }
         }
 
@@ -291,9 +293,15 @@ impl MqttState {
             }
         }
 
-        if unsuback.reasons.contains(&UnsubAckReason::Success) {
-            if let Some(tx) = self.ack_waiter[unsuback.pkid as usize].take() {
+        if let Some(tx) = self.ack_waiter[unsuback.pkid as usize].take() {
+            if unsuback
+                .reasons
+                .iter()
+                .all(|r| matches!(r, UnsubAckReason::Success))
+            {
                 tx.resolve(unsuback.pkid);
+            } else {
+                tx.fail(format!("{:?}", unsuback.reasons));
             }
         }
 
@@ -401,7 +409,11 @@ impl MqttState {
 
         if let Some(tx) = self.ack_waiter[puback.pkid as usize].take() {
             // Resolve promise for QoS 1
-            tx.resolve(puback.pkid);
+            if puback.reason == PubAckReason::Success {
+                tx.resolve(puback.pkid);
+            } else {
+                tx.fail(format!("{:?}", puback.reason));
+            }
         }
 
         self.inflight -= 1;
@@ -490,7 +502,11 @@ impl MqttState {
 
         if let Some(tx) = self.ack_waiter[pubcomp.pkid as usize].take() {
             // Resolve promise for QoS 2
-            tx.resolve(pubcomp.pkid);
+            if pubcomp.reason == PubCompReason::Success {
+                tx.resolve(pubcomp.pkid);
+            } else {
+                tx.fail(format!("{:?}", pubcomp.reason));
+            }
         }
 
         self.outgoing_rel.set(pubcomp.pkid as usize, false);

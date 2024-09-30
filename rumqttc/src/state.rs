@@ -200,13 +200,15 @@ impl MqttState {
             return Err(StateError::Unsolicited(suback.pkid));
         }
 
-        if suback
-            .return_codes
-            .iter()
-            .any(|x| matches!(x, SubscribeReasonCode::Success(_)))
-        {
-            if let Some(tx) = self.ack_waiter[suback.pkid as usize].take() {
+        if let Some(tx) = self.ack_waiter[suback.pkid as usize].take() {
+            if suback
+                .return_codes
+                .iter()
+                .all(|r| matches!(r, SubscribeReasonCode::Success(_)))
+            {
                 tx.resolve(suback.pkid);
+            } else {
+                tx.fail(format!("{:?}", suback.return_codes));
             }
         }
 

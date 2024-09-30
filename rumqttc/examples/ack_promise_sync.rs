@@ -26,34 +26,42 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Subscribe and wait for broker acknowledgement
-    let pkid = client
+    match client
         .subscribe("hello/world", QoS::AtMostOnce)
         .unwrap()
-        .blocking_recv()
-        .unwrap();
-    println!("Acknowledged Subscribe({pkid})");
+        .blocking_wait()
+    {
+        Ok(pkid) => println!("Acknowledged Sub({pkid})"),
+        Err(e) => println!("Subscription failed: {e:?}"),
+    }
 
     // Publish at all QoS levels and wait for broker acknowledgement
-    let pkid = client
+    match client
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .unwrap()
-        .blocking_recv()
-        .unwrap();
-    println!("Acknowledged Pub({pkid})");
+        .blocking_wait()
+    {
+        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+        Err(e) => println!("Publish failed: {e:?}"),
+    }
 
-    let pkid = client
+    match client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .unwrap()
-        .blocking_recv()
-        .unwrap();
-    println!("Acknowledged Pub({pkid})");
+        .blocking_wait()
+    {
+        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+        Err(e) => println!("Publish failed: {e:?}"),
+    }
 
-    let pkid = client
+    match client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap()
-        .blocking_recv()
-        .unwrap();
-    println!("Acknowledged Pub({pkid})");
+        .blocking_wait()
+    {
+        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+        Err(e) => println!("Publish failed: {e:?}"),
+    }
 
     // Spawn threads for each publish, use channel to notify result
     let (tx, rx) = bounded(1);
@@ -63,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let tx_clone = tx.clone();
     thread::spawn(move || {
-        let res = future.blocking_recv();
+        let res = future.blocking_wait();
         tx_clone.send(res).unwrap()
     });
 
@@ -72,7 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let tx_clone = tx.clone();
     thread::spawn(move || {
-        let res = future.blocking_recv();
+        let res = future.blocking_wait();
         tx_clone.send(res).unwrap()
     });
 
@@ -80,12 +88,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap();
     thread::spawn(move || {
-        let res = future.blocking_recv();
+        let res = future.blocking_wait();
         tx.send(res).unwrap()
     });
 
-    while let Ok(Ok(pkid)) = rx.recv() {
-        println!("Acknowledged Pub({:?})", pkid);
+    while let Ok(res) = rx.recv() {
+        match res {
+            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Err(e) => println!("Publish failed: {e:?}"),
+        }
+    }
+
+    // Unsubscribe and wait for broker acknowledgement
+    match client.unsubscribe("hello/world").unwrap().blocking_wait() {
+        Ok(pkid) => println!("Acknowledged Unsub({pkid})"),
+        Err(e) => println!("Unsubscription failed: {e:?}"),
     }
 
     Ok(())
