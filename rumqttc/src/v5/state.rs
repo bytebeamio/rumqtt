@@ -269,7 +269,7 @@ impl MqttState {
             .any(|x| matches!(x, SubscribeReasonCode::Success(_)))
         {
             if let Some(tx) = self.ack_waiter[suback.pkid as usize].take() {
-                tx.resolve();
+                tx.resolve(suback.pkid);
             }
         }
 
@@ -293,7 +293,7 @@ impl MqttState {
 
         if unsuback.reasons.contains(&UnsubAckReason::Success) {
             if let Some(tx) = self.ack_waiter[unsuback.pkid as usize].take() {
-                tx.resolve();
+                tx.resolve(unsuback.pkid);
             }
         }
 
@@ -401,7 +401,7 @@ impl MqttState {
 
         if let Some(tx) = self.ack_waiter[puback.pkid as usize].take() {
             // Resolve promise for QoS 1
-            tx.resolve();
+            tx.resolve(puback.pkid);
         }
 
         self.inflight -= 1;
@@ -490,7 +490,7 @@ impl MqttState {
 
         if let Some(tx) = self.ack_waiter[pubcomp.pkid as usize].take() {
             // Resolve promise for QoS 2
-            tx.resolve();
+            tx.resolve(pubcomp.pkid);
         }
 
         self.outgoing_rel.set(pubcomp.pkid as usize, false);
@@ -577,7 +577,7 @@ impl MqttState {
         let event = Event::Outgoing(Outgoing::Publish(pkid));
         self.events.push_back(event);
         match (publish.qos, tx) {
-            (QoS::AtMostOnce, Some(tx)) => tx.resolve(),
+            (QoS::AtMostOnce, Some(tx)) => tx.resolve(0),
             (_, tx) => self.ack_waiter[publish.pkid as usize] = tx,
         }
 

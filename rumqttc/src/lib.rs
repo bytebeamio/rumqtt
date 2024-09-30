@@ -223,11 +223,12 @@ impl From<Unsubscribe> for Request {
     }
 }
 
-pub type AckPromise = oneshot::Receiver<()>;
+pub type Pkid = u16;
+pub type AckPromise = oneshot::Receiver<Pkid>;
 
 #[derive(Debug)]
 pub struct PromiseTx {
-    inner: oneshot::Sender<()>,
+    inner: oneshot::Sender<Pkid>,
 }
 
 impl PromiseTx {
@@ -237,8 +238,8 @@ impl PromiseTx {
         (PromiseTx { inner }, promise)
     }
 
-    fn resolve(self) {
-        if self.inner.send(()).is_err() {
+    fn resolve(self, pkid: Pkid) {
+        if self.inner.send(pkid).is_err() {
             trace!("Promise was drpped")
         }
     }
