@@ -28,38 +28,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Subscribe and wait for broker acknowledgement
-    client
+    let pkid = client
         .subscribe("hello/world", QoS::AtMostOnce)
         .await
         .unwrap()
         .await
         .unwrap();
-    println!("Acknowledged Subscribe");
+    println!("Acknowledged Subscribe({pkid})");
 
     // Publish at all QoS levels and wait for broker acknowledgement
-    client
+    let pkid = client
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .await
         .unwrap()
         .await
         .unwrap();
-    println!("Acknowledged Pub(1)");
+    println!("Acknowledged Pub({pkid})");
 
-    client
+    let pkid = client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .await
         .unwrap()
         .await
         .unwrap();
-    println!("Acknowledged Pub(2)");
+    println!("Acknowledged Pub({pkid})");
 
-    client
+    let pkid = client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .await
         .unwrap()
         .await
         .unwrap();
-    println!("Acknowledged Pub(3)");
+    println!("Acknowledged Pub({pkid})");
 
     // Publish and spawn wait for notification
     let mut set = JoinSet::new();
@@ -68,22 +68,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .await
         .unwrap();
-    set.spawn(async { future.await.map(|_| 1) });
+    set.spawn(async { future.await });
 
     let future = client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .await
         .unwrap();
-    set.spawn(async { future.await.map(|_| 2) });
+    set.spawn(async { future.await });
 
     let future = client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .await
         .unwrap();
-    set.spawn(async { future.await.map(|_| 3) });
+    set.spawn(async { future.await });
 
-    while let Some(res) = set.join_next().await {
-        println!("Acknowledged = {:?}", res?);
+    while let Some(Ok(Ok(pkid))) = set.join_next().await {
+        println!("Acknowledged Pub({pkid})");
     }
 
     Ok(())

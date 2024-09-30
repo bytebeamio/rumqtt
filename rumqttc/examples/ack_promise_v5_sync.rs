@@ -26,34 +26,34 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Subscribe and wait for broker acknowledgement
-    client
+    let pkid = client
         .subscribe("hello/world", QoS::AtMostOnce)
         .unwrap()
         .blocking_recv()
         .unwrap();
-    println!("Acknowledged Subscribe");
+    println!("Acknowledged Subscribe({pkid})");
 
     // Publish at all QoS levels and wait for broker acknowledgement
-    client
+    let pkid = client
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
         .unwrap()
         .blocking_recv()
         .unwrap();
-    println!("Acknowledged Pub(1)");
+    println!("Acknowledged Pub({pkid})");
 
-    client
+    let pkid = client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .unwrap()
         .blocking_recv()
         .unwrap();
-    println!("Acknowledged Pub(2)");
+    println!("Acknowledged Pub({pkid})");
 
-    client
+    let pkid = client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap()
         .blocking_recv()
         .unwrap();
-    println!("Acknowledged Pub(3)");
+    println!("Acknowledged Pub({pkid})");
 
     // Spawn threads for each publish, use channel to notify result
     let (tx, rx) = bounded(1);
@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let tx_clone = tx.clone();
     thread::spawn(move || {
-        let res = future.blocking_recv().map(|_| 1);
+        let res = future.blocking_recv();
         tx_clone.send(res).unwrap()
     });
 
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
     let tx_clone = tx.clone();
     thread::spawn(move || {
-        let res = future.blocking_recv().map(|_| 2);
+        let res = future.blocking_recv();
         tx_clone.send(res).unwrap()
     });
 
@@ -80,12 +80,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap();
     thread::spawn(move || {
-        let res = future.blocking_recv().map(|_| 3);
+        let res = future.blocking_recv();
         tx.send(res).unwrap()
     });
 
-    while let Ok(res) = rx.recv() {
-        println!("Acknowledged = {:?}", res?);
+    while let Ok(Ok(pkid)) = rx.recv() {
+        println!("Acknowledged Pub({:?})", pkid);
     }
 
     Ok(())
