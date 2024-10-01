@@ -225,6 +225,7 @@ impl From<Unsubscribe> for Request {
     }
 }
 
+/// Packet Identifier with which Publish/Subscribe/Unsubscribe packets are identified while inflight.
 pub type Pkid = u16;
 
 #[derive(Debug, thiserror::Error)]
@@ -235,6 +236,9 @@ pub enum PromiseError {
     Rejected { reason: String },
 }
 
+/// Resolves with [`Pkid`] used against packet when:
+/// 1. Packet is acknowldged by the broker, e.g. QoS 1/2 Publish, Subscribe and Unsubscribe
+/// 2. QoS 0 packet finishes processing in the [`EventLoop`]
 pub struct AckPromise {
     rx: oneshot::Receiver<Result<Pkid, PromiseError>>,
 }
