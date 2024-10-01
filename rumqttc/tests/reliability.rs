@@ -591,7 +591,7 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
 
 #[tokio::test]
 async fn resolve_on_qos0_before_write_to_tcp_buffer() {
-    let options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3005);
     let (client, mut eventloop) = AsyncClient::new(options, 5);
 
     task::spawn(async move {
@@ -609,7 +609,7 @@ async fn resolve_on_qos0_before_write_to_tcp_buffer() {
         }
     });
 
-    let mut broker = Broker::new(3004, 0, false).await;
+    let mut broker = Broker::new(3005, 0, false).await;
 
     let token = client
         .publish("hello/world", QoS::AtMostOnce, false, [1; 1])
@@ -645,7 +645,7 @@ async fn resolve_on_qos0_before_write_to_tcp_buffer() {
 
 #[tokio::test]
 async fn resolve_on_qos1_ack_from_broker() {
-    let options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3006);
     let (client, mut eventloop) = AsyncClient::new(options, 5);
 
     task::spawn(async move {
@@ -663,7 +663,7 @@ async fn resolve_on_qos1_ack_from_broker() {
         }
     });
 
-    let mut broker = Broker::new(3004, 0, false).await;
+    let mut broker = Broker::new(3006, 0, false).await;
 
     let mut token = client
         .publish("hello/world", QoS::AtLeastOnce, false, [1; 1])
@@ -710,7 +710,7 @@ async fn resolve_on_qos1_ack_from_broker() {
 
 #[tokio::test]
 async fn resolve_on_qos2_ack_from_broker() {
-    let options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3007);
     let (client, mut eventloop) = AsyncClient::new(options, 5);
 
     task::spawn(async move {
@@ -728,7 +728,7 @@ async fn resolve_on_qos2_ack_from_broker() {
         }
     });
 
-    let mut broker = Broker::new(3004, 0, false).await;
+    let mut broker = Broker::new(3007, 0, false).await;
 
     let mut token = client
         .publish("hello/world", QoS::ExactlyOnce, false, [1; 1])
