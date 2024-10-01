@@ -290,6 +290,27 @@ impl PromiseTx {
     }
 }
 
+pub struct Pending<R> {
+    pub request: R,
+    promise_tx: Option<PromiseTx>,
+}
+
+impl<R> Pending<R> {
+    fn new(request: R, promise_tx: PromiseTx) -> Self {
+        Self {
+            request,
+            promise_tx: Some(promise_tx),
+        }
+    }
+
+    fn no_promises(request: R) -> Self {
+        Self {
+            request,
+            promise_tx: None,
+        }
+    }
+}
+
 /// Transport methods. Defaults to TCP.
 #[derive(Clone)]
 pub enum Transport {

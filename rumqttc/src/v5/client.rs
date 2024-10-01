@@ -8,7 +8,7 @@ use super::mqttbytes::v5::{
 };
 use super::mqttbytes::QoS;
 use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::{valid_filter, valid_topic, AckPromise, PromiseTx};
+use crate::{valid_filter, valid_topic, AckPromise, Pending, PromiseTx};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
@@ -25,15 +25,15 @@ pub enum ClientError {
     TryRequest(Request),
 }
 
-impl From<SendError<(Request, Option<PromiseTx>)>> for ClientError {
-    fn from(e: SendError<(Request, Option<PromiseTx>)>) -> Self {
-        Self::Request(e.into_inner().0)
+impl From<SendError<Pending<Request>>> for ClientError {
+    fn from(e: SendError<Pending<Request>>) -> Self {
+        Self::Request(e.into_inner().request)
     }
 }
 
-impl From<TrySendError<(Request, Option<PromiseTx>)>> for ClientError {
-    fn from(e: TrySendError<(Request, Option<PromiseTx>)>) -> Self {
-        Self::TryRequest(e.into_inner().0)
+impl From<TrySendError<Pending<Request>>> for ClientError {
+    fn from(e: TrySendError<Pending<Request>>) -> Self {
+        Self::TryRequest(e.into_inner().request)
     }
 }
 
@@ -46,7 +46,7 @@ impl From<TrySendError<(Request, Option<PromiseTx>)>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<(Request, Option<PromiseTx>)>,
+    request_tx: Sender<Pending<Request>>,
 }
 
 impl AsyncClient {
@@ -66,7 +66,7 @@ impl AsyncClient {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_senders(request_tx: Sender<(Request, Option<PromiseTx>)>) -> AsyncClient {
+    pub fn from_senders(request_tx: Sender<Pending<Request>>) -> AsyncClient {
         AsyncClient { request_tx }
     }
 
@@ -87,12 +87,12 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
         self.request_tx
-            .send_async((publish, Some(promise_tx)))
+            .send_async(Pending::new(request, promise_tx))
             .await?;
 
         Ok(promise)
@@ -145,11 +145,12 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.try_send((publish, Some(promise_tx)))?;
+        self.request_tx
+            .try_send(Pending::new(request, promise_tx))?;
 
         Ok(promise)
     }
@@ -188,7 +189,9 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_tx.send_async((ack, None)).await?;
+            self.request_tx
+                .send_async(Pending::no_promises(ack))
+                .await?;
         }
 
         Ok(())
@@ -198,7 +201,7 @@ impl AsyncClient {
     pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
         let ack = get_ack_req(publish);
         if let Some(ack) = ack {
-            self.request_tx.try_send((ack, None))?;
+            self.request_tx.try_send(Pending::no_promises(ack))?;
         }
 
         Ok(())
@@ -220,9 +223,9 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         self.request_tx
-            .send_async((publish, Some(promise_tx)))
+            .send_async(Pending::new(request, promise_tx))
             .await?;
 
         Ok(promise)
@@ -271,7 +274,7 @@ impl AsyncClient {
             return Err(ClientError::Request(subscribe.into()));
         }
         self.request_tx
-            .send_async((subscribe.into(), Some(promise_tx)))
+            .send_async(Pending::new(subscribe.into(), promise_tx))
             .await?;
 
         Ok(promise)
@@ -308,7 +311,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(subscribe.into()));
         }
         self.request_tx
-            .try_send((subscribe.into(), Some(promise_tx)))?;
+            .try_send(Pending::new(subscribe.into(), promise_tx))?;
 
         Ok(promise)
     }
@@ -345,7 +348,7 @@ impl AsyncClient {
             return Err(ClientError::Request(subscribe.into()));
         }
         self.request_tx
-            .send_async((subscribe.into(), Some(promise_tx)))
+            .send_async(Pending::new(subscribe.into(), promise_tx))
             .await?;
 
         Ok(promise)
@@ -384,7 +387,7 @@ impl AsyncClient {
             return Err(ClientError::TryRequest(subscribe.into()));
         }
         self.request_tx
-            .try_send((subscribe.into(), Some(promise_tx)))?;
+            .try_send(Pending::new(subscribe.into(), promise_tx))?;
 
         Ok(promise)
     }
@@ -417,7 +420,7 @@ impl AsyncClient {
         let unsubscribe = Unsubscribe::new(topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx
-            .send_async((request, Some(promise_tx)))
+            .send_async(Pending::new(request, promise_tx))
             .await?;
 
         Ok(promise)
@@ -444,7 +447,8 @@ impl AsyncClient {
         let (promise_tx, promise) = PromiseTx::new();
         let unsubscribe = Unsubscribe::new(topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.try_send((request, Some(promise_tx)))?;
+        self.request_tx
+            .try_send(Pending::new(request, promise_tx))?;
 
         Ok(promise)
     }
@@ -464,7 +468,9 @@ impl AsyncClient {
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.send_async((request, None)).await?;
+        self.request_tx
+            .send_async(Pending::no_promises(request))
+            .await?;
 
         Ok(())
     }
@@ -472,7 +478,7 @@ impl AsyncClient {
     /// Attempts to send a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect;
-        self.request_tx.try_send((request, None))?;
+        self.request_tx.try_send(Pending::no_promises(request))?;
 
         Ok(())
     }
@@ -523,7 +529,7 @@ impl Client {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<(Request, Option<PromiseTx>)>) -> Client {
+    pub fn from_sender(request_tx: Sender<Pending<Request>>) -> Client {
         Client {
             client: AsyncClient::from_senders(request_tx),
         }
@@ -546,11 +552,14 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload, properties);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
-        self.client.request_tx.send((publish, Some(promise_tx)))?;
+        self.client.request_tx.send(Pending {
+            request,
+            promise_tx: Some(promise_tx),
+        })?;
 
         Ok(promise)
     }
@@ -619,7 +628,7 @@ impl Client {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.client.request_tx.send((ack, None))?;
+            self.client.request_tx.send(Pending::no_promises(ack))?;
         }
 
         Ok(())
@@ -645,7 +654,7 @@ impl Client {
         }
         self.client
             .request_tx
-            .send((subscribe.into(), Some(promise_tx)))?;
+            .send(Pending::new(subscribe.into(), promise_tx))?;
 
         Ok(promise)
     }
@@ -702,7 +711,7 @@ impl Client {
         }
         self.client
             .request_tx
-            .send((subscribe.into(), Some(promise_tx)))?;
+            .send(Pending::new(subscribe.into(), promise_tx))?;
 
         Ok(promise)
     }
@@ -753,7 +762,9 @@ impl Client {
         let (promise_tx, promise) = PromiseTx::new();
         let unsubscribe = Unsubscribe::new(topic, properties);
         let request = Request::Unsubscribe(unsubscribe);
-        self.client.request_tx.send((request, Some(promise_tx)))?;
+        self.client
+            .request_tx
+            .send(Pending::new(request, promise_tx))?;
 
         Ok(promise)
     }
@@ -788,7 +799,9 @@ impl Client {
     pub fn disconnect(&self) -> Result<AckPromise, ClientError> {
         let (promise_tx, promise) = PromiseTx::new();
         let request = Request::Disconnect;
-        self.client.request_tx.send((request, Some(promise_tx)))?;
+        self.client
+            .request_tx
+            .send(Pending::new(request, promise_tx))?;
 
         Ok(promise)
     }

@@ -1,4 +1,4 @@
-use crate::PromiseTx;
+use crate::{Pending, PromiseTx};
 
 use super::mqttbytes::v5::{
     ConnAck, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
@@ -146,22 +146,28 @@ impl MqttState {
     }
 
     /// Returns inflight outgoing packets and clears internal queues
-    pub fn clean(&mut self) -> Vec<(Request, Option<PromiseTx>)> {
+    pub fn clean(&mut self) -> Vec<Pending<Request>> {
         let mut pending = Vec::with_capacity(100);
         // remove and collect pending publishes
         for publish in self.outgoing_pub.iter_mut() {
             if let Some(publish) = publish.take() {
-                let tx = self.ack_waiter[publish.pkid as usize].take();
+                let promise_tx = self.ack_waiter[publish.pkid as usize].take();
                 let request = Request::Publish(publish);
-                pending.push((request, tx));
+                pending.push(Pending {
+                    request,
+                    promise_tx,
+                });
             }
         }
 
         // remove and collect pending releases
         for pkid in self.outgoing_rel.ones() {
-            let tx = self.ack_waiter[pkid].take();
+            let promise_tx = self.ack_waiter[pkid].take();
             let request = Request::PubRel(PubRel::new(pkid as u16, None));
-            pending.push((request, tx));
+            pending.push(Pending {
+                request,
+                promise_tx,
+            });
         }
         self.outgoing_rel.clear();
 
@@ -182,14 +188,18 @@ impl MqttState {
     /// be put on to the network by the eventloop
     pub fn handle_outgoing_packet(
         &mut self,
-        request: Request,
-        tx: Option<PromiseTx>,
+        Pending {
+            request,
+            promise_tx,
+        }: Pending<Request>,
     ) -> Result<Option<Packet>, StateError> {
         let packet = match request {
-            Request::Publish(publish) => self.outgoing_publish(publish, tx)?,
+            Request::Publish(publish) => self.outgoing_publish(publish, promise_tx)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
-            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe, tx)?,
-            Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe, tx)?,
+            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe, promise_tx)?,
+            Request::Unsubscribe(unsubscribe) => {
+                self.outgoing_unsubscribe(unsubscribe, promise_tx)?
+            }
             Request::PingReq => self.outgoing_ping()?,
             Request::Disconnect => {
                 self.outgoing_disconnect(DisconnectReasonCode::NormalDisconnection)?
@@ -763,6 +773,8 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
+    use crate::Pending;
+
     use super::mqttbytes::v5::*;
     use super::mqttbytes::*;
     use super::{Event, Incoming, Outgoing, Request};
@@ -1067,8 +1079,11 @@ mod test {
 
         // network activity other than pingresp
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
-        mqtt.handle_outgoing_packet(Request::Publish(publish), None)
-            .unwrap();
+        mqtt.handle_outgoing_packet(Pending {
+            request: Request::Publish(publish),
+            promise_tx: None,
+        })
+        .unwrap();
         mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1, None)))
             .unwrap();
 

@@ -1,5 +1,5 @@
 use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, NetworkOptions, Packet, PromiseTx, Request, StateError};
+use crate::{Incoming, MqttState, NetworkOptions, Packet, Pending, Request, StateError};
 use crate::{MqttOptions, Outgoing};
 
 use crate::framed::AsyncReadWrite;
@@ -75,11 +75,11 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<(Request, Option<PromiseTx>)>,
+    requests_rx: Receiver<Pending<Request>>,
     /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<(Request, Option<PromiseTx>)>,
+    pub(crate) requests_tx: Sender<Pending<Request>>,
     /// Pending packets from last session
-    pub pending: VecDeque<(Request, Option<PromiseTx>)>,
+    pub pending: VecDeque<Pending<Request>>,
     /// Network connection to the broker
     pub network: Option<Network>,
     /// Keep alive time
@@ -132,7 +132,7 @@ impl EventLoop {
         // drain requests from channel which weren't yet received
         let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
 
-        requests_in_channel.retain(|(request, _)| {
+        requests_in_channel.retain(|Pending { request, .. }| {
             match request {
                 Request::PubAck(_) => false, // Wait for publish retransmission, else the broker could be confused by an unexpected ack
                 _ => true,
@@ -184,10 +184,10 @@ impl EventLoop {
     /// Select on network and requests and generate keepalive pings when necessary
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
+        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
         // let await_acks = self.state.await_acks;
         let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
         let collision = self.state.collision.is_some();
-        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -241,8 +241,8 @@ impl EventLoop {
                 &self.requests_rx,
                 self.mqtt_options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
-                Ok((request, tx)) => {
-                    if let Some(outgoing) = self.state.handle_outgoing_packet(request, tx)? {
+                Ok(pending) => {
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(pending)? {
                         network.write(outgoing).await?;
                     }
                     match time::timeout(network_timeout, network.flush()).await {
@@ -257,19 +257,35 @@ impl EventLoop {
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = self.keepalive_timeout.as_mut().unwrap_or(&mut no_sleep),
                 if self.keepalive_timeout.is_some() && !self.mqtt_options.keep_alive.is_zero() => {
-                let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
-
-                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq(PingReq), None)? {
-                    network.write(outgoing).await?;
-                }
-                match time::timeout(network_timeout, network.flush()).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
+                self.handle_timeout().await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), ConnectionError> {
+        let network = self.network.as_mut().unwrap();
+        let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
+
+        // Set to next timeout instant
+        self.keepalive_timeout
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .reset(Instant::now() + self.mqtt_options.keep_alive);
+
+        if let Some(outgoing) = self
+            .state
+            .handle_outgoing_packet(Pending::no_promises(Request::PingReq(PingReq)))?
+        {
+            network.write(outgoing).await?;
+        }
+        match time::timeout(network_timeout, network.flush()).await {
+            Ok(inner) => inner?,
+            Err(_) => return Err(ConnectionError::FlushTimeout),
+        };
+
+        Ok(())
     }
 
     pub fn network_options(&self) -> NetworkOptions {
@@ -282,10 +298,10 @@ impl EventLoop {
     }
 
     async fn next_request(
-        pending: &mut VecDeque<(Request, Option<PromiseTx>)>,
-        rx: &Receiver<(Request, Option<PromiseTx>)>,
+        pending: &mut VecDeque<Pending<Request>>,
+        rx: &Receiver<Pending<Request>>,
         pending_throttle: Duration,
-    ) -> Result<(Request, Option<PromiseTx>), ConnectionError> {
+    ) -> Result<Pending<Request>, ConnectionError> {
         if !pending.is_empty() {
             time::sleep(pending_throttle).await;
             // We must call .pop_front() AFTER sleep() otherwise we would have
