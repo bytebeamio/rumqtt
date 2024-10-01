@@ -290,12 +290,14 @@ impl PromiseTx {
     }
 }
 
+/// Outgoing requests pending processing
 pub struct Pending<R> {
     pub request: R,
     promise_tx: Option<PromiseTx>,
 }
 
 impl<R> Pending<R> {
+    // Pending request with an associated promise
     fn new(request: R, promise_tx: PromiseTx) -> Self {
         Self {
             request,
@@ -303,6 +305,7 @@ impl<R> Pending<R> {
         }
     }
 
+    // Pending request without an associated promise
     fn no_promises(request: R) -> Self {
         Self {
             request,
