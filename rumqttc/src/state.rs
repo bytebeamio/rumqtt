@@ -73,7 +73,7 @@ pub struct MqttState {
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
     /// Waiters for publish/subscribe/unsubscribe acknowledgements
-    pub ack_waiter: Vec<Option<PromiseTx>>,
+    ack_waiter: Vec<Option<PromiseTx>>,
 }
 
 impl MqttState {

@@ -113,7 +113,7 @@ pub struct MqttState {
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
     /// Waiters for publish/subscribe/unsubscribe acknowledgements
-    pub ack_waiter: Vec<Option<PromiseTx>>,
+    ack_waiter: Vec<Option<PromiseTx>>,
 }
 
 impl MqttState {
