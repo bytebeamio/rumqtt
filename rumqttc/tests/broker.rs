@@ -122,6 +122,18 @@ impl Broker {
         self.framed.write(packet).await.unwrap();
     }
 
+    /// Sends a publish record
+    pub async fn pubrec(&mut self, pkid: u16) {
+        let packet = Packet::PubRec(PubRec::new(pkid));
+        self.framed.write(packet).await.unwrap();
+    }
+
+    /// Sends a publish complete
+    pub async fn pubcomp(&mut self, pkid: u16) {
+        let packet = Packet::PubComp(PubComp::new(pkid));
+        self.framed.write(packet).await.unwrap();
+    }
+
     /// Sends an acknowledgement
     pub async fn pingresp(&mut self) {
         let packet = Packet::PingResp;

@@ -1,6 +1,9 @@
 use matches::assert_matches;
 use std::time::{Duration, Instant};
-use tokio::{task, time};
+use tokio::{
+    task,
+    time::{self, timeout},
+};
 
 mod broker;
 
@@ -584,4 +587,196 @@ async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly
         }
     });
     handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn resolve_on_qos0_before_write_to_tcp_buffer() {
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let (client, mut eventloop) = AsyncClient::new(options, 5);
+
+    task::spawn(async move {
+        let res = run(&mut eventloop, false).await;
+        if let Err(e) = res {
+            match e {
+                ConnectionError::FlushTimeout => {
+                    assert!(eventloop.network.is_none());
+                    println!("State is being clean properly");
+                }
+                _ => {
+                    println!("Couldn't fill the TCP send buffer to run this test properly. Try reducing the size of buffer.");
+                }
+            }
+        }
+    });
+
+    let mut broker = Broker::new(3004, 0, false).await;
+
+    let token = client
+        .publish("hello/world", QoS::AtMostOnce, false, [1; 1])
+        .await
+        .unwrap();
+
+    // Token can resolve as soon as it was processed by eventloop
+    assert_eq!(
+        timeout(Duration::from_secs(1), token)
+            .await
+            .unwrap()
+            .unwrap(),
+        0
+    );
+
+    // Verify the packet still reached broker
+    // NOTE: this can't always be guaranteed
+    let Packet::Publish(Publish {
+        qos,
+        topic,
+        pkid,
+        payload,
+        ..
+    }) = broker.read_packet().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "hello/world");
+    assert_eq!(qos, QoS::AtMostOnce);
+    assert_eq!(payload.to_vec(), [1; 1]);
+    assert_eq!(pkid, 0);
+}
+
+#[tokio::test]
+async fn resolve_on_qos1_ack_from_broker() {
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let (client, mut eventloop) = AsyncClient::new(options, 5);
+
+    task::spawn(async move {
+        let res = run(&mut eventloop, false).await;
+        if let Err(e) = res {
+            match e {
+                ConnectionError::FlushTimeout => {
+                    assert!(eventloop.network.is_none());
+                    println!("State is being clean properly");
+                }
+                _ => {
+                    println!("Couldn't fill the TCP send buffer to run this test properly. Try reducing the size of buffer.");
+                }
+            }
+        }
+    });
+
+    let mut broker = Broker::new(3004, 0, false).await;
+
+    let mut token = client
+        .publish("hello/world", QoS::AtLeastOnce, false, [1; 1])
+        .await
+        .unwrap();
+
+    // Token shouldn't resolve before reaching broker
+    timeout(Duration::from_secs(1), &mut token)
+        .await
+        .unwrap_err();
+
+    let Packet::Publish(Publish {
+        qos,
+        topic,
+        pkid,
+        payload,
+        ..
+    }) = broker.read_packet().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "hello/world");
+    assert_eq!(qos, QoS::AtLeastOnce);
+    assert_eq!(payload.to_vec(), [1; 1]);
+    assert_eq!(pkid, 1);
+
+    // Token shouldn't resolve until packet is acked
+    timeout(Duration::from_secs(1), &mut token)
+        .await
+        .unwrap_err();
+
+    // Finally ack the packet
+    broker.ack(1).await;
+
+    // Token shouldn't resolve until packet is acked
+    assert_eq!(
+        timeout(Duration::from_secs(1), &mut token)
+            .await
+            .unwrap()
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn resolve_on_qos2_ack_from_broker() {
+    let options = MqttOptions::new("dummy", "127.0.0.1", 3004);
+    let (client, mut eventloop) = AsyncClient::new(options, 5);
+
+    task::spawn(async move {
+        let res = run(&mut eventloop, false).await;
+        if let Err(e) = res {
+            match e {
+                ConnectionError::FlushTimeout => {
+                    assert!(eventloop.network.is_none());
+                    println!("State is being clean properly");
+                }
+                _ => {
+                    println!("Couldn't fill the TCP send buffer to run this test properly. Try reducing the size of buffer.");
+                }
+            }
+        }
+    });
+
+    let mut broker = Broker::new(3004, 0, false).await;
+
+    let mut token = client
+        .publish("hello/world", QoS::ExactlyOnce, false, [1; 1])
+        .await
+        .unwrap();
+
+    // Token shouldn't resolve before reaching broker
+    timeout(Duration::from_secs(1), &mut token)
+        .await
+        .unwrap_err();
+
+    let Packet::Publish(Publish {
+        qos,
+        topic,
+        pkid,
+        payload,
+        ..
+    }) = broker.read_packet().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "hello/world");
+    assert_eq!(qos, QoS::ExactlyOnce);
+    assert_eq!(payload.to_vec(), [1; 1]);
+    assert_eq!(pkid, 1);
+
+    // Token shouldn't resolve till publish recorded
+    timeout(Duration::from_secs(1), &mut token)
+        .await
+        .unwrap_err();
+
+    // Record the publish message
+    broker.pubrec(1).await;
+
+    // Token shouldn't resolve till publish complete
+    timeout(Duration::from_secs(1), &mut token)
+        .await
+        .unwrap_err();
+
+    // Complete the publish message ack
+    broker.pubcomp(1).await;
+
+    // Finally the publish is QoS2 acked
+    assert_eq!(
+        timeout(Duration::from_secs(1), &mut token)
+            .await
+            .unwrap()
+            .unwrap(),
+        1
+    );
 }
