@@ -266,7 +266,7 @@ impl AckPromise {
 }
 
 #[derive(Debug)]
-pub struct PromiseTx {
+struct PromiseTx {
     tx: oneshot::Sender<Result<Pkid, PromiseError>>,
 }
 
@@ -295,6 +295,7 @@ impl PromiseTx {
 }
 
 /// Outgoing requests pending processing
+#[derive(Debug)]
 pub struct Pending<R> {
     pub request: R,
     promise_tx: Option<PromiseTx>,
