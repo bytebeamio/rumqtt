@@ -136,9 +136,7 @@ type RequestModifierFn = Arc<
 #[cfg(feature = "proxy")]
 mod proxy;
 
-pub use client::{
-    AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
-};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
@@ -147,7 +145,7 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, oneshot::error::TryRecvError};
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
 #[cfg(feature = "use-native-tls")]
@@ -230,6 +228,8 @@ pub type Pkid = u16;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PromiseError {
+    #[error("Sender has nothing to send instantly")]
+    Waiting,
     #[error("Sender side of channel was dropped")]
     Disconnected,
     #[error("Broker rejected the request, reason: {reason}")]
@@ -262,6 +262,21 @@ impl AckPromise {
         self.rx
             .blocking_recv()
             .map_err(|_| PromiseError::Disconnected)?
+    }
+
+    /// Attempts to check if the broker acknowledged the packet, without blocking the current thread.
+    ///
+    /// Returns [`PromiseError::Waiting`] if the packet wasn't acknowledged yet.
+    ///
+    /// Multiple calls to this functions can fail with [`PromiseError::Disconnected`] if the promise
+    /// has already been resolved.
+    pub fn try_resolve(&mut self) -> Result<Pkid, PromiseError> {
+        match self.rx.try_recv() {
+            Ok(Ok(p)) => Ok(p),
+            Ok(Err(e)) => Err(e),
+            Err(TryRecvError::Empty) => Err(PromiseError::Waiting),
+            Err(TryRecvError::Closed) => Err(PromiseError::Disconnected),
+        }
     }
 }
 

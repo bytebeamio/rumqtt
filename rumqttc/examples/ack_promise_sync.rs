@@ -1,7 +1,7 @@
 use flume::bounded;
-use rumqttc::{Client, MqttOptions, QoS};
+use rumqttc::{Client, MqttOptions, PromiseError, QoS};
 use std::error::Error;
-use std::thread;
+use std::thread::{self, sleep};
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match client
         .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
         .unwrap()
-        .blocking_wait()
+        .try_resolve()
     {
         Ok(pkid) => println!("Acknowledged Pub({pkid})"),
         Err(e) => println!("Publish failed: {e:?}"),
@@ -84,12 +84,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         tx_clone.send(res).unwrap()
     });
 
-    let future = client
+    let mut future = client
         .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
         .unwrap();
-    thread::spawn(move || {
-        let res = future.blocking_wait();
-        tx.send(res).unwrap()
+    thread::spawn(move || loop {
+        match future.try_resolve() {
+            Err(PromiseError::Waiting) => {
+                println!("Promise yet to resolve, retrying");
+                sleep(Duration::from_secs(1));
+            }
+            res => {
+                tx.send(res).unwrap();
+                break;
+            }
+        }
     });
 
     while let Ok(res) = rx.recv() {
