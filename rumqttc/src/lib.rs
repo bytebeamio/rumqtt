@@ -258,6 +258,10 @@ impl Future for AckPromise {
 }
 
 impl AckPromise {
+    /// Blocks on the current thread and waits till the packet is acknowledged by the broker.
+    ///
+    /// Returns [`PromiseError::Disconnected`] if the [`EventLoop`] was dropped(usually),
+    /// [`PromiseError::Rejected`] if the packet acknowledged but not accepted.
     pub fn blocking_wait(self) -> Result<Pkid, PromiseError> {
         self.rx
             .blocking_recv()
