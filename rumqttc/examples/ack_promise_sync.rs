@@ -5,9 +5,6 @@ use std::thread::{self, sleep};
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    pretty_env_logger::init();
-    // color_backtrace::install();
-
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
@@ -36,59 +33,43 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Publish at all QoS levels and wait for broker acknowledgement
-    match client
-        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
-        .unwrap()
-        .blocking_wait()
+    for (i, qos) in [QoS::AtMostOnce, QoS::AtLeastOnce, QoS::ExactlyOnce]
+        .into_iter()
+        .enumerate()
     {
-        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
-        Err(e) => println!("Publish failed: {e:?}"),
-    }
-
-    match client
-        .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
-        .unwrap()
-        .try_resolve()
-    {
-        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
-        Err(e) => println!("Publish failed: {e:?}"),
-    }
-
-    match client
-        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
-        .unwrap()
-        .blocking_wait()
-    {
-        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
-        Err(e) => println!("Publish failed: {e:?}"),
+        match client
+            .publish("hello/world", qos, false, vec![1; i])
+            .unwrap()
+            .blocking_wait()
+        {
+            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Err(e) => println!("Publish failed: {e:?}"),
+        }
     }
 
     // Spawn threads for each publish, use channel to notify result
     let (tx, rx) = bounded(1);
 
-    let future = client
-        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
-        .unwrap();
-    let tx_clone = tx.clone();
-    thread::spawn(move || {
-        let res = future.blocking_wait();
-        tx_clone.send(res).unwrap()
-    });
+    for (i, qos) in [QoS::AtMostOnce, QoS::AtLeastOnce, QoS::ExactlyOnce]
+        .into_iter()
+        .enumerate()
+    {
+        let token = client
+            .publish("hello/world", qos, false, vec![1; i])
+            .unwrap();
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let res = token.blocking_wait();
+            tx.send(res).unwrap()
+        });
+    }
 
-    let future = client
-        .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
-        .unwrap();
-    let tx_clone = tx.clone();
-    thread::spawn(move || {
-        let res = future.blocking_wait();
-        tx_clone.send(res).unwrap()
-    });
-
-    let mut future = client
-        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
+    // Try resolving a promise, if it is waiting to resolve, try again after a sleep of 1s
+    let mut token = client
+        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 4])
         .unwrap();
     thread::spawn(move || loop {
-        match future.try_resolve() {
+        match token.try_resolve() {
             Err(PromiseError::Waiting) => {
                 println!("Promise yet to resolve, retrying");
                 sleep(Duration::from_secs(1));

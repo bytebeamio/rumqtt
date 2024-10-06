@@ -6,9 +6,6 @@ use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
-    pretty_env_logger::init();
-    // color_backtrace::install();
-
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
@@ -39,56 +36,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Publish at all QoS levels and wait for broker acknowledgement
-    match client
-        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
-        .await
-        .unwrap()
-        .await
+    for (i, qos) in [QoS::AtMostOnce, QoS::AtLeastOnce, QoS::ExactlyOnce]
+        .into_iter()
+        .enumerate()
     {
-        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
-        Err(e) => println!("Publish failed: {e:?}"),
+        match client
+            .publish("hello/world", qos, false, vec![1; i])
+            .await
+            .unwrap()
+            .await
+        {
+            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Err(e) => println!("Publish failed: {e:?}"),
+        }
     }
 
-    match client
-        .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
-        .await
-        .unwrap()
-        .await
-    {
-        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
-        Err(e) => println!("Publish failed: {e:?}"),
-    }
-
-    match client
-        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
-        .await
-        .unwrap()
-        .await
-    {
-        Ok(pkid) => println!("Acknowledged Pub({pkid})"),
-        Err(e) => println!("Publish failed: {e:?}"),
-    }
-
-    // Publish and spawn wait for notification
+    // Publish with different QoS levels and spawn wait for notification
     let mut set = JoinSet::new();
-
-    let future = client
-        .publish("hello/world", QoS::AtMostOnce, false, vec![1; 1])
-        .await
-        .unwrap();
-    set.spawn(async { future.await });
-
-    let future = client
-        .publish("hello/world", QoS::AtLeastOnce, false, vec![1; 2])
-        .await
-        .unwrap();
-    set.spawn(async { future.await });
-
-    let future = client
-        .publish("hello/world", QoS::ExactlyOnce, false, vec![1; 3])
-        .await
-        .unwrap();
-    set.spawn(async { future.await });
+    for (i, qos) in [QoS::AtMostOnce, QoS::AtLeastOnce, QoS::ExactlyOnce]
+        .into_iter()
+        .enumerate()
+    {
+        let token = client
+            .publish("hello/world", qos, false, vec![1; i])
+            .await
+            .unwrap();
+        set.spawn(token);
+    }
 
     while let Some(Ok(res)) = set.join_next().await {
         match res {
