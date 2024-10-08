@@ -3,7 +3,7 @@ use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
 use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
-use crate::PromiseTx;
+use crate::Pending;
 
 use flume::{bounded, Receiver, Sender};
 use tokio::select;
@@ -74,11 +74,11 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<(Request, Option<PromiseTx>)>,
+    requests_rx: Receiver<Pending<Request>>,
     /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<(Request, Option<PromiseTx>)>,
+    pub(crate) requests_tx: Sender<Pending<Request>>,
     /// Pending packets from last session
-    pub pending: VecDeque<(Request, Option<PromiseTx>)>,
+    pub pending: VecDeque<Pending<Request>>,
     /// Network connection to the broker
     network: Option<Network>,
     /// Keep alive time
@@ -129,7 +129,7 @@ impl EventLoop {
         // drain requests from channel which weren't yet received
         let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
 
-        requests_in_channel.retain(|(request, _)| {
+        requests_in_channel.retain(|Pending { request, .. }| {
             match request {
                 Request::PubAck(_) => false, // Wait for publish retransmission, else the broker could be confused by an unexpected ack
                 _ => true,
@@ -224,8 +224,8 @@ impl EventLoop {
                 &self.requests_rx,
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
-                Ok((request, tx)) => {
-                    if let Some(outgoing) = self.state.handle_outgoing_packet(request, tx)? {
+                Ok(pending) => {
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(pending)? {
                         network.write(outgoing).await?;
                     }
                     network.flush().await?;
@@ -243,23 +243,38 @@ impl EventLoop {
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
             _ = self.keepalive_timeout.as_mut().unwrap() => {
-                let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
-
-                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq, None)? {
-                    network.write(outgoing).await?;
-                }
-                network.flush().await?;
+                self.handle_timeout().await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
     }
 
+    async fn handle_timeout(&mut self) -> Result<(), ConnectionError> {
+        let network = self.network.as_mut().unwrap();
+
+        // Set to next timeout instant
+        self.keepalive_timeout
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .reset(Instant::now() + self.options.keep_alive);
+
+        if let Some(outgoing) = self
+            .state
+            .handle_outgoing_packet(Pending::no_promises(Request::PingReq))?
+        {
+            network.write(outgoing).await?;
+        }
+        network.flush().await?;
+
+        Ok(())
+    }
+
     async fn next_request(
-        pending: &mut VecDeque<(Request, Option<PromiseTx>)>,
-        rx: &Receiver<(Request, Option<PromiseTx>)>,
+        pending: &mut VecDeque<Pending<Request>>,
+        rx: &Receiver<Pending<Request>>,
         pending_throttle: Duration,
-    ) -> Result<(Request, Option<PromiseTx>), ConnectionError> {
+    ) -> Result<Pending<Request>, ConnectionError> {
         if !pending.is_empty() {
             time::sleep(pending_throttle).await;
             // We must call .next() AFTER sleep() otherwise .next() would

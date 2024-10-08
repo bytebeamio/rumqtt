@@ -285,7 +285,7 @@ impl AckPromise {
 }
 
 #[derive(Debug)]
-pub struct PromiseTx {
+struct PromiseTx {
     tx: oneshot::Sender<Result<Pkid, PromiseError>>,
 }
 
@@ -309,6 +309,31 @@ impl PromiseTx {
             .is_err()
         {
             trace!("Promise was dropped")
+        }
+    }
+}
+
+/// Outgoing requests pending processing
+#[derive(Debug)]
+pub struct Pending<R> {
+    pub request: R,
+    promise_tx: Option<PromiseTx>,
+}
+
+impl<R> Pending<R> {
+    // Pending request with an associated promise
+    fn new(request: R, promise_tx: PromiseTx) -> Self {
+        Self {
+            request,
+            promise_tx: Some(promise_tx),
+        }
+    }
+
+    // Pending request without an associated promise
+    fn no_promises(request: R) -> Self {
+        Self {
+            request,
+            promise_tx: None,
         }
     }
 }
