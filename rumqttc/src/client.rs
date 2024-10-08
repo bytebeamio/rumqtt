@@ -3,9 +3,9 @@
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
+use crate::tokens::{NoResponse, Resolver, Token};
 use crate::{
-    valid_filter, valid_topic, AckPromise, ConnectionError, Event, EventLoop, MqttOptions,
-    PromiseTx, Request,
+    valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Pkid, Request,
 };
 
 use bytes::Bytes;
@@ -23,15 +23,15 @@ pub enum ClientError {
     TryRequest(Request),
 }
 
-impl From<SendError<(Request, Option<PromiseTx>)>> for ClientError {
-    fn from(e: SendError<(Request, Option<PromiseTx>)>) -> Self {
-        Self::Request(e.into_inner().0)
+impl From<SendError<Request>> for ClientError {
+    fn from(e: SendError<Request>) -> Self {
+        Self::Request(e.into_inner())
     }
 }
 
-impl From<TrySendError<(Request, Option<PromiseTx>)>> for ClientError {
-    fn from(e: TrySendError<(Request, Option<PromiseTx>)>) -> Self {
-        Self::TryRequest(e.into_inner().0)
+impl From<TrySendError<Request>> for ClientError {
+    fn from(e: TrySendError<Request>) -> Self {
+        Self::TryRequest(e.into_inner())
     }
 }
 
@@ -44,7 +44,7 @@ impl From<TrySendError<(Request, Option<PromiseTx>)>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<(Request, Option<PromiseTx>)>,
+    request_tx: Sender<Request>,
 }
 
 impl AsyncClient {
@@ -64,7 +64,7 @@ impl AsyncClient {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_senders(request_tx: Sender<(Request, Option<PromiseTx>)>) -> AsyncClient {
+    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
         AsyncClient { request_tx }
     }
 
@@ -75,24 +75,22 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<AckPromise, ClientError>
+    ) -> Result<Token<Pkid>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish, resolver);
         if !valid_topic(&topic) {
-            return Err(ClientError::Request(publish));
+            return Err(ClientError::Request(request));
         }
-        self.request_tx
-            .send_async((publish, Some(promise_tx)))
-            .await?;
+        self.request_tx.send_async(request).await?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
@@ -102,43 +100,44 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<AckPromise, ClientError>
+    ) -> Result<Token<Pkid>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let request = Request::Publish(publish, resolver);
         if !valid_topic(&topic) {
-            return Err(ClientError::TryRequest(publish));
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx.try_send((publish, Some(promise_tx)))?;
+        self.request_tx.try_send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        let ack = get_ack_req(publish);
-
+    pub async fn ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+        let (resolver, token) = Resolver::new();
+        let ack = get_ack_req(publish, resolver);
         if let Some(ack) = ack {
-            self.request_tx.send_async((ack, None)).await?;
+            self.request_tx.send_async(ack).await?;
         }
 
-        Ok(())
+        Ok(token)
     }
 
     /// Attempts to send a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        let ack = get_ack_req(publish);
+    pub fn try_ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+        let (resolver, token) = Resolver::new();
+        let ack = get_ack_req(publish, resolver);
         if let Some(ack) = ack {
-            self.request_tx.try_send((ack, None))?;
+            self.request_tx.try_send(ack)?;
         }
 
-        Ok(())
+        Ok(token)
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
@@ -148,19 +147,17 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<AckPromise, ClientError>
+    ) -> Result<Token<Pkid>, ClientError>
     where
         S: Into<String>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
-        self.request_tx
-            .send_async((publish, Some(promise_tx)))
-            .await?;
+        let request = Request::Publish(publish, resolver);
+        self.request_tx.send_async(request).await?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -168,17 +165,18 @@ impl AsyncClient {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
+    ) -> Result<Token<Pkid>, ClientError> {
+        let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new(topic, qos);
-        if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(subscribe.into()));
-        }
-        self.request_tx
-            .send_async((subscribe.into(), Some(promise_tx)))
-            .await?;
 
-        Ok(promise)
+        let is_valid = subscribe_has_valid_filters(&subscribe);
+        let request = Request::Subscribe(subscribe, resolver);
+        if !is_valid {
+            return Err(ClientError::Request(request));
+        }
+        self.request_tx.send_async(request).await?;
+
+        Ok(token)
     }
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
@@ -186,94 +184,101 @@ impl AsyncClient {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
+    ) -> Result<Token<Pkid>, ClientError> {
+        let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new(topic, qos);
-        if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::TryRequest(subscribe.into()));
+        let is_valid = subscribe_has_valid_filters(&subscribe);
+        let request = Request::Subscribe(subscribe, resolver);
+        if !is_valid {
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx
-            .try_send((subscribe.into(), Some(promise_tx)))?;
+        self.request_tx.try_send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new_many(topics);
-        if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(subscribe.into()));
-        }
-        self.request_tx
-            .send_async((subscribe.into(), Some(promise_tx)))
-            .await?;
 
-        Ok(promise)
+        let is_valid = subscribe_has_valid_filters(&subscribe);
+        let request = Request::Subscribe(subscribe, resolver);
+        if !is_valid {
+            return Err(ClientError::Request(request));
+        }
+        self.request_tx.send_async(request).await?;
+
+        Ok(token)
     }
 
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new_many(topics);
-        if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::TryRequest(subscribe.into()));
+        let is_valid = subscribe_has_valid_filters(&subscribe);
+        let request = Request::Subscribe(subscribe, resolver);
+        if !is_valid {
+            return Err(ClientError::TryRequest(request));
         }
-        self.request_tx
-            .try_send((subscribe.into(), Some(promise_tx)))?;
+        self.request_tx.try_send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
+    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+        let (resolver, token) = Resolver::new();
         let unsubscribe = Unsubscribe::new(topic.into());
-        self.request_tx
-            .send_async((unsubscribe.into(), Some(promise_tx)))
-            .await?;
+        let request = Request::Unsubscribe(unsubscribe, resolver);
+        self.request_tx.send_async(request).await?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+        let (resolver, token) = Resolver::new();
         let unsubscribe = Unsubscribe::new(topic.into());
-        self.request_tx
-            .try_send((unsubscribe.into(), Some(promise_tx)))?;
+        let request = Request::Unsubscribe(unsubscribe, resolver);
+        self.request_tx.try_send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub async fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect(Disconnect);
-        self.request_tx.send_async((request, None)).await?;
+    pub async fn disconnect(&self) -> Result<Token<NoResponse>, ClientError> {
+        let (resolver, token) = Resolver::new();
+        let request = Request::Disconnect(resolver);
+        self.request_tx.send_async(request).await?;
 
-        Ok(())
+        Ok(token)
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect(Disconnect);
-        self.request_tx.try_send((request, None))?;
+    pub fn try_disconnect(&self) -> Result<Token<NoResponse>, ClientError> {
+        let (resolver, token) = Resolver::new();
+        let request = Request::Disconnect(resolver);
+        self.request_tx.try_send(request)?;
 
-        Ok(())
+        Ok(token)
     }
 }
 
-fn get_ack_req(publish: &Publish) -> Option<Request> {
+fn get_ack_req(publish: &Publish, resolver: Resolver<()>) -> Option<Request> {
     let ack = match publish.qos {
-        QoS::AtMostOnce => return None,
-        QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid)),
-        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid)),
+        QoS::AtMostOnce => {
+            resolver.resolve(());
+            return None;
+        }
+        QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid), resolver),
+        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid), resolver),
     };
     Some(ack)
 }
@@ -313,7 +318,7 @@ impl Client {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<(Request, Option<PromiseTx>)>) -> Client {
+    pub fn from_sender(request_tx: Sender<Request>) -> Client {
         Client {
             client: AsyncClient::from_senders(request_tx),
         }
@@ -326,22 +331,22 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<AckPromise, ClientError>
+    ) -> Result<Token<Pkid>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
-        let publish = Request::Publish(publish);
+        let publish = Request::Publish(publish, resolver);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.client.request_tx.send((publish, Some(promise_tx)))?;
+        self.client.request_tx.send(publish)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     pub fn try_publish<S, V>(
@@ -350,7 +355,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<AckPromise, ClientError>
+    ) -> Result<Token<Pkid>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -359,18 +364,18 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn ack(&self, publish: &Publish) -> Result<(), ClientError> {
-        let ack = get_ack_req(publish);
-
+    pub fn ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+        let (resolver, token) = Resolver::new();
+        let ack = get_ack_req(publish, resolver);
         if let Some(ack) = ack {
-            self.client.request_tx.send((ack, None))?;
+            self.client.request_tx.send(ack)?;
         }
 
-        Ok(())
+        Ok(token)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<(), ClientError> {
+    pub fn try_ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
         self.client.try_ack(publish)
     }
 
@@ -379,17 +384,17 @@ impl Client {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
+    ) -> Result<Token<Pkid>, ClientError> {
+        let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new(topic, qos);
-        if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(subscribe.into()));
+        let is_valid = subscribe_has_valid_filters(&subscribe);
+        let request = Request::Subscribe(subscribe, resolver);
+        if !is_valid {
+            return Err(ClientError::Request(request));
         }
-        self.client
-            .request_tx
-            .send((subscribe.into(), Some(promise_tx)))?;
+        self.client.request_tx.send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -397,28 +402,29 @@ impl Client {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<AckPromise, ClientError> {
+    ) -> Result<Token<Pkid>, ClientError> {
         self.client.try_subscribe(topic, qos)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
+    pub fn subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
-        let (promise_tx, promise) = PromiseTx::new();
+        let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new_many(topics);
-        if !subscribe_has_valid_filters(&subscribe) {
-            return Err(ClientError::Request(subscribe.into()));
-        }
-        self.client
-            .request_tx
-            .send((subscribe.into(), Some(promise_tx)))?;
 
-        Ok(promise)
+        let is_valid = subscribe_has_valid_filters(&subscribe);
+        let request = Request::Subscribe(subscribe, resolver);
+        if !is_valid {
+            return Err(ClientError::Request(request));
+        }
+        self.client.request_tx.send(request)?;
+
+        Ok(token)
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<AckPromise, ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -426,31 +432,31 @@ impl Client {
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
+    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+        let (resolver, token) = Resolver::new();
         let unsubscribe = Unsubscribe::new(topic.into());
-        let request = Request::Unsubscribe(unsubscribe);
-        self.client.request_tx.send((request, Some(promise_tx)))?;
+        let request = Request::Unsubscribe(unsubscribe, resolver);
+        self.client.request_tx.send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<AckPromise, ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
         self.client.try_unsubscribe(topic)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn disconnect(&self) -> Result<AckPromise, ClientError> {
-        let (promise_tx, promise) = PromiseTx::new();
-        let request = Request::Disconnect(Disconnect);
-        self.client.request_tx.send((request, Some(promise_tx)))?;
+    pub fn disconnect(&self) -> Result<Token<NoResponse>, ClientError> {
+        let (resolver, token) = Resolver::new();
+        let request = Request::Disconnect(resolver);
+        self.client.request_tx.send(request)?;
 
-        Ok(promise)
+        Ok(token)
     }
 
     /// Sends a MQTT disconnect to the `EventLoop`
-    pub fn try_disconnect(&self) -> Result<(), ClientError> {
+    pub fn try_disconnect(&self) -> Result<Token<NoResponse>, ClientError> {
         self.client.try_disconnect()
     }
 }

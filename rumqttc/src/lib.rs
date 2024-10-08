@@ -98,12 +98,7 @@
 #[macro_use]
 extern crate log;
 
-use std::{
-    fmt::{self, Debug, Formatter},
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::fmt::{self, Debug, Formatter};
 
 #[cfg(any(feature = "use-rustls", feature = "websocket"))]
 use std::sync::Arc;
@@ -135,6 +130,7 @@ type RequestModifierFn = Arc<
 
 #[cfg(feature = "proxy")]
 mod proxy;
+mod tokens;
 
 pub use client::{AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError};
 pub use eventloop::{ConnectionError, Event, EventLoop};
@@ -145,7 +141,8 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
-use tokio::sync::{oneshot, oneshot::error::TryRecvError};
+use tokens::Resolver;
+pub use tokens::{Token, TokenError};
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
 #[cfg(feature = "use-native-tls")]
@@ -189,129 +186,20 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Request {
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubComp(PubComp),
-    PubRel(PubRel),
-    PingReq(PingReq),
-    PingResp(PingResp),
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect(Disconnect),
-}
-
-impl From<Publish> for Request {
-    fn from(publish: Publish) -> Request {
-        Request::Publish(publish)
-    }
-}
-
-impl From<Subscribe> for Request {
-    fn from(subscribe: Subscribe) -> Request {
-        Request::Subscribe(subscribe)
-    }
-}
-
-impl From<Unsubscribe> for Request {
-    fn from(unsubscribe: Unsubscribe) -> Request {
-        Request::Unsubscribe(unsubscribe)
-    }
+    Publish(Publish, Resolver<Pkid>),
+    PubAck(PubAck, Resolver<()>),
+    PubRec(PubRec, Resolver<()>),
+    PubRel(PubRel, Resolver<Pkid>),
+    Subscribe(Subscribe, Resolver<Pkid>),
+    Unsubscribe(Unsubscribe, Resolver<Pkid>),
+    Disconnect(Resolver<()>),
+    PingReq,
 }
 
 /// Packet Identifier with which Publish/Subscribe/Unsubscribe packets are identified while inflight.
 pub type Pkid = u16;
-
-#[derive(Debug, thiserror::Error)]
-pub enum PromiseError {
-    #[error("Sender has nothing to send instantly")]
-    Waiting,
-    #[error("Sender side of channel was dropped")]
-    Disconnected,
-    #[error("Broker rejected the request, reason: {reason}")]
-    Rejected { reason: String },
-}
-
-/// Resolves with [`Pkid`] used against packet when:
-/// 1. Packet is acknowldged by the broker, e.g. QoS 1/2 Publish, Subscribe and Unsubscribe
-/// 2. QoS 0 packet finishes processing in the [`EventLoop`]
-pub struct AckPromise {
-    rx: oneshot::Receiver<Result<Pkid, PromiseError>>,
-}
-
-impl Future for AckPromise {
-    type Output = Result<Pkid, PromiseError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let polled = unsafe { self.map_unchecked_mut(|s| &mut s.rx) }.poll(cx);
-
-        match polled {
-            Poll::Ready(Ok(p)) => Poll::Ready(p),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(PromiseError::Disconnected)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl AckPromise {
-    /// Blocks on the current thread and waits till the packet is acknowledged by the broker.
-    ///
-    /// Returns [`PromiseError::Disconnected`] if the [`EventLoop`] was dropped(usually),
-    /// [`PromiseError::Rejected`] if the packet acknowledged but not accepted.
-    pub fn blocking_wait(self) -> Result<Pkid, PromiseError> {
-        self.rx
-            .blocking_recv()
-            .map_err(|_| PromiseError::Disconnected)?
-    }
-
-    /// Attempts to check if the broker acknowledged the packet, without blocking the current thread.
-    ///
-    /// Returns [`PromiseError::Waiting`] if the packet wasn't acknowledged yet.
-    ///
-    /// Multiple calls to this functions can fail with [`PromiseError::Disconnected`] if the promise
-    /// has already been resolved.
-    pub fn try_resolve(&mut self) -> Result<Pkid, PromiseError> {
-        match self.rx.try_recv() {
-            Ok(Ok(p)) => Ok(p),
-            Ok(Err(e)) => Err(e),
-            Err(TryRecvError::Empty) => Err(PromiseError::Waiting),
-            Err(TryRecvError::Closed) => Err(PromiseError::Disconnected),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct PromiseTx {
-    tx: oneshot::Sender<Result<Pkid, PromiseError>>,
-}
-
-impl PromiseTx {
-    fn new() -> (PromiseTx, AckPromise) {
-        let (tx, rx) = oneshot::channel();
-
-        (PromiseTx { tx }, AckPromise { rx })
-    }
-
-    fn resolve(self, pkid: Pkid) {
-        if self.tx.send(Ok(pkid)).is_err() {
-            trace!("Promise was dropped")
-        }
-    }
-
-    fn fail(self, reason: String) {
-        if self
-            .tx
-            .send(Err(PromiseError::Rejected { reason }))
-            .is_err()
-        {
-            trace!("Promise was dropped")
-        }
-    }
-}
 
 /// Transport methods. Defaults to TCP.
 #[derive(Clone)]
