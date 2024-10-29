@@ -242,7 +242,7 @@ impl MqttState {
                 }
                 _ => {
                     warn!("SubAck Pkid = {:?}, Reason = {:?}", suback.pkid, reason);
-                },
+                }
             }
         }
         Ok(None)
@@ -364,7 +364,10 @@ impl MqttState {
         if puback.reason != PubAckReason::Success
             && puback.reason != PubAckReason::NoMatchingSubscribers
         {
-            warn!("PubAck Pkid = {:?}, reason: {:?}", puback.pkid, puback.reason);
+            warn!(
+                "PubAck Pkid = {:?}, reason: {:?}",
+                puback.pkid, puback.reason
+            );
             return Ok(None);
         }
 
@@ -397,7 +400,10 @@ impl MqttState {
         if pubrec.reason != PubRecReason::Success
             && pubrec.reason != PubRecReason::NoMatchingSubscribers
         {
-            warn!("PubRec Pkid = {:?}, reason: {:?}", pubrec.pkid, pubrec.reason);
+            warn!(
+                "PubRec Pkid = {:?}, reason: {:?}",
+                pubrec.pkid, pubrec.reason
+            );
             return Ok(None);
         }
 
@@ -417,7 +423,10 @@ impl MqttState {
         self.incoming_pub.set(pubrel.pkid as usize, false);
 
         if pubrel.reason != PubRelReason::Success {
-            warn!("PubRel Pkid = {:?}, reason: {:?}", pubrel.pkid, pubrel.reason);
+            warn!(
+                "PubRel Pkid = {:?}, reason: {:?}",
+                pubrel.pkid, pubrel.reason
+            );
             return Ok(None);
         }
 
@@ -444,7 +453,10 @@ impl MqttState {
         self.outgoing_rel.set(pubcomp.pkid as usize, false);
 
         if pubcomp.reason != PubCompReason::Success {
-            warn!("PubComp Pkid = {:?}, reason: {:?}", pubcomp.pkid, pubcomp.reason);
+            warn!(
+                "PubComp Pkid = {:?}, reason: {:?}",
+                pubcomp.pkid, pubcomp.reason
+            );
             return Ok(None);
         }
 
