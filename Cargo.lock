@@ -1952,6 +1952,9 @@ dependencies = [
 [[package]]
 name = "rumqttc-ng"
 version = "0.90.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "rumqttd"
