@@ -2,33 +2,27 @@ mod tcp;
 
 pub use tcp::*;
 
+#[derive(Debug, Clone)]
+pub enum TransportEvent {
+    NewData,
+}
 
 
 #[derive(Debug, Clone)]
 pub enum TransportSettings {
     Mock,
-    // TODO(swanx): change host & port to single _bind_ address.
     Tcp {
         host: String,
         port: u16,
-    },
-    Tls {
-        host: String,
-        port: u16,
         ca_cert: Option<String>,
-        cert_file: String,
-        key_file: String,
+        cert_file: Option<String>,
+        key_file: Option<String>,
     },
     Ws {
         url: String,
-    },
-    Wss {
-        url: String,
         cert_file: String,
         key_file: String,
     },
-    Http {},
-    Https {},
     Quic {
         host: String,
         port: u16,

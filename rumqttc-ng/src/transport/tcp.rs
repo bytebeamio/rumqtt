@@ -1,4 +1,4 @@
-use base::{pipe, EventsTx, IOEvent, XchgPipeA, XchgPipeB};
+use base::{pipe, EventsTx, XchgPipeA, XchgPipeB};
 use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -6,21 +6,21 @@ use tokio::{
     time::timeout,
 };
 
-use super::ConnectionSettings;
+use super::{ConnectionSettings, TransportEvent};
 
 pub struct Connection {
     id: usize,
     pub settings: ConnectionSettings,
     connection_to_io: XchgPipeA<u8>,
     io_to_connection: XchgPipeB<u8>,
-    events_tx: EventsTx<IOEvent>,
+    events_tx: EventsTx<TransportEvent>,
 }
 
 impl Connection {
     pub fn new(
         id: usize,
         settings: ConnectionSettings,
-        events_tx: EventsTx<IOEvent>,
+        events_tx: EventsTx<TransportEvent>,
     ) -> (Self, XchgPipeA<u8>, XchgPipeB<u8>) {
         // initialize pipes for connection_to_io:
         //  keep the A in Self, return B
@@ -55,10 +55,10 @@ impl Connection {
         .await??;
 
         // this will start the timer for session
-        self.events_tx.send_async(IOEvent::NewConnection).await;
+        self.events_tx.send_async(TransportEvent::NewConnection).await;
 
         if self.connection_to_io.try_forward() {
-            self.events_tx.send_async(IOEvent::NewConnectionData).await;
+            self.events_tx.send_async(TransportEvent::NewConnectionData).await;
         }
 
         loop {
@@ -71,7 +71,7 @@ impl Connection {
                     let _n = v?;
                     // dbg!(_n);
                     if self.connection_to_io.try_forward() {
-                        self.events_tx.send_async(IOEvent::NewConnectionData).await;
+                        self.events_tx.send_async(TransportEvent::NewConnectionData).await;
                     }
                 }
                 _ = self.connection_to_io.incoming_recycler.wait() => {
@@ -80,7 +80,7 @@ impl Connection {
                     self.connection_to_io.incoming_recycler.clear();
                     // try to send to active buffer to other end
                     if self.connection_to_io.try_forward() {
-                        self.events_tx.send_async(IOEvent::NewConnectionData).await;
+                        self.events_tx.send_async(TransportEvent::NewConnectionData).await;
                     }
                 }
                 data = self.io_to_connection.incoming.recv_async() => {
@@ -88,14 +88,14 @@ impl Connection {
                     stream.write_all(&data).await?;
                     data.clear();
                     self.io_to_connection.ack(data);
-                    self.events_tx.send_async(IOEvent::OutgoingDataAck).await;
+                    self.events_tx.send_async(TransportEvent::OutgoingDataAck).await;
                 }
             }
         }
     }
 
     pub fn cleanup(&mut self) {
-        self.events_tx.send(IOEvent::ConnectionClosed);
+        self.events_tx.send(TransportEvent::ConnectionClosed);
         // self.control_rx.drain();
         // TODO: cleanup all the pipes
         self.connection_to_io.incoming_recycler.recv();

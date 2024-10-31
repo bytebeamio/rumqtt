@@ -3,7 +3,9 @@ members = [
   "rumqttc",
   "rumqttd",
   "benchmarks",
-  "benchmarks/simplerouter", "rumqttc-ng",
+  "benchmarks/simplerouter",
+  "rumqttc-ng",
+  "base"
 ]
 resolver = "2"
 

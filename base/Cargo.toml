@@ -1,0 +1,27 @@
+[package]
+name = "base"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+flume = "0.11"
+humansize = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["time"] }
+tokio-stream = "0.1"
+opendal = "0.45"
+arrow = "53"
+libsql = "0.5"
+
+[dev-dependencies]
+clap = { version = "4", features = ["derive"] }
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+futures = "0.3"
+indicatif = "0.17"
+pin-project-lite = "0.2"
+parquet = "53"
