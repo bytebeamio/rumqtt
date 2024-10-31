@@ -21,11 +21,9 @@ pub enum TransportSettings {
         host: String,
         port: u16,
         #[cfg(feature = "use-rustls")]
-        /// Rustls TLS configuration
-        rustls_config: Option<RustlsConfig>,
+        security: Option<RustlsConfig>,
         #[cfg(feature = "use-native-tls")]
-        /// Native TLS configuration
-        native_tls_config: Option<NativeTlsConfig>,
+        security: Option<NativeTlsConfig>,
     },
     Ws {
         url: String,
@@ -38,6 +36,19 @@ pub enum TransportSettings {
         cert_file: String,
         key_file: String,
     },
+}
+
+impl Default for TransportSettings {
+    fn default() -> Self {
+        TransportSettings::Tcp {
+            host: "localhost".to_string(),
+            port: 1883,
+            #[cfg(feature = "use-rustls")]
+            security: None,
+            #[cfg(feature = "use-native-tls")]
+            native_tls_config: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

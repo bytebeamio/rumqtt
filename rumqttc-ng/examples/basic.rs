@@ -1,11 +1,13 @@
+use rumqttc_ng::{client::blocking::Ack, builder::std::Builder, EventLoopSettings, QoS, TransportSettings};
 
 
-fn main() {
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
-    let clients = rumqttc::Builder::new()
+    let clients = Builder::new()
         .register_client(0, 10 * 1024)
         .register_client(1, 100 * 1024)
-        .set_eventloop(MqttSettings {
+        .set_eventloop(EventLoopSettings {
             max_subscriptions: 10,
             max_subscription_log_size: 100 * 1024 * 1024,
             max_inflight_messages: 100,
@@ -13,13 +15,14 @@ fn main() {
         // set transport
         .set_transport(TransportSettings::Tcp { 
             host: "localhost".to_string(), 
-            port: 1883 
+            port: 1883,
+            security: None,
         })
         // spawns eventloop in background
-        .build(); 
+        .start(); 
 
     // Client returns tokens for callers to block until broker acknowledges
-    let client: blocking::Client = clients.take(0).unwrap();
+    let client = clients.get(0).unwrap();
 
     // Block on each message
     client.subscribe("hello/world", QoS::AtMostOnce, Ack::Auto)?.wait()?;
@@ -28,7 +31,7 @@ fn main() {
     // Block on a batch of messages
     let mut tokens = vec![];
     for _ in 0..10 {
-        let token: blocking::Token = client.publish("hello/world", "Hello, world!", QoS::AtMostOnce, false)?;
+        let token = client.publish("hello/world", "Hello, world!", QoS::AtMostOnce, false)?;
         tokens.push(token);
     }
 
@@ -60,4 +63,5 @@ fn main() {
 
     // Convert to async client
     let client: nonblocking::Client = clients.into();
+    Ok(())
 }
