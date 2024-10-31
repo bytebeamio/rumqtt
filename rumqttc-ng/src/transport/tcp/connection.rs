@@ -6,7 +6,7 @@ use tokio::{
     time::timeout,
 };
 
-use super::{ConnectionSettings, TransportEvent};
+use crate::transport::{ConnectionSettings, TransportEvent};
 
 pub struct Connection {
     id: usize,
@@ -55,10 +55,10 @@ impl Connection {
         .await??;
 
         // this will start the timer for session
-        self.events_tx.send_async(TransportEvent::NewConnection).await;
+        self.events_tx.send_async(TransportEvent::Reconnection(0)).await;
 
         if self.connection_to_io.try_forward() {
-            self.events_tx.send_async(TransportEvent::NewConnectionData).await;
+            self.events_tx.send_async(TransportEvent::IncomingData).await;
         }
 
         loop {
@@ -71,7 +71,7 @@ impl Connection {
                     let _n = v?;
                     // dbg!(_n);
                     if self.connection_to_io.try_forward() {
-                        self.events_tx.send_async(TransportEvent::NewConnectionData).await;
+                        self.events_tx.send_async(TransportEvent::IncomingData).await;
                     }
                 }
                 _ = self.connection_to_io.incoming_recycler.wait() => {
@@ -80,7 +80,7 @@ impl Connection {
                     self.connection_to_io.incoming_recycler.clear();
                     // try to send to active buffer to other end
                     if self.connection_to_io.try_forward() {
-                        self.events_tx.send_async(TransportEvent::NewConnectionData).await;
+                        self.events_tx.send_async(TransportEvent::IncomingData).await;
                     }
                 }
                 data = self.io_to_connection.incoming.recv_async() => {
@@ -88,7 +88,7 @@ impl Connection {
                     stream.write_all(&data).await?;
                     data.clear();
                     self.io_to_connection.ack(data);
-                    self.events_tx.send_async(TransportEvent::OutgoingDataAck).await;
+                    self.events_tx.send_async(TransportEvent::OutgoingAck).await;
                 }
             }
         }

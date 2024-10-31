@@ -1,12 +1,12 @@
 mod tcp;
 
-pub use tcp::*;
-
 #[derive(Debug, Clone)]
 pub enum TransportEvent {
-    NewData,
+    Reconnection(usize),
+    IncomingData,
+    OutgoingAck,
+    ConnectionClosed,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum TransportSettings {
