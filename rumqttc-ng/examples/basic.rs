@@ -1,10 +1,9 @@
-use rumqttc_ng::{client::blocking::Ack, builder::std::Builder, EventLoopSettings, QoS, TransportSettings};
-
+use rumqttc_ng::{builder::std::Builder, client::blocking::Ack, EventLoopSettings, Notification, QoS, TransportSettings};
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
-    let clients = Builder::new()
+    let mut clients = Builder::new()
         .register_client(0, 10 * 1024)
         .register_client(1, 100 * 1024)
         .set_eventloop(EventLoopSettings {
@@ -22,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .start(); 
 
     // Client returns tokens for callers to block until broker acknowledges
-    let client = clients.get(0).unwrap();
+    let client = clients.get_mut(0).unwrap();
 
     // Block on each message
     client.subscribe("hello/world", QoS::AtMostOnce, Ack::Auto)?.wait()?;
@@ -36,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Trait implementation
-    tokens.wait();
+    // tokens.wait();
 
 
     // Subscriptions
@@ -44,13 +43,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.capture_alerts();
 
     for notification in client.next() {
+        println!("{:?}", notification);
         match notification {
             Notification::Message(message) => {
                 println!("{:?}", message);
             }
             Notification::ManualAckMessage(message, token) => {
                 println!("{:?}", message);
-                token.ack();
+                // token.ack();
             }
             Notification::Event(event) => {
                 println!("{:?}", event);
@@ -58,10 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
 
-        println!("{:?}", notification);
     }
 
     // Convert to async client
-    let client: nonblocking::Client = clients.into();
+    // let client: nonblocking::Client = clients.into();
     Ok(())
 }

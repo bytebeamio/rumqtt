@@ -1,6 +1,7 @@
 use std::time::Duration;
 use base::messages::QoS;
 
+use crate::{Notification, Token};
 
 pub struct Client {
     id: usize,
@@ -18,12 +19,12 @@ impl Client {
     pub fn publish(&self, topic: &str, payload: &str, qos: QoS, retain: bool) -> Result<Token, Error> {
         todo!()
     }
-}
+    
+    pub fn capture_alerts(&self) {
+        todo!()
+    }
 
-pub struct Token {}
-
-impl Token {
-    pub fn wait(&self) -> Result<(), Error> {
+    pub fn next(&mut self) -> Result<Notification, Error> {
         todo!()
     }
 }
