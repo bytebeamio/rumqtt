@@ -1,5 +1,11 @@
 mod tcp;
 
+#[cfg(feature = "use-rustls")]
+use tokio_rustls::rustls::ClientConfig;
+
+#[cfg(feature = "use-rustls")]
+use std::sync::Arc;
+
 #[derive(Debug, Clone)]
 pub enum TransportEvent {
     Reconnection(usize),
@@ -14,9 +20,12 @@ pub enum TransportSettings {
     Tcp {
         host: String,
         port: u16,
-        ca_cert: Option<String>,
-        cert_file: Option<String>,
-        key_file: Option<String>,
+        #[cfg(feature = "use-rustls")]
+        /// Rustls TLS configuration
+        rustls_config: Option<RustlsConfig>,
+        #[cfg(feature = "use-native-tls")]
+        /// Native TLS configuration
+        native_tls_config: Option<NativeTlsConfig>,
     },
     Ws {
         url: String,
@@ -52,4 +61,36 @@ impl Default for ConnectionSettings {
 pub enum Control {
     Disconnect,
     Stats,
+}
+
+#[cfg(feature = "use-rustls")]
+#[derive(Clone, Debug)]
+pub enum RustlsConfig {
+    /// Simple configuration with CA cert and optional client auth
+    Simple {
+        /// CA certificate
+        ca: Vec<u8>,
+        /// ALPN settings
+        alpn: Option<Vec<Vec<u8>>>,
+        /// TLS client authentication
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
+    },
+    /// Custom rustls ClientConfig for more customization
+    Custom(Arc<ClientConfig>),
+}
+
+#[cfg(feature = "use-native-tls")]
+#[derive(Clone, Debug)]
+pub enum NativeTlsConfig {
+    /// Simple configuration with CA cert and optional client auth
+    Simple {
+        /// CA certificate
+        ca: Vec<u8>,
+        /// PKCS12 binary DER and password
+        client_auth: Option<(Vec<u8>, String)>,
+    },
+    /// Use default native-tls configuration
+    Default,
+    /// Custom native-tls TlsConnector for more customization
+    Custom(TlsConnector),
 }

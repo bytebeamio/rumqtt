@@ -30,6 +30,8 @@ use tokio_native_tls::native_tls::{Error as NativeTlsError, Identity};
 use std::io;
 use std::net::AddrParseError;
 
+use super::RustlsConfig;
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -68,13 +70,22 @@ pub enum Error {
     NativeTls(#[from] NativeTlsError),
 }
 
+struct TcpSettings {
+    host: String,
+    port: u16,
+    #[cfg(feature = "use-rustls")]
+    /// Rustls TLS configuration
+    rustls_config: Option<RustlsConfig>,
+    #[cfg(feature = "use-native-tls")]
+    /// Native TLS configuration
+    native_tls_config: Option<NativeTlsConfig>,
+}
+
 pub async fn connect(
-    addr: &str,
-    _port: u16,
-    tls_config: &TlsConfiguration,
+    settings: &TcpSettings,
     tcp: Box<dyn AsyncReadWrite>,
 ) -> Result<Box<dyn AsyncReadWrite>, Error> {
-    let tls: Box<dyn AsyncReadWrite> = match tls_config {
+    let tls: Box<dyn AsyncReadWrite> = match settings.rustls_config {
         #[cfg(feature = "use-rustls")]
         TlsConfiguration::Simple { .. } | TlsConfiguration::Rustls(_) => {
             let connector = rustls_connector(tls_config).await?;
