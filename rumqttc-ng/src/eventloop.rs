@@ -1,13 +1,10 @@
-use std::{collections::VecDeque, thread, time::Duration};
-
-use base::{messages::Packet, pipe, EventError, EventsRx, EventsTx, XchgPipeA, XchgPipeB};
+use base::{messages::Packet, EventError, EventsRx, XchgPipeB};
+use tracing::debug;
 
 use crate::Event;
 
 pub struct EventLoopSettings {
     pub max_clients: usize,
-    pub max_read_buf_size: usize,
-    pub max_write_buf_size: usize,
     pub max_subscriptions: usize,
     pub max_subscription_log_size: usize,
     pub max_inflight_messages: usize,
@@ -15,44 +12,31 @@ pub struct EventLoopSettings {
 
 pub struct EventLoop {
     settings: EventLoopSettings,
-    tx_pool: VecDeque<XchgPipeA<Packet>>,
     rxs: Vec<XchgPipeB<Packet>>,
     events: EventsRx<Event>,
 }
 
 impl EventLoop {
     pub fn new(settings: EventLoopSettings) -> Self {
-        let mut tx_pool = VecDeque::new();
-        let mut rxs = Vec::new();
         let events = EventsRx::new(settings.max_clients);
 
-        for id in 0..settings.max_clients {
-            let (a, b) = pipe(id, settings.max_read_buf_size, settings.max_write_buf_size);
-            tx_pool.push_back(a);
-
-            assert_eq!(rxs.len(), id);
-            rxs.push(b);
+        EventLoop {
+            settings,
+            rxs: Vec::new(),
+            events,
         }
-
-        EventLoop { settings, tx_pool, rxs, events }
     }
 
-    pub fn tx(&mut self) -> Tx {
-        let tx = self.tx_pool.pop_front().unwrap();
-        let events_tx = self.events.producer(tx.id);
-        Tx { events_tx, tx }
+    pub fn register_client(&mut self, rx: XchgPipeB<Packet>) {
+        self.rxs.push(rx);
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
         loop {
             let event = self.events.poll()?;
+            debug!("Event: {:?}", event);
         }
     }
-}
-
-pub struct Tx {
-    pub events_tx: EventsTx<Event>,
-    pub tx: XchgPipeA<Packet>,
 }
 
 impl Default for EventLoopSettings {
@@ -62,8 +46,6 @@ impl Default for EventLoopSettings {
             max_subscription_log_size: 100 * 1024 * 1024,
             max_inflight_messages: 100,
             max_clients: 10,
-            max_read_buf_size: 1024 * 1024,
-            max_write_buf_size: 1024 * 1024,
         }
     }
 }

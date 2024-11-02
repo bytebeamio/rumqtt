@@ -1,16 +1,21 @@
+use base::{
+    messages::{Packet, QoS},
+    EventsTx, XchgPipeA,
+};
 use std::time::Duration;
-use base::{messages::{Packet, QoS}, EventsTx, XchgPipeA};
 
-use crate::{Event, Notification, Token};
+use crate::{Event, Notification, Token, Tx};
 
 pub struct Client {
     id: usize,
-    events_tx: EventsTx<Event>,
-    data_tx: XchgPipeA<Packet>,
-
+    tx: Tx<Event, Packet>,
 }
 
 impl Client {
+    pub(crate) fn new(id: usize, tx: Tx<Event, Packet>) -> Self {
+        Self { id, tx }
+    }
+
     pub fn set_token_timeout(&self, timeout: Duration) {
         todo!()
     }
@@ -19,10 +24,16 @@ impl Client {
         todo!()
     }
 
-    pub fn publish(&self, topic: &str, payload: &str, qos: QoS, retain: bool) -> Result<Token, Error> {
+    pub fn publish(
+        &self,
+        topic: &str,
+        payload: &str,
+        qos: QoS,
+        retain: bool,
+    ) -> Result<Token, Error> {
         todo!()
     }
-    
+
     pub fn capture_alerts(&self) {
         todo!()
     }
@@ -38,5 +49,4 @@ pub enum AckSetting {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
-}
+pub enum Error {}

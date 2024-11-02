@@ -1,5 +1,7 @@
-use rumqttc_ng::{builder::std::Builder, client::blocking::AckSetting, EventLoopSettings, Notification, QoS, TransportSettings};
-
+use rumqttc_ng::{
+    builder::std::Builder, client::blocking::AckSetting, EventLoopSettings, Notification, QoS,
+    TransportSettings,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
@@ -7,25 +9,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .register_client(0, 10 * 1024)
         .register_client(1, 100 * 1024)
         .set_eventloop(EventLoopSettings {
+            max_clients: 2,
             max_subscriptions: 10,
             max_subscription_log_size: 100 * 1024 * 1024,
             max_inflight_messages: 100,
         })
         // set transport
-        .set_transport(TransportSettings::Tcp { 
-            host: "localhost".to_string(), 
+        .set_transport(TransportSettings::Tcp {
+            host: "localhost".to_string(),
             port: 1883,
             security: None,
         })
         // spawns eventloop in background
-        .start(); 
+        .start();
 
     // Client returns tokens for callers to block until broker acknowledges
     let client = clients.get_mut(0).unwrap();
 
     // Block on each message
-    client.subscribe("hello/world", QoS::AtMostOnce, AckSetting::Auto)?.wait()?;
-    client.publish("hello/world", "Hello, world!", QoS::AtMostOnce, false)?.wait()?;
+    client
+        .subscribe("hello/world", QoS::AtMostOnce, AckSetting::Auto)?
+        .wait()?;
+    client
+        .publish("hello/world", "Hello, world!", QoS::AtMostOnce, false)?
+        .wait()?;
 
     // Block on a batch of messages
     let mut tokens = vec![];
@@ -37,9 +44,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Trait implementation
     // tokens.wait();
 
-
     // Subscriptions
-    client.subscribe("hello/world", QoS::AtMostOnce, AckSetting::Manual)?.wait()?;
+    client
+        .subscribe("hello/world", QoS::AtMostOnce, AckSetting::Manual)?
+        .wait()?;
     client.capture_alerts();
 
     for notification in client.next() {
@@ -57,7 +65,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {}
         }
-
     }
 
     // Convert to async client

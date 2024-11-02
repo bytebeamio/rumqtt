@@ -1,10 +1,11 @@
 pub mod builder;
 pub mod client;
 pub mod eventloop;
-pub mod transport;
 pub mod state;
+pub mod transport;
 
 pub use base::messages::*;
+use base::{EventsTx, Size, XchgPipeA};
 pub use eventloop::{EventLoop, EventLoopSettings};
 pub use transport::TransportSettings;
 
@@ -35,7 +36,6 @@ pub enum Event {
     Incoming(Incoming),
     Outgoing(Outgoing),
 }
-
 
 pub type Incoming = Packet;
 
@@ -100,4 +100,9 @@ impl From<Unsubscribe> for Request {
     fn from(unsubscribe: Unsubscribe) -> Request {
         Request::Unsubscribe(unsubscribe)
     }
+}
+
+pub struct Tx<A, B: Size> {
+    pub events_tx: EventsTx<A>,
+    pub tx: XchgPipeA<B>,
 }
