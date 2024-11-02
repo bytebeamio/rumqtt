@@ -766,11 +766,27 @@ impl Size for UnsubAck {
     }
 }
 
-// impl Size for Packet {
-//     fn size(&self) -> usize {
-//         self.length()
-//     }
-// }
+// TODO: Validate size of each packet
+impl Size for Packet {
+    fn size(&self) -> usize {
+        match self {
+            Packet::Connect(connect) => connect.size(),
+            Packet::ConnAck(connack) => connack.size(),
+            Packet::Publish(publish) => publish.size(),
+            Packet::PubAck(puback) => puback.size(),
+            Packet::PubRec(pubrec) => pubrec.size(),
+            Packet::PubRel(pubrel) => pubrel.size(),
+            Packet::PubComp(pubcomp) => pubcomp.size(),
+            Packet::PingReq(_) => 0,
+            Packet::PingResp(_) => 0,
+            Packet::Disconnect(disconnect) => disconnect.size(),
+            Packet::Subscribe(subscribe) => subscribe.size(),
+            Packet::SubAck(sub_ack) => sub_ack.size(),
+            Packet::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Packet::UnsubAck(unsub_ack) => unsub_ack.size(),
+        }
+    }
+}
 
 /// Checks if topic matches a filter. topic and filter validation isn't done here.
 ///
@@ -810,4 +826,80 @@ pub fn matches(topic: &str, filter: &str) -> bool {
     }
 
     true
+}
+
+// Add these implementations before the Size impl for Packet
+
+impl Size for Connect {
+    fn size(&self) -> usize {
+        let mut size = 2 + // fixed header
+            2 + // keep alive
+            self.client_id.len();
+        
+        if let Some(login) = &self.login {
+            size += login.username.len() + login.password.len();
+        }
+        
+        if let Some(last_will) = &self.last_will {
+            size += last_will.topic.len() + last_will.message.len();
+        }
+        
+        size
+    }
+}
+
+impl Size for ConnAck {
+    fn size(&self) -> usize {
+        4 // Fixed size for ConnAck packet
+    }
+}
+
+impl Size for PubAck {
+    fn size(&self) -> usize {
+        4 // Fixed size for PubAck packet (2 bytes fixed header + 2 bytes packet id)
+    }
+}
+
+impl Size for PubRec {
+    fn size(&self) -> usize {
+        4 // Fixed size for PubRec packet
+    }
+}
+
+impl Size for PubRel {
+    fn size(&self) -> usize {
+        4 // Fixed size for PubRel packet
+    }
+}
+
+impl Size for PubComp {
+    fn size(&self) -> usize {
+        4 // Fixed size for PubComp packet
+    }
+}
+
+impl Size for Disconnect {
+    fn size(&self) -> usize {
+        2 // Minimum size for Disconnect packet
+    }
+}
+
+impl Size for Subscribe {
+    fn size(&self) -> usize {
+        let mut size = 2 + 2; // Fixed header + packet id
+        for filter in &self.filters {
+            size += 2 + filter.path.len() + 1; // topic length + topic + qos
+        }
+        size
+    }
+}
+
+impl Size for Unsubscribe {
+    fn size(&self) -> usize {
+        let mut size = 2 + 2; // Fixed header + packet id
+        for filter in &self.filters {
+            size += 2 + filter.len(); // topic length + topic
+        }
+        size
+    }
 }
