@@ -1,4 +1,4 @@
-use base::messages::{Filter, QoS, RetainForwardRule, Subscribe};
+use base::messages::{Filter, Publish, QoS, RetainForwardRule, Subscribe};
 use std::time::Duration;
 
 use crate::{AckSetting, Event, Notification, Request, Token, Tx};
@@ -43,13 +43,32 @@ impl Client {
     }
 
     pub fn publish(
-        &self,
+        &mut self,
         topic: &str,
         payload: &str,
         qos: QoS,
         retain: bool,
     ) -> Result<Token, Error> {
-        todo!()
+        let publish = Publish {
+            pkid: 0,
+            topic: topic.into(),
+            payload: payload.as_bytes().to_vec(),
+            properties: None,
+            dup: false,
+            qos,
+            retain,
+        };
+
+        let request = Request::Publish(publish);
+        let buffer = &mut self.tx.tx.read;
+        buffer.push(request);
+
+        if self.tx.tx.try_forward() {
+            // self.tx.events_tx.send(Event::Forward);
+        }
+
+        let token = Token::new(self.id);
+        Ok(token)
     }
 
     pub fn capture_alerts(&self) {
