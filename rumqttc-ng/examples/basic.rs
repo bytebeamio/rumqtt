@@ -1,4 +1,4 @@
-use rumqttc_ng::{builder::std::Builder, client::blocking::Ack, EventLoopSettings, Notification, QoS, TransportSettings};
+use rumqttc_ng::{builder::std::Builder, client::blocking::AckSetting, EventLoopSettings, Notification, QoS, TransportSettings};
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = clients.get_mut(0).unwrap();
 
     // Block on each message
-    client.subscribe("hello/world", QoS::AtMostOnce, Ack::Auto)?.wait()?;
+    client.subscribe("hello/world", QoS::AtMostOnce, AckSetting::Auto)?.wait()?;
     client.publish("hello/world", "Hello, world!", QoS::AtMostOnce, false)?.wait()?;
 
     // Block on a batch of messages
@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     // Subscriptions
-    client.subscribe("hello/world", QoS::AtMostOnce, Ack::Manual)?.wait()?;
+    client.subscribe("hello/world", QoS::AtMostOnce, AckSetting::Manual)?.wait()?;
     client.capture_alerts();
 
     for notification in client.next() {

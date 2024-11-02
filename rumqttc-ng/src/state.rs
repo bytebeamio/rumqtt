@@ -1,10 +1,10 @@
 use crate::{Event, Incoming, Outgoing, Request};
 
-use crate::mqttbytes::v4::*;
-use crate::mqttbytes::{self, *};
+use base::messages::*;
 use fixedbitset::FixedBitSet;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
+use tracing::{error, debug, info};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -28,8 +28,6 @@ pub enum StateError {
     CollisionTimeout,
     #[error("A Subscribe packet must contain atleast one filter")]
     EmptySubscription,
-    #[error("Mqtt serialization/deserialization error: {0}")]
-    Deserialization(#[from] mqttbytes::Error),
     #[error("Connection closed by peer abruptly")]
     ConnectionAborted,
 }
@@ -166,7 +164,7 @@ impl MqttState {
         self.events.push_back(Event::Incoming(packet.clone()));
 
         let outgoing = match &packet {
-            Incoming::PingResp => self.handle_incoming_pingresp()?,
+            Incoming::PingResp(_) => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
             Incoming::SubAck(_suback) => self.handle_incoming_suback()?,
             Incoming::UnsubAck(_unsuback) => self.handle_incoming_unsuback()?,
@@ -335,7 +333,7 @@ impl MqttState {
         };
 
         debug!(
-            "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
+            "Publish. Topic = {:?}, Pkid = {:?}, Payload Size = {:?}",
             publish.topic,
             publish.pkid,
             publish.payload.len()
@@ -452,7 +450,7 @@ impl MqttState {
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
 
-        Ok(Some(Packet::Disconnect))
+        Ok(Some(Packet::Disconnect(Disconnect::default())))
     }
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
@@ -503,9 +501,8 @@ impl MqttState {
 #[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
-    use crate::mqttbytes::v4::*;
-    use crate::mqttbytes::*;
     use crate::{Event, Incoming, Outgoing, Request};
+    use base::messages::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

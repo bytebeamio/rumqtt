@@ -3441,6 +3441,8 @@ dependencies = [
  "tokio-rustls 0.25.0",
  "tokio-stream",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "ws_stream_tungstenite",
 ]

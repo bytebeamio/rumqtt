@@ -12,7 +12,7 @@ impl Client {
         todo!()
     }
 
-    pub fn subscribe(&self, topic: &str, qos: QoS, ack: Ack) -> Result<Token, Error> {
+    pub fn subscribe(&self, topic: &str, qos: QoS, ack: AckSetting) -> Result<Token, Error> {
         todo!()
     }
 
@@ -29,7 +29,7 @@ impl Client {
     }
 }
 
-pub enum Ack {
+pub enum AckSetting {
     Auto,
     Manual,
 }
