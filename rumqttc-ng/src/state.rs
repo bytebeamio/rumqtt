@@ -113,7 +113,11 @@ impl MqttState {
 
         // remove and collect pending releases
         for pkid in self.outgoing_rel.ones() {
-            let request = Request::PubRel(PubRel::new(pkid as u16));
+            let request = Request::PubRel(PubRel {
+                pkid: pkid as u16,
+                reason: PubRelReason::Success,
+                properties: None,
+            });
             pending.push(request);
         }
         self.outgoing_rel.clear();
@@ -199,7 +203,11 @@ impl MqttState {
             QoS::AtMostOnce => Ok(None),
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
-                    let puback = PubAck::new(publish.pkid);
+                    let puback = PubAck {
+                        pkid: publish.pkid,
+                        reason: PubAckReason::Success,
+                        properties: None,
+                    };
                     return self.outgoing_puback(puback);
                 }
                 Ok(None)
@@ -209,7 +217,11 @@ impl MqttState {
                 self.incoming_pub.insert(pkid as usize);
 
                 if !self.manual_acks {
-                    let pubrec = PubRec::new(pkid);
+                    let pubrec = PubRec {
+                        pkid,
+                        reason: PubRecReason::Success,
+                        properties: None,
+                    };
                     return self.outgoing_pubrec(pubrec);
                 }
                 Ok(None)
@@ -258,7 +270,11 @@ impl MqttState {
 
         // NOTE: Inflight - 1 for qos2 in comp
         self.outgoing_rel.insert(pubrec.pkid as usize);
-        let pubrel = PubRel { pkid: pubrec.pkid };
+        let pubrel = PubRel {
+            pkid: pubrec.pkid,
+            reason: PubRelReason::Success,
+            properties: None,
+        };
         let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
         self.events.push_back(event);
 
@@ -273,7 +289,11 @@ impl MqttState {
 
         self.incoming_pub.set(pubrel.pkid as usize, false);
         let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
-        let pubcomp = PubComp { pkid: pubrel.pkid };
+        let pubcomp = PubComp {
+            pkid: pubrel.pkid,
+            reason: PubCompReason::Success,
+            properties: None,
+        };
         self.events.push_back(event);
 
         Ok(Some(Packet::PubComp(pubcomp)))
@@ -398,10 +418,10 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        let event = Event::Outgoing(Outgoing::PingReq);
+        let event = Event::Outgoing(Outgoing::PingReq(PingReq));
         self.events.push_back(event);
 
-        Ok(Some(Packet::PingReq))
+        Ok(Some(Packet::PingReq(PingReq)))
     }
 
     fn outgoing_subscribe(
@@ -435,7 +455,7 @@ impl MqttState {
 
         debug!(
             "Unsubscribe. Topics = {:?}, Pkid = {:?}",
-            unsub.topics, unsub.pkid
+            unsub.filters, unsub.pkid
         );
 
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
@@ -447,10 +467,14 @@ impl MqttState {
     fn outgoing_disconnect(&mut self) -> Result<Option<Packet>, StateError> {
         debug!("Disconnect");
 
-        let event = Event::Outgoing(Outgoing::Disconnect);
+        let disconnect = Disconnect {
+            reason_code: DisconnectReasonCode::NormalDisconnection,
+            properties: None,
+        };
+        let event = Event::Outgoing(Outgoing::Disconnect(disconnect.clone()));
         self.events.push_back(event);
 
-        Ok(Some(Packet::Disconnect(Disconnect::default())))
+        Ok(Some(Packet::Disconnect(disconnect)))
     }
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
@@ -505,26 +529,63 @@ mod test {
     use base::messages::*;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
-        let topic = "hello/world".to_owned();
-        let payload = vec![1, 2, 3];
-
-        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
-        publish.qos = qos;
-        publish
+        Publish {
+            dup: false,
+            qos,
+            pkid: 0,
+            retain: false,
+            topic: b"hello/world".to_vec(),
+            payload: vec![1, 2, 3],
+            properties: None,
+        }
     }
 
     fn build_incoming_publish(qos: QoS, pkid: u16) -> Publish {
-        let topic = "hello/world".to_owned();
-        let payload = vec![1, 2, 3];
-
-        let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
-        publish.pkid = pkid;
-        publish.qos = qos;
-        publish
+        Publish {
+            dup: false,
+            qos,
+            pkid,
+            retain: false,
+            topic: b"hello/world".to_vec(),
+            payload: vec![1, 2, 3],
+            properties: None,
+        }
     }
 
     fn build_mqttstate() -> MqttState {
         MqttState::new(100, false)
+    }
+
+    fn build_puback(pkid: u16) -> PubAck {
+        PubAck {
+            pkid,
+            reason: PubAckReason::Success,
+            properties: None,
+        }
+    }
+
+    fn build_pubrec(pkid: u16) -> PubRec {
+        PubRec {
+            pkid,
+            reason: PubRecReason::Success,
+            properties: None,
+        }
+    }
+
+    fn build_pubrel(pkid: u16) -> PubRel {
+        PubRel {
+            pkid,
+            reason: PubRelReason::Success,
+            properties: None,
+        }
+    }
+
+    fn build_pubcomp(pkid: u16) -> PubComp {
+        PubComp {
+            pkid,
+            reason: PubCompReason::Success,
+            properties: None,
+        }
     }
 
     #[test]
@@ -668,10 +729,10 @@ mod test {
         mqtt.outgoing_publish(publish2).unwrap();
         assert_eq!(mqtt.inflight, 2);
 
-        mqtt.handle_incoming_puback(&PubAck::new(1)).unwrap();
+        mqtt.handle_incoming_puback(&build_puback(1)).unwrap();
         assert_eq!(mqtt.inflight, 1);
 
-        mqtt.handle_incoming_puback(&PubAck::new(2)).unwrap();
+        mqtt.handle_incoming_puback(&build_puback(2)).unwrap();
         assert_eq!(mqtt.inflight, 0);
 
         assert!(mqtt.outgoing_pub[1].is_none());
@@ -682,7 +743,7 @@ mod test {
     fn incoming_puback_with_pkid_greater_than_max_inflight_should_be_handled_gracefully() {
         let mut mqtt = build_mqttstate();
 
-        let got = mqtt.handle_incoming_puback(&PubAck::new(101)).unwrap_err();
+        let got = mqtt.handle_incoming_puback(&build_puback(101)).unwrap_err();
 
         match got {
             StateError::Unsolicited(pkid) => assert_eq!(pkid, 101),
@@ -700,7 +761,7 @@ mod test {
         let _publish_out = mqtt.outgoing_publish(publish1);
         let _publish_out = mqtt.outgoing_publish(publish2);
 
-        mqtt.handle_incoming_pubrec(&PubRec::new(2)).unwrap();
+        mqtt.handle_incoming_pubrec(&build_pubrec(2)).unwrap();
         assert_eq!(mqtt.inflight, 2);
 
         // check if the remaining element's pkid is 1
@@ -723,7 +784,7 @@ mod test {
         }
 
         let packet = mqtt
-            .handle_incoming_pubrec(&PubRec::new(1))
+            .handle_incoming_pubrec(&build_pubrec(1))
             .unwrap()
             .unwrap();
         match packet {
@@ -744,7 +805,7 @@ mod test {
         }
 
         let packet = mqtt
-            .handle_incoming_pubrel(&PubRel::new(1))
+            .handle_incoming_pubrel(&build_pubrel(1))
             .unwrap()
             .unwrap();
         match packet {
@@ -759,9 +820,9 @@ mod test {
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
 
         mqtt.outgoing_publish(publish).unwrap();
-        mqtt.handle_incoming_pubrec(&PubRec::new(1)).unwrap();
+        mqtt.handle_incoming_pubrec(&build_pubrec(1)).unwrap();
 
-        mqtt.handle_incoming_pubcomp(&PubComp::new(1)).unwrap();
+        mqtt.handle_incoming_pubcomp(&build_pubcomp(1)).unwrap();
         assert_eq!(mqtt.inflight, 0);
     }
 
@@ -774,7 +835,7 @@ mod test {
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
         mqtt.handle_outgoing_packet(Request::Publish(publish))
             .unwrap();
-        mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(1)))
+        mqtt.handle_incoming_packet(Incoming::PubAck(build_puback(1)))
             .unwrap();
 
         // should throw error because we didn't get pingresp for previous ping
@@ -791,7 +852,7 @@ mod test {
 
         // should ping
         mqtt.outgoing_ping().unwrap();
-        mqtt.handle_incoming_packet(Incoming::PingResp).unwrap();
+        mqtt.handle_incoming_packet(Incoming::PingResp(PingResp)).unwrap();
 
         // should ping
         mqtt.outgoing_ping().unwrap();
@@ -808,25 +869,28 @@ mod test {
                     dup: false,
                     qos: QoS::AtMostOnce,
                     retain: false,
-                    topic: "test".to_string(),
+                    topic: b"test".to_vec(),
                     pkid: 1,
-                    payload: "".into(),
+                    payload: b"".to_vec(),
+                    properties: None,
                 }),
                 Some(Publish {
                     dup: false,
                     qos: QoS::AtMostOnce,
                     retain: false,
-                    topic: "test".to_string(),
+                    topic: b"test".to_vec(),
                     pkid: 2,
-                    payload: "".into(),
+                    payload: b"".to_vec(),
+                    properties: None,
                 }),
                 Some(Publish {
                     dup: false,
                     qos: QoS::AtMostOnce,
                     retain: false,
-                    topic: "test".to_string(),
+                    topic: b"test".to_vec(),
                     pkid: 3,
-                    payload: "".into(),
+                    payload: b"".to_vec(),
+                    properties: None,
                 }),
                 None,
                 None,
@@ -834,9 +898,10 @@ mod test {
                     dup: false,
                     qos: QoS::AtMostOnce,
                     retain: false,
-                    topic: "test".to_string(),
+                    topic: b"test".to_vec(),
                     pkid: 6,
-                    payload: "".into(),
+                    payload: b"".to_vec(),
+                    properties: None,
                 }),
             ]
         }

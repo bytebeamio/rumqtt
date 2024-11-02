@@ -57,11 +57,11 @@ pub enum Outgoing {
     /// PubComp packet
     PubComp(u16),
     /// Ping request packet
-    PingReq,
+    PingReq(PingReq),
     /// Ping response packet
-    PingResp,
+    PingResp(PingResp),
     /// Disconnect packet
-    Disconnect,
+    Disconnect(Disconnect),
     /// Await for an ack for more outgoing progress
     AwaitAck(u16),
 }
