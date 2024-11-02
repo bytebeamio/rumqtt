@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{:?}", message);
                 // token.ack();
             }
-            Notification::Event(event) => {
+            event => {
                 println!("{:?}", event);
             }
             _ => {}

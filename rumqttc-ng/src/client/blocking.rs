@@ -1,10 +1,13 @@
 use std::time::Duration;
-use base::messages::QoS;
+use base::{messages::{Packet, QoS}, EventsTx, XchgPipeA};
 
-use crate::{Notification, Token};
+use crate::{Event, Notification, Token};
 
 pub struct Client {
     id: usize,
+    events_tx: EventsTx<Event>,
+    data_tx: XchgPipeA<Packet>,
+
 }
 
 impl Client {
