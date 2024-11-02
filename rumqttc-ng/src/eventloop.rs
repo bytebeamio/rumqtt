@@ -1,7 +1,7 @@
 use base::{messages::Packet, EventError, EventsRx, XchgPipeB};
 use tracing::debug;
 
-use crate::Event;
+use crate::{Event, Request};
 
 pub struct EventLoopSettings {
     pub max_clients: usize,
@@ -12,7 +12,7 @@ pub struct EventLoopSettings {
 
 pub struct EventLoop {
     settings: EventLoopSettings,
-    rxs: Vec<XchgPipeB<Packet>>,
+    rxs: Vec<XchgPipeB<Request>>,
     events: EventsRx<Event>,
 }
 
@@ -27,7 +27,7 @@ impl EventLoop {
         }
     }
 
-    pub fn register_client(&mut self, rx: XchgPipeB<Packet>) {
+    pub fn register_client(&mut self, rx: XchgPipeB<Request>) {
         self.rxs.push(rx);
     }
 

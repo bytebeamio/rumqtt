@@ -1,6 +1,5 @@
 use rumqttc_ng::{
-    builder::std::Builder, client::blocking::AckSetting, EventLoopSettings, Notification, QoS,
-    TransportSettings,
+    builder::std::Builder, AckSetting, EventLoopSettings, Notification, QoS, TransportSettings,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client
         .subscribe("hello/world", QoS::AtMostOnce, AckSetting::Auto)?
         .wait()?;
+
     client
         .publish("hello/world", "Hello, world!", QoS::AtMostOnce, false)?
         .wait()?;
@@ -45,27 +45,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // tokens.wait();
 
     // Subscriptions
-    client
-        .subscribe("hello/world", QoS::AtMostOnce, AckSetting::Manual)?
-        .wait()?;
-    client.capture_alerts();
+    // client
+    //     .subscribe("hello/world", QoS::AtMostOnce, AckSetting::Manual)?
+    //     .wait()?;
+    // client.capture_alerts();
 
-    for notification in client.next() {
-        println!("{:?}", notification);
-        match notification {
-            Notification::Message(message) => {
-                println!("{:?}", message);
-            }
-            Notification::ManualAckMessage(message, token) => {
-                println!("{:?}", message);
-                // token.ack();
-            }
-            event => {
-                println!("{:?}", event);
-            }
-            _ => {}
-        }
-    }
+    // for notification in client.next() {
+    //     println!("{:?}", notification);
+    //     match notification {
+    //         Notification::Message(message) => {
+    //             println!("{:?}", message);
+    //         }
+    //         Notification::ManualAckMessage(message, token) => {
+    //             println!("{:?}", message);
+    //             // token.ack();
+    //         }
+    //         event => {
+    //             println!("{:?}", event);
+    //         }
+    //         _ => {}
+    //     }
+    // }
 
     // Convert to async client
     // let client: nonblocking::Client = clients.into();

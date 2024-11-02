@@ -18,9 +18,15 @@ pub enum Notification {
 }
 
 #[derive(Debug)]
-pub struct Token {}
+pub struct Token {
+    id: usize,
+}
 
 impl Token {
+    pub fn new(id: usize) -> Self {
+        Token { id }
+    }
+
     pub fn wait(&self) -> Result<(), Error> {
         todo!()
     }
@@ -77,22 +83,35 @@ pub enum Request {
     PubRel(PubRel),
     PingReq(PingReq),
     PingResp(PingResp),
-    Subscribe(Subscribe),
+    Subscribe(Subscribe, AckSetting),
     SubAck(SubAck),
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
     Disconnect(Disconnect),
 }
 
-impl From<Publish> for Request {
-    fn from(publish: Publish) -> Request {
-        Request::Publish(publish)
+impl Size for Request {
+    fn size(&self) -> usize {
+        match self {
+            Request::Publish(publish) => publish.size(),
+            Request::Subscribe(subscribe, _) => subscribe.size(),
+            Request::PubAck(puback) => puback.size(),
+            Request::PubRec(pubrec) => pubrec.size(),
+            Request::PubComp(pubcomp) => pubcomp.size(),
+            Request::PubRel(pubrel) => pubrel.size(),
+            Request::PingReq(_) => 0,
+            Request::PingResp(_) => 0,
+            Request::SubAck(suback) => suback.size(),
+            Request::Unsubscribe(unsubscribe) => unsubscribe.size(),
+            Request::UnsubAck(unsuback) => unsuback.size(),
+            Request::Disconnect(disconnect) => disconnect.size(),
+        }
     }
 }
 
-impl From<Subscribe> for Request {
-    fn from(subscribe: Subscribe) -> Request {
-        Request::Subscribe(subscribe)
+impl From<Publish> for Request {
+    fn from(publish: Publish) -> Request {
+        Request::Publish(publish)
     }
 }
 
@@ -105,4 +124,10 @@ impl From<Unsubscribe> for Request {
 pub struct Tx<A, B: Size> {
     pub events_tx: EventsTx<A>,
     pub tx: XchgPipeA<B>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AckSetting {
+    Auto,
+    Manual,
 }

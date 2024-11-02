@@ -4,7 +4,7 @@ use base::messages::*;
 use fixedbitset::FixedBitSet;
 use std::collections::VecDeque;
 use std::{io, time::Instant};
-use tracing::{error, debug, info};
+use tracing::{debug, error, info};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -144,7 +144,7 @@ impl MqttState {
         let packet = match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
-            Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
+            Request::Subscribe(subscribe, _) => self.outgoing_subscribe(subscribe)?,
             Request::Unsubscribe(unsubscribe) => self.outgoing_unsubscribe(unsubscribe)?,
             Request::PingReq(_) => self.outgoing_ping()?,
             Request::Disconnect(_) => self.outgoing_disconnect()?,
@@ -852,7 +852,8 @@ mod test {
 
         // should ping
         mqtt.outgoing_ping().unwrap();
-        mqtt.handle_incoming_packet(Incoming::PingResp(PingResp)).unwrap();
+        mqtt.handle_incoming_packet(Incoming::PingResp(PingResp))
+            .unwrap();
 
         // should ping
         mqtt.outgoing_ping().unwrap();
