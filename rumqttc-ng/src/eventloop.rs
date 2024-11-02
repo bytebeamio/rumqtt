@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, thread, time::Duration};
 
-use base::{messages::Packet, pipe, EventError, EventsRx, XchgPipeA, XchgPipeB};
+use base::{messages::Packet, pipe, EventError, EventsRx, EventsTx, XchgPipeA, XchgPipeB};
 
 use crate::Event;
 
@@ -37,11 +37,22 @@ impl EventLoop {
         EventLoop { settings, tx_pool, rxs, events }
     }
 
+    pub fn tx(&mut self) -> Tx {
+        let tx = self.tx_pool.pop_front().unwrap();
+        let events_tx = self.events.producer(tx.id);
+        Tx { events_tx, tx }
+    }
+
     pub fn start(&mut self) -> Result<(), Error> {
         loop {
             let event = self.events.poll()?;
         }
     }
+}
+
+pub struct Tx {
+    pub events_tx: EventsTx<Event>,
+    pub tx: XchgPipeA<Packet>,
 }
 
 impl Default for EventLoopSettings {
