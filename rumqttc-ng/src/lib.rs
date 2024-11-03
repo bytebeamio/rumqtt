@@ -39,8 +39,8 @@ impl Token {
 /// Events which can be yielded by the event loop
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Incoming(Incoming),
-    Outgoing(Outgoing),
+    ClientData,
+    NetworkData,
 }
 
 pub type Incoming = Packet;

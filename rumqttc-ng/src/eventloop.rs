@@ -1,4 +1,4 @@
-use base::{messages::Packet, EventError, EventsRx, XchgPipeB};
+use base::{EventError, EventsRx, XchgPipeB};
 use tracing::debug;
 
 use crate::{Event, Request};
@@ -12,29 +12,46 @@ pub struct EventLoopSettings {
 
 pub struct EventLoop {
     settings: EventLoopSettings,
-    rxs: Vec<XchgPipeB<Request>>,
+    clients: Vec<XchgPipeB<Request>>,
+    network: Option<XchgPipeB<u8>>,
     events: EventsRx<Event>,
 }
 
 impl EventLoop {
-    pub fn new(settings: EventLoopSettings) -> Self {
-        let events = EventsRx::new(settings.max_clients);
-
+    pub fn new(settings: EventLoopSettings, events: EventsRx<Event>) -> Self {
         EventLoop {
             settings,
-            rxs: Vec::new(),
+            clients: Vec::new(),
+            network: None,
             events,
         }
     }
 
     pub fn register_client(&mut self, rx: XchgPipeB<Request>) {
-        self.rxs.push(rx);
+        self.clients.push(rx);
+    }
+
+    pub fn register_network(&mut self, rx: XchgPipeB<u8>) {
+        self.network = Some(rx);
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
+        let mut network = self.network.take().unwrap();
+        let mut clients: Vec<_> = self.clients.drain(..).collect();
+
         loop {
-            let event = self.events.poll()?;
-            debug!("Event: {:?}", event);
+            debug!("Polling events");
+            let (id, event) = self.events.poll()?;
+            debug!("Event: {:?}", &event);
+            match event {
+                Event::ClientData => {
+                    let client = clients.get_mut(id).unwrap();
+                    let requests = &mut client.try_recv().unwrap();
+                }
+                Event::NetworkData => {
+                    let packet = &mut network.recv().unwrap();
+                }
+            }
         }
     }
 }

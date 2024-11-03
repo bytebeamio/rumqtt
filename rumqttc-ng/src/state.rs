@@ -1,8 +1,7 @@
-use crate::{Event, Incoming, Outgoing, Request};
+use crate::{Incoming, Request};
 
 use base::messages::*;
 use fixedbitset::FixedBitSet;
-use std::collections::VecDeque;
 use std::{io, time::Instant};
 use tracing::{debug, error, info};
 
@@ -66,8 +65,6 @@ pub struct MqttState {
     pub(crate) incoming_pub: FixedBitSet,
     /// Last collision due to broker not acking in order
     pub collision: Option<Publish>,
-    /// Buffered incoming packets
-    pub events: VecDeque<Event>,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
 }
@@ -91,8 +88,6 @@ impl MqttState {
             outgoing_rel: FixedBitSet::with_capacity(max_inflight as usize + 1),
             incoming_pub: FixedBitSet::with_capacity(u16::MAX as usize + 1),
             collision: None,
-            // TODO: Optimize these sizes later
-            events: VecDeque::with_capacity(100),
             manual_acks,
         }
     }
@@ -165,9 +160,7 @@ impl MqttState {
         &mut self,
         packet: Incoming,
     ) -> Result<Option<Packet>, StateError> {
-        self.events.push_back(Event::Incoming(packet.clone()));
-
-        let outgoing = match &packet {
+        match &packet {
             Incoming::PingResp(_) => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
             Incoming::SubAck(_suback) => self.handle_incoming_suback()?,
@@ -183,7 +176,7 @@ impl MqttState {
         };
         self.last_incoming = Instant::now();
 
-        Ok(outgoing)
+        Ok(None)
     }
 
     fn handle_incoming_suback(&mut self) -> Result<Option<Packet>, StateError> {
@@ -246,11 +239,7 @@ impl MqttState {
         let packet = self.check_collision(puback.pkid).map(|publish| {
             self.outgoing_pub[publish.pkid as usize] = Some(publish.clone());
             self.inflight += 1;
-
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.events.push_back(event);
             self.collision_ping_count = 0;
-
             Packet::Publish(publish)
         });
 
@@ -275,8 +264,6 @@ impl MqttState {
             reason: PubRelReason::Success,
             properties: None,
         };
-        let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
-        self.events.push_back(event);
 
         Ok(Some(Packet::PubRel(pubrel)))
     }
@@ -288,13 +275,11 @@ impl MqttState {
         }
 
         self.incoming_pub.set(pubrel.pkid as usize, false);
-        let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
         let pubcomp = PubComp {
             pkid: pubrel.pkid,
             reason: PubCompReason::Success,
             properties: None,
         };
-        self.events.push_back(event);
 
         Ok(Some(Packet::PubComp(pubcomp)))
     }
@@ -308,10 +293,7 @@ impl MqttState {
         self.outgoing_rel.set(pubcomp.pkid as usize, false);
         self.inflight -= 1;
         let packet = self.check_collision(pubcomp.pkid).map(|publish| {
-            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-            self.events.push_back(event);
             self.collision_ping_count = 0;
-
             Packet::Publish(publish)
         });
 
@@ -341,8 +323,6 @@ impl MqttState {
             {
                 info!("Collision on packet id = {:?}", publish.pkid);
                 self.collision = Some(publish);
-                let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
-                self.events.push_back(event);
                 return Ok(None);
             }
 
@@ -359,33 +339,20 @@ impl MqttState {
             publish.payload.len()
         );
 
-        let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-        self.events.push_back(event);
-
         Ok(Some(Packet::Publish(publish)))
     }
 
     fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<Option<Packet>, StateError> {
         let pubrel = self.save_pubrel(pubrel)?;
-
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
-        let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
-        self.events.push_back(event);
-
         Ok(Some(Packet::PubRel(pubrel)))
     }
 
     fn outgoing_puback(&mut self, puback: PubAck) -> Result<Option<Packet>, StateError> {
-        let event = Event::Outgoing(Outgoing::PubAck(puback.pkid));
-        self.events.push_back(event);
-
         Ok(Some(Packet::PubAck(puback)))
     }
 
     fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<Option<Packet>, StateError> {
-        let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
-        self.events.push_back(event);
-
         Ok(Some(Packet::PubRec(pubrec)))
     }
 
@@ -418,9 +385,6 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        let event = Event::Outgoing(Outgoing::PingReq(PingReq));
-        self.events.push_back(event);
-
         Ok(Some(Packet::PingReq(PingReq)))
     }
 
@@ -440,9 +404,6 @@ impl MqttState {
             subscription.filters, subscription.pkid
         );
 
-        let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
-        self.events.push_back(event);
-
         Ok(Some(Packet::Subscribe(subscription)))
     }
 
@@ -458,22 +419,15 @@ impl MqttState {
             unsub.filters, unsub.pkid
         );
 
-        let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
-        self.events.push_back(event);
-
         Ok(Some(Packet::Unsubscribe(unsub)))
     }
 
     fn outgoing_disconnect(&mut self) -> Result<Option<Packet>, StateError> {
         debug!("Disconnect");
-
         let disconnect = Disconnect {
             reason_code: DisconnectReasonCode::NormalDisconnection,
             properties: None,
         };
-        let event = Event::Outgoing(Outgoing::Disconnect(disconnect.clone()));
-        self.events.push_back(event);
-
         Ok(Some(Packet::Disconnect(disconnect)))
     }
 
@@ -665,25 +619,21 @@ mod test {
     fn incoming_publish_should_be_acked() {
         let mut mqtt = build_mqttstate();
 
-        // QoS0, 1, 2 Publishes
         let publish1 = build_incoming_publish(QoS::AtMostOnce, 1);
         let publish2 = build_incoming_publish(QoS::AtLeastOnce, 2);
         let publish3 = build_incoming_publish(QoS::ExactlyOnce, 3);
 
         mqtt.handle_incoming_publish(&publish1).unwrap();
-        mqtt.handle_incoming_publish(&publish2).unwrap();
-        mqtt.handle_incoming_publish(&publish3).unwrap();
-
-        if let Event::Outgoing(Outgoing::PubAck(pkid)) = mqtt.events[0] {
-            assert_eq!(pkid, 2);
-        } else {
-            panic!("missing puback");
+        let packet = mqtt.handle_incoming_publish(&publish2).unwrap().unwrap();
+        match packet {
+            Packet::PubAck(puback) => assert_eq!(puback.pkid, 2),
+            _ => panic!("Expected PubAck"),
         }
 
-        if let Event::Outgoing(Outgoing::PubRec(pkid)) = mqtt.events[1] {
-            assert_eq!(pkid, 3);
-        } else {
-            panic!("missing PubRec");
+        let packet = mqtt.handle_incoming_publish(&publish3).unwrap().unwrap();
+        match packet {
+            Packet::PubRec(pubrec) => assert_eq!(pubrec.pkid, 3),
+            _ => panic!("Expected PubRec"),
         }
     }
 
@@ -692,7 +642,6 @@ mod test {
         let mut mqtt = build_mqttstate();
         mqtt.manual_acks = true;
 
-        // QoS0, 1, 2 Publishes
         let publish1 = build_incoming_publish(QoS::AtMostOnce, 1);
         let publish2 = build_incoming_publish(QoS::AtLeastOnce, 2);
         let publish3 = build_incoming_publish(QoS::ExactlyOnce, 3);
@@ -702,8 +651,6 @@ mod test {
         mqtt.handle_incoming_publish(&publish3).unwrap();
 
         assert!(mqtt.incoming_pub.contains(3));
-
-        assert!(mqtt.events.is_empty());
     }
 
     #[test]

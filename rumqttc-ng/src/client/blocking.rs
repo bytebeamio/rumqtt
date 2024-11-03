@@ -35,7 +35,7 @@ impl Client {
         buffer.push(request);
 
         if self.tx.tx.try_forward() {
-            // self.tx.events_tx.send(Event::Forward);
+            self.tx.events_tx.send(Event::ClientData);
         }
 
         let token = Token::new(self.id);
