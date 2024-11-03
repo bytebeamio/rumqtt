@@ -25,7 +25,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Client returns tokens for callers to block until broker acknowledges
     let client = clients.get_mut(0).unwrap();
 
-    thread::sleep(std::time::Duration::from_secs(10));
     // Block on each message
     client
         .subscribe("hello/world", QoS::AtMostOnce, AckSetting::Auto)?

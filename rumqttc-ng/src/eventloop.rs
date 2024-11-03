@@ -46,7 +46,9 @@ impl EventLoop {
             match event {
                 Event::ClientData => {
                     let client = clients.get_mut(id).unwrap();
-                    let requests = &mut client.try_recv().unwrap();
+                    let mut requests = client.try_recv().unwrap();
+                    requests.clear();
+                    client.ack(requests);
                 }
                 Event::NetworkData => {
                     let packet = &mut network.recv().unwrap();
