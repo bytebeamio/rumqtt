@@ -119,7 +119,10 @@ mod tls;
 mod websockets;
 
 #[cfg(feature = "websocket")]
-use std::future::IntoFuture;
+use std::{
+    future::{Future, IntoFuture},
+    pin::Pin,
+};
 
 #[cfg(feature = "websocket")]
 type RequestModifierFn = Arc<
