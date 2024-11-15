@@ -1,5 +1,5 @@
 use flume::bounded;
-use rumqttc::{Client, MqttOptions, PromiseError, QoS};
+use rumqttc::{Client, MqttOptions, QoS, TokenError};
 use std::error::Error;
 use std::thread::{self, sleep};
 use std::time::Duration;
@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match client
         .subscribe("hello/world", QoS::AtMostOnce)
         .unwrap()
-        .blocking_wait()
+        .wait()
     {
         Ok(pkid) => println!("Acknowledged Sub({pkid})"),
         Err(e) => println!("Subscription failed: {e:?}"),
@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         match client
             .publish("hello/world", qos, false, vec![1; i])
             .unwrap()
-            .blocking_wait()
+            .wait()
         {
             Ok(pkid) => println!("Acknowledged Pub({pkid})"),
             Err(e) => println!("Publish failed: {e:?}"),
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap();
         let tx = tx.clone();
         thread::spawn(move || {
-            let res = token.blocking_wait();
+            let res = token.wait();
             tx.send(res).unwrap()
         });
     }
@@ -69,8 +69,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .publish("hello/world", QoS::AtMostOnce, false, vec![1; 4])
         .unwrap();
     thread::spawn(move || loop {
-        match token.try_resolve() {
-            Err(PromiseError::Waiting) => {
+        match token.check() {
+            Err(TokenError::Waiting) => {
                 println!("Promise yet to resolve, retrying");
                 sleep(Duration::from_secs(1));
             }
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Unsubscribe and wait for broker acknowledgement
-    match client.unsubscribe("hello/world").unwrap().blocking_wait() {
+    match client.unsubscribe("hello/world").unwrap().wait() {
         Ok(pkid) => println!("Acknowledged Unsub({pkid})"),
         Err(e) => println!("Unsubscription failed: {e:?}"),
     }

@@ -14,8 +14,9 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
-use crate::Outgoing;
+use crate::tokens::Resolver;
 use crate::{NetworkOptions, Transport};
+use crate::{Outgoing, Pkid};
 
 use mqttbytes::v5::*;
 
@@ -33,26 +34,16 @@ pub type Incoming = Packet;
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Request {
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubComp(PubComp),
-    PubRel(PubRel),
+    Publish(Publish, Resolver<Pkid>),
+    PubAck(PubAck, Resolver<()>),
+    PubRec(PubRec, Resolver<()>),
+    PubRel(PubRel, Resolver<Pkid>),
+    Subscribe(Subscribe, Resolver<Pkid>),
+    Unsubscribe(Unsubscribe, Resolver<Pkid>),
+    Disconnect(Resolver<()>),
     PingReq,
-    PingResp,
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect,
-}
-
-impl From<Subscribe> for Request {
-    fn from(subscribe: Subscribe) -> Self {
-        Self::Subscribe(subscribe)
-    }
 }
 
 #[cfg(feature = "websocket")]
