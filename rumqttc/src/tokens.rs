@@ -67,7 +67,7 @@ impl<T> Token<T> {
         self.rx
             .blocking_recv()
             .map_err(|_| TokenError::Disconnected)?
-            .map_err(|e| TokenError::Rejection(e))
+            .map_err(TokenError::Rejection)
     }
 
     /// Attempts to check if the packet handling has been completed, without blocking the current thread.
@@ -78,7 +78,7 @@ impl<T> Token<T> {
     /// if the promise has already been resolved.
     pub fn check(&mut self) -> Result<T, TokenError> {
         match self.rx.try_recv() {
-            Ok(r) => r.map_err(|e| TokenError::Rejection(e)),
+            Ok(r) => r.map_err(TokenError::Rejection),
             Err(TryRecvError::Empty) => Err(TokenError::Waiting),
             Err(TryRecvError::Closed) => Err(TokenError::Disconnected),
         }
