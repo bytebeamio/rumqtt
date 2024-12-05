@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Assign random identifier to clients connecting with empty client id.
 - `Unsubscribe` with `local::LinkTx`.
+- Optional shutdown handle for `Broker` in the form of `BrokerHandle`.
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
