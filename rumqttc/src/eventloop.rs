@@ -161,6 +161,7 @@ impl EventLoop {
         match self.select().await {
             Ok(v) => Ok(v),
             Err(e) => {
+                log::error!("connection error : {e}");
                 self.clean();
                 Err(e)
             }

@@ -41,7 +41,7 @@ impl From<TrySendError<Request>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<Request>,
+    pub request_tx: Sender<Request>,
 }
 
 impl AsyncClient {
