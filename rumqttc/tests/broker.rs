@@ -9,8 +9,38 @@ use tokio::{task, time};
 
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender};
-use rumqttc::{Event, Incoming, Outgoing, Packet};
+use rumqttc::{Incoming, Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+#[derive(Debug, PartialEq)]
+pub enum Event {
+    Incoming(Packet),
+    Outgoing(Outgoing),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Outgoing {
+    /// Publish packet with packet identifier. 0 implies QoS 0
+    Publish(u16),
+    /// SubAck packet with packet identifier
+    SubAck(u16),
+    /// UnsubAck packet with packet identifier
+    UnsubAck(u16),
+    /// PubAck packet
+    PubAck(u16),
+    /// PubRec packet
+    PubRec(u16),
+    /// PubRel packet
+    PubRel(u16),
+    /// PubComp packet
+    PubComp(u16),
+    /// Ping request packet
+    PingReq,
+    /// Ping response packet
+    PingResp,
+    /// Disconnect packet
+    Disconnect,
+}
 
 pub struct Broker {
     pub(crate) framed: Network,
@@ -116,9 +146,33 @@ impl Broker {
         }
     }
 
-    /// Sends an acknowledgement
-    pub async fn ack(&mut self, pkid: u16) {
+    /// Sends a publish acknowledgement
+    pub async fn puback(&mut self, pkid: u16) {
         let packet = Packet::PubAck(PubAck::new(pkid));
+        self.framed.write(packet).await.unwrap();
+    }
+
+    /// Sends a publish record
+    pub async fn pubrec(&mut self, pkid: u16) {
+        let packet = Packet::PubRec(PubRec::new(pkid));
+        self.framed.write(packet).await.unwrap();
+    }
+
+    /// Sends a publish complete
+    pub async fn pubcomp(&mut self, pkid: u16) {
+        let packet = Packet::PubComp(PubComp::new(pkid));
+        self.framed.write(packet).await.unwrap();
+    }
+
+    /// Sends a subscribe acknowledgement
+    pub async fn suback(&mut self, pkid: u16, qos: QoS) {
+        let packet = Packet::SubAck(SubAck::new(pkid, vec![SubscribeReasonCode::Success(qos)]));
+        self.framed.write(packet).await.unwrap();
+    }
+
+    /// Sends an unsubscribe acknowledgement
+    pub async fn unsuback(&mut self, pkid: u16) {
+        let packet = Packet::UnsubAck(UnsubAck::new(pkid));
         self.framed.write(packet).await.unwrap();
     }
 
@@ -296,8 +350,8 @@ fn outgoing(packet: &Packet) -> Outgoing {
         Packet::PubRec(pubrec) => Outgoing::PubRec(pubrec.pkid),
         Packet::PubRel(pubrel) => Outgoing::PubRel(pubrel.pkid),
         Packet::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
-        Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
-        Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
+        Packet::SubAck(suback) => Outgoing::SubAck(suback.pkid),
+        Packet::UnsubAck(unsuback) => Outgoing::UnsubAck(unsuback.pkid),
         Packet::PingReq => Outgoing::PingReq,
         Packet::PingResp => Outgoing::PingResp,
         Packet::Disconnect => Outgoing::Disconnect,

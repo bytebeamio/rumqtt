@@ -133,10 +133,9 @@ type RequestModifierFn = Arc<
 
 #[cfg(feature = "proxy")]
 mod proxy;
+mod tokens;
 
-pub use client::{
-    AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
-};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
@@ -145,6 +144,8 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
+use tokens::Resolver;
+pub use tokens::{Token, TokenError};
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
 #[cfg(feature = "use-native-tls")]
@@ -188,39 +189,20 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Request {
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubComp(PubComp),
-    PubRel(PubRel),
-    PingReq(PingReq),
-    PingResp(PingResp),
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect(Disconnect),
+    Publish(Publish, Resolver<Pkid>),
+    PubAck(PubAck, Resolver<()>),
+    PubRec(PubRec, Resolver<()>),
+    PubRel(PubRel, Resolver<Pkid>),
+    Subscribe(Subscribe, Resolver<Pkid>),
+    Unsubscribe(Unsubscribe, Resolver<Pkid>),
+    Disconnect(Resolver<()>),
+    PingReq,
 }
 
-impl From<Publish> for Request {
-    fn from(publish: Publish) -> Request {
-        Request::Publish(publish)
-    }
-}
-
-impl From<Subscribe> for Request {
-    fn from(subscribe: Subscribe) -> Request {
-        Request::Subscribe(subscribe)
-    }
-}
-
-impl From<Unsubscribe> for Request {
-    fn from(unsubscribe: Unsubscribe) -> Request {
-        Request::Unsubscribe(unsubscribe)
-    }
-}
+/// Packet Identifier with which Publish/Subscribe/Unsubscribe packets are identified while inflight.
+pub type Pkid = u16;
 
 /// Transport methods. Defaults to TCP.
 #[derive(Clone)]
