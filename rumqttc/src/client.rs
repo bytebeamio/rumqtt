@@ -12,7 +12,7 @@ use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
 
 /// Client Error
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum ClientError {
     #[error("Failed to send mqtt requests to eventloop")]
     Request(Request),
