@@ -42,6 +42,21 @@ impl NoticeFuture {
     pub async fn wait_async(self) -> NoticeResult {
         self.0.await?
     }
+
+    /// Attempts to check if the broker acknowledged the packet, without blocking the current thread
+    /// or consuming the notice.
+    ///
+    /// It will return [`None`] if the packet wasn't acknowledged.
+    ///
+    /// Multiple calls to this functions can fail with [`NoticeError::Recv`] if the notice was
+    /// already waited and the packet was already acknowledged and [`Some`] value was returned.
+    pub fn try_wait(&mut self) -> Option<NoticeResult> {
+        match self.0.try_recv() {
+            Ok(res) => Some(res),
+            Err(oneshot::error::TryRecvError::Closed) => Some(Err(NoticeError::Recv)),
+            Err(oneshot::error::TryRecvError::Empty) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
