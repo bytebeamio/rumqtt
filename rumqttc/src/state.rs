@@ -219,14 +219,14 @@ impl MqttState {
         &mut self,
         unsuback: &UnsubAck,
     ) -> Result<Option<Packet>, StateError> {
-        if unsuback.pkid > self.max_inflight {
-            error!("Unsolicited unsuback packet: {:?}", unsuback.pkid);
-            return Err(StateError::Unsolicited(unsuback.pkid));
+        match self.outgoing_unsub.remove(&unsuback.pkid) {
+            Some(notice) => {
+                notice.success();
+            }
+            None => {
+                debug!("Unsolicited unsuback packet: {:?}", unsuback.pkid);
+            }
         }
-        self.outgoing_sub
-            .remove(&unsuback.pkid)
-            .ok_or(StateError::Unsolicited(unsuback.pkid))?
-            .success();
 
         Ok(None)
     }
