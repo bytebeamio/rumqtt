@@ -13,6 +13,25 @@ repository = "https://github.com/bytebeamio/rumqtt"
 license = "Apache-2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 
+[workspace.dependencies]
+futures-util = "0.3"
+tokio = "1.36"
+tokio-util = "0.7"
+bytes = "1.5"
+flume = "0.11"
+thiserror = "2.0"
+
+# Optional
+# rustls
+tokio-rustls = "0.26.0"
+rustls-webpki = "0.102.8"
+rustls-pemfile = "2.2.0"
+# websockets
+async-tungstenite = "0.28.0"
+ws_stream_tungstenite = "0.14.0"
+# native-tls
+tokio-native-tls = "0.3.1"
+
 [profile.dev]
 # producing debug info in builds takes up a lot of space on runner, and we
 # are currently not using it.
