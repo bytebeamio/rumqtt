@@ -324,6 +324,12 @@ pub(crate) async fn socket_connect(
 ) -> io::Result<TcpStream> {
     let addrs = lookup_host(host).await?;
     let mut last_err = None;
+    let mut jset = tokio::task::JoinSet::new();
+
+    // RFC8305: MUST NOT be less than 10ms.
+    // The recommended minimum value is 100 milliseconds, which is referred to as the
+    // "Minimum Connection Attempt Delay".
+    const ATTEMPT_DELAY: Duration = Duration::from_millis(100);
 
     for addr in addrs {
         let socket = match addr {
@@ -349,13 +355,25 @@ pub(crate) async fn socket_connect(
                 socket.bind_device(Some(bind_device.as_bytes()))?;
             }
         }
-
-        match socket.connect(addr).await {
-            Ok(s) => return Ok(s),
-            Err(e) => {
+        // Calculate connection attempt delay ahead of time.
+        // First one at 0 * ATTEMPT_DELAY and then incrementing.
+        let delay = ATTEMPT_DELAY * jset.len() as u32;
+        jset.spawn(async move {
+            tokio::time::sleep(delay).await;
+            socket.connect(addr).await
+        });
+    }
+    while let Some(taskres) = jset.join_next().await {
+        match taskres {
+            Ok(Ok(s)) => return Ok(s),
+            Ok(Err(e)) => {
                 last_err = Some(e);
             }
-        };
+            // Task failed, rather than connection failed.
+            Err(e) => {
+                last_err = Some(e.into());
+            }
+        }
     }
 
     Err(last_err.unwrap_or_else(|| {
