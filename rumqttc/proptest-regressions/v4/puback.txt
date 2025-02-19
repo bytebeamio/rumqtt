@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 494a606b886b70198796642f305bba225810d6b3ab9f9bd233d69991540584c4 # shrinks to puback_packet = PubAck { pkid: 0, reason: NoMatchingSubscribers, properties: None }

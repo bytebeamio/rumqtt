@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f6d344f8c0ee3675ca0031647b69befdae56c5dad56b01f559db30ccdfbc75f3 # shrinks to publish = Publish { dup: false, qos: AtMostOnce, pkid: 1, retain: false, topic: [], payload: [], properties: None }
+cc 5532d85f1cf95f3aa741540064559449532a3450a932ea23722d0e944758df4f # shrinks to publish = Publish { dup: false, qos: AtLeastOnce, pkid: 0, retain: false, topic: [], payload: [], properties: None }

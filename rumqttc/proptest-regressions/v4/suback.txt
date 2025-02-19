@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f41d5162c175506bc97af3664f2b5286cf0711e1c46c32e2488ba3ad1a53b268 # shrinks to packet = SubAck { pkid: 0, return_codes: [], properties: None }

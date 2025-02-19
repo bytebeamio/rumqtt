@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3fc7301ae01be0922454b622098e50f3d38bfd35b30ab2a8453f14655240da03 # shrinks to packet = ConnAck { session_present: false, code: RefusedProtocolVersion, properties: None }

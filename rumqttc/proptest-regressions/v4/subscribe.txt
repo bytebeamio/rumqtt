@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9a5d9d4f912d6098eb89b7b033640818ed110ec196c4aea375a0851aad0caf9d # shrinks to packet = Subscribe { pkid: 0, filters: [Filter { path: "", qos: AtMostOnce, nolocal: true, preserve_retain: false, retain_forward_rule: OnEverySubscribe }], properties: None }
+cc 319ca4bb9bd2c97971294895ec4cf51423dcf998cb5545c08ec43327b14ca92f # shrinks to packet = Subscribe { pkid: 0, filters: [], properties: None }

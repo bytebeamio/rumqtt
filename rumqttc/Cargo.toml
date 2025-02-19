@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.24.0"
+version = "1.0.0-alpha.1"
 publish = true
 description = "An efficient and robust mqtt client for your connected devices"
 keywords = ["mqtt", "iot", "coap", "http"]
@@ -58,6 +58,64 @@ matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.5"
 serde = { version = "1", features = ["derive"] }
+criterion = "0.5.1"
+proptest = { version = "1.4.0", features = [
+    "alloc",
+    "default-code-coverage",
+    "hardware-rng",
+] }
+
+[[bench]]
+name = "connack"
+harness = false
+
+[[bench]]
+name = "connect"
+harness = false
+
+[[bench]]
+name = "disconnect"
+harness = false
+
+[[bench]]
+name = "publish"
+harness = false
+
+[[bench]]
+name = "pubrec"
+harness = false
+
+[[bench]]
+name = "pubrel"
+harness = false
+
+[[bench]]
+name = "suback"
+harness = false
+
+[[bench]]
+name = "subscribe"
+harness = false
+
+[[bench]]
+name = "unsuback"
+harness = false
+
+[[bench]]
+name = "unsubscribe"
+harness = false
+
+[[bench]]
+name = "ping"
+harness = false
+
+[[bench]]
+name = "puback"
+harness = false
+
+[[bench]]
+name = "pubcomp"
+harness = false
 
 [[example]]
 name = "tls"

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 05386430ef0a0485d715103906ef539df50f2bda0bdef9d1763cdc946f8b14eb # shrinks to packet = Connect { keep_alive: 0, client_id: "0aa0AaaaaAaAa0AaaAAAa0A0a0aa", clean_session: false, login: Some(Login { username: "aA", password: "aAaaA000a00aA0AAA0a000a0AA0AAa" }), last_will: Some(LastWill { topic: [65, 97, 97, 97, 97, 48, 48, 65, 65, 97, 48, 65, 65, 65, 65, 65, 48, 48, 97, 65, 97, 65, 48, 97, 48, 48], message: [48, 65, 65, 48, 97, 97, 48, 48, 97, 48, 65, 65, 97, 48, 97, 97, 97, 97, 48, 65, 48, 65], qos: AtMostOnce, retain: false }), properties: None }
+cc e1f5adfc669b392b58c9354cb8ae43febe1f15e87cb122ef187dfd4f9dab516c # shrinks to packet = Connect { keep_alive: 0, client_id: "", clean_session: false, login: Some(Login { username: "", password: "" }), last_will: None, properties: None }
