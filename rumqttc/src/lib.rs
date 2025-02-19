@@ -105,10 +105,12 @@ use std::sync::Arc;
 
 use std::time::Duration;
 
-mod base;
-mod protocol;
 mod client;
 mod eventloop;
+mod framed;
+pub mod mqttbytes;
+mod state;
+pub mod v5;
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 mod tls;

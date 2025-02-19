@@ -5,7 +5,8 @@ members = [
   "benchmarks",
   "benchmarks/simplerouter",
   "rumqttc-ng",
-  "base"
+  "base",
+  "protocol"
 ]
 resolver = "2"
 
@@ -14,6 +15,13 @@ edition = "2021"
 repository = "https://github.com/bytebeamio/rumqtt"
 license = "Apache-2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+tracing-panic = { version = "0.1.2", features = ["capture-backtrace"] }
 
 [profile.dev]
 # producing debug info in builds takes up a lot of space on runner, and we

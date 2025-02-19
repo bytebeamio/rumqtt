@@ -8,7 +8,7 @@ pub mod v4;
 
 use std::str::Utf8Error;
 
-use crate::base::messages::*;
+use base::messages::*;
 
 /// Error during serialization and deserialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
