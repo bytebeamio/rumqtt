@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap()
         .wait()
     {
-        Ok(pkid) => println!("Acknowledged Sub({pkid})"),
+        Ok(pkid) => println!("Acknowledged Sub({pkid:?})"),
         Err(e) => println!("Subscription failed: {e:?}"),
     }
 
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap()
             .wait()
         {
-            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Ok(ack) => println!("Acknowledged Pub({ack:?})"),
             Err(e) => println!("Publish failed: {e:?}"),
         }
     }
@@ -83,14 +83,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     while let Ok(res) = rx.recv() {
         match res {
-            Ok(pkid) => println!("Acknowledged Pub({pkid})"),
+            Ok(ack) => println!("Acknowledged Pub({ack:?})"),
             Err(e) => println!("Publish failed: {e:?}"),
         }
     }
 
     // Unsubscribe and wait for broker acknowledgement
     match client.unsubscribe("hello/world").unwrap().wait() {
-        Ok(pkid) => println!("Acknowledged Unsub({pkid})"),
+        Ok(ack) => println!("Acknowledged Unsub({ack:?})"),
         Err(e) => println!("Unsubscription failed: {e:?}"),
     }
 

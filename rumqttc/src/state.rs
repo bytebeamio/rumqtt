@@ -1,5 +1,5 @@
-use crate::Pkid;
 use crate::{tokens::Resolver, Event, Incoming, Outgoing, Request};
+use crate::{AckOfAck, AckOfPub, Pkid};
 
 use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
@@ -68,17 +68,19 @@ pub struct MqttState {
     /// Packet ids on incoming QoS 2 publishes
     pub(crate) incoming_pub: FixedBitSet,
     /// Last collision due to broker not acking in order
-    pub collision: Option<(Publish, Resolver<Pkid>)>,
+    pub collision: Option<(Publish, Resolver<AckOfPub>)>,
     /// Buffered incoming packets
     pub events: VecDeque<Event>,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
     /// Waiters for publish acknowledgements
-    pub_ack_waiter: HashMap<Pkid, Resolver<Pkid>>,
+    pub_ack_waiter: HashMap<Pkid, Resolver<AckOfPub>>,
+    /// Waiters for PubRel, qos 2
+    pub_rel_waiter: HashMap<Pkid, Resolver<AckOfAck>>,
     /// Waiters for subscribe acknowledgements
-    sub_ack_waiter: HashMap<Pkid, Resolver<Pkid>>,
+    sub_ack_waiter: HashMap<Pkid, Resolver<SubAck>>,
     /// Waiters for unsubscribe acknowledgements
-    unsub_ack_waiter: HashMap<Pkid, Resolver<Pkid>>,
+    unsub_ack_waiter: HashMap<Pkid, Resolver<UnsubAck>>,
 }
 
 impl MqttState {
@@ -104,6 +106,7 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             manual_acks,
             pub_ack_waiter: HashMap::with_capacity(max_inflight as usize),
+            pub_rel_waiter: HashMap::with_capacity(max_inflight as usize),
             sub_ack_waiter: HashMap::with_capacity(max_inflight as usize),
             unsub_ack_waiter: HashMap::with_capacity(max_inflight as usize),
         }
@@ -167,13 +170,10 @@ impl MqttState {
                 self.outgoing_disconnect()?
             }
             Request::PubAck(puback, resolver) => {
-                resolver.resolve(());
+                resolver.resolve(AckOfAck::None);
                 self.outgoing_puback(puback)?
             }
-            Request::PubRec(pubrec, resolver) => {
-                resolver.resolve(());
-                self.outgoing_pubrec(pubrec)?
-            }
+            Request::PubRec(pubrec, resolver) => self.outgoing_pubrec(pubrec, resolver)?,
         };
 
         self.last_outgoing = Instant::now();
@@ -213,15 +213,8 @@ impl MqttState {
         let Some(resolver) = self.sub_ack_waiter.remove(&suback.pkid) else {
             return Err(StateError::Unsolicited(suback.pkid));
         };
-        if suback
-            .return_codes
-            .iter()
-            .all(|r| matches!(r, SubscribeReasonCode::Success(_)))
-        {
-            resolver.resolve(suback.pkid);
-        } else {
-            resolver.reject(suback.return_codes);
-        }
+
+        resolver.resolve(suback);
 
         Ok(None)
     }
@@ -234,7 +227,7 @@ impl MqttState {
             return Err(StateError::Unsolicited(unsuback.pkid));
         };
 
-        resolver.resolve(unsuback.pkid);
+        resolver.resolve(unsuback);
 
         Ok(None)
     }
@@ -259,7 +252,8 @@ impl MqttState {
 
                 if !self.manual_acks {
                     let pubrec = PubRec::new(pkid);
-                    return self.outgoing_pubrec(pubrec);
+                    let (resolver, _) = Resolver::new();
+                    return self.outgoing_pubrec(pubrec, resolver);
                 }
                 Ok(None)
             }
@@ -267,39 +261,38 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: PubAck) -> Result<Option<Packet>, StateError> {
+        let pkid = puback.pkid;
         let p = self
             .outgoing_pub
-            .get_mut(puback.pkid as usize)
-            .ok_or(StateError::Unsolicited(puback.pkid))?;
+            .get_mut(pkid as usize)
+            .ok_or(StateError::Unsolicited(pkid))?;
 
-        self.last_puback = puback.pkid;
+        self.last_puback = pkid;
 
         if p.take().is_none() {
-            error!("Unsolicited puback packet: {:?}", puback.pkid);
-            return Err(StateError::Unsolicited(puback.pkid));
+            error!("Unsolicited puback packet: {pkid:?}");
+            return Err(StateError::Unsolicited(pkid));
         }
 
-        let Some(resolver) = self.pub_ack_waiter.remove(&puback.pkid) else {
-            return Err(StateError::Unsolicited(puback.pkid));
+        let Some(resolver) = self.pub_ack_waiter.remove(&pkid) else {
+            return Err(StateError::Unsolicited(pkid));
         };
 
         // Resolve promise for QoS 1
-        resolver.resolve(puback.pkid);
+        resolver.resolve(AckOfPub::PubAck(puback));
 
         self.inflight -= 1;
-        let packet = self
-            .check_collision(puback.pkid)
-            .map(|(publish, resolver)| {
-                self.outgoing_pub[publish.pkid as usize] = Some(publish.clone());
-                self.inflight += 1;
+        let packet = self.check_collision(pkid).map(|(publish, resolver)| {
+            self.outgoing_pub[publish.pkid as usize] = Some(publish.clone());
+            self.inflight += 1;
 
-                let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-                self.events.push_back(event);
-                self.collision_ping_count = 0;
-                self.pub_ack_waiter.insert(publish.pkid, resolver);
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
+            self.collision_ping_count = 0;
+            self.pub_ack_waiter.insert(publish.pkid, resolver);
 
-                Packet::Publish(publish)
-            });
+            Packet::Publish(publish)
+        });
 
         Ok(packet)
     }
@@ -326,44 +319,47 @@ impl MqttState {
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: PubRel) -> Result<Option<Packet>, StateError> {
-        if !self.incoming_pub.contains(pubrel.pkid as usize) {
-            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-            return Err(StateError::Unsolicited(pubrel.pkid));
+        let pkid = pubrel.pkid;
+        if !self.incoming_pub.contains(pkid as usize) {
+            error!("Unsolicited pubrel packet: {:?}", pkid);
+            return Err(StateError::Unsolicited(pkid));
         }
 
-        self.incoming_pub.set(pubrel.pkid as usize, false);
-        let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
-        let pubcomp = PubComp { pkid: pubrel.pkid };
+        let resolver = self.pub_rel_waiter.remove(&pkid).unwrap();
+        resolver.resolve(AckOfAck::PubRel(pubrel));
+
+        self.incoming_pub.set(pkid as usize, false);
+        let event = Event::Outgoing(Outgoing::PubComp(pkid));
+        let pubcomp = PubComp { pkid };
         self.events.push_back(event);
 
         Ok(Some(Packet::PubComp(pubcomp)))
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: PubComp) -> Result<Option<Packet>, StateError> {
-        if !self.outgoing_rel.contains(pubcomp.pkid as usize) {
-            error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
-            return Err(StateError::Unsolicited(pubcomp.pkid));
+        let pkid = pubcomp.pkid;
+        if !self.outgoing_rel.contains(pkid as usize) {
+            error!("Unsolicited pubcomp packet: {pkid:?}");
+            return Err(StateError::Unsolicited(pkid));
         }
 
-        let Some(resolver) = self.pub_ack_waiter.remove(&pubcomp.pkid) else {
-            return Err(StateError::Unsolicited(pubcomp.pkid));
+        let Some(resolver) = self.pub_ack_waiter.remove(&pkid) else {
+            return Err(StateError::Unsolicited(pkid));
         };
 
         // Resolve promise for QoS 2
-        resolver.resolve(pubcomp.pkid);
+        resolver.resolve(AckOfPub::PubComp(pubcomp));
 
-        self.outgoing_rel.set(pubcomp.pkid as usize, false);
+        self.outgoing_rel.set(pkid as usize, false);
         self.inflight -= 1;
-        let packet = self
-            .check_collision(pubcomp.pkid)
-            .map(|(publish, resolver)| {
-                let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-                self.events.push_back(event);
-                self.collision_ping_count = 0;
-                self.pub_ack_waiter.insert(publish.pkid, resolver);
+        let packet = self.check_collision(pkid).map(|(publish, resolver)| {
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
+            self.collision_ping_count = 0;
+            self.pub_ack_waiter.insert(publish.pkid, resolver);
 
-                Packet::Publish(publish)
-            });
+            Packet::Publish(publish)
+        });
 
         Ok(packet)
     }
@@ -379,7 +375,7 @@ impl MqttState {
     fn outgoing_publish(
         &mut self,
         mut publish: Publish,
-        resolver: Resolver<Pkid>,
+        resolver: Resolver<AckOfPub>,
     ) -> Result<Option<Packet>, StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
@@ -416,7 +412,7 @@ impl MqttState {
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
         self.events.push_back(event);
         if publish.qos == QoS::AtMostOnce {
-            resolver.resolve(publish.pkid);
+            resolver.resolve(AckOfPub::None);
         } else {
             self.pub_ack_waiter.insert(publish.pkid, resolver);
         }
@@ -427,7 +423,7 @@ impl MqttState {
     fn outgoing_pubrel(
         &mut self,
         pubrel: PubRel,
-        resolver: Resolver<Pkid>,
+        resolver: Resolver<AckOfPub>,
     ) -> Result<Option<Packet>, StateError> {
         let pubrel = self.save_pubrel(pubrel)?;
 
@@ -446,9 +442,14 @@ impl MqttState {
         Ok(Some(Packet::PubAck(puback)))
     }
 
-    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<Option<Packet>, StateError> {
+    fn outgoing_pubrec(
+        &mut self,
+        pubrec: PubRec,
+        resolver: Resolver<AckOfAck>,
+    ) -> Result<Option<Packet>, StateError> {
         let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
         self.events.push_back(event);
+        self.pub_rel_waiter.insert(pubrec.pkid, resolver);
 
         Ok(Some(Packet::PubRec(pubrec)))
     }
@@ -491,7 +492,7 @@ impl MqttState {
     fn outgoing_subscribe(
         &mut self,
         mut subscription: Subscribe,
-        resolver: Resolver<Pkid>,
+        resolver: Resolver<SubAck>,
     ) -> Result<Option<Packet>, StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
@@ -515,7 +516,7 @@ impl MqttState {
     fn outgoing_unsubscribe(
         &mut self,
         mut unsub: Unsubscribe,
-        resolver: Resolver<Pkid>,
+        resolver: Resolver<UnsubAck>,
     ) -> Result<Option<Packet>, StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
@@ -541,7 +542,7 @@ impl MqttState {
         Ok(Some(Packet::Disconnect))
     }
 
-    fn check_collision(&mut self, pkid: u16) -> Option<(Publish, Resolver<Pkid>)> {
+    fn check_collision(&mut self, pkid: u16) -> Option<(Publish, Resolver<AckOfPub>)> {
         if let Some((publish, _)) = &self.collision {
             if publish.pkid == pkid {
                 return self.collision.take();

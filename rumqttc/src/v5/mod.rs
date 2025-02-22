@@ -15,8 +15,7 @@ pub mod mqttbytes;
 mod state;
 
 use crate::tokens::Resolver;
-use crate::{NetworkOptions, Transport};
-use crate::{Outgoing, Pkid};
+use crate::{NetworkOptions, Outgoing, Transport};
 
 use mqttbytes::v5::*;
 
@@ -32,16 +31,31 @@ pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
+/// Used to encapsulate all publish acknowledgents in v5
+#[derive(Debug)]
+pub enum AckOfPub {
+    PubAck(PubAck),
+    PubComp(PubComp),
+    None,
+}
+
+/// Used to encapsulate all ack/pubrel acknowledgements in v5
+#[derive(Debug)]
+pub enum AckOfAck {
+    None,
+    PubRel(PubRel),
+}
+
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
 #[derive(Debug)]
 pub enum Request {
-    Publish(Publish, Resolver<Pkid>),
-    PubAck(PubAck, Resolver<()>),
-    PubRec(PubRec, Resolver<()>),
-    PubRel(PubRel, Resolver<Pkid>),
-    Subscribe(Subscribe, Resolver<Pkid>),
-    Unsubscribe(Unsubscribe, Resolver<Pkid>),
+    Publish(Publish, Resolver<AckOfPub>),
+    PubAck(PubAck, Resolver<AckOfAck>),
+    PubRec(PubRec, Resolver<AckOfAck>),
+    PubRel(PubRel, Resolver<AckOfPub>),
+    Subscribe(Subscribe, Resolver<SubAck>),
+    Unsubscribe(Unsubscribe, Resolver<UnsubAck>),
     Disconnect(Resolver<()>),
     PingReq,
 }
