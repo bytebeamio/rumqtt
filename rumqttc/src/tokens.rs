@@ -6,27 +6,12 @@ use std::{
 };
 use tokio::sync::oneshot::{self, error::TryRecvError};
 
-pub trait Reason: Debug + Send {}
-impl<T> Reason for T where T: Debug + Send {}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Broker rejected the request, reason: {0:?}")]
-pub struct Rejection(Box<dyn Reason>);
-
-impl Rejection {
-    fn new<R: Reason + 'static>(reason: R) -> Self {
-        Self(Box::new(reason))
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum TokenError {
     #[error("Sender has nothing to send instantly")]
     Waiting,
     #[error("Sender side of channel was dropped")]
     Disconnected,
-    #[error("Broker rejected the request, reason: {0:?}")]
-    Rejection(#[from] Rejection),
 }
 
 pub type NoResponse = ();
@@ -35,7 +20,7 @@ pub type NoResponse = ();
 /// 1. Packet is acknowldged by the broker, e.g. QoS 1/2 Publish, Subscribe and Unsubscribe
 /// 2. QoS 0 packet finishes processing in the [`EventLoop`]
 pub struct Token<T> {
-    rx: oneshot::Receiver<Result<T, Rejection>>,
+    rx: oneshot::Receiver<T>,
 }
 
 impl<T> Future for Token<T> {
@@ -45,8 +30,7 @@ impl<T> Future for Token<T> {
         let polled = unsafe { self.map_unchecked_mut(|s| &mut s.rx) }.poll(cx);
 
         match polled {
-            Poll::Ready(Ok(Ok(p))) => Poll::Ready(Ok(p)),
-            Poll::Ready(Ok(Err(e))) => Poll::Ready(Err(TokenError::Rejection(e))),
+            Poll::Ready(Ok(p)) => Poll::Ready(Ok(p)),
             Poll::Ready(Err(_)) => Poll::Ready(Err(TokenError::Disconnected)),
             Poll::Pending => Poll::Pending,
         }
@@ -66,8 +50,7 @@ impl<T> Token<T> {
     pub fn wait(self) -> Result<T, TokenError> {
         self.rx
             .blocking_recv()
-            .map_err(|_| TokenError::Disconnected)?
-            .map_err(TokenError::Rejection)
+            .map_err(|_| TokenError::Disconnected)
     }
 
     /// Attempts to check if the packet handling has been completed, without blocking the current thread.
@@ -77,17 +60,16 @@ impl<T> Token<T> {
     /// Multiple calls to this functions can fail with [`TokenError::Disconnected`]
     /// if the promise has already been resolved.
     pub fn check(&mut self) -> Result<T, TokenError> {
-        match self.rx.try_recv() {
-            Ok(r) => r.map_err(TokenError::Rejection),
-            Err(TryRecvError::Empty) => Err(TokenError::Waiting),
-            Err(TryRecvError::Closed) => Err(TokenError::Disconnected),
-        }
+        self.rx.try_recv().map_err(|e| match e {
+            TryRecvError::Empty => TokenError::Waiting,
+            TryRecvError::Closed => TokenError::Disconnected,
+        })
     }
 }
 
 #[derive(Debug)]
 pub struct Resolver<T> {
-    tx: oneshot::Sender<Result<T, Rejection>>,
+    tx: oneshot::Sender<T>,
 }
 
 impl<T> Resolver<T> {
@@ -105,13 +87,7 @@ impl<T> Resolver<T> {
     }
 
     pub fn resolve(self, resolved: T) {
-        if self.tx.send(Ok(resolved)).is_err() {
-            trace!("Promise was dropped")
-        }
-    }
-
-    pub fn reject<R: Reason + 'static>(self, reasons: R) {
-        if self.tx.send(Err(Rejection::new(reasons))).is_err() {
+        if self.tx.send(resolved).is_err() {
             trace!("Promise was dropped")
         }
     }

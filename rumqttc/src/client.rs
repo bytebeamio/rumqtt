@@ -5,7 +5,8 @@ use std::time::Duration;
 use crate::mqttbytes::{v4::*, QoS};
 use crate::tokens::{NoResponse, Resolver, Token};
 use crate::{
-    valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Pkid, Request,
+    valid_filter, valid_topic, AckOfAck, AckOfPub, ConnectionError, Event, EventLoop, MqttOptions,
+    Request,
 };
 
 use bytes::Bytes;
@@ -75,7 +76,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<Token<Pkid>, ClientError>
+    ) -> Result<Token<AckOfPub>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -100,7 +101,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<Token<Pkid>, ClientError>
+    ) -> Result<Token<AckOfPub>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -119,7 +120,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub async fn ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+    pub async fn ack(&self, publish: &Publish) -> Result<Token<AckOfAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let ack = get_ack_req(publish, resolver);
         if let Some(ack) = ack {
@@ -130,7 +131,7 @@ impl AsyncClient {
     }
 
     /// Attempts to send a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+    pub fn try_ack(&self, publish: &Publish) -> Result<Token<AckOfAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let ack = get_ack_req(publish, resolver);
         if let Some(ack) = ack {
@@ -147,7 +148,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<Token<Pkid>, ClientError>
+    ) -> Result<Token<AckOfPub>, ClientError>
     where
         S: Into<String>,
     {
@@ -165,7 +166,7 @@ impl AsyncClient {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<Token<Pkid>, ClientError> {
+    ) -> Result<Token<SubAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new(topic, qos);
 
@@ -184,7 +185,7 @@ impl AsyncClient {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<Token<Pkid>, ClientError> {
+    ) -> Result<Token<SubAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new(topic, qos);
         let is_valid = subscribe_has_valid_filters(&subscribe);
@@ -198,7 +199,7 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub async fn subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
+    pub async fn subscribe_many<T>(&self, topics: T) -> Result<Token<SubAck>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -216,7 +217,7 @@ impl AsyncClient {
     }
 
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<Token<SubAck>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -233,7 +234,10 @@ impl AsyncClient {
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+    pub async fn unsubscribe<S: Into<String>>(
+        &self,
+        topic: S,
+    ) -> Result<Token<UnsubAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe, resolver);
@@ -243,7 +247,10 @@ impl AsyncClient {
     }
 
     /// Attempts to send a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(
+        &self,
+        topic: S,
+    ) -> Result<Token<UnsubAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe, resolver);
@@ -271,10 +278,10 @@ impl AsyncClient {
     }
 }
 
-fn get_ack_req(publish: &Publish, resolver: Resolver<()>) -> Option<Request> {
+fn get_ack_req(publish: &Publish, resolver: Resolver<AckOfAck>) -> Option<Request> {
     let ack = match publish.qos {
         QoS::AtMostOnce => {
-            resolver.resolve(());
+            resolver.resolve(AckOfAck::None);
             return None;
         }
         QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid), resolver),
@@ -331,7 +338,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<Token<Pkid>, ClientError>
+    ) -> Result<Token<AckOfPub>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -355,7 +362,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<Token<Pkid>, ClientError>
+    ) -> Result<Token<AckOfPub>, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -364,7 +371,7 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+    pub fn ack(&self, publish: &Publish) -> Result<Token<AckOfAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let ack = get_ack_req(publish, resolver);
         if let Some(ack) = ack {
@@ -375,7 +382,7 @@ impl Client {
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
-    pub fn try_ack(&self, publish: &Publish) -> Result<Token<NoResponse>, ClientError> {
+    pub fn try_ack(&self, publish: &Publish) -> Result<Token<AckOfAck>, ClientError> {
         self.client.try_ack(publish)
     }
 
@@ -384,7 +391,7 @@ impl Client {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<Token<Pkid>, ClientError> {
+    ) -> Result<Token<SubAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let subscribe = Subscribe::new(topic, qos);
         let is_valid = subscribe_has_valid_filters(&subscribe);
@@ -402,12 +409,12 @@ impl Client {
         &self,
         topic: S,
         qos: QoS,
-    ) -> Result<Token<Pkid>, ClientError> {
+    ) -> Result<Token<SubAck>, ClientError> {
         self.client.try_subscribe(topic, qos)
     }
 
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
-    pub fn subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
+    pub fn subscribe_many<T>(&self, topics: T) -> Result<Token<SubAck>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -424,7 +431,7 @@ impl Client {
         Ok(token)
     }
 
-    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<Token<Pkid>, ClientError>
+    pub fn try_subscribe_many<T>(&self, topics: T) -> Result<Token<SubAck>, ClientError>
     where
         T: IntoIterator<Item = SubscribeFilter>,
     {
@@ -432,7 +439,7 @@ impl Client {
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+    pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<UnsubAck>, ClientError> {
         let (resolver, token) = Resolver::new();
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe, resolver);
@@ -442,7 +449,10 @@ impl Client {
     }
 
     /// Sends a MQTT Unsubscribe to the `EventLoop`
-    pub fn try_unsubscribe<S: Into<String>>(&self, topic: S) -> Result<Token<Pkid>, ClientError> {
+    pub fn try_unsubscribe<S: Into<String>>(
+        &self,
+        topic: S,
+    ) -> Result<Token<UnsubAck>, ClientError> {
         self.client.try_unsubscribe(topic)
     }
 

@@ -622,7 +622,7 @@ async fn resolve_on_qos0_before_write_to_tcp_buffer() {
             .await
             .unwrap()
             .unwrap(),
-        0
+        AckOfPub::None
     );
 
     // Verify the packet still reached broker
@@ -704,7 +704,7 @@ async fn resolve_on_qos1_ack_from_broker() {
             .await
             .unwrap()
             .unwrap(),
-        1
+        AckOfPub::PubAck(PubAck { pkid: 1 })
     );
 }
 
@@ -777,7 +777,7 @@ async fn resolve_on_qos2_ack_from_broker() {
             .await
             .unwrap()
             .unwrap(),
-        1
+        AckOfPub::PubComp(PubComp { pkid: 1 })
     );
 }
 
@@ -839,7 +839,8 @@ async fn resolve_on_sub_ack_from_broker() {
         timeout(Duration::from_secs(1), &mut token)
             .await
             .unwrap()
-            .unwrap(),
+            .unwrap()
+            .pkid,
         1
     );
 }
@@ -894,6 +895,6 @@ async fn resolve_on_unsub_ack_from_broker() {
             .await
             .unwrap()
             .unwrap(),
-        1
+        UnsubAck { pkid: 1 }
     );
 }

@@ -160,6 +160,21 @@ pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
+/// Used to encapsulate all publish/pubrec acknowledgements in v4
+#[derive(Debug, PartialEq)]
+pub enum AckOfPub {
+    PubAck(PubAck),
+    PubComp(PubComp),
+    None,
+}
+
+/// Used to encapsulate all ack/pubrel acknowledgements in v4
+#[derive(Debug)]
+pub enum AckOfAck {
+    None,
+    PubRel(PubRel),
+}
+
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outgoing {
@@ -191,12 +206,12 @@ pub enum Outgoing {
 /// handled one by one.
 #[derive(Debug)]
 pub enum Request {
-    Publish(Publish, Resolver<Pkid>),
-    PubAck(PubAck, Resolver<()>),
-    PubRec(PubRec, Resolver<()>),
-    PubRel(PubRel, Resolver<Pkid>),
-    Subscribe(Subscribe, Resolver<Pkid>),
-    Unsubscribe(Unsubscribe, Resolver<Pkid>),
+    Publish(Publish, Resolver<AckOfPub>),
+    PubAck(PubAck, Resolver<AckOfAck>),
+    PubRec(PubRec, Resolver<AckOfAck>),
+    PubRel(PubRel, Resolver<AckOfPub>),
+    Subscribe(Subscribe, Resolver<SubAck>),
+    Unsubscribe(Unsubscribe, Resolver<UnsubAck>),
     Disconnect(Resolver<()>),
     PingReq,
 }
