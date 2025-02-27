@@ -67,7 +67,7 @@ pub fn write(
     let dup = publish.dup as u8;
     let qos = publish.qos as u8;
     let retain = publish.retain as u8;
-    buffer.put_u8(0b0011_0000 | retain | qos << 1 | dup << 3);
+    buffer.put_u8(0b0011_0000 | retain | (qos << 1) | (dup << 3));
 
     let count = write_remaining_length(buffer, len)?;
     write_mqtt_bytes(buffer, &publish.topic);
