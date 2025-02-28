@@ -2,7 +2,7 @@ use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::mqttbytes::QoS;
 use tokio::{task, time};
 
-use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
+use rumqttc::v5::{AsyncClient, Event, EventLoop, ManualAckReason, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
 
@@ -62,12 +62,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Packet::Publish(publish) => publish,
                 _ => continue,
             };
-            // this time we will ack incoming publishes.
+            // this time we will ack incoming publishes in two different ways.
             // Its important not to block notifier as this can cause deadlock.
-            let c = client.clone();
-            tokio::spawn(async move {
-                c.ack(&publish).await.unwrap();
-            });
+            if (publish.pkid & 1) == 0 {
+                // Ack with all default: reason code success, no reason string, properties none
+                let c = client.clone();
+                tokio::spawn(async move {
+                    c.ack(&publish).await.unwrap();
+                });
+            } else {
+                // Ack with custom reason code and reason string
+                let c = client.clone();
+                // Get manual ack packet for later acking
+                let mut ack = c.get_manual_ack(&publish);
+                tokio::spawn(async move {
+                    // Customize reason code (if not set, default is Success)
+                    ack.set_reason(ManualAckReason::Success);
+                    // Customize reason string (if not set, default is empty)
+                    ack.set_reason_string("There is no error".to_string().into());
+                    c.manual_ack(ack).await.unwrap();
+                });
+            }
         }
     }
 
