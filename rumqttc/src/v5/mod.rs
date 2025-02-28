@@ -14,8 +14,8 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
-use crate::Outgoing;
-use crate::{NetworkOptions, Transport};
+use crate::tokens::Resolver;
+use crate::{NetworkOptions, Outgoing, Transport};
 
 use mqttbytes::v5::*;
 
@@ -31,28 +31,33 @@ pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
 
-/// Requests by the client to mqtt event loop. Request are
-/// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Request {
-    Publish(Publish),
+/// Used to encapsulate all publish acknowledgents in v5
+#[derive(Debug)]
+pub enum AckOfPub {
     PubAck(PubAck),
-    PubRec(PubRec),
     PubComp(PubComp),
-    PubRel(PubRel),
-    PingReq,
-    PingResp,
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect,
+    None,
 }
 
-impl From<Subscribe> for Request {
-    fn from(subscribe: Subscribe) -> Self {
-        Self::Subscribe(subscribe)
-    }
+/// Used to encapsulate all ack/pubrel acknowledgements in v5
+#[derive(Debug)]
+pub enum AckOfAck {
+    None,
+    PubRel(PubRel),
+}
+
+/// Requests by the client to mqtt event loop. Request are
+/// handled one by one.
+#[derive(Debug)]
+pub enum Request {
+    Publish(Publish, Resolver<AckOfPub>),
+    PubAck(PubAck, Resolver<AckOfAck>),
+    PubRec(PubRec, Resolver<AckOfAck>),
+    PubRel(PubRel, Resolver<AckOfPub>),
+    Subscribe(Subscribe, Resolver<SubAck>),
+    Unsubscribe(Unsubscribe, Resolver<UnsubAck>),
+    Disconnect(Resolver<()>),
+    PingReq,
 }
 
 #[cfg(feature = "websocket")]

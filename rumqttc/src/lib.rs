@@ -133,10 +133,9 @@ type RequestModifierFn = Arc<
 
 #[cfg(feature = "proxy")]
 mod proxy;
+mod tokens;
 
-pub use client::{
-    AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
-};
+pub use client::{AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError};
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
@@ -145,6 +144,8 @@ use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 pub use tls::Error as TlsError;
+use tokens::Resolver;
+pub use tokens::{Token, TokenError};
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
 #[cfg(feature = "use-native-tls")]
@@ -158,6 +159,21 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
+
+/// Used to encapsulate all publish/pubrec acknowledgements in v4
+#[derive(Debug, PartialEq)]
+pub enum AckOfPub {
+    PubAck(PubAck),
+    PubComp(PubComp),
+    None,
+}
+
+/// Used to encapsulate all ack/pubrel acknowledgements in v4
+#[derive(Debug)]
+pub enum AckOfAck {
+    None,
+    PubRel(PubRel),
+}
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,39 +204,20 @@ pub enum Outgoing {
 
 /// Requests by the client to mqtt event loop. Request are
 /// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Request {
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubComp(PubComp),
-    PubRel(PubRel),
-    PingReq(PingReq),
-    PingResp(PingResp),
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect(Disconnect),
+    Publish(Publish, Resolver<AckOfPub>),
+    PubAck(PubAck, Resolver<AckOfAck>),
+    PubRec(PubRec, Resolver<AckOfAck>),
+    PubRel(PubRel, Resolver<AckOfPub>),
+    Subscribe(Subscribe, Resolver<SubAck>),
+    Unsubscribe(Unsubscribe, Resolver<UnsubAck>),
+    Disconnect(Resolver<()>),
+    PingReq,
 }
 
-impl From<Publish> for Request {
-    fn from(publish: Publish) -> Request {
-        Request::Publish(publish)
-    }
-}
-
-impl From<Subscribe> for Request {
-    fn from(subscribe: Subscribe) -> Request {
-        Request::Subscribe(subscribe)
-    }
-}
-
-impl From<Unsubscribe> for Request {
-    fn from(unsubscribe: Unsubscribe) -> Request {
-        Request::Unsubscribe(unsubscribe)
-    }
-}
+/// Packet Identifier with which Publish/Subscribe/Unsubscribe packets are identified while inflight.
+pub type Pkid = u16;
 
 /// Transport methods. Defaults to TCP.
 #[derive(Clone)]
