@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - MQTT keep alive interval
+- Change default network keep alive interval from `Duration::ZERO` to `Duration::MAX`.
 - record client id for remote link's span
 - session present flag in connack
 - Make write method return the number of bytes written correctly everywhere
