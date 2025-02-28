@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`.
 * `Auth` packet as per MQTT5 standards
 * Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`
+* Concurrently attempt multiple socket connections instead of blocking on each
 
 ### Changed
 
