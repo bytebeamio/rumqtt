@@ -134,6 +134,12 @@ impl MqttState {
             let request = Request::PubRel(PubRel::new(pkid), resolver);
             pending.push(request);
         }
+
+        // we don't retransmit subscribe and unsubscribe packet
+        // so we can clear their state
+        self.sub_ack_waiter.clear();
+        self.unsub_ack_waiter.clear();
+
         self.outgoing_rel.clear();
 
         // remove packet ids of incoming qos2 publishes
