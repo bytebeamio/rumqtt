@@ -55,7 +55,10 @@ impl<P: Protocol> Network<P> {
             write: BytesMut::with_capacity(10 * 1024),
             max_incoming_size,
             max_connection_buffer_len,
-            keepalive: Duration::ZERO,
+            // Overwritten by keepalive value in connect packet, otherwise we
+            // would wait indefinitely until we get a packet / network error
+            // when we call read.
+            keepalive: Duration::MAX,
             protocol,
         }
     }

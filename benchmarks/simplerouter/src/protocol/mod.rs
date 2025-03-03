@@ -282,12 +282,9 @@ pub fn length(stream: Iter<u8>) -> Result<(usize, usize), Error> {
 
 /// Returns big endian u16 view from next 2 bytes
 pub fn view_u16(stream: &[u8]) -> Result<u16, Error> {
-    let v = match stream.get(0..2) {
-        Some(v) => (v[0] as u16) << 8 | (v[1] as u16),
-        None => return Err(Error::MalformedPacket),
-    };
+    let v = stream.get(0..2).ok_or(Error::MalformedPacket)?;
 
-    Ok(v)
+    Ok(((v[0] as u16) << 8) | (v[1] as u16))
 }
 
 /// Returns big endian u16 view from next 2 bytes
@@ -306,7 +303,6 @@ pub fn view_str(stream: &[u8], end: usize) -> Result<&str, Error> {
 /// packet id or qos not being present. In cases where `read_mqtt_string` or
 /// `read_mqtt_bytes` exhausted remaining length but packet framing expects to
 /// parse qos next, these pre checks will prevent `bytes` crashes
-
 fn read_u32(stream: &mut Bytes) -> Result<u32, Error> {
     if stream.len() < 4 {
         return Err(Error::MalformedPacket);
