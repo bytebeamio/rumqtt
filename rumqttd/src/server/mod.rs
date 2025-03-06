@@ -5,6 +5,7 @@ mod broker;
 mod tls;
 
 pub use broker::Broker;
+pub use broker::BrokerHandle;
 
 // pub trait IO: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 // impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> IO for T {}
