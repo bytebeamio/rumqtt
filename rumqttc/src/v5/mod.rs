@@ -215,6 +215,11 @@ impl MqttOptions {
         self.request_modifier.clone()
     }
 
+    pub fn set_client_id(&mut self, client_id: String) -> &mut Self {
+        self.client_id = client_id;
+        self
+    }
+
     pub fn set_transport(&mut self, transport: Transport) -> &mut Self {
         self.transport = transport;
         self
