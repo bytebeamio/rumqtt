@@ -32,6 +32,32 @@ impl PubAck {
         }
     }
 
+    pub fn set_code(&mut self, code: u8) {
+        self.reason = reason(code).unwrap();
+    }
+
+    pub fn set_reason_string(&mut self, reason_string: Option<String>) {
+        if let Some(props) = &mut self.properties {
+            props.reason_string = reason_string;
+        } else {
+            self.properties = Some(PubAckProperties {
+                reason_string,
+                user_properties: Vec::<(String, String)>::new(),
+            });
+        }
+    }
+
+    pub fn set_user_properties(&mut self, user_properties: Vec<(String, String)>) {
+        if let Some(props) = &mut self.properties {
+            props.user_properties = user_properties;
+        } else {
+            self.properties = Some(PubAckProperties {
+                reason_string: None,
+                user_properties,
+            });
+        }
+    }
+
     pub fn size(&self) -> usize {
         if self.reason == PubAckReason::Success && self.properties.is_none() {
             return 4;
