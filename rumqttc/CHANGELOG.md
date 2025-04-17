@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `set_session_expiry_interval` and `session_expiry_interval` methods on `MqttOptions`.
 * `Auth` packet as per MQTT5 standards
 * Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`
+* `publish` / `subscribe` / `unsubscribe` methods on `AsyncClient` and `Client` now return an `AckPromise` which resolves when the packet(except for QoS 0 publishes, which resolve as soon as handled) is acknowledged by the broker.
 
 ### Changed
 
