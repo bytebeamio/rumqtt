@@ -452,7 +452,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
                         protocol,
                         self.awaiting_will_handler.clone(),
                     )
-                    .instrument(tracing::error_span!(
+                    .instrument(tracing::info_span!(
                         "remote_link",
                         ?tenant_id,
                         client_id = field::Empty,
