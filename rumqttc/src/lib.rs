@@ -250,7 +250,7 @@ impl Transport {
         Self::Tcp
     }
 
-    #[cfg(feature = "use-rustls")]
+    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
     pub fn tls_with_default_config() -> Self {
         Self::tls_with_config(Default::default())
     }
@@ -311,8 +311,17 @@ impl Transport {
         Self::Wss(tls_config)
     }
 
-    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "use-rustls", feature = "websocket"))))]
+    #[cfg(all(
+        any(feature = "use-rustls", feature = "use-native-tls"),
+        feature = "websocket"
+    ))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(all(
+            any(feature = "use-rustls", feature = "use-native-tls"),
+            feature = "websocket"
+        )))
+    )]
     pub fn wss_with_default_config() -> Self {
         Self::Wss(Default::default())
     }
@@ -362,6 +371,13 @@ impl Default for TlsConfiguration {
             .with_no_client_auth();
 
         Self::Rustls(Arc::new(tls_config))
+    }
+}
+
+#[cfg(all(feature = "use-native-tls", not(feature = "use-rustls")))]
+impl Default for TlsConfiguration {
+    fn default() -> Self {
+        Self::Native
     }
 }
 
@@ -788,7 +804,7 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             // Encrypted connections are supported, but require explicit TLS configuration. We fall
             // back to the unencrypted transport layer, so that `set_transport` can be used to
             // configure the encrypted transport layer with the provided TLS configuration.
-            #[cfg(feature = "use-rustls")]
+            #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
             "mqtts" | "ssl" => (Transport::tls_with_default_config(), 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
             #[cfg(feature = "websocket")]
