@@ -11,6 +11,7 @@ use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
 use slab::Slab;
+use std::cmp::min;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
 use std::thread;
@@ -1561,7 +1562,7 @@ fn forward_device_data(
     let forwards = publishes
         .into_iter()
         .map(|((mut publish, mut properties), offset)| {
-            publish.qos = protocol::qos(qos).unwrap();
+            publish.qos = min(publish.qos, protocol::qos(qos).unwrap());
 
             // if there is some topic alias to use, set it in publish properties
             if topic_alias.is_some() {
@@ -1590,7 +1591,7 @@ fn forward_device_data(
             }
         });
 
-    let (len, inflight) = outgoing.push_forwards(forwards, qos, filter_idx);
+    let (len, inflight) = outgoing.push_forwards(forwards, filter_idx);
 
     debug!(
         inflight_count = inflight,

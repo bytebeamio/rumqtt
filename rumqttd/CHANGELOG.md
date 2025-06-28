@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Will Messages
 - Retained Messages
 - Publish properties in QoS2 publish
+- Handle subscription qos as per standards.
 
 ### Security
 - Remove dependency on webpki. [CVE](https://rustsec.org/advisories/RUSTSEC-2023-0052)

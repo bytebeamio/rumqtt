@@ -8,7 +8,7 @@ use parking_lot::Mutex;
 use tracing::{error, warn};
 
 use crate::{
-    protocol::Packet,
+    protocol::{Packet, QoS},
     router::{FilterIdx, MAX_CHANNEL_CAPACITY},
     Cursor, Notification,
 };
@@ -112,27 +112,19 @@ impl Outgoing {
     pub fn push_forwards(
         &mut self,
         publishes: impl Iterator<Item = Forward>,
-        qos: u8,
         filter_idx: usize,
     ) -> (usize, usize) {
         let mut buffer = self.data_buffer.lock();
         let publishes = publishes;
 
-        if qos == 0 {
-            for p in publishes {
-                self.meter.publish_count += 1;
+        publishes.for_each(|mut p| {
+            self.meter.publish_count += 1;
+
+            if p.publish.qos == QoS::AtMostOnce {
                 buffer.push_back(Notification::Forward(p));
-                // self.meter.total_size += p.len();
+                return;
             }
 
-            // self.meter.update_data_rate(total_size);
-            let buffer_count = buffer.len();
-            let inflight_count = self.inflight_buffer.len();
-            return (buffer_count, inflight_count);
-        }
-
-        for mut p in publishes {
-            // Index and pkid of current outgoing packet
             self.last_pkid += 1;
             p.publish.pkid = self.last_pkid;
 
@@ -144,10 +136,9 @@ impl Outgoing {
                 self.last_pkid = 0;
             }
 
-            self.meter.publish_count += 1;
             self.meter.total_size += p.publish.topic.len() + p.publish.payload.len();
             buffer.push_back(Notification::Forward(p));
-        }
+        });
 
         let buffer_count = buffer.len();
         let inflight_count = self.inflight_buffer.len();
