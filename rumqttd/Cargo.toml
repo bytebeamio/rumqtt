@@ -48,6 +48,7 @@ websocket = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep
 verify-client-cert = []
 validate-tenant-prefix = ["verify-client-cert"]
 allow-duplicate-clientid = []
+allow-dollar-topic = []
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"

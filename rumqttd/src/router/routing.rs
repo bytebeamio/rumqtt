@@ -1733,6 +1733,7 @@ fn validate_subscription(
         }
     }
 
+    #[cfg(not(feature = "allow-dollar-topic"))]
     if filter.path.starts_with('$') && !filter.path.starts_with("$share") {
         return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
     }

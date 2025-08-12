@@ -655,6 +655,7 @@ pub fn valid_filter(filter: &str) -> bool {
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated
 /// during a subscribe
 pub fn matches(topic: &str, filter: &str) -> bool {
+    #[cfg(not(feature = "allow-dollar-topic"))]
     if !topic.is_empty() && topic[..1].contains('$') {
         return false;
     }
