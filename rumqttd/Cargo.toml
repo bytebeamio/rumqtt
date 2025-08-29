@@ -31,7 +31,7 @@ futures-util = { version = "0.3.30", optional = true}
 parking_lot = "0.12.1"
 config = "0.14"
 tracing = { version="0.1", features=["log"] }
-tracing-subscriber = { version="0.3.18", features=["env-filter"] }
+tracing-subscriber = { version="0.3.20", features=["env-filter"] }
 metrics = "0.22.1"
 metrics-exporter-prometheus = { version = "0.13.1", default-features = false, features = ["http-listener"] }
 clap = { version = "4.4", features = ["derive"] }
