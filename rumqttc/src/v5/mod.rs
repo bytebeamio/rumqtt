@@ -25,7 +25,7 @@ pub use client::{
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
-#[cfg(feature = "use-rustls")]
+#[cfg(feature = "use-rustls-no-provider")]
 pub use crate::tls::Error as TlsError;
 
 #[cfg(feature = "proxy")]
@@ -618,12 +618,12 @@ impl std::convert::TryFrom<url::Url> for MqttOptions {
             // Encrypted connections are supported, but require explicit TLS configuration. We fall
             // back to the unencrypted transport layer, so that `set_transport` can be used to
             // configure the encrypted transport layer with the provided TLS configuration.
-            #[cfg(feature = "use-rustls")]
+            #[cfg(feature = "use-rustls-no-provider")]
             "mqtts" | "ssl" => (Transport::tls_with_default_config(), 8883),
             "mqtt" | "tcp" => (Transport::Tcp, 1883),
             #[cfg(feature = "websocket")]
             "ws" => (Transport::Ws, 8000),
-            #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+            #[cfg(all(feature = "use-rustls-no-provider", feature = "websocket"))]
             "wss" => (Transport::wss_with_default_config(), 8000),
             _ => return Err(OptionError::Scheme),
         };
@@ -753,7 +753,7 @@ mod test {
     use super::*;
 
     #[test]
-    #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+    #[cfg(all(feature = "use-rustls-no-provider", feature = "websocket"))]
     fn no_scheme() {
         use crate::{TlsConfiguration, Transport};
         let mut mqttoptions = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
