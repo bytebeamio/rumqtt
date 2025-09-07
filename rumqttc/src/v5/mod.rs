@@ -255,6 +255,10 @@ impl MqttOptions {
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
     pub fn set_clean_start(&mut self, clean_start: bool) -> &mut Self {
+        assert!(
+            !self.client_id.is_empty() || clean_start,
+            "Cannot unset clean session when client id is empty"
+        );
         self.clean_start = clean_start;
         self
     }
