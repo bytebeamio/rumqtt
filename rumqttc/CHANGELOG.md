@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `Auth` packet as per MQTT5 standards
 * Allow configuring  the `nodelay` property of underlying TCP client with the `tcp_nodelay` field in `NetworkOptions`
 * `set_client_id` method on `MqttOptions`
+* Implemented automatic topic alias for the client. Now client will manage client-side topic_alias
 
 ### Changed
 
