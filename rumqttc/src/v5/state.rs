@@ -167,6 +167,10 @@ impl MqttState {
         // remove packed ids of incoming qos2 publishes
         self.incoming_pub.clear();
 
+        // clear topic aliases
+        self.client_topic_alias.clear();
+        self.current_topic_alias = 0;
+
         self.await_pingresp = false;
         self.collision_ping_count = 0;
         self.inflight = 0;
