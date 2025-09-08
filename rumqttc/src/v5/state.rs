@@ -104,6 +104,10 @@ pub struct MqttState {
     pub manual_acks: bool,
     /// Map of alias_id->topic
     topic_alises: HashMap<u16, Bytes>,
+    /// Client_topic_alias
+    client_topic_alias: HashMap<Bytes, u16>,
+    /// current topic alias
+    current_topic_alias: u16,
     /// `topic_alias_maximum` RECEIVED via connack packet
     pub broker_topic_alias_max: u16,
     /// Maximum number of allowed inflight QoS1 & QoS2 requests
@@ -133,6 +137,8 @@ impl MqttState {
             events: VecDeque::with_capacity(100),
             manual_acks,
             topic_alises: HashMap::new(),
+            client_topic_alias: HashMap::new(),
+            current_topic_alias: 0,
             // Set via CONNACK
             broker_topic_alias_max: 0,
             max_outgoing_inflight: max_inflight,
@@ -506,18 +512,22 @@ impl MqttState {
 
         let pkid = publish.pkid;
 
-        if let Some(props) = &publish.properties {
-            if let Some(alias) = props.topic_alias {
-                if alias > self.broker_topic_alias_max {
-                    // We MUST NOT send a Topic Alias that is greater than the
-                    // broker's Topic Alias Maximum.
-                    return Err(StateError::InvalidAlias {
-                        alias,
-                        max: self.broker_topic_alias_max,
-                    });
-                }
+        let topic = publish.topic.clone();
+        if let Some(alias) = self.client_topic_alias.get(&topic) {
+            // If the Topic Alias is already in use, the Client MUST use the same Topic Alias.
+            publish
+                .properties
+                .get_or_insert_with(Default::default)
+                .topic_alias = Some(*alias);
+        } else {
+            self.current_topic_alias += 1;
+            if self.current_topic_alias > self.broker_topic_alias_max {
+                self.current_topic_alias = 1;
             }
-        };
+
+            self.client_topic_alias
+                .insert(topic, self.current_topic_alias);
+        }
 
         let event = Event::Outgoing(Outgoing::Publish(pkid));
         self.events.push_back(event);
