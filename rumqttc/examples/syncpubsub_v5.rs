@@ -8,9 +8,7 @@ fn main() {
 
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false, None);
-    mqttoptions
-        .set_keep_alive(5)
-        .set_last_will(will);
+    mqttoptions.set_keep_alive(5).set_last_will(will);
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
     thread::spawn(move || publish(client));
