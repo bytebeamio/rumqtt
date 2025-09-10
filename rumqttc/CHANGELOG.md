@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Filter PUBACK in pending save requests to fix unexpected PUBACK sent to reconnected broker.
 * Resume session only if broker sends `CONNACK` with `session_present == 1`.
 * Remove v5 PubAck/PubRec/PubRel/PubComp/Sub/Unsub failures from `StateError` and log warnings on these failures.
+* Update crate documentation with feature flags and updated rustls docs.
 
 ### Security
 
