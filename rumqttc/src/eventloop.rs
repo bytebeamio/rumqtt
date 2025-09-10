@@ -157,8 +157,12 @@ impl EventLoop {
                 Ok(inner) => inner?,
                 Err(_) => return Err(ConnectionError::NetworkTimeout),
             };
-            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
-            if !connack.session_present {
+            // Reset session if the session flag is different from what we expected
+            // i.e. We requested clean_session but the server replied with session present
+            // or We requested an existing session but the server replied with session not present
+            if (self.mqtt_options.clean_session && connack.session_present)
+                || (!self.mqtt_options.clean_session && !connack.session_present)
+            {
                 self.pending.clear();
             }
             self.network = Some(network);
