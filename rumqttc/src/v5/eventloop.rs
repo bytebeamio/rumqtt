@@ -311,7 +311,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     let (domain, port) = match options.transport() {
         #[cfg(feature = "websocket")]
         Transport::Ws => split_url(&options.broker_addr)?,
-        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+        #[cfg(all(feature = "use-rustls", feature = "websocket-tls"))]
         Transport::Wss(_) => split_url(&options.broker_addr)?,
         _ => options.broker_address(),
     };
@@ -366,7 +366,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             Network::new(WsStream::new(socket), max_incoming_pkt_size)
         }
-        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+        #[cfg(all(feature = "use-rustls", feature = "websocket-tls"))]
         Transport::Wss(tls_config) => {
             let mut request = options.broker_addr.as_str().into_client_request()?;
             request
