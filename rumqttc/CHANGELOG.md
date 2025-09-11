@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+### Changed
+### Deprecated
+### Removed
+### Fixed 
+### Security
+
+
+---
+
+## [rumqtt 0.25.0] - 09-10-2025
+
+### Added
 
 * `size()` method on `Packet` calculates size once serialized.
 * `read()` and `write()` methods on `Packet`.
