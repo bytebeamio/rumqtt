@@ -74,8 +74,6 @@ pub struct EventLoop {
     pub state: MqttState,
     /// Request stream
     requests_rx: Receiver<Request>,
-    /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<Request>,
     /// Pending packets from last session
     pub pending: VecDeque<Request>,
     /// Network connection to the broker
@@ -96,21 +94,23 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
+    pub fn new(options: MqttOptions, cap: usize) -> (EventLoop, Sender<Request>) {
         let (requests_tx, requests_rx) = bounded(cap);
         let pending = VecDeque::new();
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;
 
-        EventLoop {
-            options,
-            state: MqttState::new(inflight_limit, manual_acks),
+        (
+            EventLoop {
+                options,
+                state: MqttState::new(inflight_limit, manual_acks),
+                requests_rx,
+                pending,
+                network: None,
+                keepalive_timeout: None,
+            },
             requests_tx,
-            requests_rx,
-            pending,
-            network: None,
-            keepalive_timeout: None,
-        }
+        )
     }
 
     /// Last session might contain packets which aren't acked. MQTT says these packets should be
