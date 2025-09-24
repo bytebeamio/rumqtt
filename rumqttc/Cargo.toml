@@ -1,6 +1,6 @@
 [package]
 name = "rumqttc"
-version = "0.24.0"
+version = "0.25.0"
 publish = true
 description = "An efficient and robust mqtt client for your connected devices"
 keywords = ["mqtt", "iot", "coap", "http"]
@@ -17,7 +17,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
+use-rustls = ["use-rustls-no-provider", "tokio-rustls/default"]
+use-rustls-no-provider = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
 use-native-tls = ["dep:tokio-native-tls", "dep:native-tls"]
 websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
 proxy = ["dep:async-http-proxy"]
@@ -33,7 +34,7 @@ thiserror = "2.0.8"
 
 # Optional
 # rustls
-tokio-rustls = { version = "0.26.0", optional = true }
+tokio-rustls = { version = "0.26.0", optional = true, default-features = false }
 rustls-webpki = { version = "0.102.8", optional = true }
 rustls-pemfile = { version = "2.2.0", optional = true }
 rustls-native-certs = { version = "0.8.1", optional = true }

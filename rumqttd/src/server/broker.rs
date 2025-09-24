@@ -344,7 +344,7 @@ enum AwaitingWill {
     Fire,
 }
 
-struct Server<P> {
+pub struct Server<P> {
     config: ServerSettings,
     router_tx: Sender<(ConnectionId, Event)>,
     protocol: P,
@@ -379,7 +379,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
+    pub async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
