@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [rumqtt 0.25.0] - 09-10-2025
+## [rumqttc 0.25.0] - 09-10-2025
 
 ### Added
 

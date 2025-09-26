@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [rumqtt 0.25.0] - 09-10-2025
+## [rumqttd 0.20.0] - 25-10-2025
 
 ### Added
 - Assign random identifier to clients connecting with empty client id.
