@@ -23,7 +23,8 @@ pub use link::local;
 pub use link::meters;
 pub use router::{Alert, Forward, IncomingMeter, Meter, Notification, OutgoingMeter, Router};
 use segments::Storage;
-pub use server::{Broker, LinkType, Server};
+pub use server::{Broker, BrokerHandle LinkType, Server};
+
 
 pub use self::router::shared_subs::Strategy;
 
