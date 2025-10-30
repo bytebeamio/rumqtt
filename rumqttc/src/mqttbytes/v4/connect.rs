@@ -196,7 +196,7 @@ impl LastWill {
     fn write(&self, buffer: &mut BytesMut) -> Result<u8, Error> {
         let mut connect_flags = 0;
 
-        connect_flags |= 0x04 | (self.qos as u8) << 3;
+        connect_flags |= 0x04 | ((self.qos as u8) << 3);
         if self.retain {
             connect_flags |= 0x20;
         }

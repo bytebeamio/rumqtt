@@ -130,10 +130,10 @@ impl Filter {
             let options = read_u8(bytes)?;
             let requested_qos = options & 0b0000_0011;
 
-            let nolocal = options >> 2 & 0b0000_0001;
+            let nolocal = (options >> 2) & 0b0000_0001;
             let nolocal = nolocal != 0;
 
-            let preserve_retain = options >> 3 & 0b0000_0001;
+            let preserve_retain = (options >> 3) & 0b0000_0001;
             let preserve_retain = preserve_retain != 0;
 
             let retain_forward_rule = (options >> 4) & 0b0000_0011;

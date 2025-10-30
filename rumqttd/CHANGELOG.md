@@ -8,12 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+### Changed
+### Deprecated
+### Removed
+### Fixed 
+### Security
+
+
+---
+
+## [rumqttd 0.20.0] - 25-10-2025
+
+### Added
 - Assign random identifier to clients connecting with empty client id.
 - `Unsubscribe` with `local::LinkTx`.
 - Optional shutdown handle for `Broker` in the form of `BrokerHandle`.
 
 ### Changed
 - Public re-export `Strategy` for shared subscriptions
+- Public export `Server` and `LinkType` so Server can be spawned on custom (or global) tokio runtime
 - Peer initiated disconnects logged as info rather than error.
 - External authentication function must be async
 - Update `tokio-rustls` to `0.25.0`, `rustls-webpki` to `0.102.1`, `tokio-native-tls` to `0.3.1` and
@@ -26,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - MQTT keep alive interval
+- Change default network keep alive interval from `Duration::ZERO` to `Duration::MAX`.
 - record client id for remote link's span
 - session present flag in connack
 - Make write method return the number of bytes written correctly everywhere
