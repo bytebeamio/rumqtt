@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * `use-rustls-no-provider` feature flag to allow choosing crypto backend without being forced to compile `aws_lc_rs`
 
 ### Changed
+
+* Publishing to a saturated `AsyncClient` has been made eventually fair.
+
 ### Deprecated
 ### Removed
 ### Fixed 
