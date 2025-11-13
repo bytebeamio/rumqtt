@@ -1,11 +1,11 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(feature = "websocket")]
 use std::{
     future::{Future, IntoFuture},
     pin::Pin,
-    sync::Arc,
 };
 
 mod client;
@@ -14,8 +14,7 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
-use crate::Outgoing;
-use crate::{NetworkOptions, Transport};
+use crate::{default_socket_connect, NetworkOptions, Outgoing, SocketConnector, Transport};
 
 use mqttbytes::v5::*;
 
@@ -112,6 +111,7 @@ pub struct MqttOptions {
     outgoing_inflight_upper_limit: Option<u16>,
     #[cfg(feature = "websocket")]
     request_modifier: Option<RequestModifierFn>,
+    socket_connector: Option<SocketConnector>,
 }
 
 impl MqttOptions {
@@ -147,6 +147,7 @@ impl MqttOptions {
             outgoing_inflight_upper_limit: None,
             #[cfg(feature = "websocket")]
             request_modifier: None,
+            socket_connector: None,
         }
     }
 
@@ -559,6 +560,45 @@ impl MqttOptions {
     /// The server may set its own maximum inflight limit, the smaller of the two will be used.
     pub fn get_outgoing_inflight_upper_limit(&self) -> Option<u16> {
         self.outgoing_inflight_upper_limit
+    }
+
+    /// Sets a custom socket connector, overriding the default TCP socket creation logic for MQTT connections.
+    ///
+    /// See the similar method [`crate::MqttOptions::set_socket_connector`] for more details.
+    pub fn set_socket_connector<F, Fut>(&mut self, f: F) -> &mut Self
+    where
+        F: Fn(String, NetworkOptions) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<Box<dyn crate::AsyncReadWrite>, std::io::Error>>
+            + Send
+            + 'static,
+    {
+        self.socket_connector = Some(Arc::new(move |host, network_options| {
+            Box::pin(f(host, network_options))
+        }));
+        self
+    }
+
+    /// Returns whether a custom socket connector has been set.
+    pub fn has_socket_connector(&self) -> bool {
+        self.socket_connector.is_some()
+    }
+
+    #[cfg(feature = "proxy")]
+    pub(crate) fn socket_connector(&self) -> Option<SocketConnector> {
+        self.socket_connector.clone()
+    }
+
+    pub(crate) async fn socket_connect(
+        &self,
+        host: String,
+        network_options: NetworkOptions,
+    ) -> std::io::Result<Box<dyn crate::framed::AsyncReadWrite>> {
+        if let Some(ref connector) = self.socket_connector {
+            connector(host, network_options).await
+        } else {
+            let tcp = default_socket_connect(host, network_options).await?;
+            Ok(Box::new(tcp))
+        }
     }
 }
 

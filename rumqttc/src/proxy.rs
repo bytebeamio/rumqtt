@@ -1,6 +1,6 @@
-use crate::eventloop::socket_connect;
+use crate::default_socket_connect;
 use crate::framed::AsyncReadWrite;
-use crate::NetworkOptions;
+use crate::{NetworkOptions, SocketConnector};
 
 use std::io;
 
@@ -46,11 +46,15 @@ impl Proxy {
         broker_addr: &str,
         broker_port: u16,
         network_options: NetworkOptions,
+        socket_connector: Option<SocketConnector>,
     ) -> Result<Box<dyn AsyncReadWrite>, ProxyError> {
         let proxy_addr = format!("{}:{}", self.addr, self.port);
 
-        let tcp: Box<dyn AsyncReadWrite> =
-            Box::new(socket_connect(proxy_addr, network_options).await?);
+        let tcp: Box<dyn AsyncReadWrite> = if let Some(connector) = socket_connector {
+            connector(proxy_addr, network_options).await?
+        } else {
+            Box::new(default_socket_connect(proxy_addr, network_options).await?)
+        };
         let mut tcp = match self.ty {
             ProxyType::Http => tcp,
             #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]

@@ -24,7 +24,11 @@ impl Broker {
     pub async fn new(port: u16, connack: u8, session_saved: bool) -> Broker {
         let addr = format!("127.0.0.1:{port}");
         let listener = TcpListener::bind(&addr).await.unwrap();
+        Self::from_listener(listener, connack, session_saved).await
+    }
 
+    /// Create a broker from a pre-bound listener (useful for OS-assigned ports)
+    pub async fn from_listener(listener: TcpListener, connack: u8, session_saved: bool) -> Broker {
         let (stream, _) = listener.accept().await.unwrap();
         let mut framed = Network::new(stream, 10 * 1024);
         let mut incoming = VecDeque::new();
