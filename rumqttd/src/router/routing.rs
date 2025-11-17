@@ -1,7 +1,7 @@
 use crate::protocol::{
     ConnAck, ConnAckProperties, ConnectReturnCode, Disconnect, DisconnectReasonCode, LastWill,
     LastWillProperties, Packet, PingResp, PubAck, PubAckReason, PubComp, PubCompReason, PubRec,
-    PubRecReason, PubRel, PubRelReason, Publish, PublishProperties, QoS, SubAck,
+    PubRecReason, PubRel, PubRelReason, Publish, PublishProperties, QoS, RetainForwardRule, SubAck,
     SubscribeReasonCode, UnsubAck, UnsubAckReason,
 };
 use crate::router::alertlog::alert;
@@ -957,10 +957,13 @@ impl Router {
                 .insert(filter_path.clone(), subscription_id);
         }
 
+        let not_shared_subscription = group.is_none();
+        let retain_forward_rule = &filter.retain_forward_rule;
         // check is group is None because retained messages aren't sent
         // for shared subscriptions
-        // TODO: use retain forward rules
-        let forward_retained = group.is_none();
+        // don't forward if retain forward rule is never
+        let forward_retained =
+            not_shared_subscription && retain_forward_rule != &RetainForwardRule::Never;
 
         // call to `insert(_)` returns `true` if it didn't contain the filter_path already
         // i.e. its a new subscription
@@ -974,17 +977,51 @@ impl Router {
                 max_count: 100,
                 // set true for new subscriptions
                 forward_retained,
+                preserve_retain: filter.preserve_retain,
                 group,
             };
 
             self.scheduler.track(id, request);
             self.scheduler.reschedule(id, ScheduleReason::NewFilter);
             debug_assert!(self.scheduler.check_tracker_duplicates(id).is_none())
-        }
+        } else {
+            let waiters = self
+                .datalog
+                .native
+                .get_mut(filter_idx)
+                .unwrap()
+                .waiters
+                .get_mut();
 
-        // TODO: figure out how we can update existing DataRequest
-        // helpful in re-subscriptions and forwarding retained messages on
-        // every subscribe
+            let req_pos = waiters
+                .iter()
+                .position(|(_, r)| r.filter_idx == filter_idx && r.group == group);
+
+            let mut request = if let Some(pos) = req_pos {
+                // remove req from waiters
+                let (_, r) = waiters.remove(pos).unwrap();
+                r
+            } else {
+                // if req was not in waiters, it MUST be in tracker
+                // so we find and remove it
+                let tracker_reqs = &mut self.scheduler.trackers.get_mut(id).unwrap().data_requests;
+                let req_pos = tracker_reqs
+                    .iter()
+                    .position(|r| r.filter_idx == filter_idx && r.group == group)
+                    .unwrap();
+                tracker_reqs.remove(req_pos).unwrap()
+            };
+
+            let forward_retained = retain_forward_rule == &RetainForwardRule::OnEverySubscribe
+                && not_shared_subscription;
+
+            request.forward_retained = forward_retained;
+            request.qos = filter.qos as u8;
+            request.preserve_retain = filter.preserve_retain;
+
+            self.scheduler.track(id, request);
+            self.scheduler.reschedule(id, ScheduleReason::NewFilter);
+        }
 
         let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
         meter.register_subscription(filter_path.clone());
@@ -1470,6 +1507,12 @@ fn forward_device_data(
 
         publishes.extend(retained_publishes.into_iter().map(|p| (p, None)));
         inflight_slots -= publishes.len() as u64;
+
+        if !request.preserve_retain {
+            publishes.iter_mut().for_each(|((p, _), _)| {
+                p.retain = false;
+            })
+        }
 
         // we only want to forward retained messages once
         request.forward_retained = false;
