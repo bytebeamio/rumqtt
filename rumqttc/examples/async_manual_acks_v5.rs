@@ -9,7 +9,7 @@ use std::time::Duration;
 fn create_conn() -> (AsyncClient, EventLoop) {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
     mqttoptions
-        .set_keep_alive(Duration::from_secs(5))
+        .set_keep_alive(5)
         .set_session_expiry_interval(u32::MAX.into())
         .set_manual_acks(true)
         .set_clean_start(false);
