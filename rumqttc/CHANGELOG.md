@@ -8,12 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+### Changed
+### Deprecated
+### Removed
+### Fixed 
+### Security
+
+
+---
+
+## [rumqttc 0.25.1] - 21-11-2025
+
+### Added
 * `use-rustls-no-provider` feature flag to allow choosing crypto backend without being forced to compile `aws_lc_rs`
 
 ### Changed
 ### Deprecated
 ### Removed
 ### Fixed 
+* Fixed broken websocket feature in rumqttc-0.25.0
+
 ### Security
 
 
