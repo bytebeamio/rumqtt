@@ -35,7 +35,7 @@ use std::{io, thread};
 
 use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
-use crate::router::{Event, Router};
+use crate::router::{Event, PublishFilterRef, Router};
 use crate::{Config, ConnectionId, ServerSettings};
 
 use tokio::net::{TcpListener, TcpStream};
@@ -71,9 +71,13 @@ pub struct Broker {
 
 impl Broker {
     pub fn new(config: Config) -> Broker {
+        Self::with_filter(config, Vec::new())
+    }
+
+    pub fn with_filter(config: Config, publish_filters: Vec<PublishFilterRef>) -> Broker {
         let config = Arc::new(config);
         let router_config = config.router.clone();
-        let router: Router = Router::new(config.id, router_config);
+        let router: Router = Router::new(config.id, publish_filters, router_config);
 
         // Setup cluster if cluster settings are configured.
         match config.cluster.clone() {
@@ -95,6 +99,8 @@ impl Broker {
             }
         }
     }
+
+
 
     // pub fn new_local_cluster(
     //     config: Config,

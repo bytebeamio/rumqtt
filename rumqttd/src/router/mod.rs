@@ -24,7 +24,9 @@ mod routing;
 mod scheduler;
 pub(crate) mod shared_subs;
 mod waiters;
+mod filter;
 
+pub use filter::{PublishFilter, PublishFilterRef};
 pub use alertlog::Alert;
 pub use connection::Connection;
 pub use routing::Router;
