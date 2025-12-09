@@ -1,12 +1,7 @@
 use flume::Sender;
 
 #[cfg(feature = "use-rustls")]
-use std::{
-    fs,
-    io::{BufReader, Cursor},
-    path::Path,
-    sync::Arc,
-};
+use std::{fs, path::Path, sync::Arc};
 
 use std::{io, net::AddrParseError, time::Duration};
 
@@ -16,12 +11,11 @@ use tokio::{
 };
 
 #[cfg(feature = "use-rustls")]
-use rustls_pemfile::Item;
-
-#[cfg(feature = "use-rustls")]
 use tokio_rustls::{
     rustls::{
-        pki_types::{InvalidDnsNameError, ServerName},
+        pki_types::{
+            pem::PemObject, CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName,
+        },
         ClientConfig, Error as TLSError, RootCertStore,
     },
     TlsConnector,
@@ -203,9 +197,11 @@ pub async fn tls_connect<P: AsRef<Path>>(
 ) -> Result<Box<dyn N>, BridgeError> {
     let mut root_cert_store = RootCertStore::empty();
 
-    for cert in rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(ca_file)?))) {
-        root_cert_store.add(cert?)?;
-    }
+    let ca_pem = fs::read(ca_file)?;
+    let certs: Vec<CertificateDer> =
+        CertificateDer::pem_slice_iter(&ca_pem).collect::<Result<Vec<_>, _>>()?;
+
+    root_cert_store.add_parsable_certificates(certs);
 
     if root_cert_store.is_empty() {
         return Err(BridgeError::NoValidCertInChain);
@@ -218,18 +214,12 @@ pub async fn tls_connect<P: AsRef<Path>>(
         key: key_path,
     }) = client_auth_opt
     {
-        let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(fs::read(certs_path)?)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let certs_pem = fs::read(certs_path)?;
+        let certs: Vec<CertificateDer> =
+            CertificateDer::pem_slice_iter(&certs_pem).collect::<Result<Vec<_>, _>>()?;
 
-        let key = loop {
-            match rustls_pemfile::read_one(&mut BufReader::new(Cursor::new(fs::read(key_path)?)))? {
-                Some(Item::Pkcs1Key(key)) => break key.into(),
-                Some(Item::Pkcs8Key(key)) => break key.into(),
-                Some(Item::Sec1Key(key)) => break key.into(),
-                None => return Err(BridgeError::NoValidCertInChain),
-                _ => {}
-            };
-        };
+        let key_pem = fs::read(key_path)?;
+        let key = PrivateKeyDer::from_pem_slice(&key_pem)?;
 
         config.with_client_auth_cert(certs, key)?
     } else {
@@ -319,4 +309,7 @@ pub enum BridgeError {
     #[cfg(feature = "use-rustls")]
     #[error("Invalid trust_anchor")]
     NoValidCertInChain,
+    #[cfg(feature = "use-rustls")]
+    #[error("PEM parsing error: {0}")]
+    Pem(#[from] tokio_rustls::rustls::pki_types::pem::Error),
 }
