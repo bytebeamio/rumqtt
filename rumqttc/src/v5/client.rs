@@ -875,10 +875,10 @@ impl Connection {
         Iter { connection: self }
     }
 
-    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
+    /// Attempt to fetch an incoming [`Event`] on the [`EventLoop`], returning an error
     /// if all clients/users have closed requests channel.
     ///
-    /// [`EvenLoop`]: super::EventLoop
+    /// [`EventLoop`]: super::EventLoop
     pub fn recv(&mut self) -> Result<Result<Event, ConnectionError>, RecvError> {
         let f = self.eventloop.poll();
         let event = self.runtime.block_on(f);
@@ -886,10 +886,10 @@ impl Connection {
         resolve_event(event).ok_or(RecvError)
     }
 
-    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
+    /// Attempt to fetch an incoming [`Event`] on the [`EventLoop`], returning an error
     /// if none immediately present or all clients/users have closed requests channel.
     ///
-    /// [`EvenLoop`]: super::EventLoop
+    /// [`EventLoop`]: super::EventLoop
     pub fn try_recv(&mut self) -> Result<Result<Event, ConnectionError>, TryRecvError> {
         let f = self.eventloop.poll();
         // Enters the runtime context so we can poll the future, as required by `now_or_never()`.
@@ -900,10 +900,10 @@ impl Connection {
         resolve_event(event).ok_or(TryRecvError::Disconnected)
     }
 
-    /// Attempt to fetch an incoming [`Event`] on the [`EvenLoop`], returning an error
+    /// Attempt to fetch an incoming [`Event`] on the [`EventLoop`], returning an error
     /// if all clients/users have closed requests channel or the timeout has expired.
     ///
-    /// [`EvenLoop`]: super::EventLoop
+    /// [`EventLoop`]: super::EventLoop
     pub fn recv_timeout(
         &mut self,
         duration: Duration,

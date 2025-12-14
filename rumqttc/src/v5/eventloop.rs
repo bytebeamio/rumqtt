@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use super::mqttbytes::v5::ConnectReturnCode;
 
-#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
 use crate::tls;
 
 #[cfg(unix)]
@@ -44,7 +44,7 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket Connect: {0}")]
     WsConnect(#[from] http::Error),
-    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
     #[error("TLS: {0}")]
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -311,7 +311,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
     let (domain, port) = match options.transport() {
         #[cfg(feature = "websocket")]
         Transport::Ws => split_url(&options.broker_addr)?,
-        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+        #[cfg(all(feature = "use-rustls-no-provider", feature = "websocket"))]
         Transport::Wss(_) => split_url(&options.broker_addr)?,
         _ => options.broker_address(),
     };
@@ -340,7 +340,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
     let network = match options.transport() {
         Transport::Tcp => Network::new(tcp_stream, max_incoming_pkt_size),
-        #[cfg(any(feature = "use-native-tls", feature = "use-rustls"))]
+        #[cfg(any(feature = "use-native-tls", feature = "use-rustls-no-provider"))]
         Transport::Tls(tls_config) => {
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)
@@ -366,7 +366,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
             Network::new(WsStream::new(socket), max_incoming_pkt_size)
         }
-        #[cfg(all(feature = "use-rustls", feature = "websocket"))]
+        #[cfg(all(feature = "use-rustls-no-provider", feature = "websocket"))]
         Transport::Wss(tls_config) => {
             let mut request = options.broker_addr.as_str().into_client_request()?;
             request
