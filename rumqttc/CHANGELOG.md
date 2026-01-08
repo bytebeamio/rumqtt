@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 * `use-rustls-no-provider` feature flag to allow choosing crypto backend without being forced to compile `aws_lc_rs`
+* `NetworkOptions.connection_backoff` configuration option to enable binary exponential backoff for reconnection attempts 
 
 ### Changed
 ### Deprecated

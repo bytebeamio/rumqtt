@@ -4,6 +4,7 @@ use crate::{MqttOptions, Outgoing};
 
 use crate::framed::AsyncReadWrite;
 use crate::mqttbytes::v4::*;
+use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use flume::{bounded, Receiver, Sender};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::select;
@@ -84,6 +85,8 @@ pub struct EventLoop {
     pub network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    /// Connection backoff state
+    backoff: Option<ExponentialBackoff>,
     pub network_options: NetworkOptions,
 }
 
@@ -113,6 +116,7 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
+            backoff: None,
             network_options: NetworkOptions::new(),
         }
     }
@@ -154,8 +158,30 @@ impl EventLoop {
             )
             .await
             {
-                Ok(inner) => inner?,
-                Err(_) => return Err(ConnectionError::NetworkTimeout),
+                Ok(inner) => {
+                    // Clear the backoff state on successful connection
+                    self.backoff = None;
+
+                    // Return the network and connack
+                    inner?
+                }
+                Err(_) => {
+                    // If backoff is enabled, wait here for a time proportional to the
+                    // number of retries before returning timeout error.
+                    if self.network_options.connection_backoff {
+                        // Initialize backoff on the first connection failure
+                        let backoff = self.backoff.get_or_insert_with(|| {
+                            ExponentialBuilder::new().without_max_times().build()
+                        });
+
+                        // Wait for the next backoff duration
+                        if let Some(backoff_duration) = backoff.next() {
+                            time::sleep(backoff_duration).await;
+                        }
+                    }
+
+                    return Err(ConnectionError::NetworkTimeout);
+                }
             };
             // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
             if !connack.session_present {

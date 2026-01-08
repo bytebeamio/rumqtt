@@ -400,6 +400,7 @@ pub struct NetworkOptions {
     conn_timeout: u64,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
+    connection_backoff: bool,
 }
 
 impl NetworkOptions {
@@ -411,6 +412,7 @@ impl NetworkOptions {
             conn_timeout: 5,
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
+            connection_backoff: true,
         }
     }
 
@@ -435,6 +437,12 @@ impl NetworkOptions {
     /// get timeout in secs
     pub fn connection_timeout(&self) -> u64 {
         self.conn_timeout
+    }
+
+    /// Enable or disable backoffs for connection retries
+    pub fn set_connection_backoff(&mut self, backoff: bool) -> &mut Self {
+        self.connection_backoff = backoff;
+        self
     }
 
     /// bind connection to a specific network device by name
