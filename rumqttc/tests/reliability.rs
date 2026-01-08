@@ -549,6 +549,71 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
 }
 
 #[tokio::test]
+async fn reconnection_clean_both_pending_packets_and_collision_when_clean_session_is_true() {
+    let mut options = MqttOptions::new("dummy", "127.0.0.1", 3003);
+    options
+        .set_inflight(2)
+        .set_keep_alive(Duration::from_secs(2))
+        .set_clean_session(true);
+
+    // A broker which does not ack the first publish to trigger collision
+    task::spawn(async move {
+        // in a loop to not return after the first connection closes
+        loop {
+            let mut broker = Broker::new(3003, 0, false).await;
+
+            let mut first_publish_unacked = false;
+            while let Some(packet) = broker.read_packet().await {
+                match packet {
+                    Packet::PingReq => broker.pingresp().await,
+                    Packet::Publish(publish) => {
+                        if first_publish_unacked {
+                            // don't ack the first publish to trigger collision
+                            broker.ack(publish.pkid).await;
+                        }
+                        first_publish_unacked = true;
+                    }
+                    _ => (),
+                }
+                time::sleep(Duration::from_secs_f64(0.5)).await;
+            }
+        }
+    });
+
+    // start sending qos0 publishes. this makes sure that there is
+    // outgoing activity but no incoming activity
+    let (client, mut eventloop) = AsyncClient::new(options, 5);
+    task::spawn(async move {
+        start_requests(3, QoS::AtLeastOnce, 1, client).await;
+        time::sleep(Duration::from_secs(10)).await;
+    });
+
+    // wait for the collision to happen
+    loop {
+        if let Err(ConnectionError::MqttState(StateError::CollisionTimeout)) =
+            eventloop.poll().await
+        {
+            break;
+        };
+    }
+
+    // Let's allow the broker to be created again
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // poll again, and check that there is no pending packets nor collision
+    match eventloop.poll().await {
+        Ok(Event::Incoming(Packet::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false, // this validates the "clean session" behavior
+        }))) => {
+            assert!(eventloop.pending.is_empty());
+            assert!(eventloop.state.collision.is_none());
+        }
+        v => panic!("Expected ConnAck Success. Found = {:?}", v),
+    }
+}
+
+#[tokio::test]
 async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3004);
     options.set_keep_alive(Duration::from_secs(5));
