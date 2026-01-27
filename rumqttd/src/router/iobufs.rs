@@ -165,10 +165,7 @@ impl Outgoing {
     // Returns (unsolicited, outoforder) flags
     // Return: Out of order or unsolicited acks
     pub fn register_ack(&mut self, pkid: u16) -> Option<()> {
-        let (head, _filter_idx, _cursor) = match self.inflight_buffer.pop_front() {
-            Some(v) => v,
-            None => return None,
-        };
+        let (head, _filter_idx, _cursor) = self.inflight_buffer.pop_front()?;
 
         // We don't support out of order acks
         if pkid != head {

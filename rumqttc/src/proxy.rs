@@ -4,7 +4,7 @@ use crate::NetworkOptions;
 
 use std::io;
 
-#[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
 use crate::{tls, TlsConfiguration};
 
 #[derive(Clone, Debug)]
@@ -18,7 +18,7 @@ pub struct Proxy {
 #[derive(Clone, Debug)]
 pub enum ProxyType {
     Http,
-    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
     Https(TlsConfiguration),
 }
 
@@ -35,7 +35,7 @@ pub enum ProxyError {
     #[error("Proxy connect: {0}.")]
     Proxy(#[from] async_http_proxy::HttpError),
 
-    #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
     #[error("Tls connect: {0}.")]
     Tls(#[from] tls::Error),
 }
@@ -53,7 +53,7 @@ impl Proxy {
             Box::new(socket_connect(proxy_addr, network_options).await?);
         let mut tcp = match self.ty {
             ProxyType::Http => tcp,
-            #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
+            #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
             ProxyType::Https(tls_config) => {
                 tls::tls_connect(&self.addr, self.port, &tls_config, tcp).await?
             }
