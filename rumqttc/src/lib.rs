@@ -117,6 +117,8 @@ mod tls;
 
 #[cfg(feature = "websocket")]
 mod websockets;
+#[cfg(feature = "websocket")]
+pub use async_tungstenite;
 
 #[cfg(feature = "websocket")]
 use std::{
