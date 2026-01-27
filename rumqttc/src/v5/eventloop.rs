@@ -24,7 +24,7 @@ use {std::path::Path, tokio::net::UnixStream};
 #[cfg(feature = "websocket")]
 use {
     crate::websockets::{split_url, validate_response_headers, UrlError},
-    async_tungstenite::tungstenite::client::IntoClientRequest,
+    crate::async_tungstenite::tungstenite::client::IntoClientRequest,
     ws_stream_tungstenite::WsStream,
 };
 
@@ -40,7 +40,7 @@ pub enum ConnectionError {
     Timeout(#[from] Elapsed),
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
-    Websocket(#[from] async_tungstenite::tungstenite::error::Error),
+    Websocket(#[from] crate::async_tungstenite::tungstenite::error::Error),
     #[cfg(feature = "websocket")]
     #[error("Websocket Connect: {0}")]
     WsConnect(#[from] http::Error),
