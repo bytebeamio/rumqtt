@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Deprecated
 ### Removed
-### Fixed 
+### Fixed
 ### Security
 
 
@@ -21,11 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 * `use-rustls-no-provider` feature flag to allow choosing crypto backend without being forced to compile `aws_lc_rs`
+* `publish` / `subscribe` / `unsubscribe` methods on `AsyncClient` and `Client` now return an `AckPromise` which resolves when the packet(except for QoS 0 publishes, which resolve as soon as handled) is acknowledged by the broker.
 
 ### Changed
 ### Deprecated
 ### Removed
-### Fixed 
+### Fixed
 * Fixed broken websocket feature in rumqttc-0.25.0
 
 ### Security
