@@ -27,7 +27,7 @@ proxy = ["dep:async-http-proxy"]
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tokio = { version = "1.36", features = ["rt", "macros", "io-util", "net", "time"] }
 tokio-util = { version = "0.7", features = ["codec"] }
-bytes = "1.5"
+bytes = "1.11"
 log = "0.4"
 flume = { version = "0.11", default-features = false, features = ["async"] }
 thiserror = "2.0.8"
