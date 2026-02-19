@@ -200,9 +200,9 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.29.1"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef0f7efedeac57d9b26170f72965ecfd31473ca52ca7a64e925b0b6f5f079886"
+checksum = "8acc405d38be14342132609f06f02acaf825ddccfe76c4824a69281e0458ebd4"
 dependencies = [
  "atomic-waker",
  "futures-core",
@@ -215,7 +215,7 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.4",
- "tungstenite 0.26.2",
+ "tungstenite 0.28.0",
 ]
 
 [[package]]
@@ -2215,17 +2215,19 @@ name = "rumqttc"
 version = "0.25.1"
 dependencies = [
  "async-http-proxy",
- "async-tungstenite 0.29.1",
+ "async-tungstenite 0.32.1",
  "bincode",
  "bytes",
  "color-backtrace",
  "fixedbitset 0.5.7",
  "flume",
+ "futures-io",
  "futures-util",
  "http 1.3.1",
  "log",
  "matches",
  "native-tls",
+ "pin-project-lite",
  "pretty_assertions",
  "pretty_env_logger",
  "rustls-native-certs",
@@ -2239,7 +2241,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "url",
- "ws_stream_tungstenite 0.15.0",
 ]
 
 [[package]]
@@ -2273,7 +2274,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "ws_stream_tungstenite 0.13.0",
+ "ws_stream_tungstenite",
  "x509-parser",
 ]
 
@@ -3129,9 +3130,9 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.26.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
+checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -3553,26 +3554,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tungstenite 0.21.0",
-]
-
-[[package]]
-name = "ws_stream_tungstenite"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c9c55940d22313a53398bfeb9438c5f519de475fa37ed7ff068f8c1ca8eb45"
-dependencies = [
- "async-tungstenite 0.29.1",
- "async_io_stream",
- "bitflags 2.10.0",
- "futures-core",
- "futures-io",
- "futures-sink",
- "futures-util",
- "pharos",
- "rustc_version",
- "tokio",
- "tracing",
- "tungstenite 0.26.2",
 ]
 
 [[package]]
