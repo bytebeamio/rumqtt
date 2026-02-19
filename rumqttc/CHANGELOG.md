@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+* `set_request_modifier` now supports fallible closures that return `Result<http::Request<()>, E>`, in addition to the existing infallible API. Modifier errors surface as `ConnectionError::RequestModifier`.
+
 ### Changed
 ### Deprecated
 ### Removed

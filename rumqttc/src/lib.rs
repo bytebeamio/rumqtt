@@ -119,17 +119,14 @@ mod tls;
 mod websockets;
 
 #[cfg(feature = "websocket")]
-use std::{
-    future::{Future, IntoFuture},
-    pin::Pin,
-};
+mod request_modifier;
+#[cfg(feature = "websocket")]
+use request_modifier::IntoModifierResult;
+#[cfg(feature = "websocket")]
+use request_modifier::RequestModifierFn;
 
 #[cfg(feature = "websocket")]
-type RequestModifierFn = Arc<
-    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>> + Send>>
-        + Send
-        + Sync,
->;
+use std::future::IntoFuture;
 
 #[cfg(feature = "proxy")]
 mod proxy;
@@ -726,16 +723,48 @@ impl MqttOptions {
         self.proxy.clone()
     }
 
+    /// Sets a handler for modifying the websocket HTTP request before it is sent.
+    ///
+    /// This can be used to add custom headers (e.g., authentication tokens) to the
+    /// websocket upgrade request.
+    ///
+    /// The modifier function accepts the request and returns a (possibly modified) request.
+    /// It supports both infallible and fallible closures:
+    ///
+    /// # Infallible modifier (returns request directly)
+    /// ```ignore
+    /// options.set_request_modifier(|mut req| async move {
+    ///     req.headers_mut().insert("X-Custom-Header", "value".parse().unwrap());
+    ///     req
+    /// });
+    /// ```
+    ///
+    /// # Fallible modifier (returns Result)
+    /// ```ignore
+    /// options.set_request_modifier(|mut req| async move {
+    ///     let token = get_auth_token().await?;
+    ///     req.headers_mut().insert("Authorization", token.parse()?);
+    ///     Ok(req)
+    /// });
+    /// ```
+    ///
+    /// If the modifier returns an error, the connection will fail with
+    /// [`ConnectionError::RequestModifier`].
     #[cfg(feature = "websocket")]
     pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
     where
         F: Fn(http::Request<()>) -> O + Send + Sync + 'static,
-        O: IntoFuture<Output = http::Request<()>> + 'static,
+        O: IntoFuture + 'static,
         O::IntoFuture: Send,
+        O::Output: IntoModifierResult,
     {
         self.request_modifier = Some(Arc::new(move |request| {
-            let request_modifier = request_modifier(request).into_future();
-            Box::pin(request_modifier)
+            let fut = request_modifier(request).into_future();
+            Box::pin(async move {
+                fut.await
+                    .into_modifier_result()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            })
         }));
 
         self
@@ -937,6 +966,68 @@ impl Debug for MqttOptions {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[cfg(all(feature = "use-rustls-no-provider", feature = "websocket"))]
+    mod request_modifier_tests {
+        use super::MqttOptions;
+
+        /// Test that infallible request modifier works (backwards compatibility)
+        #[test]
+        fn request_modifier_infallible() {
+            let mut options = MqttOptions::new("test", "ws://localhost", 8080);
+
+            // Old API: returning Request directly (no Result wrapper)
+            options.set_request_modifier(|req| async move { req });
+
+            assert!(
+                options.request_modifier().is_some(),
+                "Request modifier should be set"
+            );
+        }
+
+        /// Test that fallible request modifier works (new API)
+        #[test]
+        fn request_modifier_fallible() {
+            let mut options = MqttOptions::new("test", "ws://localhost", 8080);
+
+            // New API: returning Result
+            options.set_request_modifier(|req| async move { Ok::<_, std::io::Error>(req) });
+
+            assert!(
+                options.request_modifier().is_some(),
+                "Request modifier should be set"
+            );
+        }
+
+        /// Test that fallible modifier with custom error type works
+        #[test]
+        fn request_modifier_custom_error() {
+            #[derive(Debug)]
+            struct CustomError(String);
+
+            impl std::fmt::Display for CustomError {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}", self.0)
+                }
+            }
+
+            impl std::error::Error for CustomError {}
+
+            let mut options = MqttOptions::new("test", "ws://localhost", 8080);
+
+            options.set_request_modifier(|req| async move {
+                if req.uri().host() == Some("forbidden") {
+                    return Err(CustomError("forbidden host".into()));
+                }
+                Ok(req)
+            });
+
+            assert!(
+                options.request_modifier().is_some(),
+                "Request modifier should be set"
+            );
+        }
+    }
 
     #[test]
     #[cfg(all(feature = "use-rustls-no-provider", feature = "websocket"))]
