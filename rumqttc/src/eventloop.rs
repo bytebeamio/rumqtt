@@ -318,7 +318,13 @@ async fn connect(
     Ok((network, connack))
 }
 
-pub(crate) async fn socket_connect(
+/// Default TCP socket connection logic used by the MQTT event loop.
+///
+/// This function resolves the given host, creates a TCP socket, applies the
+/// provided [`NetworkOptions`], and connects. It can be used inside a custom
+/// socket connector set via [`MqttOptions::set_socket_connector`] to wrap or
+/// extend the default behaviour.
+pub async fn default_socket_connect(
     host: String,
     network_options: NetworkOptions,
 ) -> io::Result<TcpStream> {
@@ -395,18 +401,20 @@ async fn network_connect(
     let tcp_stream: Box<dyn AsyncReadWrite> = {
         #[cfg(feature = "proxy")]
         match options.proxy() {
-            Some(proxy) => proxy.connect(&domain, port, network_options).await?,
+            Some(proxy) => {
+                proxy
+                    .connect(&domain, port, network_options, options.socket_connector())
+                    .await?
+            }
             None => {
                 let addr = format!("{domain}:{port}");
-                let tcp = socket_connect(addr, network_options).await?;
-                Box::new(tcp)
+                options.socket_connect(addr, network_options).await?
             }
         }
         #[cfg(not(feature = "proxy"))]
         {
             let addr = format!("{domain}:{port}");
-            let tcp = socket_connect(addr, network_options).await?;
-            Box::new(tcp)
+            options.socket_connect(addr, network_options).await?
         }
     };
 

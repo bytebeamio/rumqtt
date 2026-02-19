@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+* `MqttOptions::set_socket_connector` to override the default TCP socket creation logic
+* `default_socket_connect` public function to allow composing custom connectors with the default behaviour
+* `NetworkOptions` now implements `Debug`
+
 ### Changed
 ### Deprecated
 ### Removed

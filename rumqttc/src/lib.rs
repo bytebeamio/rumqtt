@@ -100,9 +100,7 @@ extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
 
-#[cfg(any(feature = "use-rustls-no-provider", feature = "websocket"))]
 use std::sync::Arc;
-
 use std::time::Duration;
 
 mod client;
@@ -137,7 +135,8 @@ mod proxy;
 pub use client::{
     AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
 };
-pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use eventloop::{default_socket_connect, ConnectionError, Event, EventLoop};
+pub use framed::AsyncReadWrite;
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 #[cfg(feature = "use-rustls-no-provider")]
@@ -221,6 +220,20 @@ impl From<Unsubscribe> for Request {
         Request::Unsubscribe(unsubscribe)
     }
 }
+
+/// Custom socket connector function type used internally.
+pub(crate) type SocketConnector = Arc<
+    dyn Fn(
+            String,
+            NetworkOptions,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Box<dyn AsyncReadWrite>, std::io::Error>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+>;
 
 /// Transport methods. Defaults to TCP.
 #[derive(Clone)]
@@ -392,7 +405,7 @@ impl From<TlsConnector> for TlsConfiguration {
 }
 
 /// Provides a way to configure low level network connection configurations
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
@@ -492,6 +505,7 @@ pub struct MqttOptions {
     proxy: Option<Proxy>,
     #[cfg(feature = "websocket")]
     request_modifier: Option<RequestModifierFn>,
+    socket_connector: Option<SocketConnector>,
 }
 
 impl MqttOptions {
@@ -525,6 +539,7 @@ impl MqttOptions {
             proxy: None,
             #[cfg(feature = "websocket")]
             request_modifier: None,
+            socket_connector: None,
         }
     }
 
@@ -744,6 +759,68 @@ impl MqttOptions {
     #[cfg(feature = "websocket")]
     pub fn request_modifier(&self) -> Option<RequestModifierFn> {
         self.request_modifier.clone()
+    }
+
+    /// Sets a custom socket connector, overriding the default TCP socket creation logic for MQTT connections.
+    ///
+    /// This enables you to fully control how socket streams are established, such as integrating a custom TLS implementation,
+    /// injecting a proxy layer, or facilitating network mocking in tests.
+    ///
+    /// # Important
+    ///
+    /// When providing a custom socket connector, be mindful to avoid redundant or conflicting connection layers.
+    /// You can combine the custom connector with the library's built-in proxy and TLS/WSS transports when appropriate —
+    /// for example, you might use the connector to mock TCP, and still let [`MqttOptions`] handle TLS or a proxy.
+    ///
+    /// **However**, if your connector already establishes a TLS or proxied connection, you should set the transport to a plain option
+    /// (like [`Transport::Tcp`]) and leave proxy/TLS configs unset in [`MqttOptions`], to prevent duplicate layers.
+    ///
+    /// In summary, coordinate the responsibilities between your connector and the library to avoid double-wrapping.
+    ///
+    /// # Example
+    /// ```
+    /// # use rumqttc::MqttOptions;
+    /// # let mut options = MqttOptions::new("test", "localhost", 1883);
+    /// options.set_socket_connector(|host, network_options| async move {
+    ///     rumqttc::default_socket_connect(host, network_options)
+    ///         .await
+    ///         .map(|s| Box::new(s) as Box<dyn rumqttc::AsyncReadWrite>)
+    /// });
+    /// ```
+    pub fn set_socket_connector<F, Fut>(&mut self, f: F) -> &mut Self
+    where
+        F: Fn(String, NetworkOptions) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<Box<dyn AsyncReadWrite>, std::io::Error>>
+            + Send
+            + 'static,
+    {
+        self.socket_connector = Some(Arc::new(move |host, network_options| {
+            Box::pin(f(host, network_options))
+        }));
+        self
+    }
+
+    /// Returns whether a custom socket connector has been set.
+    pub fn has_socket_connector(&self) -> bool {
+        self.socket_connector.is_some()
+    }
+
+    #[cfg(feature = "proxy")]
+    pub(crate) fn socket_connector(&self) -> Option<SocketConnector> {
+        self.socket_connector.clone()
+    }
+
+    pub(crate) async fn socket_connect(
+        &self,
+        host: String,
+        network_options: NetworkOptions,
+    ) -> std::io::Result<Box<dyn crate::framed::AsyncReadWrite>> {
+        if let Some(ref connector) = self.socket_connector {
+            connector(host, network_options).await
+        } else {
+            let tcp = default_socket_connect(host, network_options).await?;
+            Ok(Box::new(tcp))
+        }
     }
 }
 

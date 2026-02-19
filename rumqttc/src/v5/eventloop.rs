@@ -1,7 +1,6 @@
 use super::framed::Network;
 use super::mqttbytes::v5::*;
 use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
-use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
 
 use flume::{bounded, Receiver, Sender};
@@ -321,20 +320,27 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
         match options.proxy() {
             Some(proxy) => {
                 proxy
-                    .connect(&domain, port, options.network_options())
+                    .connect(
+                        &domain,
+                        port,
+                        options.network_options(),
+                        options.socket_connector(),
+                    )
                     .await?
             }
             None => {
                 let addr = format!("{domain}:{port}");
-                let tcp = socket_connect(addr, options.network_options()).await?;
-                Box::new(tcp)
+                options
+                    .socket_connect(addr, options.network_options())
+                    .await?
             }
         }
         #[cfg(not(feature = "proxy"))]
         {
             let addr = format!("{domain}:{port}");
-            let tcp = socket_connect(addr, options.network_options()).await?;
-            Box::new(tcp)
+            options
+                .socket_connect(addr, options.network_options())
+                .await?
         }
     };
 
