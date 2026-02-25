@@ -15,7 +15,11 @@ use std::time::Duration;
 
 use super::mqttbytes::v5::ConnectReturnCode;
 
-#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+#[cfg(any(
+    feature = "use-rustls-no-provider",
+    feature = "use-native-tls",
+    feature = "use-openssl"
+))]
 use crate::tls;
 
 #[cfg(unix)]
@@ -44,7 +48,11 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket Connect: {0}")]
     WsConnect(#[from] http::Error),
-    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+    #[cfg(any(
+        feature = "use-rustls-no-provider",
+        feature = "use-native-tls",
+        feature = "use-openssl"
+    ))]
     #[error("TLS: {0}")]
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -340,7 +348,11 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
     let network = match options.transport() {
         Transport::Tcp => Network::new(tcp_stream, max_incoming_pkt_size),
-        #[cfg(any(feature = "use-native-tls", feature = "use-rustls-no-provider"))]
+        #[cfg(any(
+            feature = "use-native-tls",
+            feature = "use-rustls-no-provider",
+            feature = "use-openssl"
+        ))]
         Transport::Tls(tls_config) => {
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)

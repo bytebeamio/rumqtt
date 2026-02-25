@@ -18,7 +18,11 @@ use std::time::Duration;
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
 
-#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+#[cfg(any(
+    feature = "use-rustls-no-provider",
+    feature = "use-native-tls",
+    feature = "use-openssl"
+))]
 use crate::tls;
 
 #[cfg(feature = "websocket")]
@@ -46,7 +50,11 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket Connect: {0}")]
     WsConnect(#[from] http::Error),
-    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+    #[cfg(any(
+        feature = "use-rustls-no-provider",
+        feature = "use-native-tls",
+        feature = "use-openssl"
+    ))]
     #[error("TLS: {0}")]
     Tls(#[from] tls::Error),
     #[error("I/O: {0}")]
@@ -416,7 +424,11 @@ async fn network_connect(
             options.max_incoming_packet_size,
             options.max_outgoing_packet_size,
         ),
-        #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+        #[cfg(any(
+            feature = "use-rustls-no-provider",
+            feature = "use-native-tls",
+            feature = "use-openssl"
+        ))]
         Transport::Tls(tls_config) => {
             let socket =
                 tls::tls_connect(&options.broker_addr, options.port, &tls_config, tcp_stream)

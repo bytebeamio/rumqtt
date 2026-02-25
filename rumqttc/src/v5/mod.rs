@@ -25,7 +25,11 @@ pub use client::{
 pub use eventloop::{ConnectionError, Event, EventLoop};
 pub use state::{MqttState, StateError};
 
-#[cfg(feature = "use-rustls-no-provider")]
+#[cfg(any(
+    feature = "use-rustls-no-provider",
+    feature = "use-native-tls",
+    feature = "use-openssl"
+))]
 pub use crate::tls::Error as TlsError;
 
 #[cfg(feature = "proxy")]

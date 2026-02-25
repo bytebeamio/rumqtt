@@ -28,6 +28,9 @@ use tokio_native_tls::native_tls::{Error as NativeTlsError, Identity};
 use std::io;
 use std::net::AddrParseError;
 
+#[cfg(feature = "use-openssl")]
+use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Error parsing IP address
@@ -63,6 +66,12 @@ pub enum Error {
     #[cfg(feature = "use-native-tls")]
     #[error("Native TLS error {0}")]
     NativeTls(#[from] NativeTlsError),
+    #[cfg(feature = "use-openssl")]
+    #[error("OpenSSL error: {0}")]
+    OpenSsl(#[from] openssl::error::ErrorStack),
+    #[cfg(feature = "use-openssl")]
+    #[error("OpenSSL handshake error: {0}")]
+    OpenSslHandshake(String),
 }
 
 #[cfg(feature = "use-rustls-no-provider")]
@@ -163,6 +172,51 @@ pub async fn native_tls_connector(
     Ok(connector.into())
 }
 
+#[cfg(feature = "use-openssl")]
+pub fn openssl_connector(tls_config: &TlsConfiguration) -> Result<SslConnector, Error> {
+    let connector = match tls_config {
+        TlsConfiguration::SimpleOpenSsl {
+            ca,
+            alpn,
+            client_auth,
+        } => {
+            let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+            builder.set_verify(SslVerifyMode::PEER);
+
+            // Load CA certificate
+            let ca_cert = openssl::x509::X509::from_pem(ca)?;
+            builder.cert_store_mut().add_cert(ca_cert)?;
+
+            // Load client auth if provided
+            if let Some((cert_pem, key_pem)) = client_auth {
+                let cert = openssl::x509::X509::from_pem(cert_pem)?;
+                let key = openssl::pkey::PKey::private_key_from_pem(key_pem)?;
+                builder.set_certificate(&cert)?;
+                builder.set_private_key(&key)?;
+                builder.check_private_key()?;
+            }
+
+            // Set ALPN protocols
+            if let Some(alpn) = alpn {
+                // OpenSSL ALPN wire format: each protocol prefixed with its length byte
+                let mut wire = Vec::new();
+                for proto in alpn {
+                    wire.push(proto.len() as u8);
+                    wire.extend_from_slice(proto);
+                }
+                builder.set_alpn_protos(&wire)?;
+            }
+
+            builder.build()
+        }
+        TlsConfiguration::OpenSsl(connector) => connector.clone(),
+        #[allow(unreachable_patterns)]
+        _ => unreachable!("This cannot be called for other TLS backends than OpenSSL"),
+    };
+
+    Ok(connector)
+}
+
 pub async fn tls_connect(
     addr: &str,
     _port: u16,
@@ -182,6 +236,18 @@ pub async fn tls_connect(
         | TlsConfiguration::SimpleNative { .. } => {
             let connector = native_tls_connector(tls_config).await?;
             Box::new(connector.connect(addr, tcp).await?)
+        }
+        #[cfg(feature = "use-openssl")]
+        TlsConfiguration::SimpleOpenSsl { .. } | TlsConfiguration::OpenSsl(_) => {
+            let connector = openssl_connector(tls_config)?;
+            let ssl = connector.configure()?.into_ssl(addr)?;
+            let mut stream = Box::pin(tokio_openssl::SslStream::new(ssl, tcp)?);
+            stream
+                .as_mut()
+                .connect()
+                .await
+                .map_err(|e| Error::OpenSslHandshake(e.to_string()))?;
+            Box::new(stream)
         }
         #[allow(unreachable_patterns)]
         _ => panic!("Unknown or not enabled TLS backend configuration"),
