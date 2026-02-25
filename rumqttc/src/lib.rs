@@ -112,7 +112,11 @@ pub mod mqttbytes;
 mod state;
 pub mod v5;
 
-#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+#[cfg(any(
+    feature = "use-rustls-no-provider",
+    feature = "use-native-tls",
+    feature = "use-openssl"
+))]
 mod tls;
 
 #[cfg(feature = "websocket")]
@@ -143,7 +147,11 @@ pub use mqttbytes::*;
 #[cfg(feature = "use-rustls-no-provider")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};
-#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+#[cfg(any(
+    feature = "use-rustls-no-provider",
+    feature = "use-native-tls",
+    feature = "use-openssl"
+))]
 pub use tls::Error as TlsError;
 #[cfg(feature = "use-native-tls")]
 pub use tokio_native_tls;
@@ -226,7 +234,11 @@ impl From<Unsubscribe> for Request {
 #[derive(Clone)]
 pub enum Transport {
     Tcp,
-    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+    #[cfg(any(
+        feature = "use-rustls-no-provider",
+        feature = "use-native-tls",
+        feature = "use-openssl"
+    ))]
     Tls(TlsConfiguration),
     #[cfg(unix)]
     Unix,
@@ -274,7 +286,11 @@ impl Transport {
         Self::tls_with_config(config)
     }
 
-    #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+    #[cfg(any(
+        feature = "use-rustls-no-provider",
+        feature = "use-native-tls",
+        feature = "use-openssl"
+    ))]
     pub fn tls_with_config(tls_config: TlsConfiguration) -> Self {
         Self::Tls(tls_config)
     }
@@ -332,7 +348,11 @@ impl Transport {
 
 /// TLS configuration method
 #[derive(Clone, Debug)]
-#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+#[cfg(any(
+    feature = "use-rustls-no-provider",
+    feature = "use-native-tls",
+    feature = "use-openssl"
+))]
 pub enum TlsConfiguration {
     #[cfg(feature = "use-rustls-no-provider")]
     Simple {
@@ -360,6 +380,19 @@ pub enum TlsConfiguration {
     #[cfg(feature = "use-native-tls")]
     /// Injected native-tls TlsConnector for TLS, to allow more customisation.
     NativeConnector(TlsConnector),
+    #[cfg(feature = "use-openssl")]
+    /// Simple OpenSSL configuration with CA cert and optional client auth.
+    SimpleOpenSsl {
+        /// ca certificate (PEM)
+        ca: Vec<u8>,
+        /// alpn settings
+        alpn: Option<Vec<Vec<u8>>>,
+        /// tls client_authentication (cert PEM, key PEM)
+        client_auth: Option<(Vec<u8>, Vec<u8>)>,
+    },
+    #[cfg(feature = "use-openssl")]
+    /// Injected OpenSSL SslConnector for TLS, to allow more customisation.
+    OpenSsl(openssl::ssl::SslConnector),
 }
 
 #[cfg(feature = "use-rustls-no-provider")]
@@ -388,6 +421,13 @@ impl From<ClientConfig> for TlsConfiguration {
 impl From<TlsConnector> for TlsConfiguration {
     fn from(connector: TlsConnector) -> Self {
         TlsConfiguration::NativeConnector(connector)
+    }
+}
+
+#[cfg(feature = "use-openssl")]
+impl From<openssl::ssl::SslConnector> for TlsConfiguration {
+    fn from(connector: openssl::ssl::SslConnector) -> Self {
+        TlsConfiguration::OpenSsl(connector)
     }
 }
 

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+* `use-openssl` feature flag to allow using openssl crypto backend
+
 ### Changed
 ### Deprecated
 ### Removed
