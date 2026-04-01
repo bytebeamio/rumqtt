@@ -199,7 +199,12 @@ impl ConnectProperties {
                     cursor += 4;
                 }
                 PropertyType::ReceiveMaximum => {
-                    receive_maximum = Some(read_u16(bytes)?);
+                    let val = read_u16(bytes)?;
+                    // MQTT 5.0 §3.1.2.11.3: Receive Maximum value of 0 is not permitted
+                    if val == 0 {
+                        return Err(Error::MalformedPacket);
+                    }
+                    receive_maximum = Some(val);
                     cursor += 2;
                 }
                 PropertyType::MaximumPacketSize => {
@@ -690,5 +695,19 @@ mod test {
         let size_from_bytes = dummy_bytes.len();
 
         assert_eq!(reported_size, size_from_bytes);
+    }
+
+    #[test]
+    fn connect_receive_maximum_zero_rejected() {
+        // Property id=0x21 (Receive Maximum), value=0x0000 — value 0 is not permitted
+        let props_payload = [0x21u8, 0x00, 0x00];
+        let mut buf = bytes::BytesMut::new();
+        buf.put_u8(props_payload.len() as u8); // properties length VBI
+        buf.extend_from_slice(&props_payload);
+        let mut b = buf.freeze();
+        assert!(matches!(
+            ConnectProperties::read(&mut b),
+            Err(Error::MalformedPacket)
+        ));
     }
 }
