@@ -233,7 +233,10 @@ impl SubscribeProperties {
             match property(prop)? {
                 PropertyType::SubscriptionIdentifier => {
                     let (id_len, sub_id) = length(bytes.iter())?;
-                    // TODO: Validate 1 +. Tests are working either way
+                    // MQTT 5.0 §3.8.2.1.2: Subscription Identifier MUST be between 1 and 268,435,455
+                    if sub_id == 0 {
+                        return Err(Error::MalformedPacket);
+                    }
                     cursor += 1 + id_len;
                     bytes.advance(id_len);
                     id = Some(sub_id)
@@ -301,5 +304,20 @@ mod test {
 
         assert_eq!(size_from_write, size_from_bytes);
         assert_eq!(size_from_size, size_from_bytes);
+    }
+
+    #[test]
+    fn subscribe_identifier_zero_rejected() {
+        // Build SubscribeProperties bytes with Subscription Identifier = 0
+        // property id=0x0B, value=0x00 (VBI encoding of 0)
+        let props = [0x0Bu8, 0x00];
+        let mut buf = bytes::BytesMut::new();
+        buf.put_u8(props.len() as u8); // properties length VBI
+        buf.extend_from_slice(&props);
+        let mut b = buf.freeze();
+        assert!(matches!(
+            SubscribeProperties::read(&mut b),
+            Err(Error::MalformedPacket)
+        ));
     }
 }
