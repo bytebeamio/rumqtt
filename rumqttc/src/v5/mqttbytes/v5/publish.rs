@@ -205,7 +205,13 @@ impl PublishProperties {
                     cursor += 4;
                 }
                 PropertyType::TopicAlias => {
-                    topic_alias = Some(read_u16(bytes)?);
+                    let alias = read_u16(bytes)?;
+                    // MQTT 5.0 §3.3.2.3.4: Topic Alias value of 0 is not permitted
+                    // TODO: disconnect with reason code 0x94 (Topic Alias Invalid)
+                    if alias == 0 {
+                        return Err(Error::MalformedPacket);
+                    }
+                    topic_alias = Some(alias);
                     cursor += 2;
                 }
                 PropertyType::ResponseTopic => {
@@ -336,5 +342,20 @@ mod test {
 
         assert_eq!(size_from_write, size_from_bytes);
         assert_eq!(size_from_size, size_from_bytes);
+    }
+
+    #[test]
+    fn publish_topic_alias_zero_rejected() {
+        // Build PublishProperties bytes with Topic Alias = 0 (property id 0x23)
+        // properties: id=0x23, value=0x0000
+        let props = [0x23u8, 0x00, 0x00];
+        let mut buf = bytes::BytesMut::new();
+        buf.put_u8(props.len() as u8); // properties length VBI
+        buf.extend_from_slice(&props);
+        let mut b = buf.freeze();
+        assert!(matches!(
+            PublishProperties::read(&mut b),
+            Err(Error::MalformedPacket)
+        ));
     }
 }
