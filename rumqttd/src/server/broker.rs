@@ -9,7 +9,7 @@ use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, ConnectionSettings, Meter, ProtocolVersion};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -247,15 +247,26 @@ impl Broker {
         if let Some(ws_config) = &self.config.ws {
             for (_, config) in ws_config.clone() {
                 let server_thread = thread::Builder::new().name(config.name.clone());
-                //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
-                let mut server = Server::new(config, self.router_tx.clone(), V4);
+                let router_tx = self.router_tx.clone();
+                let protocol = config.protocol.clone();
                 let handle = server_thread.spawn(move || {
                     let mut runtime = tokio::runtime::Builder::new_current_thread();
                     let runtime = runtime.enable_all().build().unwrap();
 
                     runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Websocket).await {
-                            error!(error=?e, "Server error - WS");
+                        match protocol {
+                            ProtocolVersion::V4 => {
+                                let mut server = Server::new(config, router_tx, V4);
+                                if let Err(e) = server.start(LinkType::Websocket).await {
+                                    error!(error=?e, "Server error - WS/V4");
+                                }
+                            }
+                            ProtocolVersion::V5 => {
+                                let mut server = Server::new(config, router_tx, V5);
+                                if let Err(e) = server.start(LinkType::Websocket).await {
+                                    error!(error=?e, "Server error - WS/V5");
+                                }
+                            }
                         }
                     });
                 })?;

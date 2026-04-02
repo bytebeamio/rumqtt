@@ -109,6 +109,14 @@ impl TlsConfig {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProtocolVersion {
+    #[default]
+    V4,
+    V5,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerSettings {
     pub name: String,
@@ -116,6 +124,9 @@ pub struct ServerSettings {
     pub tls: Option<TlsConfig>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
+    /// Protocol version for WebSocket listeners (default: v4 for backward compat)
+    #[serde(default)]
+    pub protocol: ProtocolVersion,
 }
 
 impl ServerSettings {
