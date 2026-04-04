@@ -84,6 +84,9 @@ pub struct EventLoop {
     pub network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    /// Dummy sleep used as a placeholder in select! when keepalive is disabled.
+    /// Initialized once with Duration::MAX so that it never fires.
+    no_sleep: Option<Pin<Box<Sleep>>>,
     pub network_options: NetworkOptions,
 }
 
@@ -113,6 +116,7 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
+            no_sleep: None,
             network_options: NetworkOptions::new(),
         }
     }
@@ -194,7 +198,9 @@ impl EventLoop {
             return Ok(event);
         }
 
-        let mut no_sleep = Box::pin(time::sleep(Duration::ZERO));
+        let no_sleep = self
+            .no_sleep
+            .get_or_insert_with(|| Box::pin(time::sleep(Duration::MAX)));
         // this loop is necessary since self.incoming.pop_front() might return None. In that case,
         // instead of returning a None event, we try again.
         select! {
@@ -255,7 +261,7 @@ impl EventLoop {
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
-            _ = self.keepalive_timeout.as_mut().unwrap_or(&mut no_sleep),
+            _ = self.keepalive_timeout.as_mut().unwrap_or(no_sleep),
                 if self.keepalive_timeout.is_some() && !self.mqtt_options.keep_alive.is_zero() => {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
