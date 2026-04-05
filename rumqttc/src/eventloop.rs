@@ -1,22 +1,19 @@
-use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
-use crate::{MqttOptions, Outgoing};
-
-use crate::framed::AsyncReadWrite;
-use crate::mqttbytes::v4::*;
-use flume::{bounded, Receiver, Sender};
-use tokio::net::{lookup_host, TcpSocket, TcpStream};
-use tokio::select;
-use tokio::time::{self, Instant, Sleep};
-
-use std::collections::VecDeque;
-use std::io;
-use std::net::SocketAddr;
-use std::pin::Pin;
-use std::time::Duration;
+use std::{collections::VecDeque, io, net::SocketAddr, pin::Pin, time::Duration};
 
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
+
+use tokio::{
+    net::{lookup_host, TcpSocket, TcpStream},
+    select,
+    sync::mpsc::{channel, Receiver, Sender},
+    time::{self, Instant, Sleep},
+};
+
+use crate::{
+    framed::AsyncReadWrite, framed::Network, mqttbytes::v4::*, Incoming, MqttOptions, MqttState,
+    NetworkOptions, Outgoing, Packet, Request, StateError, Transport,
+};
 
 #[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
 use crate::tls;
@@ -100,7 +97,7 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(mqtt_options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+        let (requests_tx, requests_rx) = channel(cap);
         let pending = VecDeque::new();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
@@ -130,7 +127,10 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+        let mut requests_in_channel: Vec<_> = vec![];
+        while let Ok(x) = self.requests_rx.try_recv() {
+            requests_in_channel.push(x);
+        }
 
         requests_in_channel.retain(|request| {
             match request {
@@ -238,7 +238,7 @@ impl EventLoop {
             // outgoing requests (along with 1b).
             o = Self::next_request(
                 &mut self.pending,
-                &self.requests_rx,
+                &mut self.requests_rx,
                 self.mqtt_options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
@@ -283,7 +283,7 @@ impl EventLoop {
 
     async fn next_request(
         pending: &mut VecDeque<Request>,
-        rx: &Receiver<Request>,
+        rx: &mut Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
         if !pending.is_empty() {
@@ -292,9 +292,9 @@ impl EventLoop {
             // advanced the iterator but the future might be canceled before return
             Ok(pending.pop_front().unwrap())
         } else {
-            match rx.recv_async().await {
-                Ok(r) => Ok(r),
-                Err(_) => Err(ConnectionError::RequestsDone),
+            match rx.recv().await {
+                Some(r) => Ok(r),
+                _ => Err(ConnectionError::RequestsDone),
             }
         }
     }

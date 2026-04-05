@@ -2,14 +2,21 @@
 //! async eventloop.
 use std::time::Duration;
 
-use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
-
 use bytes::Bytes;
-use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
-use tokio::runtime::{self, Runtime};
-use tokio::time::timeout;
+use tokio::{
+    runtime::{self, Handle, Runtime},
+    sync::mpsc::{
+        error::{SendError, TrySendError},
+        Sender,
+    },
+    time::timeout,
+};
+
+use crate::{
+    mqttbytes::{v4::*, QoS},
+    valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request,
+};
 
 /// Client Error
 #[derive(Debug, thiserror::Error)]
@@ -22,7 +29,7 @@ pub enum ClientError {
 
 impl From<SendError<Request>> for ClientError {
     fn from(e: SendError<Request>) -> Self {
-        Self::Request(e.into_inner())
+        Self::Request(e.0)
     }
 }
 
@@ -84,7 +91,7 @@ impl AsyncClient {
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.request_tx.send_async(publish).await?;
+        self.request_tx.send(publish).await?;
         Ok(())
     }
 
@@ -116,7 +123,7 @@ impl AsyncClient {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.request_tx.send_async(ack).await?;
+            self.request_tx.send(ack).await?;
         }
         Ok(())
     }
@@ -144,7 +151,7 @@ impl AsyncClient {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        self.request_tx.send_async(publish).await?;
+        self.request_tx.send(publish).await?;
         Ok(())
     }
 
@@ -155,7 +162,7 @@ impl AsyncClient {
             return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.request_tx.send_async(subscribe.into()).await?;
+        self.request_tx.send(subscribe.into()).await?;
         Ok(())
     }
 
@@ -180,7 +187,7 @@ impl AsyncClient {
             return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.request_tx.send_async(subscribe.into()).await?;
+        self.request_tx.send(subscribe.into()).await?;
         Ok(())
     }
 
@@ -201,7 +208,7 @@ impl AsyncClient {
     pub async fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send(request).await?;
         Ok(())
     }
 
@@ -216,7 +223,7 @@ impl AsyncClient {
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect(Disconnect);
-        self.request_tx.send_async(request).await?;
+        self.request_tx.send(request).await?;
         Ok(())
     }
 
@@ -250,6 +257,7 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 #[derive(Clone)]
 pub struct Client {
     client: AsyncClient,
+    runtime_handle: Handle,
 }
 
 impl Client {
@@ -258,24 +266,19 @@ impl Client {
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
         let (client, eventloop) = AsyncClient::new(options, cap);
-        let client = Client { client };
+
         let runtime = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
 
+        let client = Client {
+            client,
+            runtime_handle: runtime.handle().clone(),
+        };
+
         let connection = Connection::new(eventloop, runtime);
         (client, connection)
-    }
-
-    /// Create a new `Client` from a channel `Sender`.
-    ///
-    /// This is mostly useful for creating a test instance where you can
-    /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<Request>) -> Client {
-        Client {
-            client: AsyncClient::from_senders(request_tx),
-        }
     }
 
     /// Sends a MQTT Publish to the `EventLoop`
@@ -297,7 +300,8 @@ impl Client {
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
-        self.client.request_tx.send(publish)?;
+        self.runtime_handle
+            .block_on(self.client.request_tx.send(publish))?;
         Ok(())
     }
 
@@ -321,7 +325,8 @@ impl Client {
         let ack = get_ack_req(publish);
 
         if let Some(ack) = ack {
-            self.client.request_tx.send(ack)?;
+            self.runtime_handle
+                .block_on(self.client.request_tx.send(ack))?;
         }
         Ok(())
     }
@@ -339,7 +344,8 @@ impl Client {
             return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.client.request_tx.send(subscribe.into())?;
+        self.runtime_handle
+            .block_on(self.client.request_tx.send(subscribe.into()))?;
         Ok(())
     }
 
@@ -359,7 +365,8 @@ impl Client {
             return Err(ClientError::Request(subscribe.into()));
         }
 
-        self.client.request_tx.send(subscribe.into())?;
+        self.runtime_handle
+            .block_on(self.client.request_tx.send(subscribe.into()))?;
         Ok(())
     }
 
@@ -374,7 +381,9 @@ impl Client {
     pub fn unsubscribe<S: Into<String>>(&self, topic: S) -> Result<(), ClientError> {
         let unsubscribe = Unsubscribe::new(topic.into());
         let request = Request::Unsubscribe(unsubscribe);
-        self.client.request_tx.send(request)?;
+
+        self.runtime_handle
+            .block_on(self.client.request_tx.send(request))?;
         Ok(())
     }
 
@@ -387,7 +396,9 @@ impl Client {
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&self) -> Result<(), ClientError> {
         let request = Request::Disconnect(Disconnect);
-        self.client.request_tx.send(request)?;
+
+        self.runtime_handle
+            .block_on(self.client.request_tx.send(request))?;
         Ok(())
     }
 
@@ -535,15 +546,5 @@ mod test {
         let (_, mut connection) = Client::new(mqttoptions, 10);
         let _ = connection.iter();
         let _ = connection.iter();
-    }
-
-    #[test]
-    fn should_be_able_to_build_test_client_from_channel() {
-        let (tx, rx) = flume::bounded(1);
-        let client = Client::from_sender(tx);
-        client
-            .publish("hello/world", QoS::ExactlyOnce, false, "good bye")
-            .expect("Should be able to publish");
-        let _ = rx.try_recv().expect("Should have message");
     }
 }

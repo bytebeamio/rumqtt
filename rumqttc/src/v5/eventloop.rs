@@ -1,25 +1,22 @@
-use super::framed::Network;
-use super::mqttbytes::v5::*;
-use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
-use crate::eventloop::socket_connect;
-use crate::framed::AsyncReadWrite;
-
-use flume::{bounded, Receiver, Sender};
-use tokio::select;
-use tokio::time::{self, error::Elapsed, Instant, Sleep};
-
-use std::collections::VecDeque;
-use std::io;
-use std::pin::Pin;
-use std::time::Duration;
-
-use super::mqttbytes::v5::ConnectReturnCode;
-
-#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
-use crate::tls;
+use std::{collections::VecDeque, io, pin::Pin, time::Duration};
 
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
+
+use tokio::{
+    select,
+    sync::mpsc::{channel, Receiver, Sender},
+    time::{self, error::Elapsed, Instant, Sleep},
+};
+
+use super::{
+    framed::Network, mqttbytes::v5::ConnectReturnCode, mqttbytes::v5::*, Incoming, MqttOptions,
+    MqttState, Outgoing, Request, StateError, Transport,
+};
+use crate::{eventloop::socket_connect, framed::AsyncReadWrite};
+
+#[cfg(any(feature = "use-rustls-no-provider", feature = "use-native-tls"))]
+use crate::tls;
 
 #[cfg(feature = "websocket")]
 use {
@@ -97,7 +94,7 @@ impl EventLoop {
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
     pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+        let (requests_tx, requests_rx) = channel(cap);
         let pending = VecDeque::new();
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;
@@ -126,7 +123,10 @@ impl EventLoop {
         self.pending.extend(self.state.clean());
 
         // drain requests from channel which weren't yet received
-        let mut requests_in_channel: Vec<_> = self.requests_rx.drain().collect();
+        let mut requests_in_channel: Vec<_> = vec![];
+        while let Ok(x) = self.requests_rx.try_recv() {
+            requests_in_channel.push(x);
+        }
 
         requests_in_channel.retain(|request| {
             match request {
@@ -220,7 +220,7 @@ impl EventLoop {
             // outgoing requests (along with 1b).
             o = Self::next_request(
                 &mut self.pending,
-                &self.requests_rx,
+                &mut self.requests_rx,
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
@@ -256,7 +256,7 @@ impl EventLoop {
 
     async fn next_request(
         pending: &mut VecDeque<Request>,
-        rx: &Receiver<Request>,
+        rx: &mut Receiver<Request>,
         pending_throttle: Duration,
     ) -> Result<Request, ConnectionError> {
         if !pending.is_empty() {
@@ -265,9 +265,9 @@ impl EventLoop {
             // advance the iterator but the future might be canceled before return
             Ok(pending.pop_front().unwrap())
         } else {
-            match rx.recv_async().await {
-                Ok(r) => Ok(r),
-                Err(_) => Err(ConnectionError::RequestsDone),
+            match rx.recv().await {
+                Some(r) => Ok(r),
+                _ => Err(ConnectionError::RequestsDone),
             }
         }
     }
