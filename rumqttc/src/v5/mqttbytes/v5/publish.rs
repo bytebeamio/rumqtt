@@ -14,7 +14,7 @@ pub struct Publish {
 }
 
 impl Publish {
-    pub fn new<T: Into<String>, P: Into<Bytes>>(
+    pub fn new<T: Into<Bytes>, P: Into<Bytes>>(
         topic: T,
         qos: QoS,
         payload: P,
