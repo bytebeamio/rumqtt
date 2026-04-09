@@ -267,7 +267,7 @@ impl MqttOptions {
     }
 
     /// Username and password
-    pub fn set_credentials<U: Into<String>, P: Into<String>>(
+    pub fn set_credentials<U: Into<String>, P: Into<Vec<u8>>>(
         &mut self,
         username: U,
         password: P,

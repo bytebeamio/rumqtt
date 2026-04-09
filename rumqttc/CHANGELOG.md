@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 ### Changed
+- Use `Vec<u8>` for password in `Login` to comply with MQTT 5.0 spec
+
 ### Deprecated
 ### Removed
 ### Fixed 

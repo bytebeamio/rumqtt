@@ -606,11 +606,11 @@ impl LastWillProperties {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Login {
     pub username: String,
-    pub password: String,
+    pub password: Vec<u8>,
 }
 
 impl Login {
-    pub fn new<U: Into<String>, P: Into<String>>(u: U, p: P) -> Login {
+    pub fn new<U: Into<String>, P: Into<Vec<u8>>>(u: U, p: P) -> Login {
         Login {
             username: u.into(),
             password: p.into(),
@@ -624,11 +624,11 @@ impl Login {
         };
 
         let password = match connect_flags & 0b0100_0000 {
-            0 => String::new(),
-            _ => read_mqtt_string(bytes)?,
+            0 => Vec::new(),
+            _ => read_mqtt_bytes(bytes)?.to_vec(),
         };
 
-        if username.is_empty() && password.is_empty() {
+        if username.is_empty() && password.len() == 0 {
             Ok(None)
         } else {
             Ok(Some(Login { username, password }))
@@ -658,7 +658,7 @@ impl Login {
 
         if !self.password.is_empty() {
             connect_flags |= 0x40;
-            write_mqtt_string(buffer, &self.password);
+            write_mqtt_bytes(buffer, &self.password);
         }
 
         connect_flags
