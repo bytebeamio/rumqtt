@@ -2,6 +2,7 @@
 //! async eventloop.
 use std::time::Duration;
 
+use crate::eventloop::ChannelCapacity;
 use crate::mqttbytes::{v4::*, QoS};
 use crate::{valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
 
@@ -32,6 +33,62 @@ impl From<TrySendError<Request>> for ClientError {
     }
 }
 
+/// Builder for synchronous and asynchronous MQTT v4 clients.
+///
+/// The request channel is bounded by default, using the capacity configured
+/// in [`MqttOptions`]. Call [`capacity`](Self::capacity) to override it or
+/// [`unbounded`](Self::unbounded) to opt out of backpressure entirely.
+pub struct ClientBuilder {
+    options: MqttOptions,
+    capacity: ChannelCapacity,
+}
+
+impl ClientBuilder {
+    /// Create a new builder. The channel capacity defaults to the value set
+    /// in [`MqttOptions::request_channel_capacity`].
+    pub fn new(options: MqttOptions) -> Self {
+        let capacity = ChannelCapacity::Bounded(options.request_channel_capacity());
+        Self { options, capacity }
+    }
+
+    /// Set a bounded request channel with the given capacity.
+    /// A capacity of `0` creates a rendezvous channel.
+    pub fn capacity(mut self, cap: usize) -> Self {
+        self.capacity = ChannelCapacity::Bounded(cap);
+        self
+    }
+
+    /// Use an unbounded request channel.
+    /// This removes backpressure from the client. Prefer bounded channels
+    /// unless you have a specific reason to allow unbounded queuing.
+    pub fn unbounded(mut self) -> Self {
+        self.capacity = ChannelCapacity::Unbounded;
+        self
+    }
+
+    /// Build an [`AsyncClient`] and its [`EventLoop`].
+    pub fn build_async(self) -> (AsyncClient, EventLoop) {
+        let eventloop = EventLoop::new(self.options, self.capacity);
+        let request_tx = eventloop.requests_tx.clone();
+        let client = AsyncClient::from_senders(request_tx);
+        (client, eventloop)
+    }
+
+    /// Build a [`Client`] and its [`Connection`].
+    pub fn build(self) -> (Client, Connection) {
+        let (async_client, eventloop) = self.build_async();
+        let client = Client {
+            client: async_client,
+        };
+        let runtime = runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let connection = Connection::new(eventloop, runtime);
+        (client, connection)
+    }
+}
+
 /// An asynchronous client, communicates with MQTT `EventLoop`.
 ///
 /// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
@@ -45,16 +102,15 @@ pub struct AsyncClient {
 }
 
 impl AsyncClient {
-    /// Create a new `AsyncClient`.
-    ///
-    /// `cap` specifies the capacity of the bounded async channel.
+    /// Deprecated. Use [`AsyncClient::builder`] instead.
+    #[deprecated(since = "0.26.0", note = "Use AsyncClient::builder instead")]
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let eventloop = EventLoop::new(options, cap);
-        let request_tx = eventloop.requests_tx.clone();
+        ClientBuilder::new(options).capacity(cap).build_async()
+    }
 
-        let client = AsyncClient { request_tx };
-
-        (client, eventloop)
+    /// Returns a [`ClientBuilder`] for constructing an MQTT v4 async client.
+    pub fn builder(options: MqttOptions) -> ClientBuilder {
+        ClientBuilder::new(options)
     }
 
     /// Create a new `AsyncClient` from a channel `Sender`.
@@ -253,19 +309,15 @@ pub struct Client {
 }
 
 impl Client {
-    /// Create a new `Client`
-    ///
-    /// `cap` specifies the capacity of the bounded async channel.
+    /// Deprecated. Use [`Client::builder`] instead.
+    #[deprecated(since = "0.26.0", note = "Use Client::builder instead")]
     pub fn new(options: MqttOptions, cap: usize) -> (Client, Connection) {
-        let (client, eventloop) = AsyncClient::new(options, cap);
-        let client = Client { client };
-        let runtime = runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        ClientBuilder::new(options).capacity(cap).build()
+    }
 
-        let connection = Connection::new(eventloop, runtime);
-        (client, connection)
+    /// Returns a [`ClientBuilder`] for constructing an MQTT v4 sync client.
+    pub fn builder(options: MqttOptions) -> ClientBuilder {
+        ClientBuilder::new(options)
     }
 
     /// Create a new `Client` from a channel `Sender`.
@@ -532,7 +584,7 @@ mod test {
             .set_keep_alive(Duration::from_secs(5))
             .set_last_will(will);
 
-        let (_, mut connection) = Client::new(mqttoptions, 10);
+        let (_, mut connection) = Client::builder(mqttoptions).capacity(10).build();
         let _ = connection.iter();
         let _ = connection.iter();
     }
