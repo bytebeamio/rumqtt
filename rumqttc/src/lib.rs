@@ -392,7 +392,7 @@ impl From<TlsConnector> for TlsConfiguration {
 }
 
 /// Provides a way to configure low level network connection configurations
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct NetworkOptions {
     tcp_send_buffer_size: Option<u32>,
     tcp_recv_buffer_size: Option<u32>,
@@ -400,6 +400,15 @@ pub struct NetworkOptions {
     conn_timeout: u64,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     bind_device: Option<String>,
+    /// Optional local address to bind the outgoing TCP socket to.
+    /// Use `SocketAddr::new(ip, 0)` to let the OS pick the ephemeral port.
+    bind_addr: Option<std::net::SocketAddr>,
+}
+
+impl Default for NetworkOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NetworkOptions {
@@ -411,6 +420,7 @@ impl NetworkOptions {
             conn_timeout: 5,
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
+            bind_addr: None,
         }
     }
 
@@ -446,6 +456,20 @@ impl NetworkOptions {
     pub fn set_bind_device(&mut self, bind_device: &str) -> &mut Self {
         self.bind_device = Some(bind_device.to_string());
         self
+    }
+
+    /// Bind the outgoing TCP socket to a specific local address before connecting.
+    /// Use `SocketAddr::new(ip, 0)` to let the OS pick the ephemeral port.
+    /// This is useful for distributing connections across multiple local IPs
+    /// to avoid ephemeral port exhaustion.
+    pub fn set_bind_addr(&mut self, addr: std::net::SocketAddr) -> &mut Self {
+        self.bind_addr = Some(addr);
+        self
+    }
+
+    /// Get the configured bind address, if any.
+    pub fn bind_addr(&self) -> Option<std::net::SocketAddr> {
+        self.bind_addr
     }
 }
 

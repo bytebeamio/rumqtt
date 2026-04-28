@@ -350,6 +350,13 @@ pub(crate) async fn socket_connect(
             }
         }
 
+        // Bind to a specific local address if configured.
+        // This enables distributing connections across multiple local IPs
+        // to avoid ephemeral port exhaustion when creating >50K connections.
+        if let Some(bind_addr) = network_options.bind_addr {
+            socket.bind(bind_addr)?;
+        }
+
         match socket.connect(addr).await {
             Ok(s) => return Ok(s),
             Err(e) => {
