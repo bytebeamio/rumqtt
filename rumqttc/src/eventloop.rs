@@ -13,6 +13,8 @@ use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::atomic::AtomicU16;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(unix)]
@@ -85,6 +87,8 @@ pub struct EventLoop {
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
     pub network_options: NetworkOptions,
+    /// Shared atomic counter for packet id assignment
+    pub(crate) pkid_counter: Arc<AtomicU16>,
 }
 
 /// Events which can be yielded by the event loop
@@ -104,17 +108,24 @@ impl EventLoop {
         let pending = VecDeque::new();
         let max_inflight = mqtt_options.inflight;
         let manual_acks = mqtt_options.manual_acks;
+        let pkid_counter = Arc::new(AtomicU16::new(0));
 
         EventLoop {
             mqtt_options,
-            state: MqttState::new(max_inflight, manual_acks),
+            state: MqttState::new(max_inflight, manual_acks, pkid_counter.clone()),
             requests_tx,
             requests_rx,
             pending,
             network: None,
             keepalive_timeout: None,
             network_options: NetworkOptions::new(),
+            pkid_counter,
         }
+    }
+
+    /// Returns a clone of the shared packet id counter for use by the client
+    pub fn pkid_counter(&self) -> Arc<AtomicU16> {
+        self.pkid_counter.clone()
     }
 
     /// Last session might contain packets which aren't acked. MQTT says these packets should be

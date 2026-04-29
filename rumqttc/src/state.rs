@@ -4,6 +4,9 @@ use crate::mqttbytes::v4::*;
 use crate::mqttbytes::{self, *};
 use fixedbitset::FixedBitSet;
 use std::collections::VecDeque;
+use std::fmt::{self, Debug, Formatter};
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 use std::{io, time::Instant};
 
 /// Errors during state handling
@@ -40,7 +43,6 @@ pub enum StateError {
 // This is done for 2 reasons
 // Bad acks or out of order acks aren't O(n) causing cpu spikes
 // Any missing acks from the broker are detected during the next recycled use of packet ids
-#[derive(Debug, Clone)]
 pub struct MqttState {
     /// Status of last ping
     pub await_pingresp: bool,
@@ -72,19 +74,40 @@ pub struct MqttState {
     pub events: VecDeque<Event>,
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
+    /// Shared atomic counter for packet id assignment
+    pub(crate) pkid_counter: Arc<AtomicU16>,
+}
+
+impl Debug for MqttState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("MqttState")
+            .field("await_pingresp", &self.await_pingresp)
+            .field("collision_ping_count", &self.collision_ping_count)
+            .field("last_pkid", &self.last_pkid)
+            .field("last_puback", &self.last_puback)
+            .field("inflight", &self.inflight)
+            .field("max_inflight", &self.max_inflight)
+            .field("outgoing_pub", &self.outgoing_pub)
+            .field("outgoing_rel", &self.outgoing_rel)
+            .field("collision", &self.collision)
+            .field("events", &self.events)
+            .field("manual_acks", &self.manual_acks)
+            .finish()
+    }
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, pkid_counter: Arc<AtomicU16>) -> Self {
+        let last_pkid = pkid_counter.load(Ordering::Relaxed);
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
-            last_pkid: 0,
+            last_pkid,
             last_puback: 0,
             inflight: 0,
             max_inflight,
@@ -96,6 +119,7 @@ impl MqttState {
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
             manual_acks,
+            pkid_counter,
         }
     }
 
@@ -312,6 +336,9 @@ impl MqttState {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
+            } else {
+                // Client pre-assigned pkid via shared atomic counter
+                self.last_pkid = publish.pkid;
             }
 
             let pkid = publish.pkid;
@@ -484,19 +511,10 @@ impl MqttState {
     /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
     ///
     fn next_pkid(&mut self) -> u16 {
-        let next_pkid = self.last_pkid + 1;
-
-        // When next packet id is at the edge of inflight queue,
-        // set await flag. This instructs eventloop to stop
-        // processing requests until all the inflight publishes
-        // are acked
-        if next_pkid == self.max_inflight {
-            self.last_pkid = 0;
-            return next_pkid;
-        }
-
-        self.last_pkid = next_pkid;
-        next_pkid
+        let raw = self.pkid_counter.fetch_add(1, Ordering::Relaxed);
+        let pkid = (raw % self.max_inflight) + 1;
+        self.last_pkid = pkid;
+        pkid
     }
 }
 
@@ -506,6 +524,8 @@ mod test {
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
     use crate::{Event, Incoming, Outgoing, Request};
+    use std::sync::atomic::AtomicU16;
+    use std::sync::Arc;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -527,7 +547,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(100, false)
+        MqttState::new(100, false, Arc::new(AtomicU16::new(0)))
     }
 
     #[test]

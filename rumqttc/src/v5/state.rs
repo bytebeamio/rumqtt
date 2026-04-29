@@ -10,6 +10,9 @@ use super::{Event, Incoming, Outgoing, Request};
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use std::collections::{HashMap, VecDeque};
+use std::fmt::{self, Debug, Formatter};
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 use std::{io, time::Instant};
 
 /// Errors during state handling
@@ -74,7 +77,6 @@ impl From<mqttbytes::Error> for StateError {
 // This is done for 2 reasons
 // Bad acks or out of order acks aren't O(n) causing cpu spikes
 // Any missing acks from the broker are detected during the next recycled use of packet ids
-#[derive(Debug, Clone)]
 pub struct MqttState {
     /// Status of last ping
     pub await_pingresp: bool,
@@ -110,19 +112,40 @@ pub struct MqttState {
     pub(crate) max_outgoing_inflight: u16,
     /// Upper limit on the maximum number of allowed inflight QoS1 & QoS2 requests
     max_outgoing_inflight_upper_limit: u16,
+    /// Shared atomic counter for packet id assignment
+    pub(crate) pkid_counter: Arc<AtomicU16>,
+}
+
+impl Debug for MqttState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("MqttState")
+            .field("await_pingresp", &self.await_pingresp)
+            .field("collision_ping_count", &self.collision_ping_count)
+            .field("last_pkid", &self.last_pkid)
+            .field("inflight", &self.inflight)
+            .field("max_outgoing_inflight", &self.max_outgoing_inflight)
+            .field("outgoing_pub", &self.outgoing_pub)
+            .field("outgoing_rel", &self.outgoing_rel)
+            .field("collision", &self.collision)
+            .field("events", &self.events)
+            .field("manual_acks", &self.manual_acks)
+            .field("broker_topic_alias_max", &self.broker_topic_alias_max)
+            .finish()
+    }
 }
 
 impl MqttState {
     /// Creates new mqtt state. Same state should be used during a
     /// connection for persistent sessions while new state should
     /// instantiated for clean sessions
-    pub fn new(max_inflight: u16, manual_acks: bool) -> Self {
+    pub fn new(max_inflight: u16, manual_acks: bool, pkid_counter: Arc<AtomicU16>) -> Self {
+        let last_pkid = pkid_counter.load(Ordering::Relaxed);
         MqttState {
             await_pingresp: false,
             collision_ping_count: 0,
             last_incoming: Instant::now(),
             last_outgoing: Instant::now(),
-            last_pkid: 0,
+            last_pkid,
             inflight: 0,
             // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
@@ -137,6 +160,7 @@ impl MqttState {
             broker_topic_alias_max: 0,
             max_outgoing_inflight: max_inflight,
             max_outgoing_inflight_upper_limit: max_inflight,
+            pkid_counter,
         }
     }
 
@@ -475,6 +499,9 @@ impl MqttState {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
+            } else {
+                // Client pre-assigned pkid via shared atomic counter
+                self.last_pkid = publish.pkid;
             }
 
             let pkid = publish.pkid;
@@ -666,19 +693,10 @@ impl MqttState {
     /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
     ///
     fn next_pkid(&mut self) -> u16 {
-        let next_pkid = self.last_pkid + 1;
-
-        // When next packet id is at the edge of inflight queue,
-        // set await flag. This instructs eventloop to stop
-        // processing requests until all the inflight publishes
-        // are acked
-        if next_pkid == self.max_outgoing_inflight {
-            self.last_pkid = 0;
-            return next_pkid;
-        }
-
-        self.last_pkid = next_pkid;
-        next_pkid
+        let raw = self.pkid_counter.fetch_add(1, Ordering::Relaxed);
+        let pkid = (raw % self.max_outgoing_inflight) + 1;
+        self.last_pkid = pkid;
+        pkid
     }
 }
 
@@ -688,6 +706,8 @@ mod test {
     use super::mqttbytes::*;
     use super::{Event, Incoming, Outgoing, Request};
     use super::{MqttState, StateError};
+    use std::sync::atomic::AtomicU16;
+    use std::sync::Arc;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -709,7 +729,7 @@ mod test {
     }
 
     fn build_mqttstate() -> MqttState {
-        MqttState::new(u16::MAX, false)
+        MqttState::new(u16::MAX, false, Arc::new(AtomicU16::new(0)))
     }
 
     #[test]
@@ -770,7 +790,7 @@ mod test {
 
     #[test]
     fn outgoing_publish_with_max_inflight_is_ok() {
-        let mut mqtt = MqttState::new(2, false);
+        let mut mqtt = MqttState::new(2, false, Arc::new(AtomicU16::new(0)));
 
         // QoS2 publish
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
@@ -779,12 +799,12 @@ mod test {
         assert_eq!(mqtt.last_pkid, 1);
         assert_eq!(mqtt.inflight, 1);
 
-        // Packet id should be set back down to 0, since we hit the limit
+        // Second publish gets pkid 2 (max_inflight = 2)
         mqtt.outgoing_publish(publish.clone()).unwrap();
-        assert_eq!(mqtt.last_pkid, 0);
+        assert_eq!(mqtt.last_pkid, 2);
         assert_eq!(mqtt.inflight, 2);
 
-        // This should cause a collition
+        // This should cause a collision (pkid wraps back to 1)
         mqtt.outgoing_publish(publish.clone()).unwrap();
         assert_eq!(mqtt.last_pkid, 1);
         assert_eq!(mqtt.inflight, 2);
@@ -796,7 +816,7 @@ mod test {
 
         // Now there should be space in the outgoing queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
-        assert_eq!(mqtt.last_pkid, 0);
+        assert_eq!(mqtt.last_pkid, 2);
         assert_eq!(mqtt.inflight, 2);
     }
 
