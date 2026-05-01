@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `local::LinkTx::publish_with_retain` and
+  `local::LinkTx::try_publish_with_retain` for in-process callers
+  that need to seed the retained store with a custom retain flag.
+  Existing `publish` / `try_publish` keep the previous
+  `retain: false` behaviour and now delegate.
 ### Changed
 ### Deprecated
 ### Removed
