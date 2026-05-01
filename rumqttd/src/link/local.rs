@@ -211,8 +211,30 @@ impl LinkTx {
         Ok(())
     }
 
-    /// Sends a MQTT Publish to the router
+    /// Sends a MQTT Publish to the router with `retain: false`.
     pub fn publish<S, V>(&mut self, topic: S, payload: V) -> Result<usize, LinkError>
+    where
+        S: Into<Bytes>,
+        V: Into<Bytes>,
+    {
+        self.publish_with_retain(topic, payload, false)
+    }
+
+    /// Sends a MQTT Publish to the router with an explicit retain flag.
+    ///
+    /// Useful for embedded-broker setups that need to seed the
+    /// retained store with snapshot-class topics from a local
+    /// data source (a captured fixture, an SQLite snapshot, ...)
+    /// before any external client connects. Without this method
+    /// callers either had to spin up a loopback rumqttc client to
+    /// publish-with-retain over the wire, or wait for the next live
+    /// publish to populate the retained store.
+    pub fn publish_with_retain<S, V>(
+        &mut self,
+        topic: S,
+        payload: V,
+        retain: bool,
+    ) -> Result<usize, LinkError>
     where
         S: Into<Bytes>,
         V: Into<Bytes>,
@@ -220,7 +242,7 @@ impl LinkTx {
         let publish = Publish {
             dup: false,
             qos: QoS::AtMostOnce,
-            retain: false,
+            retain,
             topic: topic.into(),
             pkid: 0,
             payload: payload.into(),
@@ -230,8 +252,23 @@ impl LinkTx {
         Ok(len)
     }
 
-    /// Sends a MQTT Publish to the router
+    /// Sends a MQTT Publish to the router with `retain: false`.
     pub fn try_publish<S, V>(&mut self, topic: S, payload: V) -> Result<usize, LinkError>
+    where
+        S: Into<Bytes>,
+        V: Into<Bytes>,
+    {
+        self.try_publish_with_retain(topic, payload, false)
+    }
+
+    /// Sends a MQTT Publish to the router (non-blocking) with an
+    /// explicit retain flag. See [`LinkTx::publish_with_retain`].
+    pub fn try_publish_with_retain<S, V>(
+        &mut self,
+        topic: S,
+        payload: V,
+        retain: bool,
+    ) -> Result<usize, LinkError>
     where
         S: Into<Bytes>,
         V: Into<Bytes>,
@@ -239,7 +276,7 @@ impl LinkTx {
         let publish = Publish {
             dup: false,
             qos: QoS::AtMostOnce,
-            retain: false,
+            retain,
             topic: topic.into(),
             pkid: 0,
             payload: payload.into(),
