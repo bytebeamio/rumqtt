@@ -78,7 +78,7 @@ async fn connection_should_timeout_on_time() {
 
     time::sleep(Duration::from_secs(1)).await;
     let options = MqttOptions::new("dummy", "127.0.0.1", 1880);
-    let mut eventloop = EventLoop::new(options, 5);
+    let (mut eventloop, _sender) = EventLoop::new(options, 5);
 
     let start = Instant::now();
     let o = eventloop.poll().await;
@@ -121,7 +121,7 @@ async fn idle_connection_triggers_pings_on_time() {
 
     // Create client eventloop and poll
     task::spawn(async move {
-        let mut eventloop = EventLoop::new(options, 5);
+        let (mut eventloop, _sender) = EventLoop::new(options, 5);
         run(&mut eventloop, false).await.unwrap();
     });
 
@@ -200,7 +200,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     options.set_keep_alive(Duration::from_secs(keep_alive));
 
     task::spawn(async move {
-        let mut eventloop = EventLoop::new(options, 5);
+        let (mut eventloop, _sender) = EventLoop::new(options, 5);
         run(&mut eventloop, false).await.unwrap();
     });
 
@@ -244,7 +244,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
 
     time::sleep(Duration::from_secs(1)).await;
     let start = Instant::now();
-    let mut eventloop = EventLoop::new(options, 5);
+    let (mut eventloop, _sender) = EventLoop::new(options, 5);
     loop {
         if let Err(e) = eventloop.poll().await {
             match e {
@@ -455,7 +455,7 @@ async fn next_poll_after_connect_failure_reconnects() {
     });
 
     time::sleep(Duration::from_secs(1)).await;
-    let mut eventloop = EventLoop::new(options, 5);
+    let (mut eventloop, _sender) = EventLoop::new(options, 5);
 
     match eventloop.poll().await {
         Err(ConnectionError::ConnectionRefused(ConnectReturnCode::BadUserNamePassword)) => (),
