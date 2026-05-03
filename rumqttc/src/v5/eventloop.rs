@@ -4,7 +4,7 @@ use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Tra
 use crate::eventloop::socket_connect;
 use crate::framed::AsyncReadWrite;
 
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, unbounded, Receiver, Sender};
 use tokio::select;
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
 
@@ -30,6 +30,19 @@ use {
 
 #[cfg(feature = "proxy")]
 use crate::proxy::ProxyError;
+
+/// Controls the capacity of the client request channel.
+///
+/// Defaults to [`Bounded`] which applies backpressure to the client.
+/// Use [`Unbounded`] only when you have a specific reason to remove backpressure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChannelCapacity {
+    /// Bounded channel with the given capacity.
+    /// A capacity of `0` creates a rendezvous channel.
+    Bounded(usize),
+    /// Unbounded channel with no backpressure.
+    Unbounded,
+}
 
 /// Critical errors during eventloop polling
 #[derive(Debug, thiserror::Error)]
@@ -96,8 +109,11 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+    pub fn new(options: MqttOptions, cap: ChannelCapacity) -> EventLoop {
+        let (requests_tx, requests_rx) = match cap {
+            ChannelCapacity::Bounded(n) => bounded(n),
+            ChannelCapacity::Unbounded => unbounded(),
+        };
         let pending = VecDeque::new();
         let inflight_limit = options.outgoing_inflight_upper_limit.unwrap_or(u16::MAX);
         let manual_acks = options.manual_acks;

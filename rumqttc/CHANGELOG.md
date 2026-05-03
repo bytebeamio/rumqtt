@@ -8,8 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ClientBuilder` and `AsyncClientBuilder` for both v4 and v5 clients,
+  enabling bounded channels by default using the capacity set in `MqttOptions`,
+  with opt-in unbounded channels via `.unbounded()`.
+
 ### Changed
 ### Deprecated
+- `Client::new(options, cap)` and `AsyncClient::new(options, cap)` -
+  use `Client::builder(options).build()` or
+  `Client::builder(options).capacity(cap).build()` instead.
+
 ### Removed
 ### Fixed 
 ### Security
