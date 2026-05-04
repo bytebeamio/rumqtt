@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Deprecated
 ### Removed
-### Fixed 
+### Fixed
+* Fixed `use-rustls-no-provider` feature flag with removing `ring` dependency of `rustls-webpki`
+
 ### Security
 
 
