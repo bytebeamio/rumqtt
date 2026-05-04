@@ -233,7 +233,12 @@ impl ConnAckProperties {
                     cursor += 4;
                 }
                 PropertyType::ReceiveMaximum => {
-                    receive_max = Some(read_u16(bytes)?);
+                    let val = read_u16(bytes)?;
+                    // MQTT 5.0 §3.2.2.3.3: Receive Maximum value of 0 is not permitted
+                    if val == 0 {
+                        return Err(Error::MalformedPacket);
+                    }
+                    receive_max = Some(val);
                     cursor += 2;
                 }
                 PropertyType::MaximumQos => {
@@ -526,5 +531,67 @@ mod test {
 
         assert_eq!(size_from_write, size_from_bytes);
         assert_eq!(size_from_size, size_from_bytes);
+    }
+
+    #[test]
+    fn connack_with_all_properties() {
+        let props = ConnAckProperties {
+            session_expiry_interval: Some(120),
+            receive_max: Some(100),
+            max_qos: Some(1),
+            retain_available: Some(1),
+            max_packet_size: Some(65536),
+            assigned_client_identifier: Some("server-assigned-id".to_string()),
+            topic_alias_max: Some(10),
+            reason_string: Some("all good".to_string()),
+            user_properties: vec![("key".to_string(), "value".to_string())],
+            wildcard_subscription_available: Some(1),
+            subscription_identifiers_available: Some(1),
+            shared_subscription_available: Some(0),
+            server_keep_alive: Some(30),
+            response_information: Some("/response".to_string()),
+            server_reference: Some("other.broker.example".to_string()),
+            authentication_method: Some("PLAIN".to_string()),
+            authentication_data: Some(bytes::Bytes::from(vec![1, 2, 3])),
+        };
+
+        let pkt = ConnAck {
+            session_present: true,
+            code: ConnectReturnCode::Success,
+            properties: Some(props.clone()),
+        };
+
+        let mut buf = BytesMut::new();
+        pkt.write(&mut buf).unwrap();
+
+        let fixed_header = super::super::check(buf.iter(), None).unwrap();
+        let decoded = ConnAck::read(fixed_header, buf.freeze()).unwrap();
+
+        assert_eq!(decoded.session_present, true);
+        assert_eq!(decoded.code, ConnectReturnCode::Success);
+        assert_eq!(decoded.properties.unwrap(), props);
+    }
+
+    #[test]
+    fn connack_receive_maximum_zero_rejected() {
+        // Craft a CONNACK with Receive Maximum property (0x21) = 0, which is forbidden
+        let inner = [
+            0x00u8, // session_present flags
+            0x00,   // return code = Success
+            0x03,   // properties length = 3
+            0x21,   // property id: Receive Maximum
+            0x00, 0x00, // value = 0 (invalid)
+        ];
+        let mut stream = BytesMut::new();
+        stream.put_u8(0x20); // CONNACK type
+        stream.put_u8(inner.len() as u8); // remaining length
+        stream.extend_from_slice(&inner);
+
+        let fixed_header = super::super::check(stream.iter(), None).unwrap();
+        let pkt = stream.freeze();
+        assert!(matches!(
+            ConnAck::read(fixed_header, pkt),
+            Err(Error::MalformedPacket)
+        ));
     }
 }
