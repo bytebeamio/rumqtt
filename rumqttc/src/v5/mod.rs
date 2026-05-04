@@ -48,7 +48,7 @@ pub enum Request {
     SubAck(SubAck),
     Unsubscribe(Unsubscribe),
     UnsubAck(UnsubAck),
-    Disconnect,
+    Disconnect(Disconnect),
 }
 
 impl From<Subscribe> for Request {

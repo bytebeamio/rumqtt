@@ -8,7 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+* `disconnect_with_properties` and `try_disconnect_with_properties` methods on `Client` and `AsyncClient`, allowing disconnection from the broker with custom properties and reason.
+
 ### Changed
+
+* Updated `Request::Disconnect` to include a Disconnect struct.
+
+
 ### Deprecated
 ### Removed
 ### Fixed 

@@ -259,6 +259,16 @@ impl Disconnect {
         }
     }
 
+    pub fn new_with_properties(
+        reason: DisconnectReasonCode,
+        properties: DisconnectProperties,
+    ) -> Self {
+        Self {
+            reason_code: reason,
+            properties: Some(properties),
+        }
+    }
+
     fn len(&self) -> usize {
         if self.reason_code == DisconnectReasonCode::NormalDisconnection
             && self.properties.is_none()
