@@ -1,5 +1,7 @@
 //! This module offers a high level synchronous and asynchronous abstraction to
 //! async eventloop.
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::mqttbytes::{v4::*, QoS};
@@ -42,6 +44,8 @@ impl From<TrySendError<Request>> for ClientError {
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
     request_tx: Sender<Request>,
+    pkid_counter: Arc<AtomicU16>,
+    max_inflight: u16,
 }
 
 impl AsyncClient {
@@ -49,10 +53,16 @@ impl AsyncClient {
     ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
+        let max_inflight = options.inflight;
         let eventloop = EventLoop::new(options, cap);
         let request_tx = eventloop.requests_tx.clone();
+        let pkid_counter = eventloop.pkid_counter();
 
-        let client = AsyncClient { request_tx };
+        let client = AsyncClient {
+            request_tx,
+            pkid_counter,
+            max_inflight,
+        };
 
         (client, eventloop)
     }
@@ -61,8 +71,24 @@ impl AsyncClient {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_senders(request_tx: Sender<Request>) -> AsyncClient {
-        AsyncClient { request_tx }
+    pub fn from_senders(request_tx: Sender<Request>, pkid_counter: Arc<AtomicU16>, max_inflight: u16) -> AsyncClient {
+        AsyncClient {
+            request_tx,
+            pkid_counter,
+            max_inflight,
+        }
+    }
+
+    /// Assigns a packet id for QoS 1/2 publishes using the shared atomic counter.
+    fn assign_pkid(&self, publish: &mut Publish) -> u16 {
+        if publish.qos != QoS::AtMostOnce {
+            let raw = self.pkid_counter.fetch_add(1, Ordering::Relaxed);
+            let pkid = (raw % self.max_inflight) + 1;
+            publish.pkid = pkid;
+            pkid
+        } else {
+            0
+        }
     }
 
     /// Sends a MQTT Publish to the `EventLoop`.
@@ -72,7 +98,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -80,12 +106,13 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        let pkid = self.assign_pkid(&mut publish);
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Attempts to send a MQTT Publish to the `EventLoop`.
@@ -95,7 +122,7 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -103,12 +130,13 @@ impl AsyncClient {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        let pkid = self.assign_pkid(&mut publish);
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -137,15 +165,16 @@ impl AsyncClient {
         qos: QoS,
         retain: bool,
         payload: Bytes,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
     {
         let mut publish = Publish::from_bytes(topic, qos, payload);
         publish.retain = retain;
+        let pkid = self.assign_pkid(&mut publish);
         let publish = Request::Publish(publish);
         self.request_tx.send_async(publish).await?;
-        Ok(())
+        Ok(pkid)
     }
 
     /// Sends a MQTT Subscribe to the `EventLoop`
@@ -272,9 +301,9 @@ impl Client {
     ///
     /// This is mostly useful for creating a test instance where you can
     /// listen on the corresponding receiver.
-    pub fn from_sender(request_tx: Sender<Request>) -> Client {
+    pub fn from_sender(request_tx: Sender<Request>, pkid_counter: Arc<AtomicU16>, max_inflight: u16) -> Client {
         Client {
-            client: AsyncClient::from_senders(request_tx),
+            client: AsyncClient::from_senders(request_tx, pkid_counter, max_inflight),
         }
     }
 
@@ -285,7 +314,7 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
@@ -293,12 +322,13 @@ impl Client {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        let pkid = self.client.assign_pkid(&mut publish);
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;
-        Ok(())
+        Ok(pkid)
     }
 
     pub fn try_publish<S, V>(
@@ -307,13 +337,12 @@ impl Client {
         qos: QoS,
         retain: bool,
         payload: V,
-    ) -> Result<(), ClientError>
+    ) -> Result<u16, ClientError>
     where
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.client.try_publish(topic, qos, retain, payload)?;
-        Ok(())
+        self.client.try_publish(topic, qos, retain, payload)
     }
 
     /// Sends a MQTT PubAck to the `EventLoop`. Only needed in if `manual_acks` flag is set.
@@ -540,7 +569,8 @@ mod test {
     #[test]
     fn should_be_able_to_build_test_client_from_channel() {
         let (tx, rx) = flume::bounded(1);
-        let client = Client::from_sender(tx);
+        let pkid_counter = Arc::new(AtomicU16::new(0));
+        let client = Client::from_sender(tx, pkid_counter, 100);
         client
             .publish("hello/world", QoS::ExactlyOnce, false, "good bye")
             .expect("Should be able to publish");
