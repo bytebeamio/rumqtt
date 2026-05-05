@@ -149,9 +149,10 @@ impl EventLoop {
                 connect(&mut self.options),
             )
             .await??;
-            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets.
+            // Last session might contain packets which aren't acked. If it's a new session, clear the pending packets and any existing collision state.
             if !connack.session_present {
                 self.pending.clear();
+                self.state.clear_collision();
             }
             self.network = Some(network);
 
