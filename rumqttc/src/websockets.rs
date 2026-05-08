@@ -1,4 +1,14 @@
+use std::{pin::Pin, task::Context};
+
+use async_tungstenite::{
+    bytes::Sender,
+    tungstenite::{Error, Message},
+    ByteReader, ByteWriter, WebSocketReceiver, WebSocketSender, WebSocketStream,
+};
+use futures_util::Stream;
 use http::{header::ToStrError, Response};
+use pin_project_lite::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, thiserror::Error)]
 pub enum UrlError {
@@ -70,4 +80,74 @@ fn port(uri: &http::Uri) -> Option<u16> {
         Some("ws") => Some(80),
         _ => None,
     })
+}
+
+pin_project! {
+
+/// Takes a [`WebSocketStream`] and makes it into a byte IO stream
+/// compatible with the rest of rumqttc.
+pub(crate) struct WsStream<S> {
+    #[pin]
+    read_half: ByteReader<WebSocketReceiver<S>>,
+    #[pin]
+    write_half: ByteWriter<WebSocketSender<S>>,
+}
+}
+
+impl<S> WsStream<S>
+where
+    S: Unpin + futures_io::AsyncWrite + futures_io::AsyncRead,
+{
+    pub fn new(stream: WebSocketStream<S>) -> Self {
+        let (sender, receiver) = stream.split();
+
+        Self {
+            read_half: ByteReader::new(receiver),
+            write_half: ByteWriter::new(sender),
+        }
+    }
+}
+
+impl<S> AsyncRead for WsStream<S>
+where
+    WebSocketReceiver<S>: Stream<Item = Result<Message, Error>> + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let this = self.project();
+        this.read_half.poll_read(cx, buf)
+    }
+}
+
+impl<S> AsyncWrite for WsStream<S>
+where
+    WebSocketSender<S>: Sender + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        let this = self.project();
+        this.write_half.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        let this = self.project();
+        this.write_half.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        let this = self.project();
+        this.write_half.poll_shutdown(cx)
+    }
 }

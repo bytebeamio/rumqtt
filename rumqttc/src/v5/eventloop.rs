@@ -23,9 +23,8 @@ use {std::path::Path, tokio::net::UnixStream};
 
 #[cfg(feature = "websocket")]
 use {
-    crate::websockets::{split_url, validate_response_headers, UrlError},
+    crate::websockets::{split_url, validate_response_headers, UrlError, WsStream},
     async_tungstenite::tungstenite::client::IntoClientRequest,
-    ws_stream_tungstenite::WsStream,
 };
 
 #[cfg(feature = "proxy")]

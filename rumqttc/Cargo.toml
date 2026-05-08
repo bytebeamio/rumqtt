@@ -20,7 +20,7 @@ default = ["use-rustls"]
 use-rustls = ["use-rustls-no-provider", "tokio-rustls/default"]
 use-rustls-no-provider = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:rustls-native-certs"]
 use-native-tls = ["dep:tokio-native-tls", "dep:native-tls"]
-websocket = ["dep:async-tungstenite", "dep:ws_stream_tungstenite", "dep:http"]
+websocket = ["dep:async-tungstenite", "dep:http", "dep:futures-io", "dep:pin-project-lite"]
 proxy = ["dep:async-http-proxy"]
 
 [dependencies]
@@ -39,9 +39,10 @@ rustls-webpki = { version = "0.102.8", optional = true }
 rustls-pemfile = { version = "2.2.0", optional = true }
 rustls-native-certs = { version = "0.8.1", optional = true }
 # websockets
-async-tungstenite = { version = "0.29.0", default-features = false, features = ["tokio-rustls-native-certs"], optional = true }
-ws_stream_tungstenite = { version= "0.15.0", default-features = false, features = ["tokio_io"], optional = true }
+async-tungstenite = { version = "0.32.0", default-features = false, features = ["tokio-rustls-native-certs", "futures-03-sink"], optional = true }
 http = { version = "1.0.0", optional = true }
+pin-project-lite = { version = "0.2", optional = true }
+futures-io = { version = "0.3", optional = true }
 # native-tls
 tokio-native-tls = { version = "0.3.1", optional = true }
 native-tls = { version = "0.2.12", optional = true }
