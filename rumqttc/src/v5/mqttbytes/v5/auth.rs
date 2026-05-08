@@ -10,7 +10,7 @@ use super::{
 pub enum AuthReasonCode {
     Success,
     Continue,
-    ReAuthentivate,
+    ReAuthenticate,
 }
 
 impl AuthReasonCode {
@@ -19,7 +19,7 @@ impl AuthReasonCode {
         let code = match reason_code {
             0x00 => AuthReasonCode::Success,
             0x18 => AuthReasonCode::Continue,
-            0x19 => AuthReasonCode::ReAuthentivate,
+            0x19 => AuthReasonCode::ReAuthenticate,
             _ => return Err(Error::MalformedPacket),
         };
 
@@ -30,7 +30,7 @@ impl AuthReasonCode {
         let reason_code = match self {
             AuthReasonCode::Success => 0x00,
             AuthReasonCode::Continue => 0x18,
-            AuthReasonCode::ReAuthentivate => 0x19,
+            AuthReasonCode::ReAuthenticate => 0x19,
         };
 
         buffer.put_u8(reason_code);
