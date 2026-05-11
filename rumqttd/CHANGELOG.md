@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 ### Changed
+- Migrated from deprecated `rustls-pemfile` to `rustls-pki-types` PEM parsing API
 ### Deprecated
 ### Removed
 ### Fixed 

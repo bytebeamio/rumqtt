@@ -1,9 +1,8 @@
-use std::fs::File;
 use tokio::net::TcpStream;
 
 #[cfg(feature = "use-native-tls")]
 use {
-    std::io::Read, tokio_native_tls::native_tls,
+    std::fs::File, std::io::Read, tokio_native_tls::native_tls,
     tokio_native_tls::native_tls::Error as NativeTlsError,
 };
 
@@ -12,9 +11,11 @@ use crate::TlsConfig;
 use tokio_rustls::rustls::{server::WebPkiClientVerifier, RootCertStore};
 #[cfg(feature = "use-rustls")]
 use {
-    rustls_pemfile::Item,
-    std::{io::BufReader, sync::Arc},
-    tokio_rustls::rustls::{pki_types::PrivateKeyDer, Error as RustlsError, ServerConfig},
+    std::sync::Arc,
+    tokio_rustls::rustls::{
+        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+        Error as RustlsError, ServerConfig,
+    },
     tracing::error,
 };
 
@@ -57,6 +58,9 @@ pub enum Error {
     MissingTenantId,
     #[error("Tenant id missing in certificate")]
     CertificateParse,
+    #[cfg(feature = "use-rustls")]
+    #[error("PEM parsing error: {0}")]
+    Pem(#[from] tokio_rustls::rustls::pki_types::pem::Error),
 }
 
 #[cfg(feature = "verify-client-cert")]
@@ -198,14 +202,15 @@ impl TLSAcceptor {
 
         let (certs, key) = {
             // Get certificates
-            let cert_file = File::open(cert_path);
-            let cert_file = cert_file.map_err(|_| Error::ServerCertNotFound(cert_path.clone()))?;
-            let certs = rustls_pemfile::certs(&mut BufReader::new(cert_file))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| Error::InvalidServerCert(cert_path.to_string()))?;
+            let cert_pem = std::fs::read(cert_path)
+                .map_err(|_| Error::ServerCertNotFound(cert_path.clone()))?;
+            let certs: Vec<CertificateDer> =
+                CertificateDer::pem_slice_iter(&cert_pem).collect::<Result<Vec<_>, _>>()?;
 
             // Get private key
-            let key = first_private_key_in_pemfile(key_path)?;
+            let key_pem =
+                std::fs::read(key_path).map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
+            let key = PrivateKeyDer::from_pem_slice(&key_pem)?;
 
             (certs, key)
         };
@@ -215,12 +220,15 @@ impl TLSAcceptor {
         // client authentication with a CA. CA isn't required otherwise
         #[cfg(feature = "verify-client-cert")]
         let builder = {
-            let ca_file = File::open(ca_path);
-            let ca_file = ca_file.map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
-            let ca_file = &mut BufReader::new(ca_file);
-            let ca_cert = rustls_pemfile::certs(ca_file)
+            let ca_pem =
+                std::fs::read(ca_path).map_err(|_| Error::CaFileNotFound(ca_path.clone()))?;
+            let ca_certs: Vec<CertificateDer> =
+                CertificateDer::pem_slice_iter(&ca_pem).collect::<Result<Vec<_>, _>>()?;
+
+            let ca_cert = ca_certs
+                .into_iter()
                 .next()
-                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))??;
+                .ok_or_else(|| Error::InvalidCACert(ca_path.to_string()))?;
 
             let mut store = RootCertStore::empty();
             store
@@ -243,40 +251,5 @@ impl TLSAcceptor {
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
         Ok(TLSAcceptor::Rustls { acceptor })
-    }
-}
-
-#[cfg(feature = "use-rustls")]
-/// Get the first private key in a PEM file
-fn first_private_key_in_pemfile(key_path: &String) -> Result<PrivateKeyDer<'static>, Error> {
-    // Get private key
-    let key_file = File::open(key_path);
-    let key_file = key_file.map_err(|_| Error::ServerKeyNotFound(key_path.clone()))?;
-
-    let rd = &mut BufReader::new(key_file);
-
-    // keep reading Items one by one to find a Key, return error if none found.
-    loop {
-        let item = rustls_pemfile::read_one(rd).map_err(|err| {
-            error!("Error reading key file: {:?}", err);
-            Error::InvalidServerKey(key_path.clone())
-        })?;
-
-        match item {
-            Some(Item::Sec1Key(key)) => {
-                return Ok(key.into());
-            }
-            Some(Item::Pkcs1Key(key)) => {
-                return Ok(key.into());
-            }
-            Some(Item::Pkcs8Key(key)) => {
-                return Ok(key.into());
-            }
-            None => {
-                error!("No private key found in {:?}", key_path);
-                return Err(Error::InvalidServerKey(key_path.clone()));
-            }
-            _ => {}
-        }
     }
 }
