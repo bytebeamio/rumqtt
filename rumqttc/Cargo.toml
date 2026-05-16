@@ -29,7 +29,7 @@ tokio = { version = "1.36", features = ["rt", "macros", "io-util", "net", "time"
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1.5"
 log = "0.4"
-flume = { version = "0.11", default-features = false, features = ["async"] }
+flume = { version = "0.11", default-features = false, features = ["async", "eventual-fairness"] }
 thiserror = "2.0.8"
 
 # Optional
