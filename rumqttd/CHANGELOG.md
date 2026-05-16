@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ---
+## [rumqttd 0.21.0] - 13-12-2025
+
+### Added
+
+### Changed
+- The Rust toolchain version for rumqttd, along with some core dependencies, is too outdated
+- For example: axum, tokio, etc.
+- Update 'tokio' to '1.48','serde' to '1.0228','flume' to '0.12.0', 'slab' to'0.4.11','thiserror' to '2.0.17','tokio-rustls' to'0.26.1','rustls-webpki' to'0.102.8','rustls-pemfile'to'2.2.0','async-tungstenite'to '0.29.1','ws_stream_tungstenite' to '0.15.0' , 'x509-parser' to '0.18.0' ,'futures-util' to '0.3.31' ,'parking_lot' to '0.12.4' , 'tracing-subscriber' to '0.3.22' , 'metrics' to '0.23.1' ,'metrics-exporter-prometheus' to '0.15.3' , 'rand' to '0.9.2' , 'uuid' to '1.19.0' , 'subtle' to '2.6.1' , 'axum' to '0.8.7' , 'pretty-assertions' to '1.4.1' .
+
+### Deprecated
+
+### Removed
+
+### Fixed 
+
+### Security
 
 ## [rumqttd 0.20.0] - 25-10-2025
 
