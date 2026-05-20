@@ -195,6 +195,7 @@ pub struct DataRequest {
     /// Maximum count of payload buffer per replica
     max_count: usize,
     pub(crate) forward_retained: bool,
+    pub(crate) preserve_retain: bool,
     pub(crate) group: Option<String>,
 }
 
