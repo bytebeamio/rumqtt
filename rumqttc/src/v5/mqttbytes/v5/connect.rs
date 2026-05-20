@@ -371,7 +371,7 @@ impl LastWill {
         retain: bool,
         properties: Option<LastWillProperties>,
     ) -> LastWill {
-        let topic = Bytes::copy_from_slice(topic.into().as_bytes());
+        let topic = Bytes::from(topic.into());
         LastWill {
             topic,
             message: Bytes::from(payload.into()),

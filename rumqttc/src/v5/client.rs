@@ -83,11 +83,13 @@ impl AsyncClient {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let topic: String = topic.into();
+        let topic_valid = valid_topic(&topic);
+        let topic_bytes = Bytes::from(topic.into_bytes());
+        let mut publish = Publish::new(topic_bytes, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !topic_valid {
             return Err(ClientError::Request(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -137,11 +139,13 @@ impl AsyncClient {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let topic: String = topic.into();
+        let topic_valid = valid_topic(&topic);
+        let topic_bytes = Bytes::from(topic.into_bytes());
+        let mut publish = Publish::new(topic_bytes, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !topic_valid {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.try_send(publish)?;
@@ -208,11 +212,13 @@ impl AsyncClient {
     where
         S: Into<String>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let topic: String = topic.into();
+        let topic_valid = valid_topic(&topic);
+        let topic_bytes = Bytes::from(topic.into_bytes());
+        let mut publish = Publish::new(topic_bytes, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !topic_valid {
             return Err(ClientError::TryRequest(publish));
         }
         self.request_tx.send_async(publish).await?;
@@ -508,11 +514,13 @@ impl Client {
         S: Into<String>,
         P: Into<Bytes>,
     {
-        let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let topic: String = topic.into();
+        let topic_valid = valid_topic(&topic);
+        let topic_bytes = Bytes::from(topic.into_bytes());
+        let mut publish = Publish::new(topic_bytes, qos, payload, properties);
         publish.retain = retain;
         let publish = Request::Publish(publish);
-        if !valid_topic(&topic) {
+        if !topic_valid {
             return Err(ClientError::Request(publish));
         }
         self.client.request_tx.send(publish)?;

@@ -14,13 +14,13 @@ pub struct Publish {
 }
 
 impl Publish {
-    pub fn new<T: Into<String>, P: Into<Bytes>>(
+    pub fn new<T: Into<Bytes>, P: Into<Bytes>>(
         topic: T,
         qos: QoS,
         payload: P,
         properties: Option<PublishProperties>,
     ) -> Self {
-        let topic = Bytes::copy_from_slice(topic.into().as_bytes());
+        let topic = Bytes::from(topic.into());
         Self {
             qos,
             topic,
