@@ -93,10 +93,8 @@ impl Network {
     }
 
     pub(crate) async fn send_data(&mut self, data: &Bytes) -> Result<(), Error> {
-        debug!(
-            "network: sent {} bytes",
-            self.stream.write(data.as_ref()).await?
-        );
+        self.stream.write_all(data.as_ref()).await?;
+        debug!("network: sent {} bytes", data.len());
         Ok(())
     }
 }
