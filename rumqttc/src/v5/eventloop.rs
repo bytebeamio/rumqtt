@@ -64,6 +64,9 @@ pub enum ConnectionError {
     #[cfg(feature = "websocket")]
     #[error("Websocket response validation error: ")]
     ResponseValidation(#[from] crate::websockets::ValidationError),
+    #[cfg(feature = "websocket")]
+    #[error("Websocket request modifier failed: {0}")]
+    RequestModifier(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Eventloop with all the state of a connection
@@ -357,7 +360,9 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
             if let Some(request_modifier) = options.request_modifier() {
-                request = request_modifier(request).await;
+                request = request_modifier(request)
+                    .await
+                    .map_err(ConnectionError::RequestModifier)?;
             }
 
             let (socket, response) =
@@ -374,7 +379,9 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
                 .insert("Sec-WebSocket-Protocol", "mqtt".parse().unwrap());
 
             if let Some(request_modifier) = options.request_modifier() {
-                request = request_modifier(request).await;
+                request = request_modifier(request)
+                    .await
+                    .map_err(ConnectionError::RequestModifier)?;
             }
 
             let connector = tls::rustls_connector(&tls_config).await?;

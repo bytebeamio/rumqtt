@@ -1,12 +1,10 @@
 use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
-use std::time::Duration;
 #[cfg(feature = "websocket")]
-use std::{
-    future::{Future, IntoFuture},
-    pin::Pin,
-    sync::Arc,
-};
+use std::future::IntoFuture;
+#[cfg(feature = "websocket")]
+use std::sync::Arc;
+use std::time::Duration;
 
 mod client;
 mod eventloop;
@@ -14,6 +12,10 @@ mod framed;
 pub mod mqttbytes;
 mod state;
 
+#[cfg(feature = "websocket")]
+use crate::request_modifier::IntoModifierResult;
+#[cfg(feature = "websocket")]
+use crate::request_modifier::RequestModifierFn;
 use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
 
@@ -56,13 +58,6 @@ impl From<Subscribe> for Request {
         Self::Subscribe(subscribe)
     }
 }
-
-#[cfg(feature = "websocket")]
-type RequestModifierFn = Arc<
-    dyn Fn(http::Request<()>) -> Pin<Box<dyn Future<Output = http::Request<()>> + Send>>
-        + Send
-        + Sync,
->;
 
 // TODO: Should all the options be exposed as public? Drawback
 // would be loosing the ability to panic when the user options
@@ -197,16 +192,24 @@ impl MqttOptions {
         self.last_will.clone()
     }
 
+    /// Sets a handler for modifying the websocket HTTP request before it is sent.
+    ///
+    /// See the similar [`crate::MqttOptions::set_request_modifier`] for more details.
     #[cfg(feature = "websocket")]
     pub fn set_request_modifier<F, O>(&mut self, request_modifier: F) -> &mut Self
     where
         F: Fn(http::Request<()>) -> O + Send + Sync + 'static,
-        O: IntoFuture<Output = http::Request<()>> + 'static,
+        O: IntoFuture + 'static,
         O::IntoFuture: Send,
+        O::Output: IntoModifierResult,
     {
         self.request_modifier = Some(Arc::new(move |request| {
-            let request_modifier = request_modifier(request).into_future();
-            Box::pin(request_modifier)
+            let fut = request_modifier(request).into_future();
+            Box::pin(async move {
+                fut.await
+                    .into_modifier_result()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            })
         }));
 
         self
