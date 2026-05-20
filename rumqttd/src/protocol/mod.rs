@@ -576,7 +576,7 @@ pub struct DisconnectProperties {
 
 /// Quality of service
 #[repr(u8)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(clippy::enum_variant_names)]
 pub enum QoS {
     #[default]
