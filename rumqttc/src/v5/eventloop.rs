@@ -155,7 +155,7 @@ impl EventLoop {
             }
             self.network = Some(network);
 
-            if self.keepalive_timeout.is_none() {
+            if self.keepalive_timeout.is_none() && !self.options.keep_alive.is_zero() {
                 self.keepalive_timeout = Some(Box::pin(time::sleep(self.options.keep_alive)));
             }
 
@@ -187,6 +187,7 @@ impl EventLoop {
             return Ok(event);
         }
 
+        let mut no_sleep = Box::pin(time::sleep(Duration::ZERO));
         // this loop is necessary since self.incoming.pop_front() might return None. In that case,
         // instead of returning a None event, we try again.
         select! {
@@ -241,15 +242,16 @@ impl EventLoop {
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
-            _ = self.keepalive_timeout.as_mut().unwrap() => {
-                let timeout = self.keepalive_timeout.as_mut().unwrap();
-                timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
+            _ = self.keepalive_timeout.as_mut().unwrap_or(&mut no_sleep),
+                if self.keepalive_timeout.is_some() && !self.options.keep_alive.is_zero() => {
+                    let timeout = self.keepalive_timeout.as_mut().unwrap();
+                    timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
-                    network.write(outgoing).await?;
-                }
-                network.flush().await?;
-                Ok(self.state.events.pop_front().unwrap())
+                    if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
+                        network.write(outgoing).await?;
+                    }
+                    network.flush().await?;
+                    Ok(self.state.events.pop_front().unwrap())
             }
         }
     }

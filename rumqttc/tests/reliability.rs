@@ -94,22 +94,15 @@ async fn connection_should_timeout_on_time() {
 //
 
 #[test]
-#[should_panic]
-fn test_invalid_keep_alive_value() {
-    let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-    options.set_keep_alive(Duration::from_millis(10));
-}
-
-#[test]
 fn test_zero_keep_alive_values() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-    options.set_keep_alive(Duration::ZERO);
+    options.set_keep_alive(0);
 }
 
 #[test]
 fn test_valid_keep_alive_values() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-    options.set_keep_alive(Duration::from_secs(1));
+    options.set_keep_alive(1);
 }
 
 #[tokio::test]
@@ -117,7 +110,7 @@ async fn idle_connection_triggers_pings_on_time() {
     let keep_alive = 1;
 
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1885);
-    options.set_keep_alive(Duration::from_secs(keep_alive));
+    options.set_keep_alive(keep_alive);
 
     // Create client eventloop and poll
     task::spawn(async move {
@@ -135,7 +128,7 @@ async fn idle_connection_triggers_pings_on_time() {
             Packet::PingReq => {
                 count += 1;
                 let elapsed = start.elapsed();
-                assert_eq!(elapsed.as_secs(), { keep_alive });
+                assert_eq!(elapsed.as_secs(), { u64::from(keep_alive) });
                 broker.pingresp().await;
                 start = Instant::now();
             }
@@ -153,7 +146,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
     let keep_alive = 5;
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 1886);
 
-    options.set_keep_alive(Duration::from_secs(keep_alive));
+    options.set_keep_alive(keep_alive);
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
@@ -183,7 +176,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
                 break;
             }
 
-            assert_eq!(start.elapsed().as_secs(), { keep_alive });
+            assert_eq!(start.elapsed().as_secs(), { u64::from(keep_alive) });
             broker.pingresp().await;
             start = Instant::now();
         }
@@ -197,7 +190,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     let keep_alive = 5;
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 2000);
 
-    options.set_keep_alive(Duration::from_secs(keep_alive));
+    options.set_keep_alive(keep_alive);
 
     task::spawn(async move {
         let mut eventloop = EventLoop::new(options, 5);
@@ -222,7 +215,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
                 break;
             }
 
-            assert_eq!(start.elapsed().as_secs(), { keep_alive });
+            assert_eq!(start.elapsed().as_secs(), { u64::from(keep_alive) });
             broker.pingresp().await;
             start = Instant::now();
         }
@@ -234,7 +227,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
 #[tokio::test]
 async fn detects_halfopen_connections_in_the_second_ping_request() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 2001);
-    options.set_keep_alive(Duration::from_secs(5));
+    options.set_keep_alive(5);
 
     // A broker which consumes packets but doesn't reply
     task::spawn(async move {
@@ -474,9 +467,7 @@ async fn next_poll_after_connect_failure_reconnects() {
 #[tokio::test]
 async fn reconnection_resumes_from_the_previous_state() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3001);
-    options
-        .set_keep_alive(Duration::from_secs(5))
-        .set_clean_session(false);
+    options.set_keep_alive(5).set_clean_session(false);
 
     // start sending qos0 publishes. Makes sure that there is out activity but no in activity
     let (client, mut eventloop) = AsyncClient::new(options, 5);
@@ -516,9 +507,7 @@ async fn reconnection_resumes_from_the_previous_state() {
 #[tokio::test]
 async fn reconnection_resends_unacked_packets_from_the_previous_connection_first() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3002);
-    options
-        .set_keep_alive(Duration::from_secs(5))
-        .set_clean_session(false);
+    options.set_keep_alive(5).set_clean_session(false);
 
     // start sending qos0 publishes. this makes sure that there is
     // outgoing activity but no incoming activity
@@ -551,7 +540,7 @@ async fn reconnection_resends_unacked_packets_from_the_previous_connection_first
 #[tokio::test]
 async fn state_is_being_cleaned_properly_and_pending_request_calculated_properly() {
     let mut options = MqttOptions::new("dummy", "127.0.0.1", 3004);
-    options.set_keep_alive(Duration::from_secs(5));
+    options.set_keep_alive(5);
     let mut network_options = NetworkOptions::new();
     network_options.set_tcp_send_buffer_size(1024);
 

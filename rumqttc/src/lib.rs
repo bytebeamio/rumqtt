@@ -14,7 +14,7 @@
 //! use std::thread;
 //!
 //! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
+//! mqttoptions.set_keep_alive(5);
 //!
 //! let (mut client, mut connection) = Client::new(mqttoptions, 10);
 //! client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
@@ -41,7 +41,7 @@
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
 //! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
+//! mqttoptions.set_keep_alive(5);
 //!
 //! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 //! client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
@@ -615,14 +615,14 @@ impl MqttOptions {
 
     /// Set number of seconds after which client should ping the broker
     /// if there is no other data exchange
-    pub fn set_keep_alive(&mut self, duration: Duration) -> &mut Self {
+    pub fn set_keep_alive(&mut self, seconds: u16) -> &mut Self {
         assert!(
-            duration.is_zero() || duration >= Duration::from_secs(1),
+            seconds == 0 || seconds >= 1,
             "Keep alives should be specified in seconds. Durations less than \
             a second are not allowed, except for Duration::ZERO."
         );
 
-        self.keep_alive = duration;
+        self.keep_alive = Duration::from_secs(u64::from(seconds));
         self
     }
 
