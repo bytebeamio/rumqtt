@@ -232,7 +232,7 @@ impl Router {
     }
 
     fn events(&mut self, id: ConnectionId, data: Event) {
-        let span = tracing::error_span!("[>] incoming", connection_id = id);
+        let span = tracing::info_span!("[>] incoming", connection_id = id);
         let _guard = span.enter();
 
         match data {
@@ -542,7 +542,7 @@ impl Router {
         };
 
         let client_id = incoming.client_id.clone();
-        let span = tracing::error_span!("incoming_payload", client_id);
+        let span = tracing::info_span!("incoming_payload", client_id);
         let _guard = span.enter();
 
         // Instead of exchanging, we should just append new incoming packets inside cache
@@ -558,7 +558,8 @@ impl Router {
         for packet in packets.drain(0..) {
             match packet {
                 Packet::Publish(publish, properties) => {
-                    let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
+                    let span =
+                        tracing::info_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
