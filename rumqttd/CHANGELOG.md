@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 ### Changed
+- Export the `Event` type, so the Router's Sender can be used.
+- Export the `bridge` module so a bridge can be constructed directly, rather than using the `Broker`.
 ### Deprecated
 ### Removed
 ### Fixed 

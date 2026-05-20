@@ -19,9 +19,12 @@ use tracing_subscriber::{
 };
 
 pub use link::alerts;
+pub use link::bridge;
 pub use link::local;
 pub use link::meters;
-pub use router::{Alert, Forward, IncomingMeter, Meter, Notification, OutgoingMeter, Router};
+pub use router::{
+    Alert, Event, Forward, IncomingMeter, Meter, Notification, OutgoingMeter, Router,
+};
 use segments::Storage;
 pub use server::{Broker, LinkType, Server};
 
