@@ -70,6 +70,8 @@ pub struct Router {
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
     connection_map: HashMap<String, ConnectionId>,
+    /// Filters to be applied to an [`Publish`] packets payload
+    publish_filters: Vec<PublishFilterRef>,
     /// Subscription map to interested connection ids
     subscription_map: HashMap<Filter, HashSet<ConnectionId>>,
     /// Incoming data grouped by connection
@@ -105,7 +107,7 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(router_id: RouterId, config: RouterConfig) -> Router {
+    pub fn new(router_id: RouterId, publish_filters: Vec<PublishFilterRef>, config: RouterConfig) -> Router {
         let (router_tx, router_rx) = bounded(1000);
 
         let meters = Slab::with_capacity(10);
@@ -129,6 +131,7 @@ impl Router {
             alerts,
             connections,
             connection_map: Default::default(),
+            publish_filters,
             subscription_map: Default::default(),
             ibufs,
             obufs,
@@ -557,13 +560,18 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(publish, properties) => {
+                Packet::Publish(mut publish, mut properties) => {
+                    println!("publish: {publish:?} payload: {:?}", publish.payload.to_vec());
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
                     let pkid = publish.pkid;
-
+                    
+                    // Decide weather to keep or discard this packet
+                    // Packet will be discard if *at least one* filter returns *false*
+                    let keep = self.publish_filters.iter().fold(true,|keep,f| keep && f.filter(&mut publish, properties.as_mut())) ;
+                    
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
                     // set global force flush flag. Force flush is triggered when the
@@ -577,12 +585,11 @@ impl Router {
                     // coordinate using multiple offsets, and we don't have any idea how to do so right now.
                     // Currently as we don't have replication, we just use a single offset, even when appending to
                     // multiple commit logs.
-
                     match qos {
                         QoS::AtLeastOnce => {
                             let puback = PubAck {
                                 pkid,
-                                reason: PubAckReason::Success,
+                                reason: if keep { PubAckReason::Success } else { PubAckReason::PayloadFormatInvalid },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
@@ -592,7 +599,7 @@ impl Router {
                         QoS::ExactlyOnce => {
                             let pubrec = PubRec {
                                 pkid,
-                                reason: PubRecReason::Success,
+                                reason: if keep { PubRecReason::Success } else { PubRecReason::PayloadFormatInvalid },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
@@ -604,7 +611,9 @@ impl Router {
                             // Do nothing
                         }
                     };
-
+                    if !keep {
+                        break;
+                    }
                     self.router_meters.total_publishes += 1;
 
                     // Try to append publish to commitlog
