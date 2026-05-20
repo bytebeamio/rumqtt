@@ -1,5 +1,5 @@
 use config::FileFormat;
-use rumqttd::Broker;
+use rumqttd::{Cluster, ClusterConnectionConfig};
 
 use clap::Parser;
 use tracing::trace;
@@ -10,7 +10,7 @@ static RUMQTTD_DEFAULT_CONFIG: &str = include_str!("../rumqttd.toml");
 #[command(version)]
 #[command(name = "rumqttd")]
 #[command(about = "A high performance, lightweight and embeddable MQTT broker written in Rust.")]
-#[command(author = "tekjar <raviteja@bytebeam.io>")]
+#[command(author = "sivanov <stanislav.ivanov9213@gmail.com>")]
 struct CommandLine {
     /// path to config file
     #[arg(short, long)]
@@ -86,8 +86,23 @@ fn main() {
 
     // println!("{:#?}", configs);
 
-    let mut broker = Broker::new(configs);
-    broker.start().unwrap();
+    let (_cluster_handles, _cluster) =
+        if let Some(cluster_config) = configs.cluster.clone() {
+            let connection_config: ClusterConnectionConfig = cluster_config
+                .try_into()
+                .expect("Invalid cluster configuration");
+            let (handles, cluster) = Cluster::connect(connection_config);
+            (Some(handles), Some(cluster))
+        } else {
+            (None, None)
+        };
+
+    loop {
+
+    }
+    //
+    // let mut broker = Broker::new(configs);
+    // broker.start().unwrap();
 }
 
 // Do any extra validation that needs to be done before starting the broker here.

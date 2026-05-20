@@ -1,0 +1,13 @@
+target/
+.git/
+docs/
+benchmarks/
+rumqttc/
+utils/
+*.md
+!rumqttd/README.md
+LICENSE
+Cross.toml
+CLAUDE.md
+.github/
+.gitignore

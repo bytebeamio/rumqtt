@@ -75,25 +75,8 @@ impl Broker {
         let router_config = config.router.clone();
         let router: Router = Router::new(config.id, router_config);
 
-        // Setup cluster if cluster settings are configured.
-        match config.cluster.clone() {
-            Some(_cluster_config) => {
-                // let node_id = cluster_config.node_id;
-                // let listen = cluster_config.listen;
-                // let seniors = cluster_config.seniors;
-                // let mut cluster = RemoteCluster::new(node_id, &listen, seniors);
-                // Broker::setup_remote_cluster(&mut router, node_id, &mut cluster);
-
-                // Start router first and then cluster in the background
-                let router_tx = router.spawn();
-                // cluster.spawn();
-                Broker { config, router_tx }
-            }
-            None => {
-                let router_tx = router.spawn();
-                Broker { config, router_tx }
-            }
-        }
+        let router_tx = router.spawn();
+        Broker { config, router_tx }
     }
 
     // pub fn new_local_cluster(
@@ -307,7 +290,7 @@ impl Broker {
         }
 
         if let Some(console) = self.config.console.clone() {
-            let console_link = ConsoleLink::new(console, self.router_tx.clone());
+            let console_link = ConsoleLink::new(console, self.router_tx.clone(), None);
 
             let console_link = Arc::new(console_link);
             let console_thread = thread::Builder::new().name("Console".to_string());

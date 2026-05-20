@@ -1,3 +1,4 @@
+use crate::cluster::cluster::Cluster;
 use crate::link::local::LinkRx;
 use crate::local::LinkBuilder;
 use crate::router::{Event, Print};
@@ -8,21 +9,35 @@ use axum::routing::post;
 use axum::Json;
 use axum::{routing::get, Router};
 use flume::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tracing::info;
 
-#[derive(Debug)]
 pub struct ConsoleLink {
     config: ConsoleSettings,
     connection_id: ConnectionId,
     router_tx: Sender<(ConnectionId, Event)>,
     _link_rx: LinkRx,
+    cluster: Option<Arc<Mutex<Cluster>>>,
+}
+
+impl std::fmt::Debug for ConsoleLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsoleLink")
+            .field("config", &self.config)
+            .field("connection_id", &self.connection_id)
+            .field("cluster", &self.cluster.is_some())
+            .finish()
+    }
 }
 
 impl ConsoleLink {
     /// Requires the corresponding Router to be running to complete
-    pub fn new(config: ConsoleSettings, router_tx: Sender<(ConnectionId, Event)>) -> ConsoleLink {
+    pub fn new(
+        config: ConsoleSettings,
+        router_tx: Sender<(ConnectionId, Event)>,
+        cluster: Option<Arc<Mutex<Cluster>>>,
+    ) -> ConsoleLink {
         let tx = router_tx.clone();
         let (link_tx, link_rx, _ack) = LinkBuilder::new("console", tx)
             .dynamic_filters(true)
@@ -34,6 +49,7 @@ impl ConsoleLink {
             router_tx,
             _link_rx: link_rx,
             connection_id,
+            cluster,
         }
     }
 }
@@ -48,6 +64,7 @@ pub async fn start(console: Arc<ConsoleLink>) {
         .route("/", get(root))
         .route("/config", get(config))
         .route("/router", get(router))
+        .route("/cluster", get(cluster_info))
         .route("/device/:device_id", get(device_with_id))
         .route("/subscriptions", get(subscriptions))
         .route("/subscriptions/:filter", get(subscriptions_with_filter))
@@ -61,6 +78,20 @@ pub async fn start(console: Arc<ConsoleLink>) {
 
 async fn root(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
     Json(console.config.clone())
+}
+
+async fn cluster_info(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {
+    match &console.cluster {
+        Some(cluster) => {
+            let info = cluster.lock().unwrap().info();
+            Json(info).into_response()
+        }
+        None => Response::builder()
+            .status(404)
+            .body("Cluster not configured".to_owned())
+            .unwrap()
+            .into_response(),
+    }
 }
 
 async fn config(State(console): State<Arc<ConsoleLink>>) -> impl IntoResponse {

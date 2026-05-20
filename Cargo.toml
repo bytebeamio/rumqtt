@@ -1,17 +1,17 @@
 [workspace]
 members = [
-  "rumqttc",
+#  "rumqttc",
   "rumqttd",
-  "benchmarks",
-  "benchmarks/simplerouter",
+#  "benchmarks",
+#  "benchmarks/simplerouter",
 ]
 resolver = "2"
 
 [workspace.package]
 edition = "2021"
-repository = "https://github.com/bytebeamio/rumqtt"
+repository = "https://github.com/talek-solutions/taleqtt"
 license = "Apache-2.0"
-authors = ["tekjar <raviteja@bytebeam.io>"]
+authors = ["sivanov <stanislav.ivanov9213@gmail.com>"]
 
 [profile.dev]
 # producing debug info in builds takes up a lot of space on runner, and we

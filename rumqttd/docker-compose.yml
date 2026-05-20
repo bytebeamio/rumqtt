@@ -1,0 +1,61 @@
+services:
+  node1:
+    build:
+      context: ..
+      dockerfile: rumqttd/Dockerfile
+      args:
+        PORT: 1884
+    container_name: node1
+    restart: always
+    volumes:
+      - ./rumqttd.toml:/etc/rumqttd/rumqttd.toml:ro
+    ports:
+      - "1884:1884"
+    networks:
+      - cluster
+    develop:
+      watch:
+        - action: rebuild
+          path: ./src/
+
+  node2:
+    build:
+      context: ..
+      dockerfile: rumqttd/Dockerfile
+      args:
+        PORT: 1885
+    container_name: node2
+    restart: always
+    volumes:
+      - ./rumqttd-node2.toml:/etc/rumqttd/rumqttd.toml:ro
+    ports:
+      - "1885:1885"
+    networks:
+      - cluster
+    develop:
+      watch:
+        - action: rebuild
+          path: ./src/
+
+  node3:
+    build:
+      context: ..
+      dockerfile: rumqttd/Dockerfile
+      args:
+        PORT: 1886
+    container_name: node3
+    restart: always
+    volumes:
+      - ./rumqttd-node3.toml:/etc/rumqttd/rumqttd.toml:ro
+    ports:
+      - "1886:1886"
+    networks:
+      - cluster
+    develop:
+      watch:
+        - action: rebuild
+          path: ./src/
+
+networks:
+  cluster:
+    driver: bridge

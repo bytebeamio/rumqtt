@@ -1,0 +1,118 @@
+id = 0
+
+# A commitlog read will pull full segment. Make sure that a segment isn't
+# too big as async tcp writes readiness of one connection might affect tail
+# latencies of other connection. Not a problem with preempting runtimes
+[router]
+id = 0
+max_connections = 10010
+max_outgoing_packet_count = 200
+max_segment_size = 104857600
+max_segment_count = 10
+# shared_subscriptions_strategy = "random" # "sticky" | "roundrobin" ( default ) | "random"
+# Any filters that match to configured filter will have custom segment size.
+# [router.custom_segment.'/office/+/devices/status']
+# max_segment_size = 102400
+# max_segment_count = 2
+# [router.custom_segment.'/home/+/devices/status']
+# max_segment_size = 51200
+# max_segment_count = 2
+
+# [bridge]
+# name = "bridge-1"
+# addr = "localhost:1883"
+# qos = 0
+# sub_path = "#"
+# reconnection_delay = 5
+# ping_delay = 5
+# timeout_delay = 5
+#     [bridge.connections]
+#     connection_timeout_ms = 60000
+#     max_payload_size = 20480
+#     max_inflight_count = 500
+#     dynamic_filters = true
+#     [bridge.transport.tls]
+#     ca = "ca.cert.pem"
+#     client_auth = { certs = "test-1.cert.pem", key = "test-1.key.pem" }
+
+# Configuration of server and connections that it accepts
+[v4.1]
+name = "v4-1"
+listen = "0.0.0.0:1883"
+next_connection_delay_ms = 1
+[v4.1.connections]
+connection_timeout_ms = 60000
+max_payload_size = 20480
+max_inflight_count = 100
+dynamic_filters = true
+#   auth = { user1 = "p@ssw0rd", user2 = "password" }
+#      [v4.1.connections.auth]
+#      user1 = "p@ssw0rd"
+#      user2 = "password"
+
+# [v4.2]
+# name = "v4-2"
+# listen = "0.0.0.0:8883"
+# next_connection_delay_ms = 10
+#     # tls config for rustls
+#     [v4.2.tls]
+#     capath = "/etc/tls/ca.cert.pem"
+#     certpath = "/etc/tls/server.cert.pem"
+#     keypath = "/etc/tls/server.key.pem"
+#     # settings for all the connections on this server
+#     [v4.2.connections]
+#     connection_timeout_ms = 60000
+#     throttle_delay_ms = 0
+#     max_payload_size = 20480
+#     max_inflight_count = 100
+#     max_inflight_size = 1024
+
+[v5.1]
+name = "v5-1"
+listen = "0.0.0.0:1884"
+next_connection_delay_ms = 1
+[v5.1.connections]
+connection_timeout_ms = 60000
+max_payload_size = 20480
+max_inflight_count = 100
+
+[prometheus]
+listen = "127.0.0.1:9042"
+interval = 1
+
+[ws.1]
+name = "ws-1"
+listen = "0.0.0.0:8083"
+next_connection_delay_ms = 1
+[ws.1.connections]
+connection_timeout_ms = 60000
+max_client_id_len = 256
+throttle_delay_ms = 0
+max_payload_size = 20480
+max_inflight_count = 500
+max_inflight_size = 1024
+
+# [ws.2]
+# name = "ws-2"
+# listen = "0.0.0.0:8081"
+# next_connection_delay_ms = 1
+#     [ws.2.tls]
+#     capath = "/etc/tls/ca.cert.pem"
+#     certpath = "/etc/tls/server.cert.pem"
+#     keypath = "/etc/tls/server.key.pem"
+#     [ws.2.connections]
+#     connection_timeout_ms = 60000
+#     max_client_id_len = 256
+#     throttle_delay_ms = 0
+#     max_payload_size = 20480
+#     max_inflight_count = 500
+#     max_inflight_size = 1024
+
+[console]
+listen = "0.0.0.0:3030"
+
+# [metrics]
+#     [metrics.alerts]
+#     push_interval = 1
+#     [metrics.meters]
+#     push_interval = 1
