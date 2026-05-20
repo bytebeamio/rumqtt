@@ -85,14 +85,22 @@
 //! - Blocking inside the `connection.iter()`/`eventloop.poll()` loop will block
 //!   connection progress.
 //!
-//! ## FAQ
-//! **Connecting to a broker using raw ip doesn't work**
+//! ## Feature Flags
 //!
-//! You cannot create a TLS connection to a bare IP address with a self-signed
-//! certificate. This is a [limitation of rustls](https://github.com/ctz/rustls/issues/184).
-//! One workaround, which only works under *nix/BSD-like systems, is to add an
-//! entry to wherever your DNS resolver looks (e.g. `/etc/hosts`) for the bare IP
-//! address and use that name in your code.
+//! This crate offers a few feature flags to configure additional functionality.
+//!
+//! * `proxy`: Enables support for connecting via a HTTP Connect proxy using the
+//!   [`async-http-proxy`] crate.
+//! * `websocket`: Enables support for MQTT via WebSocket.
+//!
+//! To enable TLS support, one of these two options may be used:
+//!
+//! * `use-native-tls`: Enables TLS support using the [`native_tls`] library.
+//! * `use-rustls`: Enables TLS support using the [`rustls`] TLS library.
+//!
+//! [`async-http-proxy`]: https://docs.rs/async-http-proxy/
+//! [`native_tls`]: https://docs.rs/native-tls/
+//! [`rustls`]: https://docs.rs/rustls/
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]
