@@ -193,6 +193,12 @@ impl MqttState {
         pending
     }
 
+    /// Drops any in-memory collision bookkeeping. Call when `session_present` is false after CONNACK.
+    pub fn clear_collision(&mut self) {
+        self.collision = None;
+        self.collision_ping_count = 0;
+    }
+
     pub fn inflight(&self) -> u16 {
         self.inflight
     }

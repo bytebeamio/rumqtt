@@ -151,6 +151,13 @@ impl MqttState {
         pending
     }
 
+    /// Drops any in-memory collision bookkeeping (MQTT 3.1.1). Call when starting a broker session where
+    /// `session_present` is false; otherwise a stale collision can persist after reconnect.
+    pub fn clear_collision(&mut self) {
+        self.collision = None;
+        self.collision_ping_count = 0;
+    }
+
     pub fn inflight(&self) -> u16 {
         self.inflight
     }
