@@ -82,6 +82,10 @@ pub struct EventLoop {
     network: Option<Network>,
     /// Keep alive time
     keepalive_timeout: Option<Pin<Box<Sleep>>>,
+    /// True once the first connect succeeded. Used to distinguish the
+    /// initial CONNACK from a reconnect CONNACK so we can emit
+    /// `Event::Reconnect` only on the latter.
+    has_connected_before: bool,
 }
 
 /// Events which can be yielded by the event loop
@@ -89,6 +93,14 @@ pub struct EventLoop {
 pub enum Event {
     Incoming(Incoming),
     Outgoing(Outgoing),
+    /// Synthetic event emitted by the event loop right after a
+    /// successful reconnect (NOT after the first connect). The caller
+    /// should re-subscribe to all its topics here: rumqttc does not
+    /// remember subscriptions across reconnects, and with
+    /// `clean_session = true` the broker drops them too, so on the new
+    /// session the client is silent until it re-subscribes.
+    /// See https://github.com/bytebeamio/rumqtt/issues/250
+    Reconnect,
 }
 
 impl EventLoop {
@@ -110,6 +122,7 @@ impl EventLoop {
             pending,
             network: None,
             keepalive_timeout: None,
+            has_connected_before: false,
         }
     }
 
@@ -161,6 +174,17 @@ impl EventLoop {
 
             self.state
                 .handle_incoming_packet(Incoming::ConnAck(connack))?;
+
+            // Distinguish the first connect (caller's initial SUBSCRIBEs
+            // already queued or about to be sent) from a reconnect (we
+            // just established a fresh MQTT session whose state — subs,
+            // pending publishes — the broker doesn't know). The caller
+            // should re-emit its subscriptions on Event::Reconnect.
+            if self.has_connected_before {
+                self.state.events.push_back(Event::Reconnect);
+            } else {
+                self.has_connected_before = true;
+            }
         }
 
         match self.select().await {
