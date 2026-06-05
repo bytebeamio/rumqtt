@@ -269,8 +269,20 @@ impl MqttState {
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Packet>, StateError> {
         if !self.incoming_pub.contains(pubrel.pkid as usize) {
-            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-            return Err(StateError::Unsolicited(pubrel.pkid));
+            // After TCP reconnect with clean_session=false, incoming_pub is cleared by clean()
+            // but the broker (per MQTT 3.1.1 spec §4.3.3) replays PUBREL for incomplete QoS 2
+            // transactions. The payload was already delivered via state.events on PUBLISH receipt.
+            // Respond with PUBCOMP to let the broker complete the transaction instead of
+            // returning an error that would trigger another disconnect → reconnect loop.
+            warn!(
+                "rumqttc: unsolicited PUBREL pkid={} after reconnect, \
+                 sending PUBCOMP to recover broker session (clean_session=false)",
+                pubrel.pkid
+            );
+            let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+            let pubcomp = PubComp { pkid: pubrel.pkid };
+            self.events.push_back(event);
+            return Ok(Some(Packet::PubComp(pubcomp)));
         }
 
         self.incoming_pub.set(pubrel.pkid as usize, false);
@@ -753,6 +765,27 @@ mod test {
         match packet {
             Packet::PubComp(pubcomp) => assert_eq!(pubcomp.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
+        }
+    }
+
+    #[test]
+    fn unsolicited_pubrel_should_send_pubcomp_without_disconnecting() {
+        // Regression test: when a broker retransmits PUBREL because PUBCOMP was delayed
+        // in transit (e.g. broker congestion), the client must NOT disconnect.
+        // Instead it should respond with PUBCOMP so the broker can complete the transaction.
+        // Disconnecting would cause an infinite reconnect loop when message_retry_interval
+        // is short (e.g. 1s) and network latency exceeds it.
+        let mut mqtt = build_mqttstate();
+
+        // Simulate a PUBREL arriving for a pkid the client has no record of
+        // (e.g. because state was cleared on reconnect, or PUBCOMP was already sent).
+        let result = mqtt.handle_incoming_pubrel(&PubRel::new(42));
+
+        // Must NOT return an error (which would trigger disconnect).
+        let packet = result.unwrap().unwrap();
+        match packet {
+            Packet::PubComp(pubcomp) => assert_eq!(pubcomp.pkid, 42),
+            packet => panic!("Expected PUBCOMP, got: {:?}", packet),
         }
     }
 

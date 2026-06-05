@@ -11,7 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Deprecated
 ### Removed
-### Fixed 
+### Fixed
+* Respond with PUBCOMP instead of disconnecting on unsolicited PUBREL (#1053).
+  When a broker retransmits PUBREL (e.g. PUBCOMP was delayed beyond
+  `message_retry_interval`), rumqttc previously returned
+  `StateError::Unsolicited`, causing a disconnect/reconnect loop. Now it
+  sends PUBCOMP and continues the session, matching MQTT v5 spec §3.6.2.
+  The same conservative fix is applied to the v3.1.1 state machine.
 ### Security
 
 
