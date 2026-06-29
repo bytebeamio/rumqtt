@@ -293,9 +293,7 @@ async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionErr
 
     // Override default value if max_packet_size is set on `connect_properties`
     if let Some(connect_props) = &options.connect_properties {
-        if let Some(max_size) = connect_props.max_packet_size {
-            max_incoming_pkt_size = Some(max_size);
-        }
+        max_incoming_pkt_size = connect_props.max_packet_size;
     }
 
     // Process Unix files early, as proxy is not supported for them.
