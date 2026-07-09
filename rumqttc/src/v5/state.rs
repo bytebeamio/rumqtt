@@ -151,6 +151,15 @@ impl MqttState {
             }
         }
 
+        // A publish stashed on a pkid collision must survive the reconnect:
+        // its colliding counterpart may never be re-acked (e.g. the session
+        // was lost and pending was dropped), which would otherwise leave the
+        // publish lost and the request branch disabled forever.
+        if let Some(publish) = self.collision.take() {
+            let request = Request::Publish(publish);
+            pending.push(request);
+        }
+
         // remove and collect pending releases
         for pkid in self.outgoing_rel.ones() {
             let request = Request::PubRel(PubRel::new(pkid as u16, None));
@@ -1012,5 +1021,24 @@ mod test {
 
         // should ping
         mqtt.outgoing_ping().unwrap();
+    }
+
+    #[test]
+    fn clean_recovers_collision_stashed_publish() {
+        let mut mqtt = build_mqttstate();
+
+        let mut publish = build_outgoing_publish(QoS::AtLeastOnce);
+        publish.pkid = 1;
+        mqtt.collision = Some(publish);
+        mqtt.collision_ping_count = 1;
+
+        let requests = mqtt.clean();
+
+        assert!(mqtt.collision.is_none());
+        assert_eq!(mqtt.collision_ping_count, 0);
+        match requests.as_slice() {
+            [Request::Publish(publish)] => assert_eq!(publish.pkid, 1),
+            requests => unreachable!("unexpected pending: {requests:?}"),
+        }
     }
 }

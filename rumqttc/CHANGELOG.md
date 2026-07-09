@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Deprecated
 ### Removed
-### Fixed 
+### Fixed
+* `MqttState::clean()` now recovers the publish stashed in `collision`, preventing a silent message loss and a permanent `CollisionTimeout` reconnect livelock when the session is lost while a collision is pending (#1056)
 ### Security
 
 
