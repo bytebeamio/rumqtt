@@ -100,12 +100,12 @@ extern crate log;
 
 use std::fmt::{self, Debug, Formatter};
 
-#[cfg(any(feature = "use-rustls-no-provider", feature = "websocket"))]
 use std::sync::Arc;
 
 use std::time::Duration;
 
 mod client;
+mod connector;
 mod eventloop;
 mod framed;
 pub mod mqttbytes;
@@ -134,10 +134,13 @@ type RequestModifierFn = Arc<
 #[cfg(feature = "proxy")]
 mod proxy;
 
+pub use async_trait::async_trait;
 pub use client::{
     AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
 };
+pub use connector::Connector;
 pub use eventloop::{ConnectionError, Event, EventLoop};
+pub use framed::AsyncReadWrite;
 pub use mqttbytes::v4::*;
 pub use mqttbytes::*;
 #[cfg(feature = "use-rustls-no-provider")]
@@ -403,6 +406,9 @@ pub struct NetworkOptions {
     /// Optional local address to bind the outgoing TCP socket to.
     /// Use `SocketAddr::new(ip, 0)` to let the OS pick the ephemeral port.
     bind_addr: Option<std::net::SocketAddr>,
+    /// Optional pluggable connector used to create the base byte stream instead
+    /// of the default `tokio::net` TCP socket.
+    connector: Option<Arc<dyn Connector>>,
 }
 
 impl Default for NetworkOptions {
@@ -421,6 +427,7 @@ impl NetworkOptions {
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
             bind_addr: None,
+            connector: None,
         }
     }
 
@@ -428,12 +435,27 @@ impl NetworkOptions {
         self.tcp_nodelay = nodelay;
     }
 
+    /// Get whether `TCP_NODELAY` is enabled.
+    pub fn tcp_nodelay(&self) -> bool {
+        self.tcp_nodelay
+    }
+
     pub fn set_tcp_send_buffer_size(&mut self, size: u32) {
         self.tcp_send_buffer_size = Some(size);
     }
 
+    /// Get the configured TCP send buffer size, if any.
+    pub fn tcp_send_buffer_size(&self) -> Option<u32> {
+        self.tcp_send_buffer_size
+    }
+
     pub fn set_tcp_recv_buffer_size(&mut self, size: u32) {
         self.tcp_recv_buffer_size = Some(size);
+    }
+
+    /// Get the configured TCP receive buffer size, if any.
+    pub fn tcp_recv_buffer_size(&self) -> Option<u32> {
+        self.tcp_recv_buffer_size
     }
 
     /// set connection timeout in secs
@@ -458,6 +480,16 @@ impl NetworkOptions {
         self
     }
 
+    /// Get the network device the connection is bound to, if any.
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))
+    )]
+    pub fn bind_device(&self) -> Option<&str> {
+        self.bind_device.as_deref()
+    }
+
     /// Bind the outgoing TCP socket to a specific local address before connecting.
     /// Use `SocketAddr::new(ip, 0)` to let the OS pick the ephemeral port.
     /// This is useful for distributing connections across multiple local IPs
@@ -470,6 +502,27 @@ impl NetworkOptions {
     /// Get the configured bind address, if any.
     pub fn bind_addr(&self) -> Option<std::net::SocketAddr> {
         self.bind_addr
+    }
+
+    /// Install a custom [`Connector`] used to create the base byte stream to the
+    /// broker instead of the default `tokio::net` TCP socket.
+    ///
+    /// When set, the connector fully owns socket creation and the `proxy` setting
+    /// is bypassed. These `NetworkOptions` are handed to the connector, which may
+    /// honor the TCP-tuning options above (nodelay, buffer sizes, `bind_addr`,
+    /// `bind_device`) where they apply to its transport. TLS and WebSocket
+    /// transports still layer on top of the stream the connector returns.
+    ///
+    /// Not used for `Transport::Unix`, which always connects through a local
+    /// Unix domain socket.
+    pub fn set_connector(&mut self, connector: Arc<dyn Connector>) -> &mut Self {
+        self.connector = Some(connector);
+        self
+    }
+
+    /// Get the configured connector, if any.
+    pub fn connector(&self) -> Option<Arc<dyn Connector>> {
+        self.connector.clone()
     }
 }
 

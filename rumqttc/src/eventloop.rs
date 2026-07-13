@@ -399,21 +399,23 @@ async fn network_connect(
         _ => options.broker_address(),
     };
 
-    let tcp_stream: Box<dyn AsyncReadWrite> = {
+    let addr = format!("{domain}:{port}");
+
+    // A custom connector, if installed, fully owns socket creation and takes
+    // precedence over the proxy setting and the default tokio socket.
+    let tcp_stream: Box<dyn AsyncReadWrite> = if let Some(connector) = network_options.connector() {
+        connector.connect(&addr, &network_options).await?
+    } else {
         #[cfg(feature = "proxy")]
-        match options.proxy() {
-            Some(proxy) => proxy.connect(&domain, port, network_options).await?,
-            None => {
-                let addr = format!("{domain}:{port}");
-                let tcp = socket_connect(addr, network_options).await?;
-                Box::new(tcp)
+        {
+            match options.proxy() {
+                Some(proxy) => proxy.connect(&domain, port, network_options).await?,
+                None => Box::new(socket_connect(addr, network_options).await?),
             }
         }
         #[cfg(not(feature = "proxy"))]
         {
-            let addr = format!("{domain}:{port}");
-            let tcp = socket_connect(addr, network_options).await?;
-            Box::new(tcp)
+            Box::new(socket_connect(addr, network_options).await?)
         }
     };
 

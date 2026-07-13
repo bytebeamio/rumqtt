@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Add pluggable `Connector` trait to supply the base byte stream, enabling running the client over custom transports such as [`turmoil`](https://github.com/tokio-rs/turmoil) for simulation testing.
+
 ### Changed
 ### Deprecated
 ### Removed
