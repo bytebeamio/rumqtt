@@ -31,6 +31,7 @@ bytes = "1.5"
 log = "0.4"
 flume = { version = "0.11", default-features = false, features = ["async"] }
 thiserror = "2.0.8"
+async-trait = "0.1"
 
 # Optional
 # rustls
@@ -59,6 +60,7 @@ matches = "0.1"
 pretty_assertions = "1"
 pretty_env_logger = "0.5"
 serde = { version = "1", features = ["derive"] }
+turmoil = "0.6"
 
 [[example]]
 name = "tls"
