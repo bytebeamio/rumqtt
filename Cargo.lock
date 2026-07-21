@@ -2232,6 +2232,7 @@ dependencies = [
  "rustls-pemfile",
  "rustls-webpki 0.102.8",
  "serde",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tokio-native-tls",

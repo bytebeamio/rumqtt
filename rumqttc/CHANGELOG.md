@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `NetworkOptions::set_mptcp` to opt the outgoing connection onto Multipath TCP
+  (`IPPROTO_MPTCP`, RFC 8684) on Linux, with a silent fallback to plain TCP when
+  the kernel lacks MPTCP support.
+
 ### Changed
 ### Deprecated
 ### Removed
