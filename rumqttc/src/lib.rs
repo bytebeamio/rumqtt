@@ -403,6 +403,9 @@ pub struct NetworkOptions {
     /// Optional local address to bind the outgoing TCP socket to.
     /// Use `SocketAddr::new(ip, 0)` to let the OS pick the ephemeral port.
     bind_addr: Option<std::net::SocketAddr>,
+    /// Use Multipath TCP (`IPPROTO_MPTCP`) for the outgoing connection.
+    #[cfg(target_os = "linux")]
+    mptcp: bool,
 }
 
 impl Default for NetworkOptions {
@@ -421,6 +424,8 @@ impl NetworkOptions {
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: None,
             bind_addr: None,
+            #[cfg(target_os = "linux")]
+            mptcp: false,
         }
     }
 
@@ -470,6 +475,20 @@ impl NetworkOptions {
     /// Get the configured bind address, if any.
     pub fn bind_addr(&self) -> Option<std::net::SocketAddr> {
         self.bind_addr
+    }
+
+    /// Use Multipath TCP (RFC 8684) for the outgoing connection.
+    ///
+    /// The socket is created with `IPPROTO_MPTCP` instead of `IPPROTO_TCP`.
+    /// MPTCP negotiates transparently down to regular TCP against a peer that
+    /// does not support it, and if the running kernel lacks MPTCP support the
+    /// client silently falls back to a plain TCP socket — so enabling this is
+    /// always safe. Linux only.
+    #[cfg(target_os = "linux")]
+    #[cfg_attr(docsrs, doc(cfg(target_os = "linux")))]
+    pub fn set_mptcp(&mut self, mptcp: bool) -> &mut Self {
+        self.mptcp = mptcp;
+        self
     }
 }
 

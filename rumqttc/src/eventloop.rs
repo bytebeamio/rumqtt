@@ -326,10 +326,7 @@ pub(crate) async fn socket_connect(
     let mut last_err = None;
 
     for addr in addrs {
-        let socket = match addr {
-            SocketAddr::V4(_) => TcpSocket::new_v4()?,
-            SocketAddr::V6(_) => TcpSocket::new_v6()?,
-        };
+        let socket = new_tcp_socket(addr, &network_options)?;
 
         socket.set_nodelay(network_options.tcp_nodelay)?;
 
@@ -371,6 +368,47 @@ pub(crate) async fn socket_connect(
             "could not resolve to any address",
         )
     }))
+}
+
+/// Create the outgoing TCP socket for `addr`.
+///
+/// On Linux, when `NetworkOptions::set_mptcp(true)` is set, this creates a
+/// Multipath TCP (`IPPROTO_MPTCP`) socket. MPTCP negotiates down to plain TCP
+/// with a non-MPTCP peer, and if the kernel lacks MPTCP support the creation
+/// fails and we fall back to a plain socket — so it can never make a
+/// connection fail.
+fn new_tcp_socket(addr: SocketAddr, network_options: &NetworkOptions) -> io::Result<TcpSocket> {
+    #[cfg(target_os = "linux")]
+    if network_options.mptcp {
+        if let Ok(socket) = new_mptcp_socket(addr) {
+            return Ok(socket);
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = network_options;
+
+    match addr {
+        SocketAddr::V4(_) => TcpSocket::new_v4(),
+        SocketAddr::V6(_) => TcpSocket::new_v6(),
+    }
+}
+
+/// Create an `IPPROTO_MPTCP` socket and hand its fd to tokio's `TcpSocket`.
+#[cfg(target_os = "linux")]
+fn new_mptcp_socket(addr: SocketAddr) -> io::Result<TcpSocket> {
+    use std::os::fd::{FromRawFd, IntoRawFd};
+
+    use socket2::{Domain, Protocol, Socket, Type};
+
+    let domain = match addr {
+        SocketAddr::V4(_) => Domain::IPV4,
+        SocketAddr::V6(_) => Domain::IPV6,
+    };
+    let socket = Socket::new(domain, Type::STREAM, Some(Protocol::MPTCP))?;
+    socket.set_nonblocking(true)?;
+    // SAFETY: `into_raw_fd` transfers sole ownership of a valid, open,
+    // non-blocking socket fd, which `TcpSocket` takes ownership of.
+    Ok(unsafe { TcpSocket::from_raw_fd(socket.into_raw_fd()) })
 }
 
 async fn network_connect(
@@ -508,5 +546,30 @@ async fn mqtt_connect(
         Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => Ok(connack),
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(packet)),
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn mptcp_connect_or_fallback_reaches_a_plain_tcp_listener() {
+        // A plain-TCP listener: an MPTCP client negotiates down to TCP against
+        // a non-MPTCP peer, and on a kernel without MPTCP support socket_connect
+        // falls back to a plain socket — either way the connection must succeed.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let mut network_options = NetworkOptions::new();
+        network_options.set_mptcp(true);
+
+        let accept = tokio::spawn(async move { listener.accept().await.map(|_| ()) });
+        let stream = socket_connect(addr.to_string(), network_options).await;
+        assert!(
+            stream.is_ok(),
+            "mptcp connect (or plain-TCP fallback) must succeed: {stream:?}"
+        );
+        accept.await.unwrap().unwrap();
     }
 }
