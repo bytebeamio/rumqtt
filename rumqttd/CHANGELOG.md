@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Deprecated
 ### Removed
-### Fixed 
+### Fixed
+- Stop poisoning the `will_handlers` mutex when a stale will send fails on the ws listener
 ### Security
 
 

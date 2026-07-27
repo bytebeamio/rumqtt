@@ -535,13 +535,17 @@ async fn remote<P: Protocol>(
         client_id = format!("{tenant_id}.{client_id}");
     }
 
-    if let Some(sender) = will_handlers.lock().unwrap().remove(&client_id) {
+    let previous_will_handler = will_handlers.lock().unwrap().remove(&client_id);
+    if let Some(sender) = previous_will_handler {
         let awaiting_will = if clean_session {
             AwaitingWill::Fire
         } else {
             AwaitingWill::Cancel
         };
-        sender.try_send(awaiting_will).unwrap();
+        // The previous connection's will task may have already exited on its own,
+        // in which case this send has nowhere to go. That's fine, just drop it
+        // instead of unwrapping and poisoning `will_handlers`.
+        let _ = sender.try_send(awaiting_will);
     }
 
     let (will_tx, will_rx) = flume::bounded::<AwaitingWill>(1);
