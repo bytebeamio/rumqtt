@@ -70,6 +70,9 @@ impl Packet {
             return match packet_type {
                 PacketType::PingReq => Ok(Packet::PingReq(PingReq)),
                 PacketType::PingResp => Ok(Packet::PingResp(PingResp)),
+                PacketType::Disconnect => Ok(Packet::Disconnect(Disconnect::new(
+                    DisconnectReasonCode::NormalDisconnection,
+                ))),
                 _ => Err(Error::PayloadRequired),
             };
         }
@@ -527,4 +530,23 @@ mod test {
     pub const USER_PROP_KEY: &str = "property";
     #[allow(dead_code)]
     pub const USER_PROP_VAL: &str = "a value thats really long............................................................................................................";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+
+    #[test]
+    fn zero_length_disconnect_round_trips_through_packet() {
+        let packet = Packet::Disconnect(Disconnect::new(DisconnectReasonCode::NormalDisconnection));
+
+        let mut buf = BytesMut::new();
+        packet.write(&mut buf, Some(4096 * 4096)).unwrap();
+        assert_eq!(&buf[..], &[0xE0, 0x00]);
+
+        let parsed = Packet::read(&mut buf, Some(4096 * 4096))
+            .expect("zero-length DISCONNECT must round-trip through Packet::read");
+        assert_eq!(parsed, packet);
+    }
 }
