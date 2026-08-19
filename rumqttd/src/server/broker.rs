@@ -505,6 +505,8 @@ async fn remote<P: Protocol>(
     );
 
     let dynamic_filters = config.dynamic_filters;
+    let auth_configured = config.auth.is_some() || config.external_auth.is_some();
+    let acl_handler = config.external_acl.clone();
 
     let connect_packet = match mqtt_connect(config, &mut network).await {
         Ok(p) => p,
@@ -550,7 +552,6 @@ async fn remote<P: Protocol>(
         .unwrap()
         .insert(client_id.clone(), will_tx);
 
-    // Start the link
     let mut link = match RemoteLink::new(
         router_tx.clone(),
         tenant_id.clone(),
@@ -558,6 +559,8 @@ async fn remote<P: Protocol>(
         connect_packet,
         dynamic_filters,
         assigned_client_id,
+        auth_configured,
+        acl_handler,
     )
     .await
     {

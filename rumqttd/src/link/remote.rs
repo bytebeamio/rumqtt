@@ -4,7 +4,7 @@ use crate::link::network::Network;
 use crate::local::LinkBuilder;
 use crate::protocol::{ConnAck, Connect, ConnectReturnCode, Login, Packet, Protocol};
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings};
+use crate::{ClientIdentity, ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
 use std::cmp::min;
@@ -68,14 +68,23 @@ impl<P: Protocol> RemoteLink<P> {
         connect_packet: Packet,
         dynamic_filters: bool,
         assigned_client_id: Option<String>,
+        auth_configured: bool,
+        acl_handler: Option<crate::AclHandler>,
     ) -> Result<RemoteLink<P>, Error> {
-        let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
+        let Packet::Connect(connect, props, lastwill, lastwill_props, login) = connect_packet
+        else {
             return Err(Error::NotConnectPacket(connect_packet));
         };
 
         // Register this connection with the router. Router replys with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex max connection limit)
         let client_id = assigned_client_id.as_ref().unwrap_or(&connect.client_id);
+        let identity = if auth_configured {
+            let username = login.ok_or(Error::InvalidAuth)?.username;
+            ClientIdentity::authenticated(client_id.to_owned(), username, tenant_id.clone())
+        } else {
+            ClientIdentity::unauthenticated(client_id.to_owned(), tenant_id.clone())
+        };
         let clean_session = connect.clean_session;
 
         let topic_alias_max = props.as_ref().and_then(|p| p.topic_alias_max);
@@ -92,9 +101,10 @@ impl<P: Protocol> RemoteLink<P> {
         // The Server delays publishing the Client’s Will Message until
         // the Will Delay Interval has passed or the Session ends, whichever happens first
         let will_delay_interval = min(session_expiry, delay_interval);
-
         let (link_tx, link_rx, notification) = LinkBuilder::new(client_id, router_tx)
             .tenant_id(tenant_id)
+            .identity(identity)
+            .acl_handler(acl_handler)
             .clean_session(clean_session)
             .last_will(lastwill)
             .last_will_properties(lastwill_props)
@@ -282,6 +292,7 @@ mod tests {
             max_inflight_count: 0,
             auth: None,
             external_auth: None,
+            external_acl: None,
             dynamic_filters: false,
         }
     }

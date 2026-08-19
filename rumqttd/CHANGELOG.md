@@ -8,11 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ClientIdentity`, `AclAction`, and `ConnectionSettings::set_acl_handler` for broker topic authorization.
 ### Changed
+- Broker ACL decisions now follow authenticated identities through remote connections.
 ### Deprecated
 ### Removed
 ### Fixed 
 ### Security
+- Enforce ACL checks for client publishes, subscriptions, unsubscriptions, and will messages before storage or delivery.
+- Local broker links remain explicitly trusted for internal bridge, console, and application integration traffic.
 
 
 ---
