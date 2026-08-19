@@ -17,6 +17,29 @@ cargo run --release -- -c rumqttd.toml
 
 Example config file is provided on the root of the repo.
 
+## Topic authorization
+
+Embedded applications can install a synchronous ACL handler on each server
+configuration. The handler receives the authenticated client identity, action,
+and topic or filter:
+
+```rust
+use rumqttd::{AclAction, ClientIdentity, ServerSettings};
+
+server_settings.set_acl_handler(|identity: &ClientIdentity, action, topic| {
+    identity.username.as_deref() == Some("publisher")
+        && matches!(action, AclAction::Publish)
+        && topic.starts_with("devices/")
+});
+```
+
+The `username` field is populated only after configured authentication
+succeeds. With authentication disabled, base ACL decisions on `client_id` or
+`tenant_id` instead.
+
+ACLs apply to client publishes, subscriptions, unsubscriptions, and will
+messages. Broker-internal local links remain trusted and bypass remote ACLs.
+
 
 #### Building the docker image
 

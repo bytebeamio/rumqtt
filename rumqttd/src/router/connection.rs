@@ -1,7 +1,10 @@
 use slab::Slab;
 
 use crate::protocol::LastWillProperties;
-use crate::Filter;
+use crate::{
+    acl::{AclAction, AclHandler, ClientIdentity},
+    Filter,
+};
 use crate::{protocol::LastWill, Topic};
 use std::collections::{HashMap, HashSet};
 
@@ -9,10 +12,13 @@ use super::ConnectionEvents;
 
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
-/// communicate with this connection
 #[derive(Debug)]
 pub struct Connection {
     pub client_id: String,
+    /// Authenticated identity used for ACL decisions.
+    pub identity: ClientIdentity,
+    /// Optional topic authorization policy for this connection.
+    pub(crate) acl_handler: Option<AclHandler>,
     /// Id of client's organisation/tenant and the prefix associated with tenant's MQTT topic
     pub tenant_prefix: Option<String>,
     /// Dynamically create subscription filters incase they didn't exist during a publish
@@ -42,6 +48,7 @@ impl Connection {
         client_id: String,
         clean: bool,
         dynamic_filters: bool,
+        identity: ClientIdentity,
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
@@ -56,6 +63,8 @@ impl Connection {
 
         Connection {
             client_id,
+            identity,
+            acl_handler: None,
             tenant_prefix,
             dynamic_filters,
             clean,
@@ -85,6 +94,18 @@ impl Connection {
         self.last_will = will;
         self.last_will_properties = props;
         self
+    }
+
+    pub fn acl_handler(&mut self, handler: Option<AclHandler>) -> &mut Self {
+        self.acl_handler = handler;
+        self
+    }
+
+    pub fn allows(&self, action: AclAction, topic: &str) -> bool {
+        match &self.acl_handler {
+            Some(handler) => handler.allows(&self.identity, action, topic),
+            None => true,
+        }
     }
 }
 
@@ -138,5 +159,33 @@ impl BrokerAliases {
         self.broker_topic_aliases
             .insert(topic.to_owned(), alias_to_use);
         Some(alias_to_use)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Connection;
+    use crate::{AclAction, AclHandler, ClientIdentity};
+
+    #[test]
+    fn connection_keeps_acl_identity() {
+        let identity =
+            ClientIdentity::authenticated("client-1", "user-1", Some("tenant-1".to_owned()));
+        let connection =
+            Connection::new(None, "client-1".to_owned(), true, false, identity.clone());
+
+        assert_eq!(connection.identity, identity);
+    }
+
+    #[test]
+    fn connection_applies_publish_acl() {
+        let identity = ClientIdentity::unauthenticated("client-1", None);
+        let mut connection = Connection::new(None, "client-1".to_owned(), true, false, identity);
+        connection.acl_handler(Some(AclHandler::new(|_, action, topic| {
+            action == AclAction::Publish && topic == "allowed/topic"
+        })));
+
+        assert!(connection.allows(AclAction::Publish, "allowed/topic"));
+        assert!(!connection.allows(AclAction::Publish, "denied/topic"));
     }
 }
