@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 ### Fixed 
 ### Security
+* Updated `rustls-webpki` to 0.103, which carries the fixes for RUSTSEC-2026-0049, RUSTSEC-2026-0098, RUSTSEC-2026-0099 and RUSTSEC-2026-0104. 0.102.8 is the last release of that line, so a downstream `cargo deny` had no version to move to.
 
 
 ---
