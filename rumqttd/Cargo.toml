@@ -1,6 +1,6 @@
 [package]
 name = "rumqttd"
-version = "0.20.0"
+version = "0.21.0"
 publish = true
 description = "rumqttd is a high performance MQTT broker written in Rust which is light weight and embeddable"
 keywords = ["mqtt", "broker", "iot", "kafka", "nats"]
@@ -45,7 +45,7 @@ default = ["use-rustls", "websocket"]
 use-rustls = ["dep:tokio-rustls", "dep:rustls-webpki", "dep:rustls-pemfile", "dep:x509-parser"]
 use-native-tls = ["dep:tokio-native-tls", "dep:x509-parser"]
 websocket = ["dep:async-tungstenite", "dep:tokio-util", "dep:futures-util", "dep:ws_stream_tungstenite"]
-verify-client-cert = []
+verify-client-cert = ["use-rustls"]
 validate-tenant-prefix = ["verify-client-cert"]
 allow-duplicate-clientid = []
 

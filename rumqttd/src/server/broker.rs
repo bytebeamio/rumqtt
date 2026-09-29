@@ -9,7 +9,7 @@ use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, ConnectionSettings, Meter, TlsConfig};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -380,6 +380,10 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
     }
 
     pub async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
+        validate_cert_auth_listener(
+            self.config.tls.as_ref(),
+            self.config.connections.external_cert_auth.is_some(),
+        )?;
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -466,6 +470,52 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
     }
 }
 
+fn validate_cert_auth_listener(tls: Option<&TlsConfig>, cert_auth: bool) -> Result<(), Error> {
+    let mtls = cfg!(all(feature = "use-rustls", feature = "verify-client-cert"))
+        && matches!(tls, Some(TlsConfig::Rustls { .. }));
+    let has_ca = matches!(
+        tls,
+        Some(TlsConfig::Rustls {
+            capath: Some(_),
+            ..
+        })
+    );
+    if mtls != cert_auth || (mtls && !has_ca) {
+        return Err(Error::Config(
+            "client certificate authentication requires a rustls listener with verify-client-cert, a CA and a certificate auth handler; verified TLS listeners require the handler".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod cert_auth_tests {
+    use super::{validate_cert_auth_listener, TlsConfig};
+
+    #[test]
+    fn certificate_auth_requires_verified_rustls_and_ca_but_plain_service_does_not() {
+        let tls = TlsConfig::Rustls {
+            capath: Some("ca.pem".into()),
+            certpath: "server.pem".into(),
+            keypath: "server.key".into(),
+        };
+        let missing_ca = TlsConfig::Rustls {
+            capath: None,
+            certpath: "server.pem".into(),
+            keypath: "server.key".into(),
+        };
+        assert!(validate_cert_auth_listener(None, false).is_ok());
+        assert!(validate_cert_auth_listener(None, true).is_err());
+        if cfg!(feature = "verify-client-cert") {
+            assert!(validate_cert_auth_listener(Some(&tls), false).is_err());
+            assert!(validate_cert_auth_listener(Some(&tls), true).is_ok());
+            assert!(validate_cert_auth_listener(Some(&missing_ca), true).is_err());
+        } else {
+            assert!(validate_cert_auth_listener(Some(&tls), true).is_err());
+        }
+    }
+}
+
 /// Configures the Websocket connection to indicate the correct protocol
 /// by adding the "sec-websocket-protocol" with value of "mqtt" to the response header
 #[cfg(feature = "websocket")]
@@ -505,14 +555,16 @@ async fn remote<P: Protocol>(
     );
 
     let dynamic_filters = config.dynamic_filters;
+    let acl_handler = config.external_acl.clone();
 
-    let connect_packet = match mqtt_connect(config, &mut network).await {
-        Ok(p) => p,
-        Err(e) => {
-            error!(error=?e, "Error while handling MQTT connect packet");
-            return;
-        }
-    };
+    let (connect_packet, authenticated_username) =
+        match mqtt_connect(config, &mut network, tenant_id.as_deref()).await {
+            Ok(p) => p,
+            Err(e) => {
+                error!(error=?e, "Error while handling MQTT connect packet");
+                return;
+            }
+        };
 
     let (mut client_id, clean_session) = match &connect_packet {
         Packet::Connect(ref connect, _, _, _, _) => {
@@ -550,7 +602,6 @@ async fn remote<P: Protocol>(
         .unwrap()
         .insert(client_id.clone(), will_tx);
 
-    // Start the link
     let mut link = match RemoteLink::new(
         router_tx.clone(),
         tenant_id.clone(),
@@ -558,6 +609,8 @@ async fn remote<P: Protocol>(
         connect_packet,
         dynamic_filters,
         assigned_client_id,
+        authenticated_username,
+        acl_handler,
     )
     .await
     {

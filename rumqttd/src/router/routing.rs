@@ -100,8 +100,16 @@ pub struct Router {
     cache: Option<VecDeque<Packet>>,
     /// Shared subscriptions map <group-name, group>
     shared_subscriptions: HashMap<String, SharedGroup>,
-    /// Will messages per client_id
-    last_wills: HashMap<String, (LastWill, Option<LastWillProperties>)>,
+    /// Will message and authorization context per client.
+    last_wills: HashMap<
+        String,
+        (
+            LastWill,
+            Option<LastWillProperties>,
+            Option<AclHandler>,
+            ClientIdentity,
+        ),
+    >,
 }
 
 impl Router {
@@ -350,7 +358,12 @@ impl Router {
         if let Some(will) = connection.last_will.take() {
             self.last_wills.insert(
                 client_id.clone(),
-                (will, connection.last_will_properties.take()),
+                (
+                    will,
+                    connection.last_will_properties.take(),
+                    connection.acl_handler.clone(),
+                    connection.identity.clone(),
+                ),
             );
         }
 
@@ -557,27 +570,28 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(publish, properties) => {
+                Packet::Publish(mut publish, mut properties) => {
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
+                    if let Err(e) =
+                        authorize_publish(id, &mut publish, &mut properties, &mut self.connections)
+                    {
+                        error!(reason = ?e, "Publish is not authorized");
+                        disconnect = true;
+                        if let RouterError::Disconnect(code) = e {
+                            disconnect_reason = Some(code);
+                        }
+                        break;
+                    }
+
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
-                    // set global force flush flag. Force flush is triggered when the
-                    // router is in instant ack more or connection data is from a replica
-                    //
-                    // TODO: handle multiple offsets
-                    //
-                    // The problem with multiple offsets is that when using replication with the current
-                    // architecture, a single publish might get appended to multiple commit logs, resulting in
-                    // multiple offsets (see `append_to_commitlog` function), meaning replicas will need to
-                    // coordinate using multiple offsets, and we don't have any idea how to do so right now.
-                    // Currently as we don't have replication, we just use a single offset, even when appending to
-                    // multiple commit logs.
-
+                    // set global force flush flag. Force flush is triggered when
+                    // the router is in instant ack mode or connection data is from a replica
                     match qos {
                         QoS::AtLeastOnce => {
                             let puback = PubAck {
@@ -615,6 +629,7 @@ impl Router {
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
+                        false,
                     ) {
                         Ok(_offset) => {
                             // Even if one of the data in the batch is appended to commitlog,
@@ -649,8 +664,17 @@ impl Router {
                     let mut return_codes = Vec::new();
                     let pkid = subscribe.pkid;
                     // let len = s.len();
+                    let subscription_id = props.as_ref().and_then(|p| p.id);
+                    if subscription_id == Some(0) {
+                        error!("Subscription identifier can't be 0");
+                        disconnect = true;
+                        disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
+                    }
 
                     for f in &mut subscribe.filters {
+                        if disconnect {
+                            break;
+                        }
                         let span =
                             tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
@@ -660,9 +684,14 @@ impl Router {
 
                         if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
-
                             disconnect = true;
                             break;
+                        }
+
+                        if !self.connections[id].allows(AclAction::Subscribe, &f.path) {
+                            warn!("Subscription is not authorized: {}", f.path);
+                            return_codes.push(SubscribeReasonCode::Failure);
+                            continue;
                         }
 
                         let mut filter = f.path.clone();
@@ -672,15 +701,6 @@ impl Router {
                             group = Some(grp);
                             filter = filter_path;
                         };
-
-                        let subscription_id = props.as_ref().and_then(|p| p.id);
-
-                        if subscription_id == Some(0) {
-                            error!("Subscription identifier can't be 0");
-                            disconnect = true;
-                            disconnect_reason = Some(DisconnectReasonCode::ProtocolError);
-                            break;
-                        }
 
                         let (idx, cursor) = self.datalog.next_native_offset(&filter);
 
@@ -708,57 +728,63 @@ impl Router {
                     force_ack = true;
                 }
                 Packet::Unsubscribe(unsubscribe, _) => {
-                    let connection = self.connections.get_mut(id).unwrap();
                     let pkid = unsubscribe.pkid;
+                    let mut reasons = Vec::with_capacity(unsubscribe.filters.len());
+
                     for filter in &unsubscribe.filters {
                         let span = tracing::info_span!("unsubscribe", topic = filter, pkid);
                         let _guard = span.enter();
 
-                        debug!("Removing subscription on filter {}", filter);
-                        if let Some(connection_ids) = self.subscription_map.get_mut(filter) {
-                            let removed = connection_ids.remove(&id);
-                            if !removed {
-                                continue;
-                            }
-
-                            let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
-                            meter.unregister_subscription(filter);
-
-                            if !connection.subscriptions.remove(filter) {
-                                warn!(
-                                    pkid = unsubscribe.pkid,
-                                    "Unsubscribe failed as filter was not subscribed previously"
-                                );
-                                continue;
-                            }
-
-                            // Remove connections from all groups
-                            // discard empty group ( group with no client )
-                            // note: can we do this in better way?
-                            self.shared_subscriptions.retain(|_, group| {
-                                group.remove_client(&client_id);
-                                !group.is_empty()
-                            });
-
-                            if let Some(broker_aliases) = connection.broker_topic_aliases.as_mut() {
-                                broker_aliases.remove_alias(filter);
-                            }
-
-                            // remove the subscription id
-                            connection.subscription_ids.remove(filter);
-
-                            let unsuback = UnsubAck {
-                                pkid,
-                                // reasons are used in MQTTv5
-                                reasons: vec![UnsubAckReason::Success],
-                            };
-                            let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.unsuback(unsuback);
-                            self.scheduler.untrack(id, filter);
-                            self.datalog.remove_waiters_for_id(id, filter);
-                            force_ack = true;
+                        if !self.connections[id].allows(AclAction::Unsubscribe, filter) {
+                            warn!("Unsubscribe is not authorized: {}", filter);
+                            reasons.push(UnsubAckReason::NotAuthorized);
+                            continue;
                         }
+
+                        debug!("Removing subscription on filter {}", filter);
+                        let Some(connection_ids) = self.subscription_map.get_mut(filter) else {
+                            reasons.push(UnsubAckReason::NoSubscriptionExisted);
+                            continue;
+                        };
+
+                        if !connection_ids.remove(&id) {
+                            reasons.push(UnsubAckReason::NoSubscriptionExisted);
+                            continue;
+                        }
+
+                        let meter = &mut self.ibufs.get_mut(id).unwrap().meter;
+                        meter.unregister_subscription(filter);
+
+                        if !self.connections[id].subscriptions.remove(filter) {
+                            warn!(
+                                pkid = unsubscribe.pkid,
+                                "Unsubscribe failed as filter was not subscribed previously"
+                            );
+                            reasons.push(UnsubAckReason::NoSubscriptionExisted);
+                            continue;
+                        }
+
+                        self.shared_subscriptions.retain(|_, group| {
+                            group.remove_client(&client_id);
+                            !group.is_empty()
+                        });
+
+                        if let Some(broker_aliases) =
+                            self.connections[id].broker_topic_aliases.as_mut()
+                        {
+                            broker_aliases.remove_alias(filter);
+                        }
+
+                        self.connections[id].subscription_ids.remove(filter);
+                        self.scheduler.untrack(id, filter);
+                        self.datalog.remove_waiters_for_id(id, filter);
+                        reasons.push(UnsubAckReason::Success);
                     }
+
+                    let unsuback = UnsubAck { pkid, reasons };
+                    let ackslog = self.ackslog.get_mut(id).unwrap();
+                    ackslog.unsuback(unsuback);
+                    force_ack = true;
                 }
                 Packet::PubAck(puback, _) => {
                     let span = tracing::info_span!("puback", pkid = puback.pkid);
@@ -826,6 +852,7 @@ impl Router {
                         &mut self.datalog,
                         &mut self.notifications,
                         &mut self.connections,
+                        true,
                     ) {
                         Ok(_offset) => {
                             // Even if one of the data in the batch is appended to commitlog,
@@ -1100,9 +1127,20 @@ impl Router {
         #[cfg(feature = "validate-tenant-prefix")]
         let tenant_prefix = tenant_id.map(|id| format!("/tenants/{id}/"));
 
-        let Some((will, will_props)) = self.last_wills.remove(&client_id) else {
+        let Some((will, will_props, acl_handler, identity)) = self.last_wills.remove(&client_id)
+        else {
             return;
         };
+
+        if let Some(handler) = acl_handler {
+            let Ok(topic) = std::str::from_utf8(&will.topic) else {
+                return;
+            };
+            if !handler.allows(&identity, AclAction::Will, topic) {
+                warn!("Will publication is not authorized: {}", topic);
+                return;
+            }
+        }
 
         let publish = Publish {
             dup: false,
@@ -1183,6 +1221,24 @@ impl Router {
         }
     }
 }
+fn authorize_publish(
+    id: ConnectionId,
+    publish: &mut Publish,
+    properties: &mut Option<PublishProperties>,
+    connections: &mut Slab<Connection>,
+) -> Result<(), RouterError> {
+    let connection = connections.get_mut(id).unwrap();
+    if let Some(alias) = properties.as_ref().and_then(|p| p.topic_alias) {
+        validate_and_set_topic_alias(publish, connection, alias)?;
+    }
+
+    let topic = std::str::from_utf8(&publish.topic)?;
+    if !connection.allows(AclAction::Publish, topic) {
+        return Err(RouterError::Disconnect(DisconnectReasonCode::NotAuthorized));
+    }
+
+    Ok(())
+}
 
 fn append_to_commitlog(
     id: ConnectionId,
@@ -1191,6 +1247,7 @@ fn append_to_commitlog(
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
     connections: &mut Slab<Connection>,
+    recheck_acl: bool,
 ) -> Result<Offset, RouterError> {
     let connection = connections.get_mut(id).unwrap();
 
@@ -1215,6 +1272,9 @@ fn append_to_commitlog(
     };
 
     let topic = std::str::from_utf8(&publish.topic)?;
+    if recheck_acl && !connection.allows(AclAction::Publish, topic) {
+        return Err(RouterError::Disconnect(DisconnectReasonCode::NotAuthorized));
+    }
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
@@ -1755,6 +1815,195 @@ fn extract_group(filter: &str) -> Option<(String, String)> {
         s.split_once('/')
             .map(|(group, path)| (group.to_string(), path.to_string()))
     })
+}
+
+#[cfg(test)]
+mod acl_tests {
+    use super::*;
+    use crate::protocol::{Filter as TopicFilter, RetainForwardRule, Subscribe, Unsubscribe};
+    use crate::router::Ack;
+    use bytes::Bytes;
+    use std::collections::HashSet;
+
+    fn router() -> Router {
+        Router::new(
+            0,
+            RouterConfig {
+                max_connections: 1,
+                max_segment_size: 1024,
+                max_segment_count: 1,
+                initialized_filters: Some(vec!["will/topic".to_owned()]),
+                ..RouterConfig::default()
+            },
+        )
+    }
+
+    fn add_will(router: &mut Router, handler: AclHandler) {
+        router.last_wills.insert(
+            "client-1".to_owned(),
+            (
+                LastWill {
+                    topic: Bytes::from_static(b"will/topic"),
+                    message: Bytes::from_static(b"payload"),
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                },
+                None,
+                Some(handler),
+                ClientIdentity::authenticated("client-1", "user-1", None),
+            ),
+        );
+    }
+
+    fn connected_router(handler: AclHandler) -> (Router, ConnectionId) {
+        let mut router = router();
+        let identity = ClientIdentity::authenticated("client-1", "user-1", None);
+        let mut connection = Connection::new(None, "client-1".to_owned(), true, false, identity);
+        connection.acl_handler(Some(handler));
+        let id = router.connections.insert(connection);
+        let incoming = Incoming::new("client-1".to_owned());
+        let (outgoing, _rx) = Outgoing::new("client-1".to_owned());
+
+        assert_eq!(router.ibufs.insert(incoming), id);
+        assert_eq!(router.obufs.insert(outgoing), id);
+        assert_eq!(router.ackslog.insert(AckLog::new()), id);
+        assert_eq!(
+            router.scheduler.add(Tracker::new("client-1".to_owned())),
+            id
+        );
+        (router, id)
+    }
+
+    #[cfg(not(feature = "validate-tenant-prefix"))]
+    fn publish_will(router: &mut Router) {
+        router.handle_last_will("client-1".to_owned());
+    }
+
+    #[cfg(feature = "validate-tenant-prefix")]
+    fn publish_will(router: &mut Router) {
+        router.handle_last_will("client-1".to_owned(), None);
+    }
+
+    #[test]
+    fn denied_will_does_not_reach_commit_log() {
+        let mut router = router();
+        add_will(
+            &mut router,
+            AclHandler::new(|_, action, _| action != AclAction::Will),
+        );
+
+        publish_will(&mut router);
+
+        assert_eq!(router.datalog.native[0].log.entries(), 0);
+    }
+
+    #[test]
+    fn allowed_will_reaches_commit_log() {
+        let mut router = router();
+        add_will(
+            &mut router,
+            AclHandler::new(|identity, action, topic| {
+                identity.client_id == "client-1"
+                    && action == AclAction::Will
+                    && topic == "will/topic"
+            }),
+        );
+
+        publish_will(&mut router);
+
+        assert_eq!(router.datalog.native[0].log.entries(), 1);
+    }
+
+    #[test]
+    fn denied_publish_is_rejected_before_commit_log() {
+        let mut router = router();
+        let identity = ClientIdentity::authenticated("client-1", "user-1", None);
+        let mut connection = Connection::new(None, "client-1".to_owned(), true, false, identity);
+        connection.acl_handler(Some(AclHandler::new(|_, _, _| false)));
+        let id = router.connections.insert(connection);
+        let mut publish = Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            pkid: 0,
+            retain: false,
+            topic: Bytes::from_static(b"will/topic"),
+            payload: Bytes::from_static(b"payload"),
+        };
+
+        let result = authorize_publish(id, &mut publish, &mut None, &mut router.connections);
+
+        assert!(matches!(
+            result,
+            Err(RouterError::Disconnect(DisconnectReasonCode::NotAuthorized))
+        ));
+        assert_eq!(router.datalog.native[0].log.entries(), 0);
+    }
+
+    #[test]
+    fn denied_subscribe_returns_failure_without_state_change() {
+        let (mut router, id) = connected_router(AclHandler::new(|_, action, _| {
+            action != AclAction::Subscribe
+        }));
+        let filter = TopicFilter {
+            path: "denied/topic".to_owned(),
+            qos: QoS::AtMostOnce,
+            nolocal: false,
+            preserve_retain: false,
+            retain_forward_rule: RetainForwardRule::Never,
+        };
+        router.ibufs[id].buffer.lock().push_back(Packet::Subscribe(
+            Subscribe {
+                pkid: 1,
+                filters: vec![filter],
+            },
+            None,
+        ));
+
+        router.handle_device_payload(id);
+
+        assert!(router.connections[id].subscriptions.is_empty());
+        let ack = router.ackslog[id].readv().back().cloned().unwrap();
+        match ack {
+            Ack::SubAck(suback) => {
+                assert_eq!(suback.return_codes, vec![SubscribeReasonCode::Failure]);
+            }
+            _ => panic!("expected suback"),
+        }
+    }
+
+    #[test]
+    fn denied_unsubscribe_returns_not_authorized_without_state_change() {
+        let (mut router, id) = connected_router(AclHandler::new(|_, action, _| {
+            action != AclAction::Unsubscribe
+        }));
+        let filter = "topic".to_owned();
+        router.connections[id].subscriptions.insert(filter.clone());
+        router
+            .subscription_map
+            .insert(filter.clone(), HashSet::from([id]));
+        router.ibufs[id]
+            .buffer
+            .lock()
+            .push_back(Packet::Unsubscribe(
+                Unsubscribe {
+                    pkid: 1,
+                    filters: vec![filter.clone()],
+                },
+                None,
+            ));
+
+        router.handle_device_payload(id);
+
+        assert!(router.connections[id].subscriptions.contains(&filter));
+        assert!(router.subscription_map[&filter].contains(&id));
+        let ack = router.ackslog[id].readv().back().cloned().unwrap();
+        match ack {
+            Ack::UnsubAck(unsuback) => {
+                assert_eq!(unsuback.reasons, vec![UnsubAckReason::NotAuthorized]);
+            }
+            _ => panic!("expected unsuback"),
+        }
+    }
 }
 // #[cfg(test)]
 // #[allow(non_snake_case)]

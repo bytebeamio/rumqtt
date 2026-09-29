@@ -26,7 +26,9 @@ use segments::Storage;
 pub use server::{Broker, LinkType, Server};
 
 pub use self::router::shared_subs::Strategy;
+pub use acl::{AclAction, AclHandler, ClientIdentity};
 
+pub mod acl;
 mod link;
 pub mod protocol;
 mod router;
@@ -47,6 +49,13 @@ pub type AuthUser = String;
 pub type AuthPass = String;
 pub type AuthHandler = Arc<
     dyn Fn(ClientId, AuthUser, AuthPass) -> Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+        + Send
+        + Sync,
+>;
+/// Called only with the organization from a verified client certificate (never CONNECT input).
+/// Arguments are the MQTT client ID and the certificate subject O, respectively.
+pub type ClientCertAuthHandler = Arc<
+    dyn Fn(ClientId, String) -> Pin<Box<dyn std::future::Future<Output = bool> + Send>>
         + Send
         + Sync,
 >;
@@ -117,7 +126,6 @@ pub struct ServerSettings {
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
 }
-
 impl ServerSettings {
     pub fn set_auth_handler<F, O>(&mut self, auth_fn: F)
     where
@@ -126,6 +134,24 @@ impl ServerSettings {
         O::IntoFuture: Send,
     {
         self.connections.set_auth_handler(auth_fn)
+    }
+
+    pub fn set_acl_handler<F>(&mut self, acl_fn: F)
+    where
+        F: Fn(&ClientIdentity, AclAction, &str) -> bool + Send + Sync + 'static,
+    {
+        self.connections.set_acl_handler(acl_fn)
+    }
+
+    /// Enable certificate authentication on this listener. Requires rustls with
+    /// `verify-client-cert` and a configured CA; never falls back to password auth.
+    pub fn set_client_cert_auth_handler<F, O>(&mut self, auth_fn: F)
+    where
+        F: Fn(ClientId, String) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = bool> + 'static,
+        O::IntoFuture: Send,
+    {
+        self.connections.set_client_cert_auth_handler(auth_fn);
     }
 }
 
@@ -141,7 +167,6 @@ pub struct BridgeConfig {
     #[serde(default)]
     pub transport: Transport,
 }
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ConnectionSettings {
     pub connection_timeout_ms: u16,
@@ -150,10 +175,13 @@ pub struct ConnectionSettings {
     pub auth: Option<HashMap<String, String>>,
     #[serde(skip)]
     pub external_auth: Option<AuthHandler>,
+    #[serde(skip)]
+    pub external_cert_auth: Option<ClientCertAuthHandler>,
+    #[serde(skip)]
+    pub external_acl: Option<AclHandler>,
     #[serde(default)]
     pub dynamic_filters: bool,
 }
-
 impl ConnectionSettings {
     pub fn set_auth_handler<F, O>(&mut self, auth_fn: F)
     where
@@ -166,8 +194,25 @@ impl ConnectionSettings {
             Box::pin(auth)
         }));
     }
-}
 
+    pub fn set_acl_handler<F>(&mut self, acl_fn: F)
+    where
+        F: Fn(&ClientIdentity, AclAction, &str) -> bool + Send + Sync + 'static,
+    {
+        self.external_acl = Some(AclHandler::new(acl_fn));
+    }
+
+    pub fn set_client_cert_auth_handler<F, O>(&mut self, auth_fn: F)
+    where
+        F: Fn(ClientId, String) -> O + Send + Sync + 'static,
+        O: IntoFuture<Output = bool> + 'static,
+        O::IntoFuture: Send,
+    {
+        self.external_cert_auth = Some(Arc::new(move |client_id, org| {
+            Box::pin(auth_fn(client_id, org).into_future())
+        }));
+    }
+}
 impl fmt::Debug for ConnectionSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConnectionSettings")
@@ -176,6 +221,8 @@ impl fmt::Debug for ConnectionSettings {
             .field("max_inflight_count", &self.max_inflight_count)
             .field("auth", &self.auth)
             .field("external_auth", &self.external_auth.is_some())
+            .field("external_cert_auth", &self.external_cert_auth.is_some())
+            .field("external_acl", &self.external_acl.is_some())
             .field("dynamic_filters", &self.dynamic_filters)
             .finish()
     }

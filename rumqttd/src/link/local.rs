@@ -8,6 +8,7 @@ use crate::router::{
     Connection, Event, Notification, ShadowRequest,
 };
 use crate::ConnectionId;
+use crate::{AclHandler, ClientIdentity};
 use bytes::Bytes;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 use parking_lot::lock_api::MutexGuard;
@@ -36,10 +37,11 @@ pub enum LinkError {
     Elapsed(#[from] tokio::time::error::Elapsed),
 }
 
-// used to build LinkTx and LinkRx
 pub struct LinkBuilder<'a> {
     tenant_id: Option<String>,
     client_id: &'a str,
+    identity: Option<ClientIdentity>,
+    acl_handler: Option<AclHandler>,
     router_tx: Sender<(ConnectionId, Event)>,
     // true by default
     clean_session: bool,
@@ -55,6 +57,8 @@ impl<'a> LinkBuilder<'a> {
     pub fn new(client_id: &'a str, router_tx: Sender<(ConnectionId, Event)>) -> Self {
         LinkBuilder {
             client_id,
+            identity: None,
+            acl_handler: None,
             router_tx,
             tenant_id: None,
             clean_session: true,
@@ -67,6 +71,16 @@ impl<'a> LinkBuilder<'a> {
 
     pub fn tenant_id(mut self, tenant_id: Option<String>) -> Self {
         self.tenant_id = tenant_id;
+        self
+    }
+
+    pub fn identity(mut self, identity: ClientIdentity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    pub fn acl_handler(mut self, handler: Option<AclHandler>) -> Self {
+        self.acl_handler = handler;
         self
     }
 
@@ -99,14 +113,18 @@ impl<'a> LinkBuilder<'a> {
     }
 
     pub fn build(self) -> Result<(LinkTx, LinkRx, Notification), LinkError> {
-        // Connect to router
-        // Local connections to the router shall have access to all subscriptions
+        // Local links are broker-internal and intentionally bypass remote ACLs.
+        let identity = self.identity.unwrap_or_else(|| {
+            ClientIdentity::unauthenticated(self.client_id.to_owned(), self.tenant_id.clone())
+        });
         let mut connection = Connection::new(
             self.tenant_id,
             self.client_id.to_owned(),
             self.clean_session,
             self.dynamic_filters,
+            identity,
         );
+        connection.acl_handler(self.acl_handler);
 
         connection
             .last_will(self.last_will, self.last_will_properties)

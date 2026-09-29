@@ -55,33 +55,51 @@ pub enum Error {
     InvalidTenant,
     #[error("Tenant id missing in certificate")]
     MissingTenantId,
-    #[error("Tenant id missing in certificate")]
+    #[error("Certificate parse error")]
     CertificateParse,
 }
 
 #[cfg(feature = "verify-client-cert")]
-/// Extract uid from certificate's subject organization field
-fn extract_tenant_id(der: &[u8]) -> Result<Option<String>, Error> {
+/// Extract the authenticated tenant identity from the verified certificate's subject O.
+fn extract_tenant_id(der: &[u8]) -> Result<String, Error> {
     let (_, cert) =
         x509_parser::parse_x509_certificate(der).map_err(|_| Error::CertificateParse)?;
-    let tenant_id = match cert.subject().iter_organization().next() {
-        Some(org) => match org.as_str() {
-            Ok(val) => val.to_string(),
-            Err(_) => return Err(Error::InvalidTenant),
-        },
-        None => {
-            #[cfg(feature = "validate-tenant-prefix")]
-            return Err(Error::MissingTenantId);
-            #[cfg(not(feature = "validate-tenant-prefix"))]
-            return Ok(None);
-        }
-    };
+    let mut organizations = cert.subject().iter_organization();
+    let org = organizations.next().ok_or(Error::MissingTenantId)?;
+    // Choosing the first O silently would let a certificate make multiple identity claims.
+    if organizations.next().is_some() {
+        return Err(Error::InvalidTenant);
+    }
+    let tenant_id = org.as_str().map_err(|_| Error::InvalidTenant)?.to_owned();
 
-    if tenant_id.chars().any(|c| !c.is_alphanumeric()) {
+    if tenant_id.is_empty() || tenant_id.chars().any(|c| !c.is_alphanumeric()) {
         return Err(Error::InvalidTenantId(tenant_id));
     }
 
-    Ok(Some(tenant_id))
+    Ok(tenant_id)
+}
+
+#[cfg(all(test, feature = "verify-client-cert"))]
+mod tests {
+    use super::{extract_tenant_id, Error};
+
+    #[test]
+    fn certificate_org_requires_exactly_one_valid_o() {
+        // Self-signed DER fixtures; extraction is only called after rustls has verified
+        // the certificate chain. These fixtures test subject parsing, not trust.
+        let single = include_bytes!("../../tests/fixtures/cert-org-single.der");
+        let missing = include_bytes!("../../tests/fixtures/cert-org-missing.der");
+        let multiple = include_bytes!("../../tests/fixtures/cert-org-multiple.der");
+        assert_eq!(extract_tenant_id(single).unwrap(), "Harbour");
+        assert!(matches!(
+            extract_tenant_id(missing),
+            Err(Error::MissingTenantId)
+        ));
+        assert!(matches!(
+            extract_tenant_id(multiple),
+            Err(Error::InvalidTenant)
+        ));
+    }
 }
 
 #[allow(dead_code)]
@@ -124,10 +142,11 @@ impl TLSAcceptor {
                 #[cfg(feature = "verify-client-cert")]
                 let tenant_id = {
                     let (_, session) = stream.get_ref();
-                    let peer_certificates = session
+                    let certificate = session
                         .peer_certificates()
+                        .and_then(|certificates| certificates.first())
                         .ok_or(Error::NoPeerCertificate)?;
-                    extract_tenant_id(&peer_certificates[0])?
+                    Some(extract_tenant_id(certificate.as_ref())?)
                 };
                 #[cfg(not(feature = "verify-client-cert"))]
                 let tenant_id: Option<String> = None;
