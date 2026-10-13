@@ -404,6 +404,24 @@ impl MqttState {
                 "PubRec Pkid = {:?}, reason: {:?}",
                 pubrec.pkid, pubrec.reason
             );
+
+            // A PUBREC with a failure reason code ends the QoS 2 flow (no PUBREL follows),
+            // so the packet id is free again and its inflight slot must be released.
+            // [MQTT-4.9] the send quota is incremented for such a PUBREC.
+            self.inflight -= 1;
+
+            if let Some(publish) = self.check_collision(pubrec.pkid) {
+                self.outgoing_pub[publish.pkid as usize] = Some(publish.clone());
+                self.inflight += 1;
+
+                let pkid = publish.pkid;
+                let event = Event::Outgoing(Outgoing::Publish(pkid));
+                self.events.push_back(event);
+                self.collision_ping_count = 0;
+
+                return Ok(Some(Packet::Publish(publish)));
+            }
+
             return Ok(None);
         }
 
@@ -946,6 +964,81 @@ mod test {
             Packet::PubRel(pubrel) => assert_eq!(pubrel.pkid, 1),
             packet => panic!("Invalid network request: {:?}", packet),
         }
+    }
+
+    #[test]
+    fn incoming_failed_pubrec_should_release_inflight_and_pkid() {
+        let mut mqtt = build_mqttstate();
+
+        let publish = build_outgoing_publish(QoS::ExactlyOnce);
+        mqtt.outgoing_publish(publish).unwrap();
+        assert_eq!(mqtt.inflight, 1);
+
+        let mut pubrec = PubRec::new(1, None);
+        pubrec.reason = PubRecReason::NotAuthorized;
+
+        // A failed PUBREC ends the QoS 2 exchange: no PUBREL is sent
+        let packet = mqtt.handle_incoming_pubrec(&pubrec).unwrap();
+        assert!(packet.is_none());
+        assert_eq!(mqtt.inflight, 0);
+        assert!(mqtt.outgoing_pub[1].is_none());
+        assert!(!mqtt.outgoing_rel.contains(1));
+    }
+
+    #[test]
+    fn incoming_failed_pubrecs_should_not_block_further_publishes() {
+        let mut mqtt = MqttState::new(2, false);
+
+        for _ in 0..2 {
+            let publish = build_outgoing_publish(QoS::ExactlyOnce);
+            mqtt.outgoing_publish(publish).unwrap();
+        }
+        assert_eq!(mqtt.inflight, mqtt.max_outgoing_inflight);
+
+        for pkid in 1..=2 {
+            let mut pubrec = PubRec::new(pkid, None);
+            pubrec.reason = PubRecReason::NotAuthorized;
+            mqtt.handle_incoming_pubrec(&pubrec).unwrap();
+        }
+
+        // Inflight queue must not stay full after the broker rejected both publishes
+        assert_eq!(mqtt.inflight, 0);
+        assert!(mqtt.inflight < mqtt.max_outgoing_inflight);
+
+        let publish = build_outgoing_publish(QoS::ExactlyOnce);
+        match mqtt.outgoing_publish(publish).unwrap() {
+            Some(Packet::Publish(publish)) => assert_eq!(publish.pkid, 1),
+            packet => panic!("Invalid network request: {:?}", packet),
+        }
+        assert!(mqtt.collision.is_none());
+        assert_eq!(mqtt.inflight, 1);
+    }
+
+    #[test]
+    fn incoming_failed_pubrec_should_resend_collided_publish() {
+        let mut mqtt = MqttState::new(2, false);
+
+        let publish = build_outgoing_publish(QoS::ExactlyOnce);
+        mqtt.outgoing_publish(publish.clone()).unwrap();
+        mqtt.outgoing_publish(publish.clone()).unwrap();
+
+        // Collides with pkid 1, which is still waiting for its PUBREC
+        mqtt.outgoing_publish(publish).unwrap();
+        assert_eq!(mqtt.collision.as_ref().unwrap().pkid, 1);
+        assert_eq!(mqtt.inflight, 2);
+
+        let mut pubrec = PubRec::new(1, None);
+        pubrec.reason = PubRecReason::QuotaExceeded;
+
+        // pkid 1 is free again, so the stashed publish goes out on it
+        match mqtt.handle_incoming_pubrec(&pubrec).unwrap() {
+            Some(Packet::Publish(publish)) => assert_eq!(publish.pkid, 1),
+            packet => panic!("Invalid network request: {:?}", packet),
+        }
+        assert!(mqtt.collision.is_none());
+        assert_eq!(mqtt.inflight, 2);
+        assert!(mqtt.outgoing_pub[1].is_some());
+        assert!(!mqtt.outgoing_rel.contains(1));
     }
 
     #[test]
