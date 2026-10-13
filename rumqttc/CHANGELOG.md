@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 ### Removed
 ### Fixed 
+* v5: a PUBREC with a failure reason code now releases its inflight slot (and resends a publish waiting on that packet id), so rejected QoS 2 publishes no longer block further publishes
 ### Security
 
 
