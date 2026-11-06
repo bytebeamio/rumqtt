@@ -38,6 +38,8 @@ pub enum ConnectionError {
     MqttState(#[from] StateError),
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
+    #[error("Flush timeout")]
+    FlushTimeout,
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -181,6 +183,7 @@ impl EventLoop {
 
         let inflight_full = self.state.inflight >= self.state.max_outgoing_inflight;
         let collision = self.state.collision.is_some();
+        let network_timeout = Duration::from_secs(self.options.connection_timeout());
 
         // Read buffered events from previous polls before calling a new poll
         if let Some(event) = self.state.events.pop_front() {
@@ -224,10 +227,8 @@ impl EventLoop {
                 self.options.pending_throttle
             ), if !self.pending.is_empty() || (!inflight_full && !collision) => match o {
                 Ok(request) => {
-                    if let Some(outgoing) = self.state.handle_outgoing_packet(request)? {
-                        network.write(outgoing).await?;
-                    }
-                    network.flush().await?;
+                    let outgoing = self.state.handle_outgoing_packet(request)?;
+                    write_and_flush(network, outgoing, network_timeout).await?;
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
@@ -236,7 +237,7 @@ impl EventLoop {
             o = network.readb(&mut self.state) => {
                 o?;
                 // flush all the acks and return first incoming packet
-                network.flush().await?;
+                write_and_flush(network, None, network_timeout).await?;
                 Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
@@ -245,10 +246,8 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                if let Some(outgoing) = self.state.handle_outgoing_packet(Request::PingReq)? {
-                    network.write(outgoing).await?;
-                }
-                network.flush().await?;
+                let outgoing = self.state.handle_outgoing_packet(Request::PingReq)?;
+                write_and_flush(network, outgoing, network_timeout).await?;
                 Ok(self.state.events.pop_front().unwrap())
             }
         }
@@ -270,6 +269,29 @@ impl EventLoop {
                 Err(_) => Err(ConnectionError::RequestsDone),
             }
         }
+    }
+}
+
+/// Writes `outgoing` (if any) and flushes the network, giving up with
+/// [`ConnectionError::FlushTimeout`] if that does not complete within `timeout`.
+///
+/// Without this bound a peer that stops reading (full TCP send buffer) would park
+/// the eventloop forever and keepalive could never detect the dead connection.
+async fn write_and_flush(
+    network: &mut Network,
+    outgoing: Option<Packet>,
+    timeout: Duration,
+) -> Result<(), ConnectionError> {
+    let io = async {
+        if let Some(outgoing) = outgoing {
+            network.write(outgoing).await?;
+        }
+        network.flush().await
+    };
+
+    match time::timeout(timeout, io).await {
+        Ok(result) => Ok(result?),
+        Err(_) => Err(ConnectionError::FlushTimeout),
     }
 }
 

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 ### Removed
 ### Fixed 
+* MQTT v5: `EventLoop::poll` no longer hangs indefinitely when the broker stops reading; socket writes/flushes are now bounded by `MqttOptions::connection_timeout` and fail with the new `ConnectionError::FlushTimeout` (#1078)
 ### Security
 
 
